@@ -5,6 +5,7 @@ venv/
 
 # Python
 __pycache__/
+modules/__pycache__/
 *.py[cod]
 *.egg-info/
 

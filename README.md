@@ -51,7 +51,7 @@ PythonTrading/
 ├── run_all.py              # Main 24/7 trading loop
 ├── fetch_data.py           # yfinance → SQLite
 ├── config.py               # Universe, credentials, paths
-├── backtester.py           # Z-score backtest
+├── backtester.py           # Backtest mirroring run_all.py pipeline
 ├── simulate.py             # Mean-reversion simulation
 ├── modules/                # Shared library
 ├── strategy_module/        # MA signal helper

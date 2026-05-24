@@ -44,9 +44,16 @@ def get_sentiment(data):
         return round((bullish - bearish) / total, 2)
     except Exception as e:
         print("Tavily error: " + str(e))
-        recent = data.iloc[-5:].mean()
-        older = data.iloc[-20:-5].mean()
-        return float((recent / older).mean() - 1.0)
+        return get_price_sentiment(data)
+
+
+def get_price_sentiment(data):
+    """Price-momentum sentiment (used by backtests; also Tavily fallback)."""
+    if len(data) < 20:
+        return 0.0
+    recent = data.iloc[-5:].mean()
+    older = data.iloc[-20:-5].mean()
+    return float((recent / older).mean() - 1.0)
 
 
 def get_market_regime(sentiment, volatility):
