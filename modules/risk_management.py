@@ -1,10 +1,15 @@
+"""Drawdown monitoring and position-size helpers."""
+
 import datetime
 
+import config
+
+
 class RiskManager:
-    def __init__(self, max_drawdown_pct=0.10):
-        self.max_drawdown = max_drawdown_pct
+    def __init__(self, max_drawdown_pct=None):
+        self.max_drawdown = max_drawdown_pct or config.MAX_DRAWDOWN_PCT
         self.peak_equity = None
-        self.log_file = "risk_events.log"
+        self.log_file = config.RISK_EVENTS_LOG
 
     def check_drawdown(self, current_equity):
         if self.peak_equity is None:

@@ -1,9 +1,15 @@
+"""Load legacy *_5m tables from SQLite (older schema)."""
+
 import sqlite3
+
 import pandas as pd
+
+import config
+
 
 def get_5m_data():
     """Fetches the latest 5-minute data from market_data.db using correct column names."""
-    conn = sqlite3.connect('market_data.db')
+    conn = sqlite3.connect(config.DB_PATH)
     cursor = conn.cursor()
     # Find all 5m tables
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_5m';")

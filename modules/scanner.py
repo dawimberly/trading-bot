@@ -1,4 +1,7 @@
+"""Scan daily tables for price above 50-day moving average."""
+
 import sqlite3
+
 import pandas as pd
 
 def get_trending_tickers(db_path='market_data.db'):

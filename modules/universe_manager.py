@@ -1,2 +1,8 @@
+"""Ticker universe access — delegates to config.UNIVERSE."""
+
+import config
+
+
 def get_full_market_universe():
-    return ['VTI', 'AAPL', 'BTC-USD', 'ETH-USD', 'TSLA', 'MSFT', 'NVDA', 'AMD', 'GOOGL', 'AMZN']
+    """Return the configured trading universe."""
+    return list(config.UNIVERSE)

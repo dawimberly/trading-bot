@@ -1,37 +1,37 @@
-import yfinance as yf
-import sqlite3
-import pandas as pd
+"""Download 5-minute OHLCV from yfinance and store in SQLite.
 
-UNIVERSE = [
-    'BTC-USD', 'ETH-USD', 'SOL-USD', 'ADA-USD', 'AVAX-USD', 'LINK-USD',
-    'AAPL', 'MSFT', 'NVDA', 'AMD', 'GOOGL', 'AMZN', 'TSLA', 'META',
-    'VTI', 'QQQ', 'SPY', 'IWM',
-    'XOM', 'CVX', 'LNG',
-    'RTX', 'LMT', 'KTOS',
-    'JPM', 'BAC', 'GS',
-    'JNJ', 'UNH', 'PFE',
-]
+Run: python fetch_data.py
+"""
+
+import sqlite3
+
+import pandas as pd
+import yfinance as yf
+
+import config
+
 
 def fetch_and_store():
-    conn = sqlite3.connect('market_data.db')
-    print('Fetching 5-minute data for ' + str(len(UNIVERSE)) + ' tickers...')
-    for ticker in UNIVERSE:
+    conn = sqlite3.connect(config.DB_PATH)
+    print(f"Fetching 5-minute data for {len(config.UNIVERSE)} tickers...")
+    for ticker in config.UNIVERSE:
         try:
-            df = yf.download(ticker, period='5d', interval='5m', progress=False)
+            df = yf.download(ticker, period="5d", interval="5m", progress=False)
             if df.empty:
-                print('No data for ' + ticker)
+                print("No data for " + ticker)
                 continue
             if isinstance(df.columns, pd.MultiIndex):
                 df.columns = df.columns.get_level_values(0)
-            df = df[['Close']].copy()
-            df.index.name = 'Date'
+            df = df[["Close"]].copy()
+            df.index.name = "Date"
             df.reset_index(inplace=True)
-            df.to_sql(ticker, conn, if_exists='replace', index=False)
-            print('Stored: ' + ticker)
+            df.to_sql(ticker, conn, if_exists="replace", index=False)
+            print("Stored: " + ticker)
         except Exception as e:
-            print('Failed: ' + ticker + ' - ' + str(e))
+            print(f"Failed: {ticker} - {e}")
     conn.close()
-    print('Done. Database updated.')
+    print("Done. Database updated.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     fetch_and_store()

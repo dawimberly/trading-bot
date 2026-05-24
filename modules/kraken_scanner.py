@@ -1,3 +1,5 @@
+"""Scan Kraken pairs for SMA-20 trend via ccxt."""
+
 import ccxt
 
 def run_scan(ticker_list):

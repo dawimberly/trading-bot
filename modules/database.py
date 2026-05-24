@@ -1,8 +1,14 @@
-import yfinance as yf
+"""Sync daily yfinance bars into SQLite."""
+
 import sqlite3
 
+import yfinance as yf
+
+import config
+
+
 def update_database(tickers):
-    conn = sqlite3.connect('market_data.db')
+    conn = sqlite3.connect(config.DB_PATH)
     for ticker in tickers:
         print(f"Syncing {ticker}...")
         df = yf.download(ticker, period='1y', interval='1d', progress=False)

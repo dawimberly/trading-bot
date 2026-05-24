@@ -1,12 +1,20 @@
+"""Watchlist helpers derived from config.UNIVERSE (no duplicate ticker lists)."""
+
+import config
+
+
 def get_full_watchlist():
-    # 1. Market Benchmarks (To gauge overall market health)
-    benchmarks = ["SPY", "QQQ", "BTC/USD", "ETH/USD"]
-    
-    # 2. High-Conviction Stocks (Diversified by sector)
-    stocks = ["AAPL", "NVDA", "AMD", "JPM", "JNJ", "XOM"]
-    
-    # 3. High-Conviction Crypto (Volatility plays)
-    crypto = ["SOL/USD", "ADA/USD", "LINK/USD"]
-    
-    # Combine them all into one master list
-    return benchmarks + stocks + crypto
+    """Return all configured universe tickers."""
+    return list(config.UNIVERSE)
+
+
+def get_benchmarks():
+    return [t for t in config.UNIVERSE if t in ("SPY", "QQQ", "VTI", "IWM")]
+
+
+def get_stocks():
+    return [t for t in config.UNIVERSE if not config.is_crypto(t)]
+
+
+def get_crypto():
+    return [t for t in config.UNIVERSE if config.is_crypto(t)]

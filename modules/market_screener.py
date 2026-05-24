@@ -1,25 +1,26 @@
-import json
-import alpaca_trade_api as tradeapi
-import config # Importing from your config file
+"""Generate a static buy plan JSON for target allocations.
 
-api = tradeapi.REST(config.API_KEY, config.SECRET_KEY, config.BASE_URL, api_version='v2')
+Run: python scripts/dev/market_screener.py
+"""
+
+import json
+
+import config
+from modules.alpaca_executor import get_trading_client
+
 
 def run_screener():
     targets = {"VTI": 0.33, "VXUS": 0.66}
-    # Goal: Deploy between $100 and $250
-    deployment_size = 150.00 
-    
+    deployment_size = 150.00
     plan = {}
     for symbol, target_weight in targets.items():
         amount = deployment_size * target_weight
-        plan[symbol] = {
-            "action": "buy",
-            "amount_needed": amount
-        }
-    
-    with open('plan.json', 'w') as f:
+        plan[symbol] = {"action": "buy", "amount_needed": amount}
+    with open("plan.json", "w", encoding="utf-8") as f:
         json.dump(plan, f, indent=4)
+    _ = get_trading_client()  # verify credentials
     print(f"Intelligence Layer: Plan generated for ${deployment_size:.2f}")
+
 
 if __name__ == "__main__":
     run_screener()

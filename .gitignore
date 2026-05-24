@@ -1,0 +1,21 @@
+# Environment
+.env
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Runtime data
+market_data.db
+*.log
+trading_history.jsonl
+portfolio_state.json
+bot_heartbeat.log
+bot_logs.log
+
+# IDE
+.idea/
+.vscode/

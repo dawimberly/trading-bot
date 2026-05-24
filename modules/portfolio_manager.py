@@ -1,8 +1,14 @@
+"""JSONL ledger for open and closed pair positions."""
+
 import json
 import os
 
+import config
+
+
 class PortfolioManager:
-    def __init__(self, ledger_file="trading_history.jsonl"):
+    def __init__(self, ledger_file=None):
+        self.ledger_file = ledger_file or config.LEDGER_PATH
         self.ledger_file = ledger_file
 
     def get_open_positions(self):

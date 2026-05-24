@@ -1,3 +1,5 @@
+"""Fixed-notional crypto buy/sell helpers using an Alpaca TradingClient."""
+
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce
 

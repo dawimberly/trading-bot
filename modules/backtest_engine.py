@@ -1,3 +1,8 @@
+"""Multi-asset momentum backtest using the backtesting library.
+
+Run: python modules/backtest_engine.py
+"""
+
 import yfinance as yf
 import pandas as pd
 from backtesting import Backtest, Strategy

@@ -1,3 +1,5 @@
+"""Rank asset pairs by z-score mean-reversion potential."""
+
 import numpy as np
 import pandas as pd
 

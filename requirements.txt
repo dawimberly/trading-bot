@@ -1,0 +1,14 @@
+# Core — run_all.py, fetch_data.py, modules
+alpaca-py
+python-dotenv
+tavily-python
+yfinance
+pandas
+numpy
+ccxt
+
+# Backtesting — backtester.py, modules/backtest_engine.py
+backtesting
+
+# Kraken — scripts/exchange/
+python-kraken-sdk

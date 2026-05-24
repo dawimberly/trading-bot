@@ -1,32 +1,51 @@
-import os
-from dotenv import load_dotenv, find_dotenv
-from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce
+"""Canonical Alpaca paper-trading executor (notional orders, crypto formatting)."""
 
-# Load variables from .env
-load_dotenv(find_dotenv())
+import time
+
+from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
+
+import config
+
 
 class AlpacaExecutor:
-    def __init__(self):
-        # Match these names exactly to your .env file
-        self.api_key = os.getenv("APCA_API_KEY_ID")
-        self.secret_key = os.getenv("APCA_API_SECRET_KEY")
-        
-        if not self.api_key or not self.secret_key:
-            raise ValueError("Alpaca credentials missing in .env file.")
-        
-        # Initialize client (paper=True is default for paper keys)
-        self.client = TradingClient(self.api_key, self.secret_key, paper=True)
+    """Submit market orders via alpaca-py with shared credential loading."""
 
-    def execute_order(self, symbol, side, qty=1):
-        # Map 'buy'/'sell' strings to Alpaca Enums
-        order_side = OrderSide.BUY if side.lower() == 'buy' else OrderSide.SELL
-        
+    def __init__(self, paper=None):
+        api_key, secret_key = config.get_alpaca_credentials()
+        use_paper = config.PAPER_TRADING if paper is None else paper
+        self.client = TradingClient(api_key, secret_key, paper=use_paper)
+
+    def get_order_params(self, symbol):
+        is_crypto_sym = config.is_crypto(symbol)
+        formatted_symbol = symbol.replace("-", "/") if is_crypto_sym else symbol
+        tif = TimeInForce.GTC if is_crypto_sym else TimeInForce.DAY
+        return formatted_symbol, tif, is_crypto_sym
+
+    def execute_order(self, symbol, side):
+        formatted_symbol, tif, _ = self.get_order_params(symbol)
+        request_params = GetOrdersRequest(status="open")
+        orders = self.client.get_orders(filter=request_params)
+        for o in orders:
+            if o.symbol == formatted_symbol:
+                self.client.cancel_order_by_id(o.id)
+                time.sleep(0.5)
+        account = self.client.get_account()
+        available_cash = float(account.cash)
+        target_notional = round(min(available_cash * 0.10, 10000.0), 2)
+        order_side = OrderSide.BUY if side.lower() == "buy" else OrderSide.SELL
         order = MarketOrderRequest(
-            symbol=symbol,
-            qty=qty,
+            symbol=formatted_symbol,
+            notional=target_notional,
             side=order_side,
-            time_in_force=TimeInForce.DAY
+            time_in_force=tif,
         )
         return self.client.submit_order(order_data=order)
+
+
+def get_trading_client(paper=None):
+    """Return a TradingClient using config credentials (for utility scripts)."""
+    api_key, secret_key = config.get_alpaca_credentials()
+    use_paper = config.PAPER_TRADING if paper is None else paper
+    return TradingClient(api_key, secret_key, paper=use_paper)

@@ -1,4 +1,7 @@
+"""Moving-average crossover signal helper (BUY/SELL/HOLD)."""
+
 import pandas as pd
+
 
 def check_signal(data, asset_type, window):
     """
