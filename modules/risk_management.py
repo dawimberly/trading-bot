@@ -1,0 +1,36 @@
+import datetime
+
+class RiskManager:
+    def __init__(self, max_drawdown_pct=0.10):
+        self.max_drawdown = max_drawdown_pct
+        self.peak_equity = None
+        self.log_file = "risk_events.log"
+
+    def check_drawdown(self, current_equity):
+        if self.peak_equity is None:
+            self.peak_equity = current_equity
+        if current_equity > self.peak_equity:
+            self.peak_equity = current_equity
+            
+        drawdown = (self.peak_equity - current_equity) / self.peak_equity
+        if drawdown >= self.max_drawdown:
+            self._log_event(f"CRITICAL: Drawdown {drawdown:.2%} reached. System Halted.")
+            return False 
+        return True
+
+    def get_position_size(self, current_equity, risk_per_trade=0.02):
+        return round(current_equity * risk_per_trade, 2)
+
+    def can_trade(self, symbol, portfolio):
+        """
+        Gatekeeper logic: Prevents over-exposure.
+        For now, we limit to 5 concurrent positions.
+        """
+        if len(portfolio.positions) >= 5:
+            return False
+        return True
+
+    def _log_event(self, message):
+        ts = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(self.log_file, "a") as f:
+            f.write(f"{ts} | {message}\n")
