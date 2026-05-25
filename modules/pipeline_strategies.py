@@ -36,6 +36,7 @@ def run_crypto_strategy(
     z_threshold=CRYPTO_Z_THRESHOLD,
     log_fn=None,
     portfolio_manager=None,
+    volatility=None,
 ):
     """Z-score on raw spread; require min correlation; trade strongest |z| pairs first."""
     crypto_cols = [c for c in data.columns if config.is_crypto(c)]
@@ -43,6 +44,12 @@ def run_crypto_strategy(
         return 0
     if regime in PAUSED_REGIMES:
         return 0
+    if config.CRYPTO_VOL_ONLY:
+        if volatility is None:
+            from modules.market_context import get_volatility
+            volatility = get_volatility(data)
+        if volatility != "High":
+            return 0
 
     candidates = []
     for i in range(len(crypto_cols)):
@@ -72,7 +79,12 @@ def run_crypto_strategy(
         ):
             continue
         side = "sell" if z > 0 else "buy"
-        order = executor.execute_order(t1, side)
+        notional = None
+        if side == "buy" and hasattr(executor, "compute_crypto_notional"):
+            notional = executor.compute_crypto_notional()
+            if notional is None:
+                continue
+        order = executor.execute_order(t1, side, notional=notional)
         if order is None:
             continue
         pair_cooldown[pair_key] = now
@@ -82,7 +94,8 @@ def run_crypto_strategy(
         if portfolio_manager:
             portfolio_manager.add_position(pair_key, z, 0)
         if log_fn:
-            notional = getattr(executor, "compute_notional", lambda: "")()
+            if notional is None:
+                notional = getattr(executor, "compute_notional", lambda: "")()
             log_fn(t1, side, regime, pair_key, z, notional)
     return trades
 
@@ -180,8 +193,6 @@ def run_spy_strategy(
     bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
     if not bullish:
         return 0
-    if _holds_symbol(executor, symbol):
-        return 0
 
     pair_key = f"{symbol}/MA{ma_window}"
     if _on_cooldown(
@@ -193,10 +204,11 @@ def run_spy_strategy(
     ):
         return 0
 
+    notional = None
     if hasattr(executor, "compute_spy_notional"):
         notional = executor.compute_spy_notional()
-    else:
-        notional = None
+        if notional is None:
+            return 0
     order = executor.execute_order(symbol, "buy", notional=notional)
     if order is None:
         return 0
@@ -226,7 +238,10 @@ def run_equity_strategy(
     """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
     if regime in PAUSED_REGIMES:
         return 0
-    equity_cols = [c for c in data.columns if not config.is_crypto(c)]
+    equity_cols = [
+        c for c in data.columns
+        if not config.is_crypto(c) and c != config.SPY_BOT_SYMBOL
+    ]
     ranked = _equity_momentum_candidates(data, equity_cols)
     if not ranked:
         return 0
@@ -244,7 +259,12 @@ def run_equity_strategy(
             cooldown_bars=cooldown_bars,
         ):
             continue
-        order = executor.execute_order(symbol, "buy")
+        notional = None
+        if hasattr(executor, "compute_nyse_notional"):
+            notional = executor.compute_nyse_notional()
+            if notional is None:
+                continue
+        order = executor.execute_order(symbol, "buy", notional=notional)
         if order is None:
             continue
         pair_cooldown[pair_key] = now
@@ -252,6 +272,7 @@ def run_equity_strategy(
         if portfolio_manager:
             portfolio_manager.add_position(pair_key, 0, 0)
         if log_fn:
-            notional = getattr(executor, "compute_notional", lambda: "")()
+            if notional is None:
+                notional = getattr(executor, "compute_notional", lambda: "")()
             log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
     return trades

@@ -1,7 +1,7 @@
-"""24/7 SPY bot: buy when the S&P 500 ETF is above its moving average (market-up bet).
+"""Optional standalone SPY loop. Prefer integrated mode: python run_all.py
 
-Run: python run_spy.py
-Preflight: python scripts/account/preflight.py
+SPY is capped at SPY_SLEEVE_CAP_PCT (33.33%) inside run_all.py on the shared account.
+Use this file only if you want SPY running alone in a separate terminal.
 """
 
 import datetime
@@ -25,13 +25,21 @@ refresh_scheduler = RefreshScheduler(
     refresh_crypto=False,
     equity_tickers=[config.SPY_BOT_SYMBOL],
 )
-risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
-portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
+risk_manager = RiskManager(
+    max_drawdown_pct=config.MAX_DRAWDOWN_PCT,
+    log_file=config.SPY_RISK_EVENTS_LOG,
+)
+portfolio_manager = PortfolioManager(ledger_file=config.SPY_LEDGER_PATH)
+SPY_JOURNAL = config.SPY_PAPER_JOURNAL_CSV
 _last_equity = 0.0
 
 
+def _spy_executor():
+    return AlpacaExecutor(credentials_fn=config.get_alpaca_credentials)
+
+
 def log_trade(symbol, side, regime):
-    with open(config.TRADE_HISTORY_LOG, "a", encoding="utf-8") as f:
+    with open(config.SPY_TRADE_HISTORY_LOG, "a", encoding="utf-8") as f:
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"{ts} | SPY-BOT | {side.upper()} | {symbol} | Regime: {regime}\n")
 
@@ -49,7 +57,8 @@ def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
         )
     log_trade(symbol, side, regime)
     trade_journal.log_signal(
-        symbol, side, regime, pair_key, momentum, _last_equity, notional
+        symbol, side, regime, pair_key, momentum, _last_equity, notional,
+        journal_path=SPY_JOURNAL,
     )
 
 
@@ -84,7 +93,7 @@ def _holding_spy(executor):
 def main():
     global _last_equity
     now_ts = datetime.datetime.now()
-    executor = AlpacaExecutor()
+    executor = _spy_executor()
     market_open = refresh_scheduler.sync(executor.client, now_ts)
 
     account = executor.client.get_account()
@@ -97,7 +106,9 @@ def main():
         peak = risk_manager.peak_equity or equity
         dd = (peak - equity) / peak if peak else 0
         print("!!! RISK HALT: Max drawdown reached. Skipping cycle. !!!")
-        trade_journal.log_event("halt", equity=equity, cash=cash, notes="spy bot drawdown")
+        trade_journal.log_event(
+            "halt", equity=equity, cash=cash, notes="spy bot drawdown", journal_path=SPY_JOURNAL
+        )
         alerts.notify_halt(equity, peak, dd)
         try:
             alerts.maybe_daily_summary(equity, cash, "HALTED", True)
@@ -113,12 +124,12 @@ def main():
     min_bars = max(20, config.SPY_MA_WINDOW)
     if data.empty or len(data) < min_bars:
         print("Insufficient market data. Skipping cycle.")
-        trade_journal.log_event("skip", equity=equity, notes="spy bot: short data")
+        trade_journal.log_event("skip", equity=equity, notes="spy bot: short data", journal_path=SPY_JOURNAL)
         return
     if config.SPY_BOT_SYMBOL not in data.columns:
         print(f"No {config.SPY_BOT_SYMBOL} data in database. Skipping cycle.")
         trade_journal.log_event(
-            "skip", equity=equity, notes=f"missing {config.SPY_BOT_SYMBOL}"
+            "skip", equity=equity, notes=f"missing {config.SPY_BOT_SYMBOL}", journal_path=SPY_JOURNAL
         )
         return
 
@@ -128,12 +139,16 @@ def main():
     if not market_open:
         holding = _holding_spy(executor)
         print("--- Equity session closed; skipping SPY scan ---")
-        trade_journal.log_cycle(regime, equity, cash, 0, 0)
+        trade_journal.log_cycle(regime, equity, cash, 0, 0, journal_path=SPY_JOURNAL)
         _write_heartbeat(regime, equity, cash, 0, False, holding, market_open)
         return
 
     exits = run_position_exits(
-        executor, risk_manager, trade_journal, equity_session_open=market_open
+        executor,
+        risk_manager,
+        trade_journal,
+        equity_session_open=market_open,
+        journal_path=SPY_JOURNAL,
     )
     if exits:
         print(f"--- Stop-loss exits: {exits} ---")
@@ -159,7 +174,7 @@ def main():
     )
     holding = _holding_spy(executor)
     print(f"--- SPY trades: {trades} | MA exits: {ma_exits} | Holding SPY: {holding} ---")
-    trade_journal.log_cycle(regime, equity, cash, 0, trades)
+    trade_journal.log_cycle(regime, equity, cash, 0, trades, journal_path=SPY_JOURNAL)
     try:
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as e:
@@ -174,12 +189,13 @@ def _print_startup_banner():
         f"--- Symbol: {config.SPY_BOT_SYMBOL} | Signal: price > MA{config.SPY_MA_WINDOW} | "
         f"Exit below MA: {config.SPY_EXIT_ON_MA_BREAK} ---"
     )
-    print(f"--- Alpaca mode: {mode} ---")
+    acct_label = "separate SPY paper account" if config.spy_uses_separate_alpaca_account() else "shared APCA_* account"
+    print(f"--- Alpaca mode: {mode} ({acct_label}) ---")
     print(
-        f"--- Allocation: {config.SPY_RISK_PER_TRADE:.0%}/entry, stop {config.STOP_LOSS_PCT:.0%}, "
+        f"--- Allocation: {config.SPY_SLEEVE_CAP_PCT:.2%} sleeve cap, stop {config.STOP_LOSS_PCT:.0%}, "
         f"max DD {config.MAX_DRAWDOWN_PCT:.0%} ---"
     )
-    print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.SPY_HEARTBEAT_FILE} ---")
+    print("--- Prefer integrated fund: python run_all.py ---")
     if alerts.alerts_configured():
         print("--- Alerts: enabled (Telegram and/or email) ---")
     else:
@@ -190,11 +206,11 @@ def _print_startup_banner():
 
 if __name__ == "__main__":
     _print_startup_banner()
-    trade_journal.log_event("startup", notes="run_spy.py started")
+    trade_journal.log_event("startup", notes="run_spy.py started", journal_path=SPY_JOURNAL)
     while True:
         try:
             main()
         except Exception as e:
             print("Cycle Error: " + str(e))
-            trade_journal.log_event("error", notes=f"spy bot: {e}")
+            trade_journal.log_event("error", notes=f"spy bot: {e}", journal_path=SPY_JOURNAL)
         time.sleep(60)

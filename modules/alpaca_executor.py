@@ -12,8 +12,9 @@ import config
 class AlpacaExecutor:
     """Submit market orders via alpaca-py with shared credential loading."""
 
-    def __init__(self, paper=None):
-        api_key, secret_key = config.get_alpaca_credentials()
+    def __init__(self, paper=None, credentials_fn=None):
+        cred_fn = credentials_fn or config.get_alpaca_credentials
+        api_key, secret_key = cred_fn()
         use_paper = config.PAPER_TRADING if paper is None else paper
         if not use_paper and not config.ALLOW_LIVE_TRADING:
             raise RuntimeError(
@@ -35,6 +36,65 @@ class AlpacaExecutor:
         except Exception:
             return 0
 
+    @staticmethod
+    def _position_market_value(pos):
+        mv = getattr(pos, "market_value", None)
+        if mv is not None:
+            return abs(float(mv))
+        qty = float(pos.qty)
+        price = float(pos.current_price or 0)
+        return abs(qty * price)
+
+    @staticmethod
+    def _is_crypto_position(pos):
+        sym = pos.symbol.replace("/", "-")
+        return config.is_crypto(sym)
+
+    @staticmethod
+    def _is_spy_position(pos):
+        return pos.symbol.replace("/", "-") == config.SPY_BOT_SYMBOL
+
+    @staticmethod
+    def _is_nyse_sleeve_position(pos):
+        if AlpacaExecutor._is_crypto_position(pos):
+            return False
+        if AlpacaExecutor._is_spy_position(pos):
+            return False
+        return True
+
+    def _sleeve_exposure(self, predicate):
+        total = 0.0
+        try:
+            for pos in self.client.get_all_positions():
+                if predicate(pos):
+                    total += self._position_market_value(pos)
+        except Exception:
+            pass
+        return total
+
+    def crypto_sleeve_value(self):
+        return self._sleeve_exposure(self._is_crypto_position)
+
+    def nyse_sleeve_value(self):
+        return self._sleeve_exposure(self._is_nyse_sleeve_position)
+
+    def spy_sleeve_value(self):
+        return self._sleeve_exposure(self._is_spy_position)
+
+    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value):
+        account = self.client.get_account()
+        equity = float(account.equity)
+        cash = float(account.cash)
+        cap = round(equity * sleeve_cap_pct, 2)
+        room = round(cap - sleeve_value, 2)
+        if room < config.MIN_NOTIONAL:
+            return None
+        per_trade = round(equity * config.RISK_PER_TRADE, 2)
+        raw = min(room, per_trade, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
+        if raw < config.MIN_NOTIONAL:
+            return None
+        return raw
+
     def compute_notional(self):
         account = self.client.get_account()
         equity = float(account.equity)
@@ -43,13 +103,39 @@ class AlpacaExecutor:
         capped = min(raw, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
         return max(config.MIN_NOTIONAL, capped)
 
+    def compute_crypto_notional(self):
+        return self._compute_capped_notional(
+            config.CRYPTO_SLEEVE_CAP_PCT, self.crypto_sleeve_value()
+        )
+
+    def compute_nyse_notional(self):
+        return self._compute_capped_notional(
+            config.NYSE_SLEEVE_CAP_PCT, self.nyse_sleeve_value()
+        )
+
+    def spy_position_value(self):
+        return self.spy_sleeve_value()
+
     def compute_spy_notional(self):
+        return self._compute_capped_notional(
+            config.SPY_SLEEVE_CAP_PCT, self.spy_sleeve_value()
+        )
+
+    def sleeve_snapshot(self):
         account = self.client.get_account()
         equity = float(account.equity)
-        cash = float(account.cash)
-        raw = round(equity * config.SPY_RISK_PER_TRADE, 2)
-        capped = min(raw, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
-        return max(config.MIN_NOTIONAL, capped)
+        spy_v = self.spy_sleeve_value()
+        crypto_v = self.crypto_sleeve_value()
+        nyse_v = self.nyse_sleeve_value()
+        return {
+            "equity": equity,
+            "spy_value": spy_v,
+            "spy_cap": equity * config.SPY_SLEEVE_CAP_PCT,
+            "crypto_value": crypto_v,
+            "crypto_cap": equity * config.CRYPTO_SLEEVE_CAP_PCT,
+            "nyse_value": nyse_v,
+            "nyse_cap": equity * config.NYSE_SLEEVE_CAP_PCT,
+        }
 
     def execute_full_exit(self, symbol):
         formatted_symbol, _, _ = self.get_order_params(symbol)

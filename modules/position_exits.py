@@ -8,7 +8,9 @@ def _position_symbol(raw_symbol):
     return raw_symbol.replace("/", "-")
 
 
-def run_position_exits(executor, risk_manager, journal=None, equity_session_open=True):
+def run_position_exits(
+    executor, risk_manager, journal=None, equity_session_open=True, journal_path=None
+):
     """
     Close positions that hit stop-loss or max hold time.
     Returns number of exit orders submitted.
@@ -18,7 +20,7 @@ def run_position_exits(executor, risk_manager, journal=None, equity_session_open
         positions = executor.client.get_all_positions()
     except Exception as e:
         if journal:
-            journal.log_event("exit_error", notes=str(e))
+            journal.log_event("exit_error", notes=str(e), journal_path=journal_path)
         return 0
 
     account = executor.client.get_account()
@@ -59,9 +61,11 @@ def run_position_exits(executor, risk_manager, journal=None, equity_session_open
                     f"STOP EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty}"
                 )
                 if journal:
-                    journal.log_exit(symbol, side, f"stop_loss {pnl_pct:.2%}", equity)
+                    journal.log_exit(
+                        symbol, side, f"stop_loss {pnl_pct:.2%}", equity, journal_path=journal_path
+                    )
         except Exception as e:
             if journal:
-                journal.log_event("exit_error", symbol=symbol, notes=str(e))
+                journal.log_event("exit_error", symbol=symbol, notes=str(e), journal_path=journal_path)
 
     return exits

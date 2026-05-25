@@ -13,7 +13,12 @@ from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
 from modules.market_context import get_market_regime, get_sentiment, get_volatility
-from modules.pipeline_strategies import run_crypto_strategy, run_equity_strategy
+from modules.pipeline_strategies import (
+    run_crypto_strategy,
+    run_equity_strategy,
+    run_spy_exits,
+    run_spy_strategy,
+)
 from modules.portfolio_manager import PortfolioManager
 from modules.position_exits import run_position_exits
 from modules.risk_management import RiskManager
@@ -33,9 +38,10 @@ def log_trade(symbol, side, regime):
 
 
 def _crypto_log(symbol, side, regime, pair_key, z, notional=""):
+    cap = config.CRYPTO_SLEEVE_CAP_PCT
     print(
-        f"!!! CRYPTO SIGNAL: {pair_key} | Z={round(z, 2)} | "
-        f"{side.upper()} | ${notional} | Regime: {regime}"
+        f"!!! CRYPTO SLEEVE: {pair_key} | Z={round(z, 2)} | "
+        f"{side.upper()} ${notional} | cap {cap:.2%} | Regime: {regime}"
     )
     log_trade(symbol, side, regime)
     trade_journal.log_signal(symbol, side, regime, pair_key, z, _last_equity, notional)
@@ -43,16 +49,44 @@ def _crypto_log(symbol, side, regime, pair_key, z, notional=""):
 
 def _equity_log(symbol, side, regime, pair_key, _z, notional=""):
     print(
-        f"!!! EQUITY SIGNAL: {symbol} above MA50 | BUY | ${notional} | Regime: {regime}"
+        f"!!! NYSE SLEEVE: {symbol} above MA50 | BUY ${notional} | "
+        f"cap {config.NYSE_SLEEVE_CAP_PCT:.2%} | Regime: {regime}"
     )
     log_trade(symbol, side, regime)
     trade_journal.log_signal(symbol, side, regime, pair_key, 0.0, _last_equity, notional)
 
 
+def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
+    if side == "buy":
+        print(
+            f"!!! SPY SLEEVE: {symbol} above MA{config.SPY_MA_WINDOW} | "
+            f"BUY ${notional} | cap {config.SPY_SLEEVE_CAP_PCT:.2%} | Regime: {regime}"
+        )
+    else:
+        print(
+            f"!!! SPY SLEEVE: {symbol} below MA{config.SPY_MA_WINDOW} | "
+            f"SELL ${notional} | Regime: {regime}"
+        )
+    log_trade(symbol, side, regime)
+    trade_journal.log_signal(
+        symbol, side, regime, pair_key, momentum, _last_equity, notional
+    )
+
+
 _last_equity = 0.0
 
 
-def _write_heartbeat(regime, equity, cash, crypto_trades, equity_trades, halted, market_open):
+def _write_heartbeat(
+    regime,
+    equity,
+    cash,
+    crypto_trades,
+    equity_trades,
+    spy_trades,
+    halted,
+    market_open,
+    sleeves=None,
+):
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
         "regime": regime,
@@ -60,10 +94,20 @@ def _write_heartbeat(regime, equity, cash, crypto_trades, equity_trades, halted,
         "cash": cash,
         "crypto_trades_last_cycle": crypto_trades,
         "equity_trades_last_cycle": equity_trades,
+        "spy_trades_last_cycle": spy_trades,
+        "sleeve_caps": {
+            "spy": config.SPY_SLEEVE_CAP_PCT,
+            "crypto": config.CRYPTO_SLEEVE_CAP_PCT,
+            "nyse": config.NYSE_SLEEVE_CAP_PCT,
+            "cash_buffer": config.FUND_CASH_BUFFER_PCT,
+        },
+        "crypto_vol_only": config.CRYPTO_VOL_ONLY,
         "equity_session_open": market_open,
         "halted": halted,
         "paper": config.PAPER_TRADING,
     }
+    if sleeves:
+        payload["sleeve_exposure"] = sleeves
     with open(config.HEARTBEAT_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
@@ -90,7 +134,7 @@ def main():
             alerts.maybe_daily_summary(equity, cash, "HALTED", True)
         except Exception as e:
             print(f"Alert error (non-fatal): {e}")
-        _write_heartbeat("HALTED", equity, cash, 0, 0, True, market_open)
+        _write_heartbeat("HALTED", equity, cash, 0, 0, 0, True, market_open, None)
         return
 
     alerts.clear_halt_flag()
@@ -103,7 +147,11 @@ def main():
         return
 
     regime = get_market_regime(get_sentiment(data), get_volatility(data))
-    print(f"--- Regime: {regime} | Equity session: {'OPEN' if market_open else 'CLOSED'} ---")
+    vol = get_volatility(data)
+    print(
+        f"--- Regime: {regime} | Vol: {vol} | "
+        f"Equity session: {'OPEN' if market_open else 'CLOSED'} ---"
+    )
 
     exits = run_position_exits(
         executor, risk_manager, trade_journal, equity_session_open=market_open
@@ -120,9 +168,21 @@ def main():
         pair_cooldown,
         log_fn=_crypto_log,
         portfolio_manager=portfolio_manager,
+        volatility=vol,
     )
+    s = 0
     e = 0
     if market_open:
+        s += run_spy_exits(data, executor, regime, log_fn=_spy_log)
+        s += run_spy_strategy(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            log_fn=_spy_log,
+            portfolio_manager=portfolio_manager,
+        )
         e = run_equity_strategy(
             data,
             executor,
@@ -133,21 +193,46 @@ def main():
             portfolio_manager=portfolio_manager,
         )
     else:
-        print("--- Equity session closed; skipping equity scan ---")
-    print(f"--- Crypto trades: {c} | Equity trades: {e} ---")
-    trade_journal.log_cycle(regime, equity, cash, c, e)
+        print("--- Equity session closed; skipping SPY and equity scans ---")
+    print(f"--- Crypto: {c} | SPY: {s} | NYSE: {e} ---")
+    sleeves = executor.sleeve_snapshot()
+    print(
+        f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
+        f"Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
+        f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)} ---"
+    )
+    trade_journal.log_cycle(
+        regime,
+        equity,
+        cash,
+        c,
+        e,
+        notes=(
+            f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
+            f"nyse_cap={config.NYSE_SLEEVE_CAP_PCT:.2%}"
+        ),
+    )
     try:
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as e:
         print(f"Alert error (non-fatal): {e}")
-    _write_heartbeat(regime, equity, cash, c, e, False, market_open)
+    _write_heartbeat(regime, equity, cash, c, e, s, False, market_open, sleeves)
 
 
 def _print_startup_banner():
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
     print(f"--- Alpaca mode: {mode} (Kraken not used) ---")
-    print(f"--- Risk: {config.RISK_PER_TRADE:.0%}/trade, stop {config.STOP_LOSS_PCT:.0%}, max DD {config.MAX_DRAWDOWN_PCT:.0%} ---")
+    print(
+        f"--- Fund: SPY {config.SPY_SLEEVE_CAP_PCT:.0%} | "
+        f"crypto {config.CRYPTO_SLEEVE_CAP_PCT:.0%} (vol-only) | "
+        f"NYSE {config.NYSE_SLEEVE_CAP_PCT:.0%} | "
+        f"cash buffer {config.FUND_CASH_BUFFER_PCT:.0%} ---"
+    )
+    print(
+        f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
+        f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"
+    )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     if alerts.alerts_configured():
         print("--- Alerts: enabled (Telegram and/or email) ---")

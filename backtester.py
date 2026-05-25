@@ -26,6 +26,7 @@ from modules.pipeline_strategies import (
     COOLDOWN_SECONDS,
     run_crypto_strategy,
     run_equity_strategy,
+    run_spy_strategy,
 )
 from modules.risk_management import RiskManager
 
@@ -46,11 +47,13 @@ class BacktestExecutor:
         self.prices = prices
         self.orders = []
 
-    def execute_order(self, symbol, side):
+    def execute_order(self, symbol, side, notional=None, reduce_only=False):
         price = self.prices.get(symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None
-        order = self.portfolio.trade(symbol, side.lower(), price, tx_cost=TX_COST)
+        order = self.portfolio.trade(
+            symbol, side.lower(), price, tx_cost=TX_COST, notional=notional
+        )
         if order:
             self.orders.append(order)
         return order
@@ -70,16 +73,17 @@ class BacktestPortfolio:
                 total += qty * p
         return total
 
-    def trade(self, symbol, side, price, tx_cost=TX_COST):
-        notional = round(
-            min(
-                self.cash * config.RISK_PER_TRADE,
-                config.MAX_NOTIONAL_PER_ORDER,
-                self.cash * 0.95,
-            ),
-            2,
-        )
-        notional = max(config.MIN_NOTIONAL, notional)
+    def trade(self, symbol, side, price, tx_cost=TX_COST, notional=None):
+        if notional is None:
+            notional = round(
+                min(
+                    self.cash * config.RISK_PER_TRADE,
+                    config.MAX_NOTIONAL_PER_ORDER,
+                    self.cash * 0.95,
+                ),
+                2,
+            )
+            notional = max(config.MIN_NOTIONAL, notional)
         if side == "buy":
             if notional < 1 or self.cash < notional:
                 return None
@@ -156,6 +160,7 @@ def run_performance_test(days=None, refresh=False):
     regime_counts = {}
     total_crypto = 0
     total_equity = 0
+    total_spy = 0
     total_orders = 0
     halted = False
 
@@ -178,6 +183,15 @@ def run_performance_test(days=None, refresh=False):
 
         executor = BacktestExecutor(portfolio, prices)
         total_crypto += run_crypto_strategy(
+            window,
+            executor,
+            regime,
+            i,
+            pair_cooldown,
+            cooldown_bars=cooldown_bars,
+            volatility=vol,
+        )
+        total_spy += run_spy_strategy(
             window,
             executor,
             regime,
@@ -210,16 +224,24 @@ def run_performance_test(days=None, refresh=False):
     max_dd = ((curve / curve.cummax()) - 1).min() * 100
     bench = _benchmark_return(data, MIN_HISTORY)
 
-    print("--- PIPELINE BACKTEST REPORT (mirrors run_all.py) ---")
+    print("--- FUND BACKTEST REPORT (SPY + vol-gated crypto + NYSE) ---")
     print(f"Period:           {days} days ({bar_label})")
+    print(
+        f"Sleeves:          SPY {config.SPY_SLEEVE_CAP_PCT:.0%} | "
+        f"crypto {config.CRYPTO_SLEEVE_CAP_PCT:.0%} | "
+        f"NYSE {config.NYSE_SLEEVE_CAP_PCT:.0%} | "
+        f"cash {config.FUND_CASH_BUFFER_PCT:.0%}"
+    )
+    print(f"Crypto vol-only:  {config.CRYPTO_VOL_ONLY}")
     print(f"Final Equity:     ${round(curve.iloc[-1], 2)}")
     print(f"Total Return:     {round(total_ret, 2)}%")
     if bench is not None:
         print(f"VTI Buy & Hold:   {round(bench, 2)}%")
     print(f"Sharpe Ratio:     {round(sharpe, 2)}")
     print(f"Max Drawdown:     {round(max_dd, 2)}%")
+    print(f"SPY signals:      {total_spy}")
     print(f"Crypto signals:   {total_crypto}")
-    print(f"Equity signals:   {total_equity}")
+    print(f"NYSE signals:     {total_equity}")
     print(f"Total orders:     {total_orders}")
     print("Regime distribution:")
     for name, count in sorted(regime_counts.items(), key=lambda x: -x[1]):

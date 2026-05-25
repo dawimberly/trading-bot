@@ -40,8 +40,9 @@ def log_event(
     cash="",
     notional="",
     notes="",
+    journal_path=None,
 ):
-    path = config.PAPER_JOURNAL_CSV
+    path = journal_path or config.PAPER_JOURNAL_CSV
     _ensure_header(path)
     row = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -60,17 +61,18 @@ def log_event(
         csv.DictWriter(f, fieldnames=JOURNAL_FIELDS).writerow(row)
 
 
-def log_cycle(regime, equity, cash, crypto_trades, equity_trades, notes=""):
+def log_cycle(regime, equity, cash, crypto_trades, equity_trades, notes="", journal_path=None):
     log_event(
         "cycle",
         regime=regime,
         equity=round(equity, 2),
         cash=round(cash, 2),
         notes=f"crypto={crypto_trades} equity={equity_trades}; {notes}",
+        journal_path=journal_path,
     )
 
 
-def log_signal(symbol, side, regime, pair_key, z_score, equity, notional):
+def log_signal(symbol, side, regime, pair_key, z_score, equity, notional, journal_path=None):
     log_event(
         "signal",
         symbol=symbol,
@@ -80,14 +82,16 @@ def log_signal(symbol, side, regime, pair_key, z_score, equity, notional):
         z_score=round(z_score, 4) if z_score != "" else "",
         equity=round(equity, 2),
         notional=notional,
+        journal_path=journal_path,
     )
 
 
-def log_exit(symbol, side, reason, equity):
+def log_exit(symbol, side, reason, equity, journal_path=None):
     log_event(
         "exit",
         symbol=symbol,
         side=side,
         equity=round(equity, 2),
         notes=reason,
+        journal_path=journal_path,
     )

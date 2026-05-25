@@ -34,15 +34,26 @@ TICKER = "VTI"
 ASSET_TYPE = "STOCK"
 MA_WINDOW = 45
 
-# --- SPY bot (run_spy.py) — tuned from 500-day backtest grid ---
+# --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer ---
+FUND_CASH_BUFFER_PCT = 0.15
+SPY_SLEEVE_CAP_PCT = 0.45
+NYSE_SLEEVE_CAP_PCT = 0.20
+CRYPTO_SLEEVE_CAP_PCT = 0.20
+CRYPTO_VOL_ONLY = True  # crypto pairs only when cross-asset volatility is High
+
+# --- SPY sleeve settings ---
 SPY_BOT_SYMBOL = "SPY"
 SPY_MA_WINDOW = 200
-SPY_RISK_PER_TRADE = 1.00
+SPY_RISK_PER_TRADE = SPY_SLEEVE_CAP_PCT  # legacy alias for backtests
 SPY_EXIT_ON_MA_BREAK = False
 SPY_MA_WINDOWS = [20, 50, 100, 200]
 SPY_ALLOCATIONS = [0.10, 0.25, 0.50, 1.00]
 SPY_BACKTEST_RESULTS = "spy_backtest_results.csv"
 SPY_HEARTBEAT_FILE = "spy_bot_heartbeat.json"
+SPY_TRADE_HISTORY_LOG = "spy_trade_history.log"
+SPY_PAPER_JOURNAL_CSV = "spy_paper_journal.csv"
+SPY_LEDGER_PATH = "spy_trading_history.jsonl"
+SPY_RISK_EVENTS_LOG = "spy_risk_events.log"
 REFRESH_INTERVAL = 900
 MAX_DRAWDOWN_PCT = 0.10
 BACKTEST_DAYS = 365
@@ -70,6 +81,25 @@ def get_alpaca_credentials():
             "Alpaca credentials missing. Set APCA_API_KEY_ID and APCA_API_SECRET_KEY in .env"
         )
     return key, secret
+
+
+def get_spy_alpaca_credentials():
+    """SPY bot keys: SPY_APCA_* if set, else main APCA_* (same paper account)."""
+    key = os.getenv("SPY_APCA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID") or os.getenv("ALPACA_API_KEY")
+    secret = (
+        os.getenv("SPY_APCA_API_SECRET_KEY")
+        or os.getenv("APCA_API_SECRET_KEY")
+        or os.getenv("ALPACA_SECRET_KEY")
+    )
+    if not key or not secret:
+        raise ValueError(
+            "Alpaca credentials missing. Set SPY_APCA_* or APCA_* in .env"
+        )
+    return key, secret
+
+
+def spy_uses_separate_alpaca_account():
+    return bool(os.getenv("SPY_APCA_API_KEY_ID") and os.getenv("SPY_APCA_API_SECRET_KEY"))
 
 
 def get_tavily_api_key():

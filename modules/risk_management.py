@@ -6,10 +6,10 @@ import config
 
 
 class RiskManager:
-    def __init__(self, max_drawdown_pct=None):
+    def __init__(self, max_drawdown_pct=None, log_file=None):
         self.max_drawdown = max_drawdown_pct or config.MAX_DRAWDOWN_PCT
         self.peak_equity = None
-        self.log_file = config.RISK_EVENTS_LOG
+        self.log_file = log_file or config.RISK_EVENTS_LOG
 
     def check_drawdown(self, current_equity):
         if self.peak_equity is None:
