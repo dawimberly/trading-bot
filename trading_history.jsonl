@@ -1,3 +1,45 @@
-{"event": "ledger_rebuilt", "at": "2026-05-25T01:49:35", "backup": "trading_history.jsonl.bak.20260525_014935"}
+{"event": "ledger_rebuilt", "at": "2026-05-25T02:01:06", "backup": "trading_history.jsonl.bak.20260525_020106"}
 {"pair": "BTC-USD", "qty": 8.6e-08, "price": 76670.075684013, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "ETH-USD", "qty": 4e-09, "price": 2098.699333333, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
