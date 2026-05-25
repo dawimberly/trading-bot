@@ -27,11 +27,12 @@ def _normalize_df(df):
     return out.reset_index()
 
 
-def fetch_and_store():
+def fetch_and_store(tickers=None):
     """Live pipeline: 5-minute bars (~5 days, yfinance intraday limit)."""
+    tickers = list(config.UNIVERSE if tickers is None else tickers)
     conn = sqlite3.connect(config.DB_PATH)
-    print(f"Fetching 5-minute data for {len(config.UNIVERSE)} tickers...")
-    for ticker in config.UNIVERSE:
+    print(f"Fetching 5-minute data for {len(tickers)} tickers...")
+    for ticker in tickers:
         try:
             df = yf.download(ticker, period="5d", interval="5m", progress=False)
             df = _normalize_df(df)

@@ -71,7 +71,15 @@ class BacktestPortfolio:
         return total
 
     def trade(self, symbol, side, price, tx_cost=TX_COST):
-        notional = round(min(self.cash * 0.10, 10000.0), 2)
+        notional = round(
+            min(
+                self.cash * config.RISK_PER_TRADE,
+                config.MAX_NOTIONAL_PER_ORDER,
+                self.cash * 0.95,
+            ),
+            2,
+        )
+        notional = max(config.MIN_NOTIONAL, notional)
         if side == "buy":
             if notional < 1 or self.cash < notional:
                 return None

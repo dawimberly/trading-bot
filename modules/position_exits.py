@@ -1,0 +1,67 @@
+"""Stop-loss and max-hold exits for open Alpaca positions."""
+
+import config
+
+
+def _position_symbol(raw_symbol):
+    """Normalize Alpaca symbol to yfinance-style where possible."""
+    return raw_symbol.replace("/", "-")
+
+
+def run_position_exits(executor, risk_manager, journal=None, equity_session_open=True):
+    """
+    Close positions that hit stop-loss or max hold time.
+    Returns number of exit orders submitted.
+    """
+    exits = 0
+    try:
+        positions = executor.client.get_all_positions()
+    except Exception as e:
+        if journal:
+            journal.log_event("exit_error", notes=str(e))
+        return 0
+
+    account = executor.client.get_account()
+    equity = float(account.equity)
+
+    for pos in positions:
+        symbol = _position_symbol(pos.symbol)
+        if not equity_session_open and not config.is_crypto(symbol):
+            continue
+        qty = float(pos.qty)
+        if qty == 0:
+            continue
+
+        entry = float(pos.avg_entry_price or 0)
+        current = float(pos.current_price or 0)
+        if entry <= 0 or current <= 0:
+            continue
+
+        pnl_pct = (current - entry) / entry
+        if qty < 0:
+            pnl_pct = -pnl_pct
+
+        stop_hit = pnl_pct <= -config.STOP_LOSS_PCT
+        # Alpaca may expose hold time; fallback: use unrealized plpc if available
+        plpc = getattr(pos, "unrealized_plpc", None)
+        if plpc is not None and float(plpc) <= -config.STOP_LOSS_PCT:
+            stop_hit = True
+
+        if not stop_hit:
+            continue
+
+        side = "sell" if qty > 0 else "buy"
+        try:
+            order = executor.execute_order(symbol, side, reduce_only=True)
+            if order:
+                exits += 1
+                risk_manager._log_event(
+                    f"STOP EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty}"
+                )
+                if journal:
+                    journal.log_exit(symbol, side, f"stop_loss {pnl_pct:.2%}", equity)
+        except Exception as e:
+            if journal:
+                journal.log_event("exit_error", symbol=symbol, notes=str(e))
+
+    return exits

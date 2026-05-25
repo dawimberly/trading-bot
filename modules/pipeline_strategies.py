@@ -18,6 +18,11 @@ def _on_cooldown(pair_cooldown, key, now, cooldown_seconds=COOLDOWN_SECONDS, coo
     return (now - last).total_seconds() < cooldown_seconds
 
 
+def _crypto_pair_z(data, t1, t2):
+    spread = data[t1] - data[t2]
+    return (spread.iloc[-1] - spread.mean()) / (spread.std() + 1e-9)
+
+
 def run_crypto_strategy(
     data,
     executor,
@@ -32,44 +37,177 @@ def run_crypto_strategy(
     log_fn=None,
     portfolio_manager=None,
 ):
-    """Same logic as run_all.py: z-score on raw spread, trade t1 only."""
+    """Z-score on raw spread; require min correlation; trade strongest |z| pairs first."""
     crypto_cols = [c for c in data.columns if config.is_crypto(c)]
     if len(crypto_cols) < 2:
         return 0
     if regime in PAUSED_REGIMES:
         return 0
-    fired = set()
-    trades = 0
+
+    candidates = []
     for i in range(len(crypto_cols)):
         for j in range(i + 1, len(crypto_cols)):
-            if trades >= max_trades:
-                return trades
             t1, t2 = crypto_cols[i], crypto_cols[j]
-            if t1 in fired or t2 in fired:
+            if data[t1].corr(data[t2]) < config.CRYPTO_MIN_CORRELATION:
                 continue
-            spread = data[t1] - data[t2]
-            z = (spread.iloc[-1] - spread.mean()) / (spread.std() + 1e-9)
+            z = _crypto_pair_z(data, t1, t2)
             if abs(z) > z_threshold:
-                pair_key = t1 + "/" + t2
-                if _on_cooldown(
-                    pair_cooldown,
-                    pair_key,
-                    now,
-                    cooldown_seconds=cooldown_seconds,
-                    cooldown_bars=cooldown_bars,
-                ):
-                    continue
-                side = "sell" if z > 0 else "buy"
-                executor.execute_order(t1, side)
-                pair_cooldown[pair_key] = now
-                fired.add(t1)
-                fired.add(t2)
-                trades += 1
-                if portfolio_manager:
-                    portfolio_manager.add_position(pair_key, z, 0)
-                if log_fn:
-                    log_fn(t1, side, regime, pair_key, z)
+                candidates.append((abs(z), z, t1, t2))
+
+    candidates.sort(reverse=True)
+    fired = set()
+    trades = 0
+    for _abs_z, z, t1, t2 in candidates:
+        if trades >= max_trades:
+            break
+        if t1 in fired or t2 in fired:
+            continue
+        pair_key = t1 + "/" + t2
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        side = "sell" if z > 0 else "buy"
+        order = executor.execute_order(t1, side)
+        if order is None:
+            continue
+        pair_cooldown[pair_key] = now
+        fired.add(t1)
+        fired.add(t2)
+        trades += 1
+        if portfolio_manager:
+            portfolio_manager.add_position(pair_key, z, 0)
+        if log_fn:
+            notional = getattr(executor, "compute_notional", lambda: "")()
+            log_fn(t1, side, regime, pair_key, z, notional)
     return trades
+
+
+def _equity_momentum_candidates(data, equity_cols):
+    rows = []
+    for symbol in equity_cols:
+        prices = data[symbol].dropna()
+        if len(prices) < 20:
+            continue
+        ma50 = prices.rolling(window=min(50, len(prices))).mean().iloc[-1]
+        current = prices.iloc[-1]
+        if current > ma50 and ma50 > 0:
+            rows.append((current / ma50 - 1, symbol))
+    rows.sort(reverse=True)
+    return [s for _, s in rows]
+
+
+def _spy_market_up_signal(data, symbol, ma_window):
+    """True when price is above the moving average (market-up bet)."""
+    if symbol not in data.columns:
+        return False, 0.0
+    prices = data[symbol].dropna()
+    if len(prices) < ma_window:
+        return False, 0.0
+    window = min(ma_window, len(prices))
+    ma = prices.rolling(window=window).mean().iloc[-1]
+    current = prices.iloc[-1]
+    if ma <= 0 or current <= ma:
+        return False, 0.0
+    return True, current / ma - 1
+
+
+def _holds_symbol(executor, symbol):
+    try:
+        return any(p.symbol == symbol for p in executor.client.get_all_positions())
+    except Exception:
+        return False
+
+
+def run_spy_exits(
+    data,
+    executor,
+    regime="",
+    *,
+    symbol=None,
+    ma_window=None,
+    log_fn=None,
+):
+    """Sell full SPY position when price closes below the moving average."""
+    if not config.SPY_EXIT_ON_MA_BREAK:
+        return 0
+    symbol = symbol or config.SPY_BOT_SYMBOL
+    ma_window = ma_window or config.SPY_MA_WINDOW
+    if not _holds_symbol(executor, symbol):
+        return 0
+    bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
+    if bullish:
+        return 0
+
+    if hasattr(executor, "execute_full_exit"):
+        order = executor.execute_full_exit(symbol)
+    else:
+        order = executor.execute_order(symbol, "sell", reduce_only=True)
+    if order is None:
+        return 0
+    pair_key = f"{symbol}/MA{ma_window}"
+    if log_fn:
+        notional = ""
+        if isinstance(order, dict):
+            notional = order.get("notional", "")
+        log_fn(symbol, "sell", regime, pair_key, momentum, notional)
+    return 1
+
+
+def run_spy_strategy(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    symbol=None,
+    ma_window=None,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    log_fn=None,
+    portfolio_manager=None,
+):
+    """Buy SPY when above MA — a simple bet that the broad market keeps rising."""
+    symbol = symbol or config.SPY_BOT_SYMBOL
+    ma_window = ma_window or config.SPY_MA_WINDOW
+    if regime in PAUSED_REGIMES:
+        return 0
+    bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
+    if not bullish:
+        return 0
+    if _holds_symbol(executor, symbol):
+        return 0
+
+    pair_key = f"{symbol}/MA{ma_window}"
+    if _on_cooldown(
+        pair_cooldown,
+        pair_key,
+        now,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+    ):
+        return 0
+
+    if hasattr(executor, "compute_spy_notional"):
+        notional = executor.compute_spy_notional()
+    else:
+        notional = None
+    order = executor.execute_order(symbol, "buy", notional=notional)
+    if order is None:
+        return 0
+    pair_cooldown[pair_key] = now
+    if portfolio_manager:
+        portfolio_manager.add_position(pair_key, momentum, 0)
+    if log_fn:
+        if notional is None:
+            notional = getattr(executor, "compute_notional", lambda: "")()
+        log_fn(symbol, "buy", regime, pair_key, momentum, notional)
+    return 1
 
 
 def run_equity_strategy(
@@ -85,34 +223,35 @@ def run_equity_strategy(
     log_fn=None,
     portfolio_manager=None,
 ):
-    """Same logic as run_all.py: buy first equity above MA50."""
+    """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
     if regime in PAUSED_REGIMES:
         return 0
     equity_cols = [c for c in data.columns if not config.is_crypto(c)]
-    if len(equity_cols) < 1:
+    ranked = _equity_momentum_candidates(data, equity_cols)
+    if not ranked:
         return 0
+
     trades = 0
-    for symbol in equity_cols:
+    for symbol in ranked:
         if trades >= max_trades:
-            return trades
-        prices = data[symbol]
-        ma50 = prices.rolling(window=min(50, len(prices))).mean().iloc[-1]
-        current_price = prices.iloc[-1]
-        if current_price > ma50:
-            pair_key = symbol + "/MA50"
-            if _on_cooldown(
-                pair_cooldown,
-                pair_key,
-                now,
-                cooldown_seconds=cooldown_seconds,
-                cooldown_bars=cooldown_bars,
-            ):
-                continue
-            executor.execute_order(symbol, "buy")
-            pair_cooldown[pair_key] = now
-            trades += 1
-            if portfolio_manager:
-                portfolio_manager.add_position(pair_key, 0, 0)
-            if log_fn:
-                log_fn(symbol, "buy", regime, pair_key, 0.0)
+            break
+        pair_key = symbol + "/MA50"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        order = executor.execute_order(symbol, "buy")
+        if order is None:
+            continue
+        pair_cooldown[pair_key] = now
+        trades += 1
+        if portfolio_manager:
+            portfolio_manager.add_position(pair_key, 0, 0)
+        if log_fn:
+            notional = getattr(executor, "compute_notional", lambda: "")()
+            log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
     return trades

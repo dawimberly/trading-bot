@@ -16,6 +16,9 @@ trading_history.jsonl
 portfolio_state.json
 bot_heartbeat.log
 bot_logs.log
+bot_heartbeat.json
+alert_state.json
+paper_journal.csv
 
 # IDE
 .idea/
