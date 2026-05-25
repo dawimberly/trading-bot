@@ -134,6 +134,40 @@ def clear_halt_flag():
         _save_state(state)
 
 
+def maybe_monthly_wisdom_summary(rollup: dict) -> None:
+    """One alert per rolled-up calendar month (recommendation only; no auto-switch)."""
+    if not rollup or not alerts_configured():
+        return
+    month_key = rollup.get("month", "")
+    state = _load_state()
+    if state.get("last_monthly_wisdom_alert") == month_key:
+        return
+
+    live = rollup.get("live") or {}
+    best = rollup.get("best_sim_mode", "n/a")
+    rec = rollup.get("recommendation", "")
+    mode = live.get("mode", config.WISDOM_MODE)
+    live_ret = live.get("return_pct")
+    ret_s = f"{live_ret:+.2f}%" if live_ret is not None else "n/a (no journal data)"
+
+    mode_label = "PAPER" if config.PAPER_TRADING else "LIVE"
+    subject = f"[PythonTrading {mode_label}] Wisdom month {month_key}"
+    body = (
+        f"Month:          {month_key}\n"
+        f"Active mode:    {mode}\n"
+        f"Live return:    {ret_s}\n"
+        f"Best sim mode:  {best}\n"
+        f"Pause cycles:   {live.get('pause_cycles', 'n/a')}\n\n"
+        f"Recommendation:\n{rec}\n\n"
+        f"File: wisdom_monthly_{month_key}.json\n"
+        f"Change WISDOM_MODE in .env manually if you agree."
+    )
+    if broadcast(subject, body):
+        state = _load_state()
+        state["last_monthly_wisdom_alert"] = month_key
+        _save_state(state)
+
+
 def maybe_daily_summary(equity, cash, regime, halted):
     """One summary per calendar day (UTC-local date on machine)."""
     state = _load_state()

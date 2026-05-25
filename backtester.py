@@ -32,7 +32,7 @@ from modules.risk_management import RiskManager
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-MIN_HISTORY = 50
+MIN_HISTORY = max(50, config.SPY_MA_WINDOW)
 TX_COST = 0.001
 BENCHMARK = "VTI"
 # One daily bar ≈ one pipeline day; ~1h cooldown ≈ 1 session on daily data
@@ -118,28 +118,39 @@ def _benchmark_return(data, start_idx):
     return (col.iloc[-1] / col.iloc[0] - 1) * 100
 
 
-def _ensure_daily_data(days, refresh=False):
+def _ensure_daily_data(days, refresh=False, use_max=False):
+    if use_max:
+        if not refresh:
+            data = load_close_matrix(interval="1d")
+            if len(data) >= MIN_HISTORY + 10:
+                return data
+        print("--- Downloading max daily history (may take a few minutes) ---")
+        fetch_daily_history(use_max=True)
+        return load_close_matrix(interval="1d")
     min_rows = max(MIN_HISTORY + 10, int(days * 0.85))
     if not refresh:
         data = load_close_matrix(interval="1d", days=days)
         if len(data) >= min_rows:
             return data
-    print(f"--- Downloading {days} days of daily history (first run may take a few minutes) ---")
+    print(f"--- Downloading {days} days of daily history ---")
     fetch_daily_history(days)
     return load_close_matrix(interval="1d", days=days)
 
 
-def run_performance_test(days=None, refresh=False):
-    days = days or config.BACKTEST_DAYS
-    print(f"--- STARTING run_all.py PIPELINE BACKTEST ({days} days) ---")
+def run_performance_test(days=None, refresh=False, use_max=False):
+    if use_max:
+        print("--- STARTING FUND BACKTEST (max available daily history) ---")
+    else:
+        days = days or config.BACKTEST_DAYS
+        print(f"--- STARTING FUND BACKTEST ({days} days) ---")
     try:
-        data = _ensure_daily_data(days, refresh=refresh)
+        data = _ensure_daily_data(days or 0, refresh=refresh, use_max=use_max)
     except Exception as e:
         print("Database error: " + str(e))
         return
     if len(data) < MIN_HISTORY:
         print(f"Need at least {MIN_HISTORY} rows; got {len(data)}.")
-        print("Run: python fetch_data.py --daily --days " + str(days))
+        print("Run: python fetch_data.py --daily --max")
         return
 
     start_date = data.index[MIN_HISTORY]
@@ -147,7 +158,8 @@ def run_performance_test(days=None, refresh=False):
     cooldown_bars = DAILY_COOLDOWN_BARS
     sharpe_scale = np.sqrt(252)
     bar_label = "daily bars"
-    progress_step = 50
+    sim_days = (end_date - start_date).days
+    progress_step = max(50, len(data) // 20)
 
     print(f"Loaded {len(data.columns)} tickers over {len(data)} {bar_label}.")
     print(f"Simulation: {start_date.date()} to {end_date.date()}")
@@ -225,7 +237,10 @@ def run_performance_test(days=None, refresh=False):
     bench = _benchmark_return(data, MIN_HISTORY)
 
     print("--- FUND BACKTEST REPORT (SPY + vol-gated crypto + NYSE) ---")
-    print(f"Period:           {days} days ({bar_label})")
+    print(
+        f"Simulation:       {start_date.date()} to {end_date.date()} "
+        f"(~{sim_days} days, {len(data)} {bar_label})"
+    )
     print(
         f"Sleeves:          SPY {config.SPY_SLEEVE_CAP_PCT:.0%} | "
         f"crypto {config.CRYPTO_SLEEVE_CAP_PCT:.0%} | "
@@ -262,5 +277,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Re-download daily history before running",
     )
+    parser.add_argument(
+        "--max",
+        action="store_true",
+        help="Use maximum available daily history (full universe, yfinance max)",
+    )
     args = parser.parse_args()
-    run_performance_test(days=args.days, refresh=args.refresh)
+    run_performance_test(days=args.days, refresh=args.refresh, use_max=args.max)

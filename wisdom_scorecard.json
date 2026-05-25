@@ -1,0 +1,50 @@
+{
+  "evaluated_at": "2026-05-25T00:03:37",
+  "window_days": 30,
+  "config": {
+    "wisdom_mode": "arbitrage",
+    "gap_threshold": 0.25,
+    "web_cache_hours": 24
+  },
+  "live": null,
+  "simulated_modes": {
+    "baseline": {
+      "return_pct": 12.1,
+      "sharpe": 3.94,
+      "max_drawdown_pct": -3.9,
+      "orders": 70,
+      "paused_days": 0,
+      "from_date": "2026-04-20",
+      "to_date": "2026-05-25"
+    },
+    "web_regime": {
+      "return_pct": 12.1,
+      "sharpe": 3.94,
+      "max_drawdown_pct": -3.9,
+      "orders": 70,
+      "paused_days": 0,
+      "from_date": "2026-04-20",
+      "to_date": "2026-05-25"
+    },
+    "arbitrage": {
+      "return_pct": 12.1,
+      "sharpe": 3.94,
+      "max_drawdown_pct": -3.9,
+      "orders": 70,
+      "paused_days": 0,
+      "from_date": "2026-04-20",
+      "to_date": "2026-05-25"
+    },
+    "wisdom_pause": {
+      "return_pct": 6.9,
+      "sharpe": 3.67,
+      "max_drawdown_pct": -2.36,
+      "orders": 40,
+      "paused_days": 15,
+      "from_date": "2026-04-20",
+      "to_date": "2026-05-25"
+    }
+  },
+  "best_sim_mode": "baseline",
+  "recommendation": "No live equity journal yet. Best 30d sim: baseline (+12.1%)."
+}

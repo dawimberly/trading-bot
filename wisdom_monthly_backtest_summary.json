@@ -1,0 +1,55 @@
+{
+  "period": "2017-01 to 2023-12",
+  "months": 84,
+  "gap_threshold": 0.25,
+  "strategies": {
+    "always_baseline": {
+      "final_equity": 60113.26,
+      "total_return_pct": 501.13,
+      "sharpe": 0.95,
+      "max_drawdown_pct": -42.06,
+      "months": 84
+    },
+    "always_web_regime": {
+      "final_equity": 60423.32,
+      "total_return_pct": 504.23,
+      "sharpe": 0.95,
+      "max_drawdown_pct": -41.87,
+      "months": 84
+    },
+    "always_arbitrage": {
+      "final_equity": 60113.26,
+      "total_return_pct": 501.13,
+      "sharpe": 0.95,
+      "max_drawdown_pct": -42.06,
+      "months": 84
+    },
+    "always_wisdom_pause": {
+      "final_equity": 60800.81,
+      "total_return_pct": 508.01,
+      "sharpe": 0.96,
+      "max_drawdown_pct": -42.32,
+      "months": 84
+    },
+    "oracle_monthly_best": {
+      "final_equity": 67038.62,
+      "total_return_pct": 570.39,
+      "sharpe": 1.0,
+      "max_drawdown_pct": -41.09,
+      "months": 84
+    },
+    "vti_buy_hold": {
+      "final_equity": 20566.72,
+      "total_return_pct": 105.67,
+      "sharpe": 0.67,
+      "max_drawdown_pct": -24.67,
+      "months": 84
+    }
+  },
+  "best_sim_mode_wins": {
+    "web_regime": 34,
+    "wisdom_pause": 27,
+    "baseline": 23
+  },
+  "oracle_note": "Oracle = best sim mode each month (not achievable in advance)."
+}

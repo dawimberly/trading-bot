@@ -58,6 +58,30 @@ REFRESH_INTERVAL = 900
 MAX_DRAWDOWN_PCT = 0.10
 BACKTEST_DAYS = 365
 
+# --- Sentiment (regime input) — "price" is free and matches backtests ---
+SENTIMENT_SOURCE = os.getenv("SENTIMENT_SOURCE", "price").strip().lower()
+
+# --- Wisdom layer (web mood + price math -> RHYME; see backtester_wisdom.py) ---
+# baseline | web_regime | arbitrage | wisdom_pause
+WISDOM_MODE = os.getenv("WISDOM_MODE", "arbitrage").strip().lower()
+WISDOM_GAP_THRESHOLD = float(os.getenv("WISDOM_GAP_THRESHOLD", "0.25"))
+WEB_SENTIMENT_CACHE_FILE = "web_sentiment_live.json"
+WEB_SENTIMENT_CACHE_HOURS = int(os.getenv("WEB_SENTIMENT_CACHE_HOURS", "24"))
+
+# --- Wisdom self-evaluation (journal + rolling scorecard + monthly rollup) ---
+WISDOM_EVAL_ENABLED = os.getenv("WISDOM_EVAL_ENABLED", "true").lower() in ("1", "true", "yes")
+WISDOM_EVAL_DAYS = int(os.getenv("WISDOM_EVAL_DAYS", "30"))
+WISDOM_MONTHLY_ENABLED = os.getenv("WISDOM_MONTHLY_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+WISDOM_JOURNAL_FILE = "wisdom_journal.csv"
+WISDOM_SCORECARD_FILE = "wisdom_scorecard.json"
+WISDOM_EVAL_HISTORY_FILE = "wisdom_evaluations.jsonl"
+WISDOM_EVAL_STATE_FILE = "wisdom_eval_state.json"
+WISDOM_MONTHLY_HISTORY_FILE = "wisdom_monthly_history.jsonl"
+
 # --- Risk & sizing (paper month defaults) ---
 RISK_PER_TRADE = 0.02
 MAX_NOTIONAL_PER_ORDER = 10000.0

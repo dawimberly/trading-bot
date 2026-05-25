@@ -1,0 +1,7 @@
+timestamp,active_mode,gap_threshold,web_sentiment,price_sentiment,sentiment_gap,regime,volatility,wisdom_paused,equity,cash,crypto_trades,spy_trades,nyse_trades,shadow_would_pause_baseline,shadow_would_pause_arbitrage,shadow_would_pause_web_regime,shadow_would_pause_wisdom_pause,notes
+2026-05-25T00:10:38,arbitrage,0.25,-0.5,-0.0008784585151166979,-0.48682312227324953,RHYME_D: Range_Bound_Neutral,Low,False,100326.32,4441.62,0,0,0,False,False,False,False,
+2026-05-25T00:11:39,arbitrage,0.25,-0.5,-0.0008784585151166979,-0.48682312227324953,RHYME_D: Range_Bound_Neutral,Low,False,100326.32,4441.62,0,0,0,False,False,False,False,
+2026-05-25T00:12:39,arbitrage,0.25,-0.5,-0.0008784585151166979,-0.48682312227324953,RHYME_D: Range_Bound_Neutral,Low,False,100483.21,4441.62,0,0,0,False,False,False,False,
+2026-05-25T00:13:40,arbitrage,0.25,-0.5,-0.0008784585151166979,-0.48682312227324953,RHYME_D: Range_Bound_Neutral,Low,False,100483.21,4441.62,0,0,0,False,False,False,False,
+2026-05-25T00:14:41,arbitrage,0.25,-0.5,-0.0008784585151166979,-0.48682312227324953,RHYME_D: Range_Bound_Neutral,Low,False,100483.21,4441.62,0,0,0,False,False,False,False,
+2026-05-25T00:15:42,arbitrage,0.25,-0.5,0.00684246171244296,-0.6026369256866444,RHYME_D: Range_Bound_Neutral,Low,False,100389.51,4441.62,0,0,0,False,False,False,False,

@@ -47,21 +47,24 @@ def fetch_and_store(tickers=None):
     print("Done. Database updated.")
 
 
-def fetch_daily_history(days=None):
-    """Backtest pipeline: daily bars for up to ~2 years (365d default)."""
-    days = days or config.BACKTEST_DAYS
+def fetch_daily_history(days=None, use_max=False):
+    """Backtest pipeline: daily bars. use_max=True requests full yfinance history per ticker."""
     conn = sqlite3.connect(config.DB_PATH)
-    print(f"Fetching {days}-day daily data for {len(config.UNIVERSE)} tickers...")
-    for ticker in config.UNIVERSE:
+    tickers = config.UNIVERSE
+    if use_max:
+        print(f"Fetching max daily history for {len(tickers)} tickers...")
+    else:
+        days = days or config.BACKTEST_DAYS
+        print(f"Fetching {days}-day daily data for {len(tickers)} tickers...")
+    for ticker in tickers:
         table = f"{ticker}_daily"
         try:
-            df = yf.download(
-                ticker,
-                period=f"{days}d",
-                interval="1d",
-                progress=False,
-                auto_adjust=True,
-            )
+            kwargs = dict(interval="1d", progress=False, auto_adjust=True)
+            if use_max:
+                kwargs["period"] = "max"
+            else:
+                kwargs["period"] = f"{days}d"
+            df = yf.download(ticker, **kwargs)
             df = _normalize_df(df)
             if df.empty:
                 print("No data for " + ticker)
@@ -87,8 +90,13 @@ if __name__ == "__main__":
         default=config.BACKTEST_DAYS,
         help=f"Days of daily history (default: {config.BACKTEST_DAYS})",
     )
+    parser.add_argument(
+        "--max",
+        action="store_true",
+        help="Fetch maximum available daily history (yfinance period=max)",
+    )
     args = parser.parse_args()
     if args.daily:
-        fetch_daily_history(args.days)
+        fetch_daily_history(args.days, use_max=args.max)
     else:
         fetch_and_store()

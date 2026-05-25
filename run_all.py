@@ -12,7 +12,7 @@ import config
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
-from modules.market_context import get_market_regime, get_sentiment, get_volatility
+from modules.wisdom_sentiment import resolve_wisdom_regime
 from modules.pipeline_strategies import (
     run_crypto_strategy,
     run_equity_strategy,
@@ -24,6 +24,8 @@ from modules.position_exits import run_position_exits
 from modules.risk_management import RiskManager
 from modules import trade_journal
 from modules import alerts
+from modules import wisdom_journal
+from modules.wisdom_evaluator import maybe_run_daily_evaluation, maybe_run_monthly_rollup
 
 pair_cooldown = {}
 refresh_scheduler = RefreshScheduler()
@@ -86,6 +88,7 @@ def _write_heartbeat(
     halted,
     market_open,
     sleeves=None,
+    wisdom=None,
 ):
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
@@ -108,6 +111,14 @@ def _write_heartbeat(
     }
     if sleeves:
         payload["sleeve_exposure"] = sleeves
+    if wisdom:
+        payload["wisdom"] = {
+            "mode": wisdom.get("wisdom_mode"),
+            "web_sentiment": wisdom.get("web_sentiment"),
+            "price_sentiment": wisdom.get("price_sentiment"),
+            "gap": wisdom.get("sentiment_gap"),
+            "paused": wisdom.get("wisdom_paused"),
+        }
     with open(config.HEARTBEAT_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
@@ -146,10 +157,17 @@ def main():
         trade_journal.log_event("skip", equity=equity, notes="empty or short data")
         return
 
-    regime = get_market_regime(get_sentiment(data), get_volatility(data))
-    vol = get_volatility(data)
+    wisdom = resolve_wisdom_regime(data)
+    regime = wisdom["regime"]
+    vol = wisdom["volatility"]
+    web = wisdom.get("web_sentiment")
+    gap = wisdom.get("sentiment_gap")
+    web_s = f"{web:+.2f}" if web is not None else "n/a"
+    gap_s = f"{gap:+.2f}" if gap is not None else "n/a"
+    pause_s = " | WISDOM PAUSE" if wisdom.get("wisdom_paused") else ""
     print(
         f"--- Regime: {regime} | Vol: {vol} | "
+        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s} | "
         f"Equity session: {'OPEN' if market_open else 'CLOSED'} ---"
     )
 
@@ -216,7 +234,32 @@ def main():
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as e:
         print(f"Alert error (non-fatal): {e}")
-    _write_heartbeat(regime, equity, cash, c, e, s, False, market_open, sleeves)
+    _write_heartbeat(regime, equity, cash, c, e, s, False, market_open, sleeves, wisdom)
+
+    wisdom_journal.log_cycle(
+        data,
+        datetime.datetime.now(),
+        wisdom,
+        equity=equity,
+        cash=cash,
+        crypto_trades=c,
+        spy_trades=s,
+        nyse_trades=e,
+    )
+    scorecard = maybe_run_daily_evaluation()
+    if scorecard:
+        print(f"--- Wisdom scorecard: {scorecard.get('recommendation', '')} ---")
+
+    rollup = maybe_run_monthly_rollup()
+    if rollup:
+        print(
+            f"--- Wisdom monthly {rollup.get('month')}: "
+            f"{rollup.get('recommendation', '')} ---"
+        )
+        try:
+            alerts.maybe_monthly_wisdom_summary(rollup)
+        except Exception as e:
+            print(f"Monthly wisdom alert error (non-fatal): {e}")
 
 
 def _print_startup_banner():
@@ -233,6 +276,20 @@ def _print_startup_banner():
         f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
         f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"
     )
+    print(f"--- Sentiment: {config.SENTIMENT_SOURCE} (RHYME regimes) ---")
+    print(
+        f"--- Wisdom: {config.WISDOM_MODE} | gap threshold {config.WISDOM_GAP_THRESHOLD} ---"
+    )
+    if config.WISDOM_EVAL_ENABLED:
+        print(
+            f"--- Wisdom eval: every {config.WISDOM_EVAL_DAYS}d -> "
+            f"{config.WISDOM_SCORECARD_FILE} (history: {config.WISDOM_EVAL_HISTORY_FILE}) ---"
+        )
+    if config.WISDOM_MONTHLY_ENABLED:
+        print(
+            f"--- Wisdom monthly: rollup + alert -> wisdom_monthly_YYYY-MM.json "
+            f"(history: {config.WISDOM_MONTHLY_HISTORY_FILE}) ---"
+        )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     if alerts.alerts_configured():
         print("--- Alerts: enabled (Telegram and/or email) ---")

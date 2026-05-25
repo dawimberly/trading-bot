@@ -1,0 +1,5 @@
+mode,final_equity,total_return_pct,sharpe,max_drawdown_pct,benchmark_pct,spy_signals,crypto_signals,nyse_signals,orders,paused_days,halted,regime_counts,start,end
+baseline,38379.39,283.79,0.75,-42.15,108.28,99,0,99,198,0,True,{'RHYME_D: Range_Bound_Neutral': 251},2017-07-20,2023-12-31
+web_regime,31697.46,216.97,0.68,-37.95,108.28,99,0,99,198,0,True,"{'RHYME_E: Steady_Bearish_Decline': 43, 'RHYME_D: Range_Bound_Neutral': 213}",2017-07-20,2023-12-31
+arbitrage,38379.39,283.79,0.75,-42.15,108.28,99,0,99,198,0,True,"{'RHYME_D: Range_Bound_Neutral': 249, 'RHYME_E: Steady_Bearish_Decline': 2}",2017-07-20,2023-12-31
+wisdom_pause,36804.82,268.05,0.72,-41.31,108.28,98,0,100,198,320,True,"{'RHYME_E: Steady_Bearish_Decline': 320, 'RHYME_D: Range_Bound_Neutral': 128}",2017-07-20,2023-12-31
