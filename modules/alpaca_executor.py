@@ -23,6 +23,102 @@ class AlpacaExecutor:
             )
         self.paper = use_paper
         self.client = TradingClient(api_key, secret_key, paper=use_paper)
+        self._equity_session_open = None  # None => check Alpaca clock per order
+        self._account = None
+        self._positions = None
+
+    def refresh_cache(self):
+        """Fetch account + positions once per pipeline cycle."""
+        self._account = self.client.get_account()
+        self._positions = list(self.client.get_all_positions())
+        return self._account
+
+    def _invalidate_cache(self):
+        self._account = None
+        self._positions = None
+
+    @property
+    def equity_session_open(self):
+        return self._equity_session_open
+
+    @equity_session_open.setter
+    def equity_session_open(self, value):
+        self._equity_session_open = bool(value) if value is not None else None
+
+    def _get_account(self):
+        if self._account is None:
+            self.refresh_cache()
+        return self._account
+
+    def _get_positions(self):
+        if self._positions is None:
+            self.refresh_cache()
+        return self._positions
+
+    @staticmethod
+    def _order_filled_qty(order):
+        if order is None:
+            return 0.0
+        return float(getattr(order, "filled_qty", None) or 0)
+
+    def order_filled(self, order, max_wait=2.0):
+        """True when Alpaca reports a non-zero fill (brief poll for market orders)."""
+        if order is None:
+            return False
+        if self._order_filled_qty(order) > 0:
+            return True
+        if max_wait <= 0:
+            return False
+        oid = order.id
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            time.sleep(0.5)
+            try:
+                order = self.client.get_order_by_id(oid)
+            except Exception:
+                return False
+            if self._order_filled_qty(order) > 0:
+                return True
+            status = str(getattr(order, "status", "")).lower()
+            if any(x in status for x in ("cancel", "reject", "expire", "fail")):
+                return False
+        try:
+            return self._order_filled_qty(self.client.get_order_by_id(oid)) > 0
+        except Exception:
+            return False
+
+    def _equity_trading_allowed(self, symbol):
+        if config.is_crypto(symbol):
+            return True
+        if self._equity_session_open is True:
+            return True
+        if self._equity_session_open is False:
+            return False
+        from modules.market_hours import is_equity_market_open
+
+        return is_equity_market_open(self.client)
+
+    def _cancel_open_orders_for(self, symbol):
+        target = config.normalize_symbol(symbol)
+        request_params = GetOrdersRequest(status="open")
+        for o in self.client.get_orders(filter=request_params):
+            if config.normalize_symbol(o.symbol) == target:
+                self.client.cancel_order_by_id(o.id)
+                time.sleep(0.5)
+
+    def cancel_open_equity_orders(self):
+        """Cancel queued US equity orders (e.g. unfilled DAY orders after the close)."""
+        canceled = 0
+        request_params = GetOrdersRequest(status="open")
+        for o in self.client.get_orders(filter=request_params):
+            if config.is_crypto(o.symbol):
+                continue
+            self.client.cancel_order_by_id(o.id)
+            canceled += 1
+            time.sleep(0.2)
+        if canceled:
+            self._invalidate_cache()
+        return canceled
 
     def get_order_params(self, symbol):
         is_crypto_sym = config.is_crypto(symbol)
@@ -32,7 +128,7 @@ class AlpacaExecutor:
 
     def open_position_count(self):
         try:
-            return len(self.client.get_all_positions())
+            return len(self._get_positions())
         except Exception:
             return 0
 
@@ -65,7 +161,7 @@ class AlpacaExecutor:
     def _sleeve_exposure(self, predicate):
         total = 0.0
         try:
-            for pos in self.client.get_all_positions():
+            for pos in self._get_positions():
                 if predicate(pos):
                     total += self._position_market_value(pos)
         except Exception:
@@ -82,7 +178,7 @@ class AlpacaExecutor:
         return self._sleeve_exposure(self._is_spy_position)
 
     def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value):
-        account = self.client.get_account()
+        account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
         cap = round(equity * sleeve_cap_pct, 2)
@@ -96,7 +192,7 @@ class AlpacaExecutor:
         return raw
 
     def compute_notional(self):
-        account = self.client.get_account()
+        account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
         raw = round(equity * config.RISK_PER_TRADE, 2)
@@ -122,7 +218,7 @@ class AlpacaExecutor:
         )
 
     def sleeve_snapshot(self):
-        account = self.client.get_account()
+        account = self._get_account()
         equity = float(account.equity)
         spy_v = self.spy_sleeve_value()
         crypto_v = self.crypto_sleeve_value()
@@ -143,13 +239,15 @@ class AlpacaExecutor:
 
     def _find_position(self, symbol):
         target = config.normalize_symbol(symbol)
-        for pos in self.client.get_all_positions():
+        for pos in self._get_positions():
             if self._normalize_pos_symbol(pos) == target:
                 return pos
         return None
 
     def execute_reduce_notional(self, symbol, sell_notional):
         """Sell up to sell_notional; crypto uses qty to avoid insufficient-balance errors."""
+        if not self._equity_trading_allowed(symbol):
+            return None
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
         pos = self._find_position(symbol)
         if pos is None:
@@ -165,11 +263,7 @@ class AlpacaExecutor:
         if sell_notional < config.MIN_NOTIONAL:
             return None
 
-        request_params = GetOrdersRequest(status="open")
-        for o in self.client.get_orders(filter=request_params):
-            if config.normalize_symbol(o.symbol) == config.normalize_symbol(symbol):
-                self.client.cancel_order_by_id(o.id)
-                time.sleep(0.5)
+        self._cancel_open_orders_for(symbol)
 
         if is_crypto_sym:
             sell_qty = min(qty, sell_notional / price)
@@ -189,13 +283,18 @@ class AlpacaExecutor:
                 side=OrderSide.SELL,
                 time_in_force=tif,
             )
-        return self.client.submit_order(order_data=order)
+        order = self.client.submit_order(order_data=order)
+        self._invalidate_cache()
+        return order
 
     def execute_full_exit(self, symbol):
+        if not self._equity_trading_allowed(symbol):
+            return None
         pos = self._find_position(symbol)
         if pos is None:
             return None
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
+        self._cancel_open_orders_for(symbol)
         qty = float(pos.qty)
         price = float(pos.current_price or 0)
         if qty <= 0 or price <= 0:
@@ -214,9 +313,13 @@ class AlpacaExecutor:
                 side=OrderSide.SELL,
                 time_in_force=tif,
             )
-        return self.client.submit_order(order_data=order)
+        order = self.client.submit_order(order_data=order)
+        self._invalidate_cache()
+        return order
 
     def execute_order(self, symbol, side, notional=None, reduce_only=False):
+        if not self._equity_trading_allowed(symbol):
+            return None
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
         side_lower = side.lower()
 
@@ -227,12 +330,7 @@ class AlpacaExecutor:
                 if self._find_position(symbol) is None:
                     return None
 
-        request_params = GetOrdersRequest(status="open")
-        orders = self.client.get_orders(filter=request_params)
-        for o in orders:
-            if o.symbol == formatted_symbol:
-                self.client.cancel_order_by_id(o.id)
-                time.sleep(0.5)
+        self._cancel_open_orders_for(symbol)
 
         target_notional = notional if notional is not None else self.compute_notional()
         if target_notional < config.MIN_NOTIONAL:
@@ -245,7 +343,9 @@ class AlpacaExecutor:
             side=order_side,
             time_in_force=tif,
         )
-        return self.client.submit_order(order_data=order)
+        submitted = self.client.submit_order(order_data=order)
+        self._invalidate_cache()
+        return submitted
 
 
 def get_trading_client(paper=None):

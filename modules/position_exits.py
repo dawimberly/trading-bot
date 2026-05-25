@@ -16,13 +16,13 @@ def run_position_exits(
     """
     exits = 0
     try:
-        positions = executor.client.get_all_positions()
+        positions = executor._get_positions()
     except Exception as e:
         if journal:
             journal.log_event("exit_error", notes=str(e), journal_path=journal_path)
         return 0
 
-    account = executor.client.get_account()
+    account = executor._get_account()
     equity = float(account.equity)
 
     for pos in positions:
@@ -53,16 +53,17 @@ def run_position_exits(
 
         side = "sell" if qty > 0 else "buy"
         try:
-            order = executor.execute_order(symbol, side, reduce_only=True)
-            if order:
-                exits += 1
-                risk_manager._log_event(
-                    f"STOP EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty}"
+            order = executor.execute_full_exit(symbol)
+            if not executor.order_filled(order):
+                continue
+            exits += 1
+            risk_manager._log_event(
+                f"STOP EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty}"
+            )
+            if journal:
+                journal.log_exit(
+                    symbol, side, f"stop_loss {pnl_pct:.2%}", equity, journal_path=journal_path
                 )
-                if journal:
-                    journal.log_exit(
-                        symbol, side, f"stop_loss {pnl_pct:.2%}", equity, journal_path=journal_path
-                    )
         except Exception as e:
             if journal:
                 journal.log_event("exit_error", symbol=symbol, notes=str(e), journal_path=journal_path)

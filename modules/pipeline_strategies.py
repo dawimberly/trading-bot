@@ -9,6 +9,15 @@ MAX_EQUITY_TRADES = 1
 COOLDOWN_SECONDS = 3600
 
 
+def _count_if_filled(executor, order, *, max_wait=2.0):
+    """Return 1 only when Alpaca confirms a fill (not a queued accept)."""
+    if order is None:
+        return 0
+    if hasattr(executor, "order_filled"):
+        return 1 if executor.order_filled(order, max_wait=max_wait) else 0
+    return 1
+
+
 def _on_cooldown(pair_cooldown, key, now, cooldown_seconds=COOLDOWN_SECONDS, cooldown_bars=None):
     last = pair_cooldown.get(key)
     if last is None:
@@ -85,7 +94,7 @@ def run_crypto_strategy(
             if notional is None:
                 continue
         order = executor.execute_order(t1, side, notional=notional)
-        if order is None:
+        if not _count_if_filled(executor, order, max_wait=3.0):
             continue
         pair_cooldown[pair_key] = now
         fired.add(t1)
@@ -160,7 +169,7 @@ def run_spy_exits(
         order = executor.execute_full_exit(symbol)
     else:
         order = executor.execute_order(symbol, "sell", reduce_only=True)
-    if order is None:
+    if not _count_if_filled(executor, order):
         return 0
     pair_key = f"{symbol}/MA{ma_window}"
     if log_fn:
@@ -210,7 +219,7 @@ def run_spy_strategy(
         if notional is None:
             return 0
     order = executor.execute_order(symbol, "buy", notional=notional)
-    if order is None:
+    if not _count_if_filled(executor, order):
         return 0
     pair_cooldown[pair_key] = now
     if portfolio_manager:
@@ -265,7 +274,7 @@ def run_equity_strategy(
             if notional is None:
                 continue
         order = executor.execute_order(symbol, "buy", notional=notional)
-        if order is None:
+        if not _count_if_filled(executor, order):
             continue
         pair_cooldown[pair_key] = now
         trades += 1

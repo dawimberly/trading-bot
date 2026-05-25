@@ -12,6 +12,7 @@ import config
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
+from modules.market_hours import is_equity_market_open
 from modules.wisdom_sentiment import resolve_wisdom_regime
 from modules.pipeline_strategies import (
     run_crypto_strategy,
@@ -209,10 +210,11 @@ def main():
     global _last_equity
     now_ts = datetime.datetime.now()
     executor = AlpacaExecutor()
-    _maybe_reconcile_startup(executor)
     market_open = refresh_scheduler.sync(executor.client, now_ts)
+    executor.equity_session_open = market_open
+    executor.refresh_cache()
 
-    account = executor.client.get_account()
+    account = executor._get_account()
     equity = float(account.equity)
     cash = float(account.cash)
     _last_equity = equity
@@ -226,12 +228,18 @@ def main():
         alerts.notify_halt(equity, peak, dd)
         try:
             alerts.maybe_daily_summary(equity, cash, "HALTED", True)
-        except Exception as e:
-            print(f"Alert error (non-fatal): {e}")
+        except Exception as exc:
+            print(f"Alert error (non-fatal): {exc}")
         _write_heartbeat("HALTED", equity, cash, 0, 0, 0, True, market_open, None)
         return
 
     alerts.clear_halt_flag()
+    _maybe_reconcile_startup(executor)
+
+    if not market_open:
+        canceled = executor.cancel_open_equity_orders()
+        if canceled:
+            print(f"--- Canceled {canceled} stale equity order(s) (session closed) ---")
 
     print("--- Pipeline Cycle: " + str(datetime.datetime.now()) + " ---")
     data = load_close_matrix()
@@ -280,8 +288,8 @@ def main():
             )
         try:
             alerts.maybe_spacex_ipo_alert(spacex_snapshot)
-        except Exception as e:
-            print(f"SpaceX IPO alert error (non-fatal): {e}")
+        except Exception as exc:
+            print(f"SpaceX IPO alert error (non-fatal): {exc}")
 
     listing_snapshot = get_spacex_ipo_listing_status(executor=executor)
     spacex_listing_heartbeat = None
@@ -308,8 +316,8 @@ def main():
         try:
             alerts.maybe_spacex_listing_alert(listing_snapshot)
             alerts.maybe_spacex_ipo_countdown_alert(listing_snapshot)
-        except Exception as e:
-            print(f"SpaceX listing alert error (non-fatal): {e}")
+        except Exception as exc:
+            print(f"SpaceX listing alert error (non-fatal): {exc}")
         if market_open and listing_snapshot.get("ready_to_buy_alpaca"):
             ipo_buy_result = maybe_buy_spacex_ipo(executor, listing_snapshot)
             if ipo_buy_result:
@@ -349,7 +357,10 @@ def main():
         spacex_snapshot=spacex_snapshot,
     )
     s = 0
-    e = 0
+    nyse_trades = 0
+
+    market_open = is_equity_market_open(executor.client)
+    executor.equity_session_open = market_open
     if market_open:
         s += run_spy_exits(data, executor, regime, log_fn=_spy_log)
         s += run_spy_strategy(
@@ -361,7 +372,7 @@ def main():
             log_fn=_spy_log,
             portfolio_manager=portfolio_manager,
         )
-        e = run_equity_strategy(
+        nyse_trades = run_equity_strategy(
             data,
             executor,
             regime,
@@ -372,7 +383,7 @@ def main():
         )
     else:
         print("--- Equity session closed; skipping SPY and equity scans ---")
-    print(f"--- Crypto: {c} | SPY: {s} | NYSE: {e} ---")
+    print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
     sleeves = executor.sleeve_snapshot()
     print(
         f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
@@ -384,7 +395,7 @@ def main():
         equity,
         cash,
         c,
-        e,
+        nyse_trades,
         notes=(
             f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
             f"nyse_cap={config.NYSE_SLEEVE_CAP_PCT:.2%}"
@@ -392,14 +403,14 @@ def main():
     )
     try:
         alerts.maybe_daily_summary(equity, cash, regime, False)
-    except Exception as e:
-        print(f"Alert error (non-fatal): {e}")
+    except Exception as exc:
+        print(f"Alert error (non-fatal): {exc}")
     _write_heartbeat(
         regime,
         equity,
         cash,
         c,
-        e,
+        nyse_trades,
         s,
         False,
         market_open,
@@ -417,7 +428,7 @@ def main():
         cash=cash,
         crypto_trades=c,
         spy_trades=s,
-        nyse_trades=e,
+        nyse_trades=nyse_trades,
         spacex_ipo=spacex_snapshot,
         crypto_gate=crypto_gate,
     )
@@ -433,8 +444,8 @@ def main():
         )
         try:
             alerts.maybe_monthly_wisdom_summary(rollup)
-        except Exception as e:
-            print(f"Monthly wisdom alert error (non-fatal): {e}")
+        except Exception as exc:
+            print(f"Monthly wisdom alert error (non-fatal): {exc}")
 
 
 def _print_startup_banner():
