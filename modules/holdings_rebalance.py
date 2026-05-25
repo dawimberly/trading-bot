@@ -7,6 +7,7 @@ from datetime import datetime
 import config
 from modules.alpaca_executor import AlpacaExecutor
 from modules.holdings_reconcile import holdings_audit, rebuild_ledger, normalize_symbol
+from modules.crypto_vol_gate import crypto_target_allowed
 from modules.pipeline_strategies import (
     PAUSED_REGIMES,
     _equity_momentum_candidates,
@@ -45,10 +46,13 @@ def target_sleeves(
     *,
     volatility: str,
     regime: str,
+    spacex_snapshot: dict | None = None,
 ) -> dict[str, float]:
     """Target market value per sleeve (strategy-aware crypto target)."""
     crypto_target = equity * config.CRYPTO_SLEEVE_CAP_PCT
-    if config.CRYPTO_VOL_ONLY and volatility != "High":
+    if config.CRYPTO_VOL_ONLY and not crypto_target_allowed(
+        volatility, regime, spacex_snapshot=spacex_snapshot
+    ):
         crypto_target = 0.0
     if regime in PAUSED_REGIMES:
         crypto_target = 0.0
@@ -221,6 +225,7 @@ def rebalance_to_targets(
     volatility: str,
     market_open: bool = True,
     portfolio_manager: PortfolioManager | None = None,
+    spacex_snapshot: dict | None = None,
     dry_run: bool = False,
     should_rebuild_ledger: bool = True,
 ) -> dict:
@@ -231,7 +236,9 @@ def rebalance_to_targets(
     """
     before = holdings_audit(executor)
     equity = before["equity"]
-    targets = target_sleeves(equity, volatility=volatility, regime=regime)
+    targets = target_sleeves(
+        equity, volatility=volatility, regime=regime, spacex_snapshot=spacex_snapshot
+    )
     actions: list[dict] = []
 
     for sleeve in SLEEVE_ORDER:

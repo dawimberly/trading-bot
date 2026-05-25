@@ -191,3 +191,150 @@ def maybe_daily_summary(equity, cash, regime, halted):
         _save_state(state)
     else:
         print("Daily summary alert failed (will retry next cycle).")
+
+
+def maybe_spacex_ipo_alert(snapshot: dict) -> None:
+    """Alert once per cache refresh when BTC-linked SpaceX IPO headlines spike."""
+    if not snapshot or not snapshot.get("alert") or not alerts_configured():
+        return
+    fetched_at = snapshot.get("fetched_at", "")
+    state = _load_state()
+    if state.get("last_spacex_ipo_alert") == fetched_at:
+        return
+
+    s = snapshot.get("summary") or {}
+    top = (s.get("top_headlines") or [{}])[0].get("title", "n/a")
+    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    subject = f"[PythonTrading {mode}] SpaceX IPO ↔ BTC narrative active"
+    body = (
+        f"Narrative:      {s.get('narrative', 'n/a')}\n"
+        f"Headlines:      {s.get('headline_count', 0)}\n"
+        f"BTC-linked:     {s.get('btc_linked_count', 0)}\n"
+        f"Avg sentiment:  {s.get('avg_sentiment', 0):+.2f}\n"
+        f"Top headline:   {top}\n\n"
+        f"S-1 context: SpaceX disclosed ~18,712 BTC treasury.\n"
+        f"SPCX perp: synthetic pre-IPO contract on Hyperliquid (not Alpaca).\n"
+        f"Override: SPACEX_IPO_CRYPTO_OVERRIDE opens BTC pairs when narrative hot.\n"
+        f"Monitor file: {config.SPACEX_IPO_CACHE_FILE}"
+    )
+    if broadcast(subject, body):
+        state = _load_state()
+        state["last_spacex_ipo_alert"] = fetched_at
+        _save_state(state)
+
+
+def maybe_spacex_listing_alert(listing: dict) -> None:
+    """Alert on SEC stage changes and when SPCX becomes tradable on Alpaca or Kraken."""
+    if not listing or not alerts_configured():
+        return
+
+    stage = listing.get("stage", "")
+    state = _load_state()
+    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    ticker = listing.get("ticker", config.SPACEX_IPO_TICKER)
+    kraken = listing.get("kraken") or {}
+    alpaca = listing.get("alpaca") or {}
+
+    if listing.get("became_tradable_kraken"):
+        key = f"kraken_tradable_{listing.get('fetched_at', '')[:16]}"
+        if state.get("last_spacex_kraken_alert_key") != key:
+            subject = f"[PythonTrading] {ticker} LIVE ON KRAKEN — {kraken.get('wsname') or kraken.get('pair')}"
+            body = (
+                f"Kraken pair:  {kraken.get('wsname') or kraken.get('pair')}\n"
+                f"Kind:         {kraken.get('kind')}\n"
+                f"Stage:        {stage}\n\n"
+                f"Auto-buy:     {'on' if config.KRAKEN_SPCX_BUY_ENABLED else 'off'} "
+                f"(${config.KRAKEN_SPCX_BUY_USD:,.0f})\n"
+                f"Requires:     ALLOW_KRAKEN_TRADING=yes + API keys in .env\n\n"
+                f"US equities on Kraken Pro may also appear in-app before API xStock pairs.\n"
+                f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
+            )
+            if broadcast(subject, body):
+                state = _load_state()
+                state["last_spacex_kraken_alert_key"] = key
+                _save_state(state)
+
+    if listing.get("became_tradable_alpaca"):
+        key = f"alpaca_tradable_{listing.get('fetched_at', '')[:16]}"
+        if state.get("last_spacex_listing_alert_key") == key:
+            return
+        subject = f"[PythonTrading {mode}] {ticker} IS TRADABLE ON ALPACA — IPO LIVE"
+        body = (
+            f"Ticker:     {ticker}\n"
+            f"Stage:      {stage}\n"
+            f"Tradable:   YES (Alpaca)\n"
+            f"Status:     {alpaca.get('status', 'n/a')}\n"
+            f"Expected:   {listing.get('expected_listing_date')} "
+            f"({listing.get('days_until_expected')} days)\n\n"
+            f"PAPER auto-buy: ${config.SPACEX_IPO_BUY_NOTIONAL:,.0f} "
+            f"({'on' if config.SPACEX_IPO_AUTO_BUY and config.PAPER_TRADING else 'off'})\n\n"
+            f"Kraken:     {'tradable' if kraken.get('tradable') else 'scanning for SPCXx/USD'}\n"
+            f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
+        )
+        if broadcast(subject, body):
+            state = _load_state()
+            state["last_spacex_listing_alert_key"] = key
+            _save_state(state)
+        return
+
+    if listing.get("became_tradable"):
+        return
+
+    if not listing.get("stage_changed"):
+        return
+
+    stage_key = f"stage_{stage}_{listing.get('fetched_at', '')[:10]}"
+    if state.get("last_spacex_listing_alert_key") == stage_key:
+        return
+
+    sec = listing.get("sec") or {}
+    milestones = sec.get("milestones") or []
+    latest = milestones[0] if milestones else {}
+    days = listing.get("days_until_expected")
+    days_s = f"{days} days" if days is not None else "n/a"
+
+    subject = f"[PythonTrading {mode}] SpaceX IPO milestone: {stage}"
+    body = (
+        f"Ticker:           {ticker}\n"
+        f"Stage:            {stage}\n"
+        f"Expected listing: {listing.get('expected_listing_date')} ({days_s})\n"
+        f"Alpaca tradable:  {alpaca.get('tradable', False)}\n"
+        f"Kraken tradable:  {kraken.get('tradable', False)} "
+        f"({kraken.get('wsname') or 'not listed'})\n"
+        f"Latest SEC:       {latest.get('form', 'n/a')} ({latest.get('date', 'n/a')})\n\n"
+        f"Tracked: SEC → Alpaca paper → Kraken Pro (SPCX / SPCXx API scan)\n"
+        f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
+    )
+    if broadcast(subject, body):
+        state = _load_state()
+        state["last_spacex_listing_alert_key"] = stage_key
+        _save_state(state)
+
+
+def maybe_spacex_ipo_countdown_alert(listing: dict) -> None:
+    """One alert per day when within 14 days of expected listing."""
+    if not listing or not alerts_configured():
+        return
+    days = listing.get("days_until_expected")
+    if days is None or days < 0 or days > 14:
+        return
+
+    today = date.today().isoformat()
+    state = _load_state()
+    if state.get("last_spacex_countdown_day") == today:
+        return
+
+    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    subject = f"[PythonTrading {mode}] SpaceX IPO in {days} day(s) — watch {listing.get('ticker')}"
+    body = (
+        f"Expected:  {listing.get('expected_listing_date')}\n"
+        f"Stage:     {listing.get('stage')}\n"
+        f"Alpaca:    {(listing.get('alpaca') or {}).get('tradable', False)}\n"
+        f"Kraken:    {(listing.get('kraken') or {}).get('tradable', False)}\n\n"
+        f"Bot scans Alpaca + Kraken Pro API every cycle for {listing.get('ticker')}.\n"
+        f"Paper Alpaca auto-buy: on by default. Kraken: set KRAKEN_SPCX_BUY_ENABLED=true."
+    )
+    if broadcast(subject, body):
+        state = _load_state()
+        state["last_spacex_countdown_day"] = today
+        _save_state(state)

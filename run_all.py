@@ -22,6 +22,14 @@ from modules.pipeline_strategies import (
 from modules.portfolio_manager import PortfolioManager
 from modules.holdings_reconcile import reconcile
 from modules.holdings_rebalance import rebalance_to_targets
+from modules.crypto_vol_gate import crypto_trading_allowed
+from modules.spacex_ipo_monitor import format_monitor_line, get_spacex_ipo_monitor
+from modules.spacex_ipo_listing_monitor import (
+    format_listing_line,
+    get_spacex_ipo_listing_status,
+)
+from modules.spacex_ipo_buy import maybe_buy_spacex_ipo
+from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
 from modules.position_exits import run_position_exits
 from modules.risk_management import RiskManager
 from modules import trade_journal
@@ -147,6 +155,8 @@ def _write_heartbeat(
     market_open,
     sleeves=None,
     wisdom=None,
+    spacex_ipo=None,
+    spacex_listing=None,
 ):
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
@@ -176,6 +186,20 @@ def _write_heartbeat(
             "price_sentiment": wisdom.get("price_sentiment"),
             "gap": wisdom.get("sentiment_gap"),
             "paused": wisdom.get("wisdom_paused"),
+        }
+    if spacex_ipo:
+        payload["spacex_ipo"] = spacex_ipo
+    if spacex_listing:
+        payload["spacex_ipo_listing"] = {
+            "stage": spacex_listing.get("stage"),
+            "days_until_expected": spacex_listing.get("days_until_expected"),
+            "ready_to_buy": spacex_listing.get("ready_to_buy"),
+            "ready_to_buy_alpaca": spacex_listing.get("ready_to_buy_alpaca"),
+            "ready_to_buy_kraken": spacex_listing.get("ready_to_buy_kraken"),
+            "expected_listing_date": spacex_listing.get("expected_listing_date"),
+            "alpaca_tradable": (spacex_listing.get("alpaca") or {}).get("tradable"),
+            "kraken_tradable": (spacex_listing.get("kraken") or {}).get("tradable"),
+            "kraken_pair": (spacex_listing.get("kraken") or {}).get("wsname"),
         }
     with open(config.HEARTBEAT_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -231,6 +255,81 @@ def main():
         f"Equity session: {'OPEN' if market_open else 'CLOSED'} ---"
     )
 
+    spacex_snapshot = get_spacex_ipo_monitor()
+    spacex_heartbeat = None
+    crypto_gate = crypto_trading_allowed(vol, regime, spacex_snapshot=spacex_snapshot)
+    if spacex_snapshot:
+        print(f"--- {format_monitor_line(spacex_snapshot)} ---")
+        s = spacex_snapshot.get("summary", {})
+        spacex_heartbeat = {
+            "narrative": s.get("narrative"),
+            "headline_count": s.get("headline_count"),
+            "btc_linked_count": s.get("btc_linked_count"),
+            "spcx_perp_count": s.get("spcx_perp_count"),
+            "avg_sentiment": s.get("avg_sentiment"),
+            "alert": spacex_snapshot.get("alert"),
+            "top_headline": (s.get("top_headlines") or [{}])[0].get("title"),
+            "top_spcx_perp": (s.get("top_spcx_perp") or [{}])[0].get("title"),
+        }
+        spacex_heartbeat["crypto_override"] = crypto_gate.get("spacex_override", False)
+        spacex_heartbeat["crypto_allowed"] = crypto_gate.get("allowed", False)
+        if crypto_gate.get("spacex_override"):
+            print(
+                f"--- Crypto vol OVERRIDE: {crypto_gate.get('reason')} "
+                f"(5m vol {vol}; SpaceX narrative opens BTC pairs) ---"
+            )
+        try:
+            alerts.maybe_spacex_ipo_alert(spacex_snapshot)
+        except Exception as e:
+            print(f"SpaceX IPO alert error (non-fatal): {e}")
+
+    listing_snapshot = get_spacex_ipo_listing_status(executor=executor)
+    spacex_listing_heartbeat = None
+    ipo_buy_result = None
+    if listing_snapshot:
+        print(f"--- {format_listing_line(listing_snapshot)} ---")
+        if listing_snapshot.get("ready_to_buy_alpaca"):
+            print(f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON ALPACA — IPO listing live !!!")
+        if listing_snapshot.get("ready_to_buy_kraken"):
+            k = listing_snapshot.get("kraken") or {}
+            print(
+                f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON KRAKEN "
+                f"({k.get('wsname') or k.get('pair')}) — buy on Kraken Pro !!!"
+            )
+        spacex_listing_heartbeat = {
+            "stage": listing_snapshot.get("stage"),
+            "days_until_expected": listing_snapshot.get("days_until_expected"),
+            "ready_to_buy": listing_snapshot.get("ready_to_buy"),
+            "ready_to_buy_alpaca": listing_snapshot.get("ready_to_buy_alpaca"),
+            "ready_to_buy_kraken": listing_snapshot.get("ready_to_buy_kraken"),
+            "sec_stage": (listing_snapshot.get("sec") or {}).get("sec_stage"),
+            "kraken_pair": (listing_snapshot.get("kraken") or {}).get("wsname"),
+        }
+        try:
+            alerts.maybe_spacex_listing_alert(listing_snapshot)
+            alerts.maybe_spacex_ipo_countdown_alert(listing_snapshot)
+        except Exception as e:
+            print(f"SpaceX listing alert error (non-fatal): {e}")
+        if market_open and listing_snapshot.get("ready_to_buy_alpaca"):
+            ipo_buy_result = maybe_buy_spacex_ipo(executor, listing_snapshot)
+            if ipo_buy_result:
+                print(
+                    f"--- SpaceX IPO paper buy {config.SPACEX_IPO_TICKER}: "
+                    f"${ipo_buy_result.get('notional', 0):,.0f} "
+                    f"({'ok' if ipo_buy_result.get('ok') else 'failed'}) ---"
+                )
+        if listing_snapshot.get("ready_to_buy_kraken"):
+            kraken_buy = maybe_buy_kraken_spcx(listing_snapshot)
+            if kraken_buy:
+                if kraken_buy.get("ok"):
+                    print(
+                        f"--- Kraken SPCX buy {kraken_buy.get('pair')}: "
+                        f"${kraken_buy.get('usd', 0):,.0f} "
+                        f"vol {kraken_buy.get('volume')} ---"
+                    )
+                elif kraken_buy.get("error"):
+                    print(f"--- Kraken SPCX buy skipped/failed: {kraken_buy['error']} ---")
+
     exits = run_position_exits(
         executor, risk_manager, trade_journal, equity_session_open=market_open
     )
@@ -247,6 +346,7 @@ def main():
         log_fn=_crypto_log,
         portfolio_manager=portfolio_manager,
         volatility=vol,
+        spacex_snapshot=spacex_snapshot,
     )
     s = 0
     e = 0
@@ -294,7 +394,20 @@ def main():
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as e:
         print(f"Alert error (non-fatal): {e}")
-    _write_heartbeat(regime, equity, cash, c, e, s, False, market_open, sleeves, wisdom)
+    _write_heartbeat(
+        regime,
+        equity,
+        cash,
+        c,
+        e,
+        s,
+        False,
+        market_open,
+        sleeves,
+        wisdom,
+        spacex_heartbeat,
+        spacex_listing_heartbeat,
+    )
 
     wisdom_journal.log_cycle(
         data,
@@ -305,6 +418,8 @@ def main():
         crypto_trades=c,
         spy_trades=s,
         nyse_trades=e,
+        spacex_ipo=spacex_snapshot,
+        crypto_gate=crypto_gate,
     )
     scorecard = maybe_run_daily_evaluation()
     if scorecard:
@@ -350,6 +465,32 @@ def _print_startup_banner():
             f"--- Wisdom monthly: rollup + alert -> wisdom_monthly_YYYY-MM.json "
             f"(history: {config.WISDOM_MONTHLY_HISTORY_FILE}) ---"
         )
+    if config.SPACEX_IPO_MONITOR_ENABLED:
+        print(
+            f"--- SpaceX IPO monitor: RSS headlines -> {config.SPACEX_IPO_CACHE_FILE} "
+            f"(cache {config.SPACEX_IPO_CACHE_HOURS}h) ---"
+        )
+    if config.SPACEX_IPO_CRYPTO_OVERRIDE:
+        print(
+            "--- SpaceX crypto override: opens BTC pairs when IPO/BTC or SPCX-perp "
+            "narrative hot (despite Low 5m vol) ---"
+        )
+    if config.SPACEX_IPO_LISTING_MONITOR_ENABLED:
+        print(
+            f"--- SpaceX IPO listing: SEC + Alpaca scan for {config.SPACEX_IPO_TICKER} "
+            f"(expected {config.SPACEX_IPO_EXPECTED_DATE}) -> "
+            f"{config.SPACEX_IPO_LISTING_CACHE_FILE} ---"
+        )
+        if config.SPACEX_IPO_AUTO_BUY and config.PAPER_TRADING:
+            print(
+                f"--- SpaceX IPO paper auto-buy: ${config.SPACEX_IPO_BUY_NOTIONAL:,.0f} "
+                f"when {config.SPACEX_IPO_TICKER} tradable on Alpaca ---"
+            )
+        if config.KRAKEN_SPCX_BUY_ENABLED:
+            print(
+                f"--- Kraken SPCX live buy: ${config.KRAKEN_SPCX_BUY_USD:,.0f} "
+                f"when SPCX/SPCXx appears on Kraken Pro API ---"
+            )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     if alerts.alerts_configured():
         print("--- Alerts: enabled (Telegram and/or email) ---")

@@ -37,19 +37,19 @@ def run_crypto_strategy(
     log_fn=None,
     portfolio_manager=None,
     volatility=None,
+    spacex_snapshot=None,
 ):
     """Z-score on raw spread; require min correlation; trade strongest |z| pairs first."""
+    from modules.crypto_vol_gate import crypto_trading_allowed
+
     crypto_cols = [c for c in data.columns if config.is_crypto(c)]
     if len(crypto_cols) < 2:
         return 0
-    if regime in PAUSED_REGIMES:
+    gate = crypto_trading_allowed(
+        volatility or "Low", regime, spacex_snapshot=spacex_snapshot
+    )
+    if not gate["allowed"]:
         return 0
-    if config.CRYPTO_VOL_ONLY:
-        if volatility is None:
-            from modules.market_context import get_volatility
-            volatility = get_volatility(data)
-        if volatility != "High":
-            return 0
 
     candidates = []
     for i in range(len(crypto_cols)):

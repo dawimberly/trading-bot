@@ -68,7 +68,70 @@ WISDOM_GAP_THRESHOLD = float(os.getenv("WISDOM_GAP_THRESHOLD", "0.25"))
 WEB_SENTIMENT_CACHE_FILE = "web_sentiment_live.json"
 WEB_SENTIMENT_CACHE_HOURS = int(os.getenv("WEB_SENTIMENT_CACHE_HOURS", "24"))
 
-# --- Wisdom self-evaluation (journal + rolling scorecard + monthly rollup) ---
+# --- SpaceX IPO ↔ crypto monitor (headline watch; S-1 BTC treasury narrative) ---
+SPACEX_IPO_MONITOR_ENABLED = os.getenv("SPACEX_IPO_MONITOR_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+SPACEX_IPO_CACHE_FILE = "spacex_ipo_monitor.json"
+SPACEX_IPO_HISTORY_FILE = "spacex_ipo_monitor_history.jsonl"
+SPACEX_IPO_CACHE_HOURS = int(os.getenv("SPACEX_IPO_CACHE_HOURS", "6"))
+SPACEX_IPO_ALERT_HEADLINES = int(os.getenv("SPACEX_IPO_ALERT_HEADLINES", "3"))
+# Open crypto sleeve when SpaceX/BTC narrative hot despite Low 5m vol
+SPACEX_IPO_CRYPTO_OVERRIDE = os.getenv("SPACEX_IPO_CRYPTO_OVERRIDE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+SPACEX_CRYPTO_OVERRIDE_MIN_BTC_HEADLINES = int(
+    os.getenv("SPACEX_CRYPTO_OVERRIDE_MIN_BTC_HEADLINES", "3")
+)
+SPACEX_CRYPTO_OVERRIDE_MIN_SPCX_PERP = int(
+    os.getenv("SPACEX_CRYPTO_OVERRIDE_MIN_SPCX_PERP", "1")
+)
+SPACEX_CRYPTO_OVERRIDE_MIN_SENTIMENT = float(
+    os.getenv("SPACEX_CRYPTO_OVERRIDE_MIN_SENTIMENT", "-0.35")
+)
+
+# --- Real SpaceX IPO listing (Nasdaq SPCX): SEC + Alpaca tradability ---
+SPACEX_IPO_LISTING_MONITOR_ENABLED = os.getenv(
+    "SPACEX_IPO_LISTING_MONITOR_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+SPACEX_IPO_TICKER = os.getenv("SPACEX_IPO_TICKER", "SPCX").strip().upper()
+SPACEX_IPO_CIK = int(os.getenv("SPACEX_IPO_CIK", "1181412"))
+SPACEX_IPO_EXPECTED_DATE = os.getenv("SPACEX_IPO_EXPECTED_DATE", "2026-06-12")
+SPACEX_IPO_LISTING_CACHE_FILE = "spacex_ipo_listing.json"
+SPACEX_IPO_LISTING_HISTORY_FILE = "spacex_ipo_listing_history.jsonl"
+SPACEX_IPO_LISTING_CACHE_HOURS = int(os.getenv("SPACEX_IPO_LISTING_CACHE_HOURS", "1"))
+SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "PythonTradingBot/1.0 (personal research)")
+# Optional: market buy SPCX on Alpaca the first cycle it becomes tradable (paper only by default)
+_auto_buy_env = os.getenv("SPACEX_IPO_AUTO_BUY")
+if _auto_buy_env is None:
+    SPACEX_IPO_AUTO_BUY = PAPER_TRADING
+else:
+    SPACEX_IPO_AUTO_BUY = _auto_buy_env.lower() in ("1", "true", "yes")
+SPACEX_IPO_BUY_NOTIONAL = float(os.getenv("SPACEX_IPO_BUY_NOTIONAL", "2500"))
+
+# Kraken Pro SPCX (xStock or equity pair) when IPO lists on Kraken API
+ALLOW_KRAKEN_TRADING = os.getenv("ALLOW_KRAKEN_TRADING", "").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+KRAKEN_SPCX_BUY_ENABLED = os.getenv("KRAKEN_SPCX_BUY_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Legacy alias
+if os.getenv("KRAKEN_IPO_BUY_ENABLED", "").lower() in ("1", "true", "yes"):
+    KRAKEN_SPCX_BUY_ENABLED = True
+KRAKEN_SPCX_BUY_USD = float(
+    os.getenv("KRAKEN_SPCX_BUY_USD", os.getenv("KRAKEN_IPO_BUY_USD", "500"))
+)
+KRAKEN_SPCX_PAIR = os.getenv("KRAKEN_SPCX_PAIR", "").strip().upper()
+
 WISDOM_EVAL_ENABLED = os.getenv("WISDOM_EVAL_ENABLED", "true").lower() in ("1", "true", "yes")
 WISDOM_EVAL_DAYS = int(os.getenv("WISDOM_EVAL_DAYS", "30"))
 WISDOM_MONTHLY_ENABLED = os.getenv("WISDOM_MONTHLY_ENABLED", "true").lower() in (

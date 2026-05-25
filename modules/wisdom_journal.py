@@ -31,6 +31,12 @@ JOURNAL_FIELDS = [
     "shadow_would_pause_arbitrage",
     "shadow_would_pause_web_regime",
     "shadow_would_pause_wisdom_pause",
+    "spacex_ipo_narrative",
+    "spacex_btc_headlines",
+    "spacex_ipo_sentiment",
+    "spacex_ipo_alert",
+    "spacex_spcx_perp",
+    "crypto_spacex_override",
     "notes",
 ]
 
@@ -50,10 +56,19 @@ def _monthly_web() -> pd.Series:
 
 def _ensure_header() -> None:
     path = _path()
-    if os.path.exists(path) and os.path.getsize(path) > 0:
+    if not os.path.exists(path) or os.path.getsize(path) == 0:
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            csv.DictWriter(f, fieldnames=JOURNAL_FIELDS).writeheader()
         return
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        csv.DictWriter(f, fieldnames=JOURNAL_FIELDS).writeheader()
+    with open(path, newline="", encoding="utf-8") as f:
+        header = next(csv.reader(f), [])
+    missing = [c for c in JOURNAL_FIELDS if c not in header]
+    if not missing:
+        return
+    df = pd.read_csv(path)
+    for col in missing:
+        df[col] = ""
+    df[JOURNAL_FIELDS].to_csv(path, index=False)
 
 
 def _shadow_pauses(data, ts, monthly_web: pd.Series, gap_threshold: float) -> dict[str, bool]:
@@ -80,6 +95,8 @@ def log_cycle(
     crypto_trades: int = 0,
     spy_trades: int = 0,
     nyse_trades: int = 0,
+    spacex_ipo: dict | None = None,
+    crypto_gate: dict | None = None,
     notes: str = "",
 ) -> None:
     _ensure_header()
@@ -87,6 +104,7 @@ def log_cycle(
     monthly_web = _monthly_web()
     shadows = _shadow_pauses(data, ts, monthly_web, gap_threshold)
 
+    summary = (spacex_ipo or {}).get("summary") or {}
     row = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "active_mode": wisdom.get("wisdom_mode", config.WISDOM_MODE),
@@ -106,6 +124,12 @@ def log_cycle(
         "shadow_would_pause_arbitrage": shadows.get("arbitrage", False),
         "shadow_would_pause_web_regime": shadows.get("web_regime", False),
         "shadow_would_pause_wisdom_pause": shadows.get("wisdom_pause", False),
+        "spacex_ipo_narrative": summary.get("narrative", ""),
+        "spacex_btc_headlines": summary.get("btc_linked_count", ""),
+        "spacex_ipo_sentiment": summary.get("avg_sentiment", ""),
+        "spacex_ipo_alert": (spacex_ipo or {}).get("alert", False),
+        "spacex_spcx_perp": summary.get("spcx_perp_count", ""),
+        "crypto_spacex_override": (crypto_gate or {}).get("spacex_override", False),
         "notes": notes,
     }
     with open(_path(), "a", newline="", encoding="utf-8") as f:
