@@ -1,17 +1,21 @@
 """Backtest that mirrors run_all.py (regime + crypto pairs + equity MA50).
 
-Uses price-momentum sentiment (same fallback as live Tavily errors).
-Data is 5m bars from market_data.db; one row = one pipeline cycle.
+Default: 365-day simulation on daily bars (fetch if missing).
+Live bot still uses 5m data via fetch_data.py without --daily.
 
-Run: python backtester.py
+Run:  python backtester.py
+       python backtester.py --days 180
+       python fetch_data.py --daily --days 365
 """
 
+import argparse
 import warnings
 
 import numpy as np
 import pandas as pd
 
 import config
+from fetch_data import fetch_daily_history
 from modules.data_loader import load_close_matrix
 from modules.market_context import (
     get_market_regime,
@@ -29,9 +33,9 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 MIN_HISTORY = 50
 TX_COST = 0.001
-# 3600s cooldown on 5m bars
-COOLDOWN_BARS = COOLDOWN_SECONDS // 300
 BENCHMARK = "VTI"
+# One daily bar ≈ one pipeline day; ~1h cooldown ≈ 1 session on daily data
+DAILY_COOLDOWN_BARS = 1
 
 
 class BacktestExecutor:
@@ -102,19 +106,40 @@ def _benchmark_return(data, start_idx):
     return (col.iloc[-1] / col.iloc[0] - 1) * 100
 
 
-def run_performance_test():
-    print("--- STARTING run_all.py PIPELINE BACKTEST ---")
+def _ensure_daily_data(days, refresh=False):
+    min_rows = max(MIN_HISTORY + 10, int(days * 0.85))
+    if not refresh:
+        data = load_close_matrix(interval="1d", days=days)
+        if len(data) >= min_rows:
+            return data
+    print(f"--- Downloading {days} days of daily history (first run may take a few minutes) ---")
+    fetch_daily_history(days)
+    return load_close_matrix(interval="1d", days=days)
+
+
+def run_performance_test(days=None, refresh=False):
+    days = days or config.BACKTEST_DAYS
+    print(f"--- STARTING run_all.py PIPELINE BACKTEST ({days} days) ---")
     try:
-        data = load_close_matrix()
+        data = _ensure_daily_data(days, refresh=refresh)
     except Exception as e:
         print("Database error: " + str(e))
         return
     if len(data) < MIN_HISTORY:
         print(f"Need at least {MIN_HISTORY} rows; got {len(data)}.")
+        print("Run: python fetch_data.py --daily --days " + str(days))
         return
 
-    print(f"Loaded {len(data.columns)} tickers over {len(data)} rows (5m bars).")
-    print(f"Cooldown: {COOLDOWN_BARS} bars (~{COOLDOWN_SECONDS // 60} min)")
+    start_date = data.index[MIN_HISTORY]
+    end_date = data.index[-1]
+    cooldown_bars = DAILY_COOLDOWN_BARS
+    sharpe_scale = np.sqrt(252)
+    bar_label = "daily bars"
+    progress_step = 50
+
+    print(f"Loaded {len(data.columns)} tickers over {len(data)} {bar_label}.")
+    print(f"Simulation: {start_date.date()} to {end_date.date()}")
+    print(f"Cooldown: {cooldown_bars} bar(s) (~{COOLDOWN_SECONDS // 60} min live logic)")
 
     portfolio = BacktestPortfolio()
     pair_cooldown = {}
@@ -135,7 +160,7 @@ def run_performance_test():
         if halted or not risk_manager.check_drawdown(eq):
             if not halted:
                 halted = True
-                print(f"!!! RISK HALT at bar {i} (equity ${round(eq, 2)}) !!!")
+                print(f"!!! RISK HALT at {data.index[i].date()} (equity ${round(eq, 2)}) !!!")
             continue
 
         sentiment = get_price_sentiment(window)
@@ -150,7 +175,7 @@ def run_performance_test():
             regime,
             i,
             pair_cooldown,
-            cooldown_bars=COOLDOWN_BARS,
+            cooldown_bars=cooldown_bars,
         )
         total_equity += run_equity_strategy(
             window,
@@ -158,25 +183,27 @@ def run_performance_test():
             regime,
             i,
             pair_cooldown,
-            cooldown_bars=COOLDOWN_BARS,
+            cooldown_bars=cooldown_bars,
         )
         total_orders += len(executor.orders)
 
-        if i % 500 == 0:
-            print(f"Bar {i} of {len(data)} | equity ${round(eq, 2)} | {regime}")
+        if i % progress_step == 0:
+            print(
+                f"{data.index[i].date()} ({i}/{len(data)}) | "
+                f"equity ${round(eq, 2)} | {regime}"
+            )
 
     curve = pd.Series(equity_curve)
     returns = curve.pct_change().dropna()
     total_ret = (curve.iloc[-1] / portfolio.initial_capital - 1) * 100
     sharpe = (
-        (returns.mean() / returns.std()) * np.sqrt(252 * 78)
-        if returns.std() != 0
-        else 0
+        (returns.mean() / returns.std()) * sharpe_scale if returns.std() != 0 else 0
     )
     max_dd = ((curve / curve.cummax()) - 1).min() * 100
     bench = _benchmark_return(data, MIN_HISTORY)
 
     print("--- PIPELINE BACKTEST REPORT (mirrors run_all.py) ---")
+    print(f"Period:           {days} days ({bar_label})")
     print(f"Final Equity:     ${round(curve.iloc[-1], 2)}")
     print(f"Total Return:     {round(total_ret, 2)}%")
     if bench is not None:
@@ -193,4 +220,17 @@ def run_performance_test():
 
 
 if __name__ == "__main__":
-    run_performance_test()
+    parser = argparse.ArgumentParser(description="Backtest run_all.py pipeline")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=config.BACKTEST_DAYS,
+        help=f"Simulation length in calendar days (default: {config.BACKTEST_DAYS})",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Re-download daily history before running",
+    )
+    args = parser.parse_args()
+    run_performance_test(days=args.days, refresh=args.refresh)

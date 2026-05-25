@@ -82,8 +82,16 @@ def main():
     print(f"--- Crypto trades: {c} | Equity trades: {e} ---")
 
 
-if __name__ == "__main__":
+def _print_startup_banner():
+    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
+    print(f"--- Alpaca mode: {mode} (Kraken not used) ---")
+    if not config.PAPER_TRADING:
+        print("!!! WARNING: Live trading enabled !!!")
+
+
+if __name__ == "__main__":
+    _print_startup_banner()
     while True:
         try:
             main()

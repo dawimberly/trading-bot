@@ -28,9 +28,39 @@ copy .env.example .env
 # Edit .env with your APCA_* keys
 python fetch_data.py
 python run_all.py
+
+# 365-day strategy backtest (daily bars; auto-downloads on first run)
+python backtester.py
+# Or: python fetch_data.py --daily --days 365 && python backtester.py
 ```
 
 Always run commands from the **project root** so relative paths (`market_data.db`, logs) resolve correctly.
+
+## Paper trading on Alpaca (recommended first month)
+
+`run_all.py` trades **only on Alpaca paper** by default (`PAPER_TRADING=true`). Kraken keys are ignored by the bot.
+
+1. Create **paper** API keys at [Alpaca Paper Dashboard](https://app.alpaca.markets/paper/dashboard/overview).
+2. Put them in `.env` as `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` (not live keys).
+3. Verify before leaving it running:
+
+```powershell
+python scripts/account/verify.py
+python scripts/account/check_account.py
+```
+
+4. Refresh data, then start the loop (leave terminal open or use a process manager):
+
+```powershell
+python fetch_data.py
+python run_all.py
+```
+
+5. Each week, review `trade_history.log`, `risk_events.log`, and equity on the Alpaca paper dashboard.
+
+**Safety:** Live trading is blocked unless you set `PAPER_TRADING=false` **and** `ALLOW_LIVE_TRADING=yes` in `.env`. Do not set those during your paper month.
+
+**Logs to watch:** `trade_history.log`, `risk_events.log`, `trading_history.jsonl`
 
 ## Environment variables
 
@@ -51,7 +81,7 @@ PythonTrading/
 ├── run_all.py              # Main 24/7 trading loop
 ├── fetch_data.py           # yfinance → SQLite
 ├── config.py               # Universe, credentials, paths
-├── backtester.py           # Backtest mirroring run_all.py pipeline
+├── backtester.py           # 365-day backtest (daily bars, mirrors run_all.py)
 ├── simulate.py             # Mean-reversion simulation
 ├── modules/                # Shared library
 ├── strategy_module/        # MA signal helper

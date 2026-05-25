@@ -15,6 +15,12 @@ class AlpacaExecutor:
     def __init__(self, paper=None):
         api_key, secret_key = config.get_alpaca_credentials()
         use_paper = config.PAPER_TRADING if paper is None else paper
+        if not use_paper and not config.ALLOW_LIVE_TRADING:
+            raise RuntimeError(
+                "Live trading is disabled. Use Alpaca paper keys with PAPER_TRADING=true, "
+                "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
+            )
+        self.paper = use_paper
         self.client = TradingClient(api_key, secret_key, paper=use_paper)
 
     def get_order_params(self, symbol):
@@ -48,4 +54,8 @@ def get_trading_client(paper=None):
     """Return a TradingClient using config credentials (for utility scripts)."""
     api_key, secret_key = config.get_alpaca_credentials()
     use_paper = config.PAPER_TRADING if paper is None else paper
+    if not use_paper and not config.ALLOW_LIVE_TRADING:
+        raise RuntimeError(
+            "Live trading is disabled. Set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
+        )
     return TradingClient(api_key, secret_key, paper=use_paper)

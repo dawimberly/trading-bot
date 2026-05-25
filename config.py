@@ -6,7 +6,9 @@ from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 # --- Alpaca (canonical: APCA_*; legacy ALPACA_* supported via get_alpaca_credentials) ---
-PAPER_TRADING = True
+# Paper-only by default. Set ALLOW_LIVE_TRADING=yes in .env to override PAPER_TRADING=False.
+PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
+ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in ("1", "true", "yes")
 
 # --- Universe (single source of truth) ---
 UNIVERSE = [
@@ -31,6 +33,7 @@ ASSET_TYPE = "STOCK"
 MA_WINDOW = 45
 REFRESH_INTERVAL = 900
 MAX_DRAWDOWN_PCT = 0.10
+BACKTEST_DAYS = 365
 
 CRYPTO_KEYWORDS = ("BTC", "ETH", "SOL", "DOGE", "ADA", "USD", "AVAX", "LINK")
 
@@ -51,8 +54,9 @@ def get_tavily_api_key():
 
 
 def get_kraken_credentials():
+    """Return (api_key, secret). Accepts KRAKEN_SECRET_KEY or KRAKEN_API_SECRET."""
     key = os.getenv("KRAKEN_API_KEY")
-    secret = os.getenv("KRAKEN_SECRET_KEY")
+    secret = os.getenv("KRAKEN_SECRET_KEY") or os.getenv("KRAKEN_API_SECRET")
     return key, secret
 
 
