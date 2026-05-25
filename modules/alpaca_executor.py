@@ -137,19 +137,84 @@ class AlpacaExecutor:
             "nyse_cap": equity * config.NYSE_SLEEVE_CAP_PCT,
         }
 
-    def execute_full_exit(self, symbol):
-        formatted_symbol, _, _ = self.get_order_params(symbol)
+    @staticmethod
+    def _normalize_pos_symbol(pos):
+        return config.normalize_symbol(pos.symbol)
+
+    def _find_position(self, symbol):
+        target = config.normalize_symbol(symbol)
         for pos in self.client.get_all_positions():
-            if pos.symbol != formatted_symbol:
-                continue
-            qty = float(pos.qty)
-            price = float(pos.current_price or 0)
-            if qty <= 0 or price <= 0:
-                return None
-            return self.execute_order(
-                symbol, "sell", notional=round(qty * price, 2), reduce_only=True
-            )
+            if self._normalize_pos_symbol(pos) == target:
+                return pos
         return None
+
+    def execute_reduce_notional(self, symbol, sell_notional):
+        """Sell up to sell_notional; crypto uses qty to avoid insufficient-balance errors."""
+        formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
+        pos = self._find_position(symbol)
+        if pos is None:
+            return None
+
+        qty = float(pos.qty)
+        price = float(pos.current_price or pos.avg_entry_price or 0)
+        if qty <= 0 or price <= 0:
+            return None
+
+        mv = qty * price
+        sell_notional = min(float(sell_notional), mv)
+        if sell_notional < config.MIN_NOTIONAL:
+            return None
+
+        request_params = GetOrdersRequest(status="open")
+        for o in self.client.get_orders(filter=request_params):
+            if config.normalize_symbol(o.symbol) == config.normalize_symbol(symbol):
+                self.client.cancel_order_by_id(o.id)
+                time.sleep(0.5)
+
+        if is_crypto_sym:
+            sell_qty = min(qty, sell_notional / price)
+            sell_qty = round(sell_qty, 8)
+            if sell_qty <= 0:
+                return None
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                qty=sell_qty,
+                side=OrderSide.SELL,
+                time_in_force=tif,
+            )
+        else:
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                notional=round(sell_notional, 2),
+                side=OrderSide.SELL,
+                time_in_force=tif,
+            )
+        return self.client.submit_order(order_data=order)
+
+    def execute_full_exit(self, symbol):
+        pos = self._find_position(symbol)
+        if pos is None:
+            return None
+        formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
+        qty = float(pos.qty)
+        price = float(pos.current_price or 0)
+        if qty <= 0 or price <= 0:
+            return None
+        if is_crypto_sym:
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                qty=qty,
+                side=OrderSide.SELL,
+                time_in_force=tif,
+            )
+        else:
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                notional=round(qty * price, 2),
+                side=OrderSide.SELL,
+                time_in_force=tif,
+            )
+        return self.client.submit_order(order_data=order)
 
     def execute_order(self, symbol, side, notional=None, reduce_only=False):
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
@@ -159,11 +224,7 @@ class AlpacaExecutor:
             if side_lower == "buy" and self.open_position_count() >= config.MAX_OPEN_POSITIONS:
                 return None
             if side_lower == "sell":
-                held = any(
-                    p.symbol == formatted_symbol
-                    for p in self.client.get_all_positions()
-                )
-                if not held:
+                if self._find_position(symbol) is None:
                     return None
 
         request_params = GetOrdersRequest(status="open")

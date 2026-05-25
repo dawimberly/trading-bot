@@ -4,8 +4,7 @@ import config
 
 
 def _position_symbol(raw_symbol):
-    """Normalize Alpaca symbol to yfinance-style where possible."""
-    return raw_symbol.replace("/", "-")
+    return config.normalize_symbol(raw_symbol)
 
 
 def run_position_exits(

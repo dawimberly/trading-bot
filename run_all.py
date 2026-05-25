@@ -20,6 +20,8 @@ from modules.pipeline_strategies import (
     run_spy_strategy,
 )
 from modules.portfolio_manager import PortfolioManager
+from modules.holdings_reconcile import reconcile
+from modules.holdings_rebalance import rebalance_to_targets
 from modules.position_exits import run_position_exits
 from modules.risk_management import RiskManager
 from modules import trade_journal
@@ -31,6 +33,62 @@ pair_cooldown = {}
 refresh_scheduler = RefreshScheduler()
 risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
 portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
+_startup_reconciled = False
+_startup_rebalanced = False
+
+
+def _maybe_rebalance_startup(executor, data, regime, vol, market_open):
+    global _startup_rebalanced
+    if _startup_rebalanced or not config.REBALANCE_ON_STARTUP:
+        return
+    _startup_rebalanced = True
+    try:
+        result = rebalance_to_targets(
+            executor,
+            data,
+            regime=regime,
+            volatility=vol,
+            market_open=market_open,
+            portfolio_manager=portfolio_manager,
+            dry_run=False,
+        )
+        n = len([a for a in result.get("actions", []) if a.get("phase") in ("buy", "sell")])
+        if n:
+            print(f"--- Rebalance on startup: {n} order(s) ---")
+            for a in result["actions"]:
+                if a.get("phase") in ("buy", "sell"):
+                    print(
+                        f"  {a['phase'].upper()} {a.get('symbol', '')} "
+                        f"${a.get('notional', 0):,.0f} ({a.get('sleeve', '')})"
+                    )
+    except Exception as exc:
+        print(f"Rebalance error (non-fatal): {exc}")
+
+
+def _maybe_reconcile_startup(executor):
+    global _startup_reconciled
+    if _startup_reconciled or not config.RECONCILE_ON_STARTUP:
+        return
+    _startup_reconciled = True
+    try:
+        result = reconcile(
+            executor,
+            portfolio_manager,
+            rebuild=True,
+            trim=config.TRIM_OVER_CAP_ON_STARTUP,
+        )
+        over = result["before"]["over_cap"]
+        if any(v >= config.MIN_NOTIONAL for v in over.values()):
+            print("--- Holdings reconcile (startup) ---")
+            print(f"  Over-cap before: SPY ${over['spy']:,.0f} | crypto ${over['crypto']:,.0f} | NYSE ${over['nyse']:,.0f}")
+            if result.get("trim_actions"):
+                print(f"  Trim orders: {len(result['trim_actions'])}")
+            after = result["after"]["over_cap"]
+            print(f"  Over-cap after:  SPY ${after['spy']:,.0f} | crypto ${after['crypto']:,.0f} | NYSE ${after['nyse']:,.0f}")
+        if result.get("ledger"):
+            print(f"  Ledger rebuilt: {result['ledger']['open_positions']} Alpaca positions")
+    except Exception as exc:
+        print(f"Holdings reconcile error (non-fatal): {exc}")
 
 
 def log_trade(symbol, side, regime):
@@ -127,6 +185,7 @@ def main():
     global _last_equity
     now_ts = datetime.datetime.now()
     executor = AlpacaExecutor()
+    _maybe_reconcile_startup(executor)
     market_open = refresh_scheduler.sync(executor.client, now_ts)
 
     account = executor.client.get_account()
@@ -160,6 +219,7 @@ def main():
     wisdom = resolve_wisdom_regime(data)
     regime = wisdom["regime"]
     vol = wisdom["volatility"]
+    _maybe_rebalance_startup(executor, data, regime, vol, market_open)
     web = wisdom.get("web_sentiment")
     gap = wisdom.get("sentiment_gap")
     web_s = f"{web:+.2f}" if web is not None else "n/a"

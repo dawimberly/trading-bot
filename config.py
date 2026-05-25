@@ -82,6 +82,23 @@ WISDOM_EVAL_HISTORY_FILE = "wisdom_evaluations.jsonl"
 WISDOM_EVAL_STATE_FILE = "wisdom_eval_state.json"
 WISDOM_MONTHLY_HISTORY_FILE = "wisdom_monthly_history.jsonl"
 
+# --- Holdings reconcile (Alpaca vs ledger vs sleeve caps) ---
+RECONCILE_ON_STARTUP = os.getenv("RECONCILE_ON_STARTUP", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+TRIM_OVER_CAP_ON_STARTUP = os.getenv("TRIM_OVER_CAP_ON_STARTUP", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+REBALANCE_ON_STARTUP = os.getenv("REBALANCE_ON_STARTUP", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # --- Risk & sizing (paper month defaults) ---
 RISK_PER_TRADE = 0.02
 MAX_NOTIONAL_PER_ORDER = 10000.0
@@ -159,9 +176,16 @@ def get_smtp_config():
 
 
 def is_crypto(symbol: str) -> bool:
-    """True for universe crypto pairs (BTC-USD) or Alpaca format (BTC/USD)."""
-    normalized = symbol.replace("/", "-")
-    return normalized in CRYPTO_TICKERS
+    """True for universe crypto pairs (BTC-USD) or Alpaca format (BTC/USD, BTCUSD)."""
+    return normalize_symbol(symbol) in CRYPTO_TICKERS
+
+
+def normalize_symbol(symbol: str) -> str:
+    """Alpaca (BTCUSD, BTC/USD) -> universe form (BTC-USD)."""
+    s = symbol.replace("/", "-")
+    if s.endswith("USD") and "-" not in s:
+        return f"{s[:-3]}-USD"
+    return s
 
 
 def crypto_universe():
