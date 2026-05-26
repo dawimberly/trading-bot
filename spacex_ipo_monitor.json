@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-25T22:14:47",
+  "fetched_at": "2026-05-26T04:15:12",
   "enabled": true,
   "context": {
     "spacex_btc_disclosed": 18712,
@@ -8,10 +8,10 @@
     "note": "S-1 BTC treasury + SPCX perp/whale headlines vs BTC sleeve"
   },
   "summary": {
-    "headline_count": 193,
-    "btc_linked_count": 141,
+    "headline_count": 192,
+    "btc_linked_count": 140,
     "spcx_perp_count": 44,
-    "avg_sentiment": 0.0725,
+    "avg_sentiment": 0.0677,
     "narrative": "hot_btc_narrative",
     "top_headlines": [
       {
@@ -123,7 +123,7 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+S-1+Bitcoin+treasury&hl=en-US&gl=US&ceid=US:en",
-      "count": 43,
+      "count": 44,
       "error": null
     },
     {

@@ -31,6 +31,7 @@ from modules.spacex_ipo_listing_monitor import (
 )
 from modules.spacex_ipo_buy import maybe_buy_spacex_ipo
 from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
+from modules.kraken_autopilot import format_autopilot_line, run_kraken_autopilot
 from modules.position_exits import run_position_exits
 from modules.risk_management import RiskManager
 from modules import trade_journal
@@ -474,6 +475,50 @@ def main():
                 signals=gp_signals,
             )
     print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
+
+    kraken_autopilot_result = None
+    if config.KRAKEN_AUTOPILOT_ENABLED:
+        try:
+            kraken_autopilot_result = run_kraken_autopilot(
+                wisdom=wisdom,
+                gp_signals=gp_signals,
+                gp_result=gp_result,
+                crypto_gate=crypto_gate,
+                data=data,
+                regime=regime,
+                now=now,
+                pair_cooldown=pair_cooldown,
+                market_open=market_open,
+            )
+            print(f"--- {format_autopilot_line(kraken_autopilot_result)} ---")
+            rb = kraken_autopilot_result.get("rebalance") or {}
+            if rb.get("profile"):
+                cap = rb.get("capabilities") or {}
+                print(
+                    f"--- Kraken rebalance {rb.get('profile')}: "
+                    f"${rb.get('total_usd', 0):.0f} | "
+                    f"API fills: crypto={cap.get('crypto_ok')} xstock={cap.get('xstock_ok')} "
+                    f"| stocks not on API: {len(rb.get('needs_app') or [])} ---"
+                )
+            for bucket in ("cleanup", "crypto_mirror", "paper_mirror"):
+                for item in kraken_autopilot_result.get(bucket) or []:
+                    if not item.get("ok"):
+                        continue
+                    intent = item.get("intent") or item.get("trade") or {}
+                    sym = intent.get("symbol") or item.get("pair", "?")
+                    phase = intent.get("phase", bucket)
+                    dry = " (dry-run)" if item.get("dry_run") else ""
+                    print(f"--- Kraken {phase}: {sym}{dry} ---")
+            for item in rb.get("executed") or []:
+                if not item.get("ok"):
+                    continue
+                tr = item.get("trade") or {}
+                sym = tr.get("symbol", "?")
+                dry = " (dry-run)" if item.get("dry_run") else ""
+                print(f"--- Kraken rebalance: {tr.get('side')} {sym}{dry} ---")
+        except Exception as exc:
+            print(f"--- Kraken autopilot error (non-fatal): {exc} ---")
+
     sleeves = executor.sleeve_snapshot()
     metal_line = ""
     if config.GAME_PLAN_ENABLED and "metal_value" in sleeves:

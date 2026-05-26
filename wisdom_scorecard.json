@@ -1,8 +1,8 @@
 {
-  "evaluated_at": "2026-05-25T21:53:47",
+  "evaluated_at": "2026-05-26T00:00:37",
   "window_days": 30,
   "config": {
-    "wisdom_mode": "arbitrage",
+    "wisdom_mode": "governor",
     "gap_threshold": 0.25,
     "web_cache_hours": 24
   },
@@ -10,14 +10,14 @@
     "return_pct": 0.0,
     "sharpe": 0.0,
     "max_drawdown_pct": 0.0,
-    "samples": 1,
-    "mode": "arbitrage",
+    "samples": 2,
+    "mode": "governor",
     "gap_threshold": 0.25,
-    "cycles": 1269,
-    "pause_cycles": 0,
+    "cycles": 1382,
+    "pause_cycles": 105,
     "window_days": 30,
     "from_date": "2026-05-25",
-    "to_date": "2026-05-25"
+    "to_date": "2026-05-26"
   },
   "simulated_modes": {
     "baseline": {
@@ -55,9 +55,18 @@
       "paused_days": 20,
       "from_date": "2026-04-06",
       "to_date": "2026-05-22"
+    },
+    "governor": {
+      "return_pct": 5.45,
+      "sharpe": 3.98,
+      "max_drawdown_pct": -1.79,
+      "orders": 29,
+      "paused_days": 20,
+      "from_date": "2026-04-06",
+      "to_date": "2026-05-22"
     }
   },
   "best_sim_mode": "baseline",
-  "recommendation": "Consider reviewing baseline \u2014 sim lead 16.9pp over 30d (live arbitrage +0.0%). Change WISDOM_MODE in .env manually; bot does not auto-switch.",
+  "recommendation": "Consider reviewing baseline \u2014 sim lead 16.9pp over 30d (live governor +0.0%). Change WISDOM_MODE in .env manually; bot does not auto-switch.",
   "live_vs_best_sim_return_pp": -16.88
 }

@@ -1,0 +1,18 @@
+{
+  "description": "Kraken Pro stocks/ETFs if not returned by API Balance. Update from your app.",
+  "positions": [
+    {"ticker": "NASA", "pct": 16.7, "usd": 42.02},
+    {"ticker": "VOO", "pct": 16.5, "usd": 41.44},
+    {"ticker": "WFC", "pct": 8.3, "usd": 20.84},
+    {"ticker": "IONQ", "pct": 4.9, "usd": 12.26},
+    {"ticker": "FTNT", "pct": 4.6, "usd": 11.66},
+    {"ticker": "GE", "pct": 4.3, "usd": 10.76},
+    {"ticker": "CMPS", "pct": 4.2, "usd": 10.63},
+    {"ticker": "XOP", "pct": 4.2, "usd": 10.55},
+    {"ticker": "SLV", "pct": 4.2, "usd": 10.46},
+    {"ticker": "CVX", "pct": 4.1, "usd": 10.25},
+    {"ticker": "MKSI", "pct": 4.1, "usd": 10.22},
+    {"ticker": "KTOS", "pct": 3.7, "usd": 9.22},
+    {"ticker": "GUSH", "pct": 2.3, "usd": 5.88}
+  ]
+}

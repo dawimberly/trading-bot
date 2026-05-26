@@ -109,6 +109,8 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 copy .env.example .env
+# Edit .env only — never commit .env (gitignored). .env.example has no real passwords.
+# Not the same as .venv/ (Python packages folder).
 # Edit .env with your APCA_* paper keys
 python fetch_data.py
 python run_all.py

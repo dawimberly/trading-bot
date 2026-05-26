@@ -133,6 +133,50 @@ KRAKEN_SPCX_BUY_USD = float(
 )
 KRAKEN_SPCX_PAIR = os.getenv("KRAKEN_SPCX_PAIR", "").strip().upper()
 
+# Kraken autopilot: cleanup + crypto mirror + paper-bot mirror (wisdom + game plan gates)
+KRAKEN_AUTOPILOT_ENABLED = os.getenv("KRAKEN_AUTOPILOT_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Default dry-run: validate orders only until you set KRAKEN_DRY_RUN=false
+KRAKEN_DRY_RUN = os.getenv("KRAKEN_DRY_RUN", "true").lower() in ("1", "true", "yes")
+KRAKEN_AUTOPILOT_CLEANUP = os.getenv("KRAKEN_AUTOPILOT_CLEANUP", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+KRAKEN_AUTOPILOT_CRYPTO_MIRROR = os.getenv(
+    "KRAKEN_AUTOPILOT_CRYPTO_MIRROR", "true"
+).lower() in ("1", "true", "yes")
+KRAKEN_AUTOPILOT_MIRROR = os.getenv("KRAKEN_AUTOPILOT_MIRROR", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+KRAKEN_MAX_ORDER_USD = float(os.getenv("KRAKEN_MAX_ORDER_USD", "25"))
+KRAKEN_CRYPTO_NOTIONAL = float(os.getenv("KRAKEN_CRYPTO_NOTIONAL", "15"))
+KRAKEN_CLEANUP_MAX_ACTIONS = int(os.getenv("KRAKEN_CLEANUP_MAX_ACTIONS", "3"))
+# Min base volume to treat as a real position (skip dust after partial sells)
+KRAKEN_DUST_VOLUME = float(os.getenv("KRAKEN_DUST_VOLUME", "0.1"))
+KRAKEN_REBALANCE_ENABLED = os.getenv("KRAKEN_REBALANCE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+KRAKEN_REBALANCE_MAX_TRADES = int(os.getenv("KRAKEN_REBALANCE_MAX_TRADES", "6"))
+KRAKEN_REBALANCE_FORCE = os.getenv("KRAKEN_REBALANCE_FORCE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# When true, skip Telegram manual stock alerts; run_all logs only
+KRAKEN_NO_MANUAL_ALERTS = os.getenv("KRAKEN_NO_MANUAL_ALERTS", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 WISDOM_EVAL_ENABLED = os.getenv("WISDOM_EVAL_ENABLED", "true").lower() in ("1", "true", "yes")
 WISDOM_EVAL_DAYS = int(os.getenv("WISDOM_EVAL_DAYS", "30"))
 WISDOM_MONTHLY_ENABLED = os.getenv("WISDOM_MONTHLY_ENABLED", "true").lower() in (

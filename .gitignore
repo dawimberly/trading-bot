@@ -1,5 +1,7 @@
-# Environment
+# Secrets — never commit (template only: .env.example with placeholders)
 .env
+.env.local
+.env.*.local
 .venv/
 venv/
 

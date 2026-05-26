@@ -1,0 +1,22 @@
+{
+  "cleanup_done": {
+    "QQQ:duplicate_core_sold_manual": "2026-05-26"
+  },
+  "manual_alerts": {
+    "GUSH:cleanup_leverage": "2026-05-26",
+    "VOO:cleanup_duplicate_core": "2026-05-26",
+    "manual_batch:2026-05-26": "2026-05-26",
+    "KTOS:cleanup_trim_small": "2026-05-26",
+    "MKSI:cleanup_trim_small": "2026-05-26",
+    "rebalance_manual:2026-05-26": "2026-05-26"
+  },
+  "notes": "User sold QQQ; kept VOO. GUSH still manual.",
+  "last_rebalance_at": "2026-05-26",
+  "last_rebalance_profile": "stress",
+  "last_rebalance_auto_count": 1,
+  "capabilities": {
+    "crypto_ok": true,
+    "xstock_ok": false,
+    "equity_spot_ok": true
+  }
+}
