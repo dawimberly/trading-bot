@@ -10,17 +10,23 @@ class RiskManager:
         self.max_drawdown = max_drawdown_pct or config.MAX_DRAWDOWN_PCT
         self.peak_equity = None
         self.log_file = log_file or config.RISK_EVENTS_LOG
+        self._halt_logged = False
 
     def check_drawdown(self, current_equity):
         if self.peak_equity is None:
             self.peak_equity = current_equity
         if current_equity > self.peak_equity:
             self.peak_equity = current_equity
-            
+
         drawdown = (self.peak_equity - current_equity) / self.peak_equity
         if drawdown >= self.max_drawdown:
-            self._log_event(f"CRITICAL: Drawdown {drawdown:.2%} reached. System Halted.")
-            return False 
+            if not self._halt_logged:
+                self._log_event(
+                    f"CRITICAL: Drawdown {drawdown:.2%} reached. System Halted."
+                )
+                self._halt_logged = True
+            return False
+        self._halt_logged = False
         return True
 
     def get_position_size(self, current_equity, risk_per_trade=0.02):

@@ -12,6 +12,7 @@ import config
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
+from modules.wisdom_sentiment import MODES
 from fetch_data import fetch_and_store
 
 
@@ -101,7 +102,14 @@ def run():
         print("\n[INFO] GAME_PLAN_ENABLED=false — baseline fund only")
 
     print("\n--- Settings ---")
-    print(f"  Wisdom mode:        {config.WISDOM_MODE}")
+    wisdom_mode = config.WISDOM_MODE.strip().lower()
+    if wisdom_mode not in MODES:
+        print(f"  Wisdom mode:        {config.WISDOM_MODE} [INVALID — use one of: {', '.join(MODES)}]")
+        ok = False
+    else:
+        print(f"  Wisdom mode:        {wisdom_mode}")
+        if wisdom_mode == "governor" and not config.GAME_PLAN_ENABLED:
+            print("  [WARN] governor mode works best with GAME_PLAN_ENABLED=true")
     print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
     print(f"  Stop loss:          {config.STOP_LOSS_PCT:.0%}")
     print(f"  Max drawdown halt:  {config.MAX_DRAWDOWN_PCT:.0%}")

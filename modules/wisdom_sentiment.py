@@ -86,12 +86,15 @@ def entries_paused(
     *,
     data=None,
     vol: str | None = None,
+    stress_confirmed: bool | None = None,
 ) -> bool:
     if web is None or np.isnan(web) or not _gap_exceeds(gap, gap_threshold):
         return False
     if mode == "wisdom_pause":
         return True
     if mode == "governor":
+        if stress_confirmed is not None:
+            return stress_confirmed
         if data is None or vol is None:
             return False
         return governor_stress_confirmed(data, vol)
@@ -112,6 +115,7 @@ def resolve_wisdom_regime(
     """
     mode = (mode or config.WISDOM_MODE).strip().lower()
     if mode not in MODES:
+        print(f"Unknown WISDOM_MODE '{mode}', falling back to baseline.")
         mode = "baseline"
     gap_threshold = gap_threshold if gap_threshold is not None else config.WISDOM_GAP_THRESHOLD
     ts = pd.Timestamp(ts or datetime.datetime.now())
@@ -135,9 +139,17 @@ def resolve_wisdom_regime(
         web_override=web,
     )
     regime = get_market_regime(sent, vol)
-    stress_confirmed = governor_stress_confirmed(data, vol) if mode == "governor" else None
+    stress_confirmed = (
+        governor_stress_confirmed(data, vol) if mode == "governor" else None
+    )
     paused = entries_paused(
-        mode, web_used, gap, gap_threshold, data=data, vol=vol
+        mode,
+        web_used,
+        gap,
+        gap_threshold,
+        data=data,
+        vol=vol,
+        stress_confirmed=stress_confirmed,
     )
     if paused:
         regime = PAUSE_REGIME
