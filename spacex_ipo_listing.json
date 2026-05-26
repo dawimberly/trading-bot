@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-25T16:29:22",
+  "fetched_at": "2026-05-25T20:30:33",
   "ticker": "SPCX",
   "expected_listing_date": "2026-06-12",
   "days_until_expected": 18,
@@ -95,9 +95,9 @@
       "link": "https://news.google.com/rss/articles/CBMijAFBVV95cUxNa3U1OGtXTVQzZmRURzJLeEZhZHJnS2szcS05ZDE3MlJ1YWh5MGVVWTRMMlFPQURmZm1lMExsbzNid1JNWXp0YVNIVmpIZzZXNnZJUWR2Y2hiWkhUdTd2M2JaR3ZtMHlwNGl5UUNMS0QwamtLN05GOFYwTWNUQnNlS2k2UF8teDNBT3ZmbQ?oc=5"
     },
     {
-      "title": "Elon Musk Wants Small Investors to Buy the SpaceX IPO. Here\u2019s Why You Shouldn\u2019t. - Yahoo Finance",
-      "published": "Fri, 22 May 2026 17:36:52 GMT",
-      "link": "https://news.google.com/rss/articles/CBMinAFBVV95cUxOVUZ3WjFzQ2gyOW9tRU82ZDBJaVNibVc1MFBaVHlMYUhIRS1iQWs4eFZNT3p6Ykl2MFJlQWVkeWdkQXV4dk4ycl9SVEFra1lYOHI1S3hraVljLUJLUF8xTjZKb1dTTkFXc3FOQ0RXM3JpLXJFNmVkWXVGTzVPVng3ZzR5cUl2RmtoYUhmbE1XM1dpS2VEYXU3NTZDQmE?oc=5"
+      "title": "Exclusive: SpaceX accelerates IPO timeline, targets June 12 listing on Nasdaq, sources say - Reuters",
+      "published": "Sat, 16 May 2026 07:00:00 GMT",
+      "link": "https://news.google.com/rss/articles/CBMipwFBVV95cUxPUW9IMlpoSzV0SmFtY1JvSXVrZW41dDVxQWZObkloNXk3X2FyS2ZTLWhsUjczUHJ2a2daNEJ5VHFWcHJuX3lPS0k5ZXJsZ2liV1c3T0lvVDFpdTJBdDVWcGUtbzhVc3Vlak5CMUVkdlRoenlwUlh1ekVId3hibzVvS3ptdXhpdjc4bDktNmdjMXJFTlN3WWh4N3ExVEFlY2tUQldsUWtIRQ?oc=5"
     },
     {
       "title": "SpaceX speeds toward record $1.75T IPO amid hype and risks - MSN",
@@ -110,19 +110,19 @@
       "link": "https://news.google.com/rss/articles/CBMibEFVX3lxTE9JVXZaZ21LY2k0XzVncG10WlNTblZUeGFiRlcyZ05iRURweXNTM0I3ZFZLYTVKSmFVcFItMjVhM09NNXNjM2JOa3NjOU9PU01GNTQydEJYTUM0cUR5bG0yUlBxcEl2MzJmOTBxaw?oc=5"
     },
     {
-      "title": "Exclusive: SpaceX accelerates IPO timeline, targets June 12 listing on Nasdaq, sources say - Reuters",
-      "published": "Fri, 15 May 2026 07:00:00 GMT",
-      "link": "https://news.google.com/rss/articles/CBMipwFBVV95cUxPUW9IMlpoSzV0SmFtY1JvSXVrZW41dDVxQWZObkloNXk3X2FyS2ZTLWhsUjczUHJ2a2daNEJ5VHFWcHJuX3lPS0k5ZXJsZ2liV1c3T0lvVDFpdTJBdDVWcGUtbzhVc3Vlak5CMUVkdlRoenlwUlh1ekVId3hibzVvS3ptdXhpdjc4bDktNmdjMXJFTlN3WWh4N3ExVEFlY2tUQldsUWtIRQ?oc=5"
-    },
-    {
       "title": "SpaceX IPO 2026 Guide: Everything You Need to Know and Consider - Zacks Investment Research",
       "published": "Wed, 20 May 2026 23:30:41 GMT",
       "link": "https://news.google.com/rss/articles/CBMiZEFVX3lxTFA1MjJONENxZlNnTGdybmZNSUNHTW5XNVcwTzhFaDlwR3I4WW8tWUJ0eFZ3MUxuclo0ejBZZ0ViMkx6WUprd3ZUWGp4TE1YNUUzZThCbXp0VVJTOUc4YVZTRlpOV2c?oc=5"
+    },
+    {
+      "title": "SpaceX Mania Hits ETFs: XOVR Raises Stake Ahead Of Blockbuster IPO - Sahm",
+      "published": "Fri, 22 May 2026 08:18:23 GMT",
+      "link": "https://news.google.com/rss/articles/CBMiuAFBVV95cUxOU0lxSmxkbWNFOG45ZF9xUHR2ZXVwYW1ncnNRVXBMNUxYVTlVOXRiNmhzUDhmQjE5QWJyWWZEaF9jN0tncFo1MnM4LUtYZlk2LTlBLXRIV2VHZWJNRTZ1U1Y3ajRETTZzSUNLMzNQMVNDVkVwWGpnMUVHdkg1T1lDbG43YzBmT3BDRHl0NE01bnhpcG5mMUVoaHZEcXlESHduWUdESDNNUHk2X29Ia0dSNXg3QW9reU9B?oc=5"
     }
   ],
   "ready_to_buy_alpaca": false,
   "ready_to_buy_kraken": false,
   "ready_to_buy": false,
   "auto_buy_alpaca": true,
-  "auto_buy_kraken": false
+  "auto_buy_kraken": true
 }
