@@ -82,7 +82,7 @@ def run_fund_backtest(
             window, ts, monthly_web, mode=mode, gap_threshold=gap_threshold
         )
         regime = get_market_regime(sent, vol)
-        if entries_paused(mode, web, gap, gap_threshold):
+        if entries_paused(mode, web, gap, gap_threshold, data=window, vol=vol):
             regime = PAUSE_REGIME
             paused_days += 1
         regime_counts[regime] = regime_counts.get(regime, 0) + 1
@@ -178,6 +178,8 @@ def main() -> None:
         )
         if mode == "wisdom_pause":
             print(f"  wisdom-pause days: {row['paused_days']}")
+        if mode == "governor":
+            print(f"  governor-pause days: {row['paused_days']}")
 
     print("\n=== COMPARISON ===")
     header = f"{'Mode':<16} {'Return':>9} {'Sharpe':>7} {'MaxDD':>8} {'Orders':>7}"

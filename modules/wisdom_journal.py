@@ -11,6 +11,7 @@ import pandas as pd
 import config
 from modules.wayback_sentiment import load_monthly_web_sentiment
 from modules.wisdom_sentiment import MODES, entries_paused, regime_sentiment
+from modules.market_context import get_volatility
 
 JOURNAL_FIELDS = [
     "timestamp",
@@ -31,6 +32,7 @@ JOURNAL_FIELDS = [
     "shadow_would_pause_arbitrage",
     "shadow_would_pause_web_regime",
     "shadow_would_pause_wisdom_pause",
+    "shadow_would_pause_governor",
     "spacex_ipo_narrative",
     "spacex_btc_headlines",
     "spacex_ipo_sentiment",
@@ -72,6 +74,7 @@ def _ensure_header() -> None:
 
 
 def _shadow_pauses(data, ts, monthly_web: pd.Series, gap_threshold: float) -> dict[str, bool]:
+    vol = get_volatility(data)
     pauses = {}
     for mode in MODES:
         _sent, web, gap = regime_sentiment(
@@ -81,7 +84,9 @@ def _shadow_pauses(data, ts, monthly_web: pd.Series, gap_threshold: float) -> di
             mode=mode,
             gap_threshold=gap_threshold,
         )
-        pauses[mode] = entries_paused(mode, web, gap, gap_threshold)
+        pauses[mode] = entries_paused(
+            mode, web, gap, gap_threshold, data=data, vol=vol
+        )
     return pauses
 
 
@@ -124,6 +129,7 @@ def log_cycle(
         "shadow_would_pause_arbitrage": shadows.get("arbitrage", False),
         "shadow_would_pause_web_regime": shadows.get("web_regime", False),
         "shadow_would_pause_wisdom_pause": shadows.get("wisdom_pause", False),
+        "shadow_would_pause_governor": shadows.get("governor", False),
         "spacex_ipo_narrative": summary.get("narrative", ""),
         "spacex_btc_headlines": summary.get("btc_linked_count", ""),
         "spacex_ipo_sentiment": summary.get("avg_sentiment", ""),

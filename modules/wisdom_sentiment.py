@@ -12,8 +12,10 @@ from modules.market_context import get_market_regime, get_price_sentiment, get_v
 from modules.wayback_sentiment import normalize_price_sentiment, web_sentiment_for_date
 from modules.web_sentiment_live import get_live_web_sentiment
 
-MODES = ("baseline", "web_regime", "arbitrage", "wisdom_pause")
+MODES = ("baseline", "web_regime", "arbitrage", "wisdom_pause", "governor")
 PAUSE_REGIME = "RHYME_E: Steady_Bearish_Decline"
+BEAR_REGIME = "RHYME_E: Steady_Bearish_Decline"
+PANIC_REGIME = "RHYME_B: Panic_Volatility"
 
 
 def regime_sentiment(
@@ -42,7 +44,7 @@ def regime_sentiment(
     if mode == "web_regime":
         return web, web, gap
 
-    if mode == "arbitrage":
+    if mode in ("arbitrage", "governor"):
         if gap is not None and abs(gap) >= gap_threshold:
             return price, web, gap
         return (web + math_n) / 2.0, web, gap
@@ -53,10 +55,47 @@ def regime_sentiment(
     return price, web, gap
 
 
-def entries_paused(mode: str, web, gap, gap_threshold: float = 0.25) -> bool:
-    if mode != "wisdom_pause" or web is None or gap is None or np.isnan(web):
+def _gap_exceeds(gap, gap_threshold: float) -> bool:
+    return gap is not None and not np.isnan(gap) and abs(gap) >= gap_threshold
+
+
+def governor_stress_confirmed(data, vol: str) -> bool:
+    """True when vol/macro/game-plan stress confirms a headline-price gap is dangerous."""
+    price_regime = get_market_regime(get_price_sentiment(data), vol)
+    if vol == "High" or price_regime in (BEAR_REGIME, PANIC_REGIME):
+        return True
+    if not config.GAME_PLAN_ENABLED:
         return False
-    return abs(gap) >= gap_threshold
+    try:
+        from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
+
+        ensure_macro_daily(refresh=False)
+        daily = load_daily_matrix(days=450)
+        if daily is None or daily.empty:
+            return False
+        return bool(evaluate(daily, price_regime).get("stress"))
+    except Exception:
+        return False
+
+
+def entries_paused(
+    mode: str,
+    web,
+    gap,
+    gap_threshold: float = 0.25,
+    *,
+    data=None,
+    vol: str | None = None,
+) -> bool:
+    if web is None or np.isnan(web) or not _gap_exceeds(gap, gap_threshold):
+        return False
+    if mode == "wisdom_pause":
+        return True
+    if mode == "governor":
+        if data is None or vol is None:
+            return False
+        return governor_stress_confirmed(data, vol)
+    return False
 
 
 def resolve_wisdom_regime(
@@ -96,7 +135,10 @@ def resolve_wisdom_regime(
         web_override=web,
     )
     regime = get_market_regime(sent, vol)
-    paused = entries_paused(mode, web_used, gap, gap_threshold)
+    stress_confirmed = governor_stress_confirmed(data, vol) if mode == "governor" else None
+    paused = entries_paused(
+        mode, web_used, gap, gap_threshold, data=data, vol=vol
+    )
     if paused:
         regime = PAUSE_REGIME
 
@@ -109,4 +151,5 @@ def resolve_wisdom_regime(
         "effective_sentiment": sent,
         "wisdom_mode": mode,
         "wisdom_paused": paused,
+        "governor_stress": stress_confirmed,
     }

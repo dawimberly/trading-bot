@@ -1,0 +1,8 @@
+mode,total_return_pct,sharpe,max_drawdown_pct,orders,paused_days,benchmark_pct,final_equity
+baseline,282.09,0.89,-44.6,198,0,100.2,38209.37
+web_regime,282.09,0.89,-44.6,198,0,100.2,38209.37
+arbitrage,282.07,0.89,-44.6,198,0,100.2,38206.9
+wisdom_pause,267.03,0.81,-50.85,140,176,100.2,36703.39
+governor_vol,282.07,0.89,-44.6,198,0,100.2,38206.9
+governor,215.54,0.85,-39.27,198,93,100.2,31554.32
+governor_strict,282.07,0.89,-44.6,198,0,100.2,38206.9

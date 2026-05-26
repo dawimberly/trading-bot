@@ -241,7 +241,7 @@ def _run_long_book_day(
             window, ts, monthly_web, mode=wisdom_mode, gap_threshold=gap_threshold
         )
         regime = get_market_regime(sent, vol)
-        if entries_paused(wisdom_mode, web, gap, gap_threshold):
+        if entries_paused(wisdom_mode, web, gap, gap_threshold, data=window, vol=vol):
             regime = PAUSE_REGIME
     else:
         sentiment = get_price_sentiment(window)

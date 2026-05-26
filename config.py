@@ -63,7 +63,7 @@ BACKTEST_DAYS = 365
 SENTIMENT_SOURCE = os.getenv("SENTIMENT_SOURCE", "price").strip().lower()
 
 # --- Wisdom layer (web mood + price math -> RHYME; see backtester_wisdom.py) ---
-# baseline | web_regime | arbitrage | wisdom_pause
+# baseline | web_regime | arbitrage | wisdom_pause | governor
 WISDOM_MODE = os.getenv("WISDOM_MODE", "arbitrage").strip().lower()
 WISDOM_GAP_THRESHOLD = float(os.getenv("WISDOM_GAP_THRESHOLD", "0.25"))
 WEB_SENTIMENT_CACHE_FILE = "web_sentiment_live.json"

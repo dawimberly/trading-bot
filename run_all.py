@@ -49,6 +49,15 @@ _startup_rebalanced = False
 _macro_daily_bootstrapped = False
 
 
+def _gap_wide(gap) -> bool:
+    if gap is None:
+        return False
+    try:
+        return abs(float(gap)) >= config.WISDOM_GAP_THRESHOLD
+    except (TypeError, ValueError):
+        return False
+
+
 def _game_plan_signals(regime: str) -> dict:
     global _macro_daily_bootstrapped
     if not config.GAME_PLAN_ENABLED:
@@ -206,6 +215,7 @@ def _write_heartbeat(
             "price_sentiment": wisdom.get("price_sentiment"),
             "gap": wisdom.get("sentiment_gap"),
             "paused": wisdom.get("wisdom_paused"),
+            "governor_stress": wisdom.get("governor_stress"),
         }
     if spacex_ipo:
         payload["spacex_ipo"] = spacex_ipo
@@ -287,7 +297,17 @@ def main():
     gap = wisdom.get("sentiment_gap")
     web_s = f"{web:+.2f}" if web is not None else "n/a"
     gap_s = f"{gap:+.2f}" if gap is not None else "n/a"
-    pause_s = " | WISDOM PAUSE" if wisdom.get("wisdom_paused") else ""
+    pause_s = ""
+    if wisdom.get("wisdom_paused"):
+        pause_s = (
+            " | GOVERNOR PAUSE"
+            if wisdom.get("wisdom_mode") == "governor"
+            else " | WISDOM PAUSE"
+        )
+    elif wisdom.get("wisdom_mode") == "governor" and _gap_wide(gap):
+        stress = wisdom.get("governor_stress")
+        if stress is False:
+            pause_s = " | governor: gap wide, calm (trust price)"
     gp_s = ""
     if config.GAME_PLAN_ENABLED:
         gate = "GATE" if yield_gated else "open"
