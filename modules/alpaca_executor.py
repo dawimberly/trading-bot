@@ -151,10 +151,16 @@ class AlpacaExecutor:
         return pos.symbol.replace("/", "-") == config.SPY_BOT_SYMBOL
 
     @staticmethod
+    def _is_metal_position(pos):
+        return config.is_metal_symbol(pos.symbol)
+
+    @staticmethod
     def _is_nyse_sleeve_position(pos):
         if AlpacaExecutor._is_crypto_position(pos):
             return False
         if AlpacaExecutor._is_spy_position(pos):
+            return False
+        if AlpacaExecutor._is_metal_position(pos):
             return False
         return True
 
@@ -173,6 +179,9 @@ class AlpacaExecutor:
 
     def nyse_sleeve_value(self):
         return self._sleeve_exposure(self._is_nyse_sleeve_position)
+
+    def metal_sleeve_value(self):
+        return self._sleeve_exposure(self._is_metal_position)
 
     def spy_sleeve_value(self):
         return self._sleeve_exposure(self._is_spy_position)
@@ -201,12 +210,14 @@ class AlpacaExecutor:
 
     def compute_crypto_notional(self):
         return self._compute_capped_notional(
-            config.CRYPTO_SLEEVE_CAP_PCT, self.crypto_sleeve_value()
+            config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
+            self.crypto_sleeve_value(),
         )
 
     def compute_nyse_notional(self):
         return self._compute_capped_notional(
-            config.NYSE_SLEEVE_CAP_PCT, self.nyse_sleeve_value()
+            config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
+            self.nyse_sleeve_value(),
         )
 
     def spy_position_value(self):
@@ -214,7 +225,8 @@ class AlpacaExecutor:
 
     def compute_spy_notional(self):
         return self._compute_capped_notional(
-            config.SPY_SLEEVE_CAP_PCT, self.spy_sleeve_value()
+            config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            self.spy_sleeve_value(),
         )
 
     def sleeve_snapshot(self):
@@ -223,15 +235,20 @@ class AlpacaExecutor:
         spy_v = self.spy_sleeve_value()
         crypto_v = self.crypto_sleeve_value()
         nyse_v = self.nyse_sleeve_value()
-        return {
+        metal_v = self.metal_sleeve_value()
+        snap = {
             "equity": equity,
             "spy_value": spy_v,
-            "spy_cap": equity * config.SPY_SLEEVE_CAP_PCT,
+            "spy_cap": equity * config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto_value": crypto_v,
-            "crypto_cap": equity * config.CRYPTO_SLEEVE_CAP_PCT,
+            "crypto_cap": equity * config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse_value": nyse_v,
-            "nyse_cap": equity * config.NYSE_SLEEVE_CAP_PCT,
+            "nyse_cap": equity * config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
         }
+        if config.GAME_PLAN_ENABLED:
+            snap["metal_value"] = metal_v
+            snap["metal_cap"] = equity * config.METAL_SLEEVE_CAP_PCT
+        return snap
 
     @staticmethod
     def _normalize_pos_symbol(pos):

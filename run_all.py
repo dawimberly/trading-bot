@@ -36,7 +36,8 @@ from modules.risk_management import RiskManager
 from modules import trade_journal
 from modules import alerts
 from modules import wisdom_journal
-from modules.wisdom_evaluator import maybe_run_daily_evaluation, maybe_run_monthly_rollup
+from modules.game_plan import run_game_plan_cycle
+from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
 
 pair_cooldown = {}
 refresh_scheduler = RefreshScheduler()
@@ -44,9 +45,23 @@ risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
 portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
 _startup_reconciled = False
 _startup_rebalanced = False
+_macro_daily_bootstrapped = False
 
 
-def _maybe_rebalance_startup(executor, data, regime, vol, market_open):
+def _game_plan_signals(regime: str) -> dict:
+    global _macro_daily_bootstrapped
+    if not config.GAME_PLAN_ENABLED:
+        return {"ok": True, "stress": False, "yield_gate": False}
+    if not _macro_daily_bootstrapped:
+        ensure_macro_daily(refresh=True)
+        _macro_daily_bootstrapped = True
+    else:
+        ensure_macro_daily(refresh=False)
+    daily = load_daily_matrix(days=450)
+    return evaluate(daily, regime)
+
+
+def _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=False):
     global _startup_rebalanced
     if _startup_rebalanced or not config.REBALANCE_ON_STARTUP:
         return
@@ -60,6 +75,7 @@ def _maybe_rebalance_startup(executor, data, regime, vol, market_open):
             market_open=market_open,
             portfolio_manager=portfolio_manager,
             dry_run=False,
+            yield_gated=yield_gated,
         )
         n = len([a for a in result.get("actions", []) if a.get("phase") in ("buy", "sell")])
         if n:
@@ -158,6 +174,7 @@ def _write_heartbeat(
     wisdom=None,
     spacex_ipo=None,
     spacex_listing=None,
+    game_plan=None,
 ):
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
@@ -168,10 +185,11 @@ def _write_heartbeat(
         "equity_trades_last_cycle": equity_trades,
         "spy_trades_last_cycle": spy_trades,
         "sleeve_caps": {
-            "spy": config.SPY_SLEEVE_CAP_PCT,
-            "crypto": config.CRYPTO_SLEEVE_CAP_PCT,
-            "nyse": config.NYSE_SLEEVE_CAP_PCT,
-            "cash_buffer": config.FUND_CASH_BUFFER_PCT,
+            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
+            "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
+            "metal": config.METAL_SLEEVE_CAP_PCT if config.GAME_PLAN_ENABLED else 0.0,
+            "cash_buffer": config.effective_cash_buffer_pct(),
         },
         "crypto_vol_only": config.CRYPTO_VOL_ONLY,
         "equity_session_open": market_open,
@@ -201,6 +219,16 @@ def _write_heartbeat(
             "alpaca_tradable": (spacex_listing.get("alpaca") or {}).get("tradable"),
             "kraken_tradable": (spacex_listing.get("kraken") or {}).get("tradable"),
             "kraken_pair": (spacex_listing.get("kraken") or {}).get("wsname"),
+        }
+    if game_plan:
+        payload["game_plan_state"] = game_plan
+    if config.GAME_PLAN_ENABLED:
+        payload["game_plan"] = {
+            "enabled": True,
+            "metal_blend": config.metal_blend_weights(),
+            "metal_cap_pct": config.METAL_SLEEVE_CAP_PCT,
+            "stress_cash_pct": config.STRESS_CASH_PCT,
+            "yield_gate_enabled": config.YIELD_GATE_ENABLED,
         }
     with open(config.HEARTBEAT_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
@@ -251,15 +279,22 @@ def main():
     wisdom = resolve_wisdom_regime(data)
     regime = wisdom["regime"]
     vol = wisdom["volatility"]
-    _maybe_rebalance_startup(executor, data, regime, vol, market_open)
+    gp_signals = _game_plan_signals(regime)
+    yield_gated = bool(gp_signals.get("yield_gate"))
+    _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=yield_gated)
     web = wisdom.get("web_sentiment")
     gap = wisdom.get("sentiment_gap")
     web_s = f"{web:+.2f}" if web is not None else "n/a"
     gap_s = f"{gap:+.2f}" if gap is not None else "n/a"
     pause_s = " | WISDOM PAUSE" if wisdom.get("wisdom_paused") else ""
+    gp_s = ""
+    if config.GAME_PLAN_ENABLED:
+        gate = "GATE" if yield_gated else "open"
+        stress = "STRESS" if gp_signals.get("stress") else "calm"
+        gp_s = f" | GamePlan: {stress} | SPY {gate}"
     print(
         f"--- Regime: {regime} | Vol: {vol} | "
-        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s} | "
+        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{gp_s} | "
         f"Equity session: {'OPEN' if market_open else 'CLOSED'} ---"
     )
 
@@ -358,6 +393,7 @@ def main():
     )
     s = 0
     nyse_trades = 0
+    gp_result = {"enabled": False, "signals": gp_signals, "actions": []}
 
     market_open = is_equity_market_open(executor.client)
     executor.equity_session_open = market_open
@@ -371,6 +407,7 @@ def main():
             pair_cooldown,
             log_fn=_spy_log,
             portfolio_manager=portfolio_manager,
+            yield_gated=yield_gated,
         )
         nyse_trades = run_equity_strategy(
             data,
@@ -381,15 +418,60 @@ def main():
             log_fn=_equity_log,
             portfolio_manager=portfolio_manager,
         )
+        gp_result = run_game_plan_cycle(
+            executor,
+            regime,
+            market_open=True,
+            signals=gp_signals,
+        )
+        if gp_result.get("actions"):
+            for a in gp_result["actions"]:
+                phase = a.get("phase", "action")
+                sym = a.get("symbol", "")
+                notional = a.get("notional", "")
+                print(f"--- Game plan {phase}: {sym} ${notional} ---")
+                side = "sell" if phase in ("sell", "exit_metal") else "buy"
+                if sym:
+                    log_trade(sym, side, regime)
+                    trade_journal.log_event(
+                        "game_plan",
+                        symbol=sym,
+                        side=side,
+                        regime=regime,
+                        equity=equity,
+                        cash=cash,
+                        notional=notional,
+                        notes=phase,
+                    )
     else:
         print("--- Equity session closed; skipping SPY and equity scans ---")
+        if config.GAME_PLAN_ENABLED:
+            gp_result = run_game_plan_cycle(
+                executor,
+                regime,
+                market_open=False,
+                signals=gp_signals,
+            )
     print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
     sleeves = executor.sleeve_snapshot()
+    metal_line = ""
+    if config.GAME_PLAN_ENABLED and "metal_value" in sleeves:
+        metal_line = (
+            f" | Metal ${round(sleeves['metal_value'], 2)}/"
+            f"${round(sleeves['metal_cap'], 2)}"
+        )
     print(
         f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
         f"Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
-        f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)} ---"
+        f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)}{metal_line} ---"
     )
+    gp_notes = ""
+    if config.GAME_PLAN_ENABLED and gp_result.get("enabled"):
+        sig = gp_result.get("signals") or {}
+        gp_notes = (
+            f"game_plan stress={sig.get('stress')} gate={sig.get('yield_gate')} "
+            f"metal=${gp_result.get('metal_value', 0)}"
+        )
     trade_journal.log_cycle(
         regime,
         equity,
@@ -398,7 +480,8 @@ def main():
         nyse_trades,
         notes=(
             f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
-            f"nyse_cap={config.NYSE_SLEEVE_CAP_PCT:.2%}"
+            f"nyse_cap={config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT):.2%}; "
+            f"{gp_notes}"
         ),
     )
     try:
@@ -418,6 +501,7 @@ def main():
         wisdom,
         spacex_heartbeat,
         spacex_listing_heartbeat,
+        gp_result if config.GAME_PLAN_ENABLED else None,
     )
 
     wisdom_journal.log_cycle(
@@ -452,12 +536,21 @@ def _print_startup_banner():
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
     print(f"--- Alpaca mode: {mode} (Kraken not used) ---")
+    alloc = config.fund_allocation_pct()
     print(
-        f"--- Fund: SPY {config.SPY_SLEEVE_CAP_PCT:.0%} | "
-        f"crypto {config.CRYPTO_SLEEVE_CAP_PCT:.0%} (vol-only) | "
-        f"NYSE {config.NYSE_SLEEVE_CAP_PCT:.0%} | "
-        f"cash buffer {config.FUND_CASH_BUFFER_PCT:.0%} ---"
+        f"--- Fund: SPY {alloc['spy']:.0%} | "
+        f"crypto {alloc['crypto']:.0%} (vol-only) | "
+        f"NYSE {alloc['nyse']:.0%} | "
+        f"cash buffer {alloc['cash_buffer']:.0%} ---"
     )
+    if config.GAME_PLAN_ENABLED:
+        blend = config.metal_blend_weights()
+        print(
+            f"--- Game plan ON: metal {alloc['metal']:.0%} "
+            f"({blend['GLD']:.0%} GLD / {blend['SLV']:.0%} SLV / {blend['CPER']:.0%} CPER) | "
+            f"stress cash {config.STRESS_CASH_PCT:.0%} | yield gate "
+            f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'} ---"
+        )
     print(
         f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
         f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"

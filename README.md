@@ -1,6 +1,6 @@
 # PythonTrading
 
-Personal systematic fund on Alpaca paper: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), shared risk controls, and SQLite market data from yfinance.
+Personal systematic fund on Alpaca paper: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), an optional **macro game plan** (yield gate + metal hedge + stress cash), shared risk controls, and SQLite market data from yfinance.
 
 ## Architecture
 
@@ -11,14 +11,19 @@ flowchart TB
   fetchData --> db[(market_data.db)]
   runAll --> db
   runAll --> strategies[modules/pipeline_strategies.py]
+  runAll --> gamePlan[modules/game_plan.py]
+  runAll --> macroSig[modules/macro_signals.py]
   runAll --> marketCtx[modules/market_context.py]
   runAll --> executor[modules/alpaca_executor.py]
   runAll --> risk[modules/risk_management.py]
   runAll --> alerts[modules/alerts.py]
   runAll --> journal[paper_journal.csv]
+  gamePlan --> macroSig
   backtester[backtester.py] --> strategies
+  backtestMetals[backtester_metals.py] --> strategies
   backtestSpy[backtest_spy.py] --> strategies
   backtester --> db
+  backtestMetals --> db
   backtestSpy --> db
   executor --> alpaca[Alpaca API]
 ```
@@ -36,6 +41,8 @@ flowchart TB
 
 On a $100k account, SPY can hold at most ~$45k; total crypto positions at most ~$20k; NYSE names at most ~$20k. Each buy is **2% of equity per order** within the sleeve cap (max $10k per order).
 
+When **game plan** is enabled (default), long sleeves are scaled to **90%** of these caps so **10%** of equity can go to the metal hedge sleeve.
+
 Tune caps in `config.py`:
 
 ```python
@@ -45,6 +52,54 @@ NYSE_SLEEVE_CAP_PCT = 0.20
 FUND_CASH_BUFFER_PCT = 0.15
 CRYPTO_VOL_ONLY = True
 ```
+
+## Game plan (live default: ON)
+
+The **game plan** (`game_plan_gld_slv_cper`) adds macro hedging on top of the base fund. It is wired into `run_all.py` and enabled by default (`GAME_PLAN_ENABLED=true`).
+
+| Piece | What it does |
+|-------|----------------|
+| **Yield gate** | Blocks **new SPY buys** when 10Y yield (TNX) is above MA50 and rising; falls back to TLT weakness |
+| **Stress cash** | On macro stress only, trims SPY/crypto/NYSE toward **25% cash** (not every day) |
+| **Metal sleeve (10%)** | On stress: deploy **50% GLD / 30% SLV / 20% CPER**; on calm: exit metals |
+| **Long sleeve scale** | SPY/crypto/NYSE caps use **90%** of base caps to reserve room for metals |
+
+**Stress** = SPY below MA200, OR TLT below MA50, OR bear/panic RHYME regime.
+
+Game plan actions run during the **US equity session** (metals are ETFs). Crypto still runs 24/7 with its own vol gate.
+
+### Fresh-capital 2022 backtest (fair stress read)
+
+| Strategy | 2022 return | Sharpe |
+|----------|-------------|--------|
+| Baseline fund | +1.6% | 0.19 |
+| **Game plan (live blend)** | **+16.2%** | **0.83** |
+| VTI buy & hold | -20.0% | — |
+
+Full 2017–2023 window: game plan ~**+292%** vs baseline ~**+289%** (yield gate edge; metals help most in stress years).
+
+Re-run:
+
+```powershell
+python scripts/research/backtest_game_plan_live.py
+```
+
+### Game plan `.env` settings
+
+```env
+GAME_PLAN_ENABLED=true
+YIELD_GATE_ENABLED=true
+METAL_SLEEVE_CAP_PCT=0.10
+METAL_BLEND_GLD=0.50
+METAL_BLEND_SLV=0.30
+METAL_BLEND_CPER=0.20
+STRESS_CASH_PCT=0.25
+WISDOM_MODE=arbitrage
+```
+
+Set `GAME_PLAN_ENABLED=false` to revert to the baseline fund only.
+
+Preflight prints current macro signals (`stress`, `yield_gate`, `bond_stress`) and confirms GLD/SLV/CPER are in the data universe.
 
 ## Quick start
 
@@ -94,9 +149,10 @@ python backtester.py --days 500
 python run_all.py
 ```
 
-Preflight checks paper mode, Alpaca connection, and data. The bot then:
+Preflight checks paper mode, Alpaca connection, market data, and (when enabled) game plan macro signals + metal tickers. The bot then:
 
-- Enforces **sleeve caps** (SPY / crypto / NYSE) on each buy
+- Enforces **sleeve caps** (SPY / crypto / NYSE / metal) on each buy
+- Runs **game plan** when enabled: yield gate, stress cash trim, GLD/SLV/CPER sleeve
 - Runs **crypto only in high-volatility** regimes (still skips panic/bear)
 - Applies **5% stop-loss** exits on open positions each cycle
 - **10% max drawdown** halts new trading
@@ -119,6 +175,16 @@ Crypto has an additional gate: when `CRYPTO_VOL_ONLY=true`, pairs are skipped un
 python backtester.py
 python backtester.py --days 500
 
+# Game plan + metal sleeves (2017-2023 default)
+python backtester_metals.py
+python backtester_metals.py --from 2022 --to 2022
+
+# Live game plan summary (full window + fresh-capital 2022 stress test)
+python scripts/research/backtest_game_plan_live.py
+
+# Macro hedge variants (yield gate, GLD, dynamic cash)
+python backtester_macro_hedge.py --game-plan
+
 # SPY sleeve only — grid search all MA/allocation combos
 python backtest_spy.py
 python backtest_spy.py --compare
@@ -131,6 +197,9 @@ python fetch_data.py --daily --days 500
 | Script | What it tests |
 |--------|----------------|
 | `backtester.py` | Integrated fund logic (shared strategies module) |
+| `backtester_metals.py` | Metal sleeves + `game_plan_gld_slv_cper` (50/30/20 GLD/SLV/CPER) |
+| `backtester_macro_hedge.py` | Yield gate, GLD hedge, stress cash, full game plan |
+| `scripts/research/backtest_game_plan_live.py` | Live blend vs baseline; saves `fund_game_plan_*.csv` |
 | `backtest_spy.py` | SPY MA200 sleeve in isolation; saves `spy_backtest_results.csv` |
 
 Live bot uses **5-minute** bars; backtests use **daily** bars. Results are directional, not identical to live fills.
@@ -185,6 +254,11 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `SENTIMENT_SOURCE` | No | Default `price` (free). Set `tavily` only if you have API quota |
 | `WISDOM_MODE` | No | Default `arbitrage`. Also: `baseline`, `web_regime`, `wisdom_pause` |
 | `WISDOM_GAP_THRESHOLD` | No | Web vs price divergence gate (default `0.25`) |
+| `GAME_PLAN_ENABLED` | No | Default `true` — yield gate + metal sleeve + stress cash |
+| `YIELD_GATE_ENABLED` | No | Default `true` — block new SPY buys on hostile rates |
+| `METAL_SLEEVE_CAP_PCT` | No | Metal sleeve cap (default `0.10`) |
+| `METAL_BLEND_GLD` / `SLV` / `CPER` | No | Weights within metal sleeve (default 50/30/20) |
+| `STRESS_CASH_PCT` | No | Cash target on macro stress (default `0.25`) |
 | `WISDOM_EVAL_ENABLED` | No | Daily self-eval (default `true`) |
 | `WISDOM_EVAL_DAYS` | No | Rolling window for scorecard (default `30`) |
 | `WISDOM_MONTHLY_ENABLED` | No | Calendar-month rollup + alert (default `true`) |
@@ -205,21 +279,26 @@ Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 
 ```
 PythonTrading/
-├── run_all.py              # Main 24/7 integrated fund loop
+├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
 ├── run_spy.py              # Optional standalone SPY loop
 ├── fetch_data.py           # yfinance → SQLite (5m live, daily backtest)
-├── config.py               # Universe, sleeves, credentials, paths
+├── config.py               # Universe, sleeves, game plan, credentials, paths
 ├── backtester.py           # Fund backtest (SPY + crypto + NYSE)
+├── backtester_metals.py    # Metal hedge + game_plan_gld_slv_cper backtests
+├── backtester_macro_hedge.py  # Yield gate, GLD, stress cash variants
 ├── backtest_spy.py         # SPY sleeve backtest + grid search
 ├── simulate.py             # Mean-reversion research
 ├── modules/
 │   ├── pipeline_strategies.py  # SPY, crypto, NYSE strategies
+│   ├── game_plan.py            # Metal sleeve + stress cash (live)
+│   ├── macro_signals.py        # TNX/TLT daily signals for game plan
 │   ├── alpaca_executor.py      # Sleeve caps + order sizing
 │   ├── data_refresh.py         # Session-aware data refresh
 │   ├── market_context.py       # Regime / volatility / sentiment
 │   ├── alerts.py
 │   └── ...
 └── scripts/
+    ├── research/           # Game plan backtests, projections
     ├── db/                 # SQLite utilities
     ├── account/            # Alpaca + alerts (preflight, preflight_spy, verify)
     ├── exchange/           # Kraken checks
@@ -231,6 +310,7 @@ PythonTrading/
 
 ```powershell
 python scripts/account/preflight.py          # Pre-flight before paper month
+python scripts/research/backtest_game_plan_live.py  # Game plan backtest summary
 python scripts/account/preflight_spy.py      # SPY-only standalone check
 python scripts/account/verify.py
 python scripts/account/check_account.py
@@ -257,8 +337,8 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `trade_history.log` | Trade log from `run_all.py` |
 | `trading_history.jsonl` | Position ledger |
 | `risk_events.log` | Drawdown halt and stop events |
-| `paper_journal.csv` | Structured log for paper-month analysis |
-| `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, trades, halted |
+| `paper_journal.csv` | Structured log for paper-month analysis (`game_plan` events when enabled) |
+| `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, game plan state, trades, halted |
 | `wisdom_journal.csv` | Every cycle: wisdom config, web/price/gap, equity, shadow modes |
 | `wisdom_scorecard.json` | Latest daily self-evaluation (live vs sim modes) |
 | `wisdom_evaluations.jsonl` | Append-only history of daily scorecards (perpetual log) |
@@ -266,6 +346,9 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `wisdom_monthly_history.jsonl` | Append-only history of monthly rollups |
 | `web_sentiment_live.json` | Cached daily headline sentiment |
 | `spy_backtest_results.csv` | Output of `backtest_spy.py --all` |
+| `fund_game_plan_live_backtest.csv` | Full-window game plan vs baseline |
+| `fund_game_plan_fresh_2022.csv` | Fresh-capital 2022 stress test results |
+| `fund_metals_backtest_results.csv` | Output of `backtester_metals.py` |
 | `spy_paper_journal.csv` | Standalone `run_spy.py` journal only |
 | `spy_bot_heartbeat.json` | Standalone SPY bot heartbeat |
 | `alert_state.json` | Alert dedupe state (halt notified, last daily summary) |
@@ -281,4 +364,5 @@ The bot is lightweight (Python + API calls + SQLite). A **$5–12/mo Linux VPS**
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
 - **Strategy sharing:** `run_all.py`, `backtester.py`, and `backtest_spy.py` share `modules/pipeline_strategies.py`.
 - **Alpaca crypto fees:** ~0.25% taker per leg on market orders. Kraken keys are available for future crypto-only execution but are not wired to `run_all.py`.
-- **NYSE overlap:** SPY and NYSE sleeves both hold US equities; caps limit double exposure. SPY is excluded from the NYSE MA50 picker.
+- **NYSE overlap:** SPY and NYSE sleeves both hold US equities; caps limit double exposure. SPY is excluded from the NYSE MA50 picker. GLD, SLV, and CPER are excluded from NYSE momentum and counted in the metal sleeve.
+- **Game plan metals:** GLD, SLV, CPER are in `UNIVERSE` for data refresh but not in the NYSE momentum picker. Macro daily bars (TLT, TNX) bootstrap on first `run_all.py` cycle.

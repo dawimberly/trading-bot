@@ -193,11 +193,14 @@ def run_spy_strategy(
     cooldown_bars=None,
     log_fn=None,
     portfolio_manager=None,
+    yield_gated=False,
 ):
     """Buy SPY when above MA — a simple bet that the broad market keeps rising."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
     if regime in PAUSED_REGIMES:
+        return 0
+    if yield_gated:
         return 0
     bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
     if not bullish:
@@ -248,8 +251,11 @@ def run_equity_strategy(
     if regime in PAUSED_REGIMES:
         return 0
     equity_cols = [
-        c for c in data.columns
-        if not config.is_crypto(c) and c != config.SPY_BOT_SYMBOL
+        c
+        for c in data.columns
+        if not config.is_crypto(c)
+        and c != config.SPY_BOT_SYMBOL
+        and not config.is_metal_symbol(c)
     ]
     ranked = _equity_momentum_candidates(data, equity_cols)
     if not ranked:

@@ -44,6 +44,16 @@ def holdings_audit(executor: AlpacaExecutor) -> dict:
             "spy": max(0.0, sleeves["spy_value"] - sleeves["spy_cap"]),
             "crypto": max(0.0, sleeves["crypto_value"] - sleeves["crypto_cap"]),
             "nyse": max(0.0, sleeves["nyse_value"] - sleeves["nyse_cap"]),
+            **(
+                {
+                    "metal": max(
+                        0.0,
+                        sleeves.get("metal_value", 0) - sleeves.get("metal_cap", 0),
+                    )
+                }
+                if config.GAME_PLAN_ENABLED and "metal_value" in sleeves
+                else {}
+            ),
         },
     }
 
@@ -93,9 +103,9 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
     actions = []
 
     sleeve_defs = (
-        ("crypto", config.CRYPTO_SLEEVE_CAP_PCT, executor.crypto_sleeve_value, AlpacaExecutor._is_crypto_position),
-        ("spy", config.SPY_SLEEVE_CAP_PCT, executor.spy_sleeve_value, AlpacaExecutor._is_spy_position),
-        ("nyse", config.NYSE_SLEEVE_CAP_PCT, executor.nyse_sleeve_value, AlpacaExecutor._is_nyse_sleeve_position),
+        ("crypto", config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT), executor.crypto_sleeve_value, AlpacaExecutor._is_crypto_position),
+        ("spy", config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT), executor.spy_sleeve_value, AlpacaExecutor._is_spy_position),
+        ("nyse", config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT), executor.nyse_sleeve_value, AlpacaExecutor._is_nyse_sleeve_position),
     )
 
     for name, cap_pct, value_fn, pred in sleeve_defs:
@@ -131,6 +141,39 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
                 }
             )
             remaining = round(remaining - sell_notional, 2)
+
+    if config.GAME_PLAN_ENABLED:
+        metal_cap = equity * config.METAL_SLEEVE_CAP_PCT
+        metal_val = executor.metal_sleeve_value()
+        excess = round(metal_val - metal_cap, 2)
+        if excess >= config.MIN_NOTIONAL:
+            positions = [
+                p
+                for p in executor.client.get_all_positions()
+                if config.is_metal_symbol(p.symbol)
+            ]
+            total = sum(_position_value(p) for p in positions)
+            remaining = excess
+            for pos in positions:
+                if remaining < config.MIN_NOTIONAL:
+                    break
+                mv = _position_value(pos)
+                if mv <= 0 or total <= 0:
+                    continue
+                sell_notional = round(min(remaining, excess * (mv / total), mv), 2)
+                if sell_notional < config.MIN_NOTIONAL:
+                    continue
+                sym = normalize_symbol(pos.symbol)
+                order = executor.execute_reduce_notional(sym, sell_notional)
+                actions.append(
+                    {
+                        "sleeve": "metal",
+                        "symbol": sym,
+                        "sell_notional": sell_notional,
+                        "ok": order is not None,
+                    }
+                )
+                remaining = round(remaining - sell_notional, 2)
 
     return actions
 

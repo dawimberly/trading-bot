@@ -15,6 +15,7 @@ UNIVERSE = [
     "BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "AVAX-USD", "LINK-USD",
     "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "AMZN", "TSLA", "META",
     "VTI", "QQQ", "SPY", "IWM",
+    "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX",
     "XOM", "CVX", "LNG",
     "RTX", "LMT", "KTOS",
     "JPM", "BAC", "GS",
@@ -34,7 +35,7 @@ TICKER = "VTI"
 ASSET_TYPE = "STOCK"
 MA_WINDOW = 45
 
-# --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer ---
+# --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
 FUND_CASH_BUFFER_PCT = 0.15
 SPY_SLEEVE_CAP_PCT = 0.45
 NYSE_SLEEVE_CAP_PCT = 0.20
@@ -162,6 +163,37 @@ REBALANCE_ON_STARTUP = os.getenv("REBALANCE_ON_STARTUP", "false").lower() in (
     "yes",
 )
 
+# --- Game plan (yield gate + metal sleeve + stress cash) — backtest: game_plan_gld / gld_slv_cper ---
+GAME_PLAN_ENABLED = os.getenv("GAME_PLAN_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+YIELD_GATE_ENABLED = os.getenv("YIELD_GATE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+METAL_SLEEVE_CAP_PCT = float(os.getenv("METAL_SLEEVE_CAP_PCT", "0.10"))
+METAL_SLEEVE_DEPLOY_PCT = float(os.getenv("METAL_SLEEVE_DEPLOY_PCT", "0.90"))
+METAL_BLEND_GLD = float(os.getenv("METAL_BLEND_GLD", "0.50"))
+METAL_BLEND_SLV = float(os.getenv("METAL_BLEND_SLV", "0.30"))
+METAL_BLEND_CPER = float(os.getenv("METAL_BLEND_CPER", "0.20"))
+STRESS_CASH_PCT = float(os.getenv("STRESS_CASH_PCT", "0.25"))
+# Live bot trades GLD/SLV/CPER only; backtester may use the full set below.
+LIVE_METAL_SYMBOLS = frozenset({"GLD", "SLV", "CPER"})
+METAL_SYMBOLS = frozenset({"GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX"})
+MACRO_DAILY_TICKERS = ("TLT", "SPY", *sorted(METAL_SYMBOLS))
+
+_universe_set = frozenset(UNIVERSE)
+_metal_not_in_universe = METAL_SYMBOLS - _universe_set
+if _metal_not_in_universe:
+    raise ValueError(
+        f"METAL_SYMBOLS not in UNIVERSE: {sorted(_metal_not_in_universe)}"
+    )
+if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
+    raise ValueError("LIVE_METAL_SYMBOLS must be a subset of METAL_SYMBOLS")
+
 # --- Risk & sizing (paper month defaults) ---
 RISK_PER_TRADE = 0.02
 MAX_NOTIONAL_PER_ORDER = 10000.0
@@ -256,4 +288,97 @@ def crypto_universe():
 
 
 def equity_universe():
-    return [t for t in UNIVERSE if not is_crypto(t)]
+    return [t for t in UNIVERSE if not is_crypto(t) and t not in METAL_SYMBOLS]
+
+
+def is_metal_symbol(symbol: str) -> bool:
+    """True for live-traded metal ETFs (GLD/SLV/CPER), not research-only metals."""
+    return normalize_symbol(symbol) in LIVE_METAL_SYMBOLS
+
+
+def live_metal_universe() -> list[str]:
+    return sorted(LIVE_METAL_SYMBOLS)
+
+
+def metal_blend_weights() -> dict[str, float]:
+    weights = {
+        "GLD": METAL_BLEND_GLD,
+        "SLV": METAL_BLEND_SLV,
+        "CPER": METAL_BLEND_CPER,
+    }
+    return validate_metal_weights(weights, allowed=LIVE_METAL_SYMBOLS, strategy="live_blend")
+
+
+def validate_metal_weights(
+    weights: dict[str, float],
+    *,
+    allowed: frozenset | None = None,
+    available: frozenset | set | None = None,
+    strategy: str = "",
+) -> dict[str, float]:
+    """Ensure metal weights use allowed symbols and sum to 1.0 — never re-normalize."""
+    if not weights:
+        raise ValueError("Metal weights cannot be empty")
+    label = f" ({strategy})" if strategy else ""
+    allowed_set = allowed or METAL_SYMBOLS
+    unsupported = sorted(s for s in weights if s not in allowed_set)
+    if unsupported:
+        raise ValueError(
+            f"Metal strategy{label} uses unsupported symbols {unsupported}. "
+            f"Allowed: {sorted(allowed_set)}"
+        )
+    total = sum(weights.values())
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(
+            f"Metal strategy{label} weights must sum to 1.0, got {total:.6f}: {weights}"
+        )
+    if available is not None:
+        missing = sorted(s for s in weights if s not in available)
+        if missing:
+            raise ValueError(
+                f"Metal strategy{label} missing price data for {missing}. "
+                f"Available: {sorted(available)}"
+            )
+    return dict(weights)
+
+
+def long_fund_scale() -> float:
+    """Reserve headroom for metal sleeve when game plan is on."""
+    if GAME_PLAN_ENABLED:
+        return max(0.5, 1.0 - METAL_SLEEVE_CAP_PCT)
+    return 1.0
+
+
+def effective_sleeve_cap(base_pct: float) -> float:
+    return round(base_pct * long_fund_scale(), 6)
+
+
+def effective_cash_buffer_pct() -> float:
+    """Cash headroom so long + metal sleeve caps sum to 100% of equity."""
+    metal = METAL_SLEEVE_CAP_PCT if GAME_PLAN_ENABLED else 0.0
+    long_caps = (
+        SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
+    ) * long_fund_scale()
+    cash = round(1.0 - metal - long_caps, 6)
+    if cash < 0:
+        raise ValueError(
+            f"Fund over-allocated: metal {metal:.2%} + long sleeves {long_caps:.2%} "
+            f"> 100%; reduce METAL_SLEEVE_CAP_PCT or base sleeve caps"
+        )
+    return cash
+
+
+def fund_allocation_pct() -> dict[str, float]:
+    """Current sleeve + cash cap fractions (sum to 1.0)."""
+    return {
+        "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
+        "crypto": effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT),
+        "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),
+        "metal": METAL_SLEEVE_CAP_PCT if GAME_PLAN_ENABLED else 0.0,
+        "cash_buffer": effective_cash_buffer_pct(),
+    }
+
+
+_alloc = fund_allocation_pct()
+if abs(sum(_alloc.values()) - 1.0) > 1e-4:
+    raise ValueError(f"Fund allocation must sum to 100%, got {_alloc}")

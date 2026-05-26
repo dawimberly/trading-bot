@@ -19,7 +19,12 @@ class RefreshScheduler:
     def _equity_symbols(self):
         if self.equity_tickers is not None:
             return list(self.equity_tickers)
-        return config.equity_universe()
+        symbols = list(config.equity_universe())
+        if config.GAME_PLAN_ENABLED:
+            for sym in config.live_metal_universe():
+                if sym not in symbols:
+                    symbols.append(sym)
+        return symbols
 
     def _due(self, last_refresh, now_ts):
         if last_refresh is None:

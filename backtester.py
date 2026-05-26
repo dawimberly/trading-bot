@@ -241,11 +241,13 @@ def run_performance_test(days=None, refresh=False, use_max=False):
         f"Simulation:       {start_date.date()} to {end_date.date()} "
         f"(~{sim_days} days, {len(data)} {bar_label})"
     )
+    alloc = config.fund_allocation_pct()
     print(
-        f"Sleeves:          SPY {config.SPY_SLEEVE_CAP_PCT:.0%} | "
-        f"crypto {config.CRYPTO_SLEEVE_CAP_PCT:.0%} | "
-        f"NYSE {config.NYSE_SLEEVE_CAP_PCT:.0%} | "
-        f"cash {config.FUND_CASH_BUFFER_PCT:.0%}"
+        f"Sleeves:          SPY {alloc['spy']:.0%} | "
+        f"crypto {alloc['crypto']:.0%} | "
+        f"NYSE {alloc['nyse']:.0%} | "
+        f"metal {alloc['metal']:.0%} | "
+        f"cash {alloc['cash_buffer']:.0%}"
     )
     print(f"Crypto vol-only:  {config.CRYPTO_VOL_ONLY}")
     print(f"Final Equity:     ${round(curve.iloc[-1], 2)}")

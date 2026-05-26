@@ -19,6 +19,11 @@ bot_logs.log
 bot_heartbeat.json
 alert_state.json
 paper_journal.csv
+fund_*.csv
+wisdom_journal.csv
+spacex_ipo_listing.json
+trading_history.jsonl.bak.*
+web_sentiment_live.json
 
 # IDE
 .idea/

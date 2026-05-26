@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import config
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
+from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
 from fetch_data import fetch_and_store
 
 
@@ -42,8 +43,11 @@ def run():
 
     print("\n--- Refreshing 5m market data ---")
     try:
-        fetch_and_store()
-        print("[OK] fetch_data complete")
+        symbols = list(config.equity_universe())
+        if config.GAME_PLAN_ENABLED:
+            symbols.extend(s for s in config.live_metal_universe() if s not in symbols)
+        fetch_and_store(symbols)
+        print(f"[OK] fetch_data complete ({len(symbols)} equity tickers incl. metals)")
     except Exception as e:
         print(f"[WARN] fetch_data: {e}")
 
@@ -62,7 +66,42 @@ def run():
     else:
         print("[WARN] VTI missing from data")
 
+    if config.GAME_PLAN_ENABLED:
+        print("\n--- Game plan (game_plan_gld_slv_cper) ---")
+        blend = config.metal_blend_weights()
+        alloc = config.fund_allocation_pct()
+        print(
+            f"[OK] Enabled | metal {alloc['metal']:.0%} "
+            f"({blend['GLD']:.0%} GLD / {blend['SLV']:.0%} SLV / {blend['CPER']:.0%} CPER)"
+        )
+        print(
+            f"     Cash buffer {alloc['cash_buffer']:.0%} | "
+            f"stress cash {config.STRESS_CASH_PCT:.0%} | "
+            f"yield gate {'ON' if config.YIELD_GATE_ENABLED else 'OFF'}"
+        )
+        for sym in config.live_metal_universe():
+            if sym in data.columns or sym in config.UNIVERSE:
+                print(f"[OK] {sym} in universe")
+            else:
+                print(f"[WARN] {sym} missing from price data")
+        try:
+            ensure_macro_daily(refresh=True)
+            daily = load_daily_matrix(days=450)
+            sig = evaluate(daily, "PREFLIGHT")
+            if sig.get("ok"):
+                print(
+                    f"[OK] Macro signals | stress={sig.get('stress')} "
+                    f"yield_gate={sig.get('yield_gate')} bond_stress={sig.get('bond_stress')}"
+                )
+            else:
+                print("[WARN] Macro daily data thin — game plan may skip until history fills")
+        except Exception as e:
+            print(f"[WARN] Macro daily bootstrap: {e}")
+    else:
+        print("\n[INFO] GAME_PLAN_ENABLED=false — baseline fund only")
+
     print("\n--- Settings ---")
+    print(f"  Wisdom mode:        {config.WISDOM_MODE}")
     print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
     print(f"  Stop loss:          {config.STOP_LOSS_PCT:.0%}")
     print(f"  Max drawdown halt:  {config.MAX_DRAWDOWN_PCT:.0%}")
