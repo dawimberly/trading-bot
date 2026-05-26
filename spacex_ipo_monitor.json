@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-25T16:14:02",
+  "fetched_at": "2026-05-25T22:14:47",
   "enabled": true,
   "context": {
     "spacex_btc_disclosed": 18712,
@@ -8,24 +8,12 @@
     "note": "S-1 BTC treasury + SPCX perp/whale headlines vs BTC sleeve"
   },
   "summary": {
-    "headline_count": 188,
-    "btc_linked_count": 143,
-    "spcx_perp_count": 42,
-    "avg_sentiment": 0.0532,
+    "headline_count": 193,
+    "btc_linked_count": 141,
+    "spcx_perp_count": 44,
+    "avg_sentiment": 0.0725,
     "narrative": "hot_btc_narrative",
     "top_headlines": [
-      {
-        "title": "SpaceX IPO filing gives crypto investors a new way to price Bitcoin exposure, X payments, and AI compute - CryptoRank",
-        "published": "Fri, 22 May 2026 11:29:00 GMT",
-        "link": "https://news.google.com/rss/articles/CBMikAFBVV95cUxQZjhaQUZ1cllkTDZPbkZ1Z19JWVdKV1EzMHIyYVRrZlpRRGkzNVZoLWk1S0xjYnhFOXJQZ0Rra3Z4WjVLUWxrSU4zTWRoWHY0eFhBQi1TOVZoVEl2a1QwNGJtd0RERXhZT3pya3g4cUVlVFl4MDdaT0lrVVVVSkdVTDZEdExuYnRUelYyRHJVdmk?oc=5",
-        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 4,
-        "crypto_hits": 6,
-        "spcx_perp_hits": 0,
-        "btc_linked": true,
-        "spcx_perp": false,
-        "sentiment": 0.0
-      },
       {
         "title": "Next Crypto: SpaceX IPO Reveals $1.29 Billion in Bitcoin as Pepeto, BTC, and SOL Shape 2026 - StreetInsider",
         "published": "Mon, 25 May 2026 08:17:48 GMT",
@@ -54,6 +42,18 @@
         "title": "SpaceX IPO filing gives crypto investors a new way to price Bitcoin exposure, X payments, and AI compute - CryptoSlate",
         "published": "Fri, 22 May 2026 10:45:52 GMT",
         "link": "https://news.google.com/rss/articles/CBMif0FVX3lxTE5VSWczY1BaRGhvNTRtdnpqSjY0TVUyaHBFT1VQRDlQcHJTdk9zbVJlSzhKODNNZmQ3TTVFRzBQMUtPUDJqVi1fMndCTkFzSzVBNEtpb2ZOOEVDUkg0ZURpTGZFUHo5eWRyODdVdXpPNEtETW1TenVpLVdlNkEwYkk?oc=5",
+        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
+        "spacex_hits": 4,
+        "crypto_hits": 6,
+        "spcx_perp_hits": 0,
+        "btc_linked": true,
+        "spcx_perp": false,
+        "sentiment": 0.0
+      },
+      {
+        "title": "SpaceX IPO filing gives crypto investors a new way to price Bitcoin exposure, X payments, and AI compute - CryptoRank",
+        "published": "Fri, 22 May 2026 11:29:00 GMT",
+        "link": "https://news.google.com/rss/articles/CBMikAFBVV95cUxQZjhaQUZ1cllkTDZPbkZ1Z19JWVdKV1EzMHIyYVRrZlpRRGkzNVZoLWk1S0xjYnhFOXJQZ0Rra3Z4WjVLUWxrSU4zTWRoWHY0eFhBQi1TOVZoVEl2a1QwNGJtd0RERXhZT3pya3g4cUVlVFl4MDdaT0lrVVVVSkdVTDZEdExuYnRUelYyRHJVdmk?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 4,
         "crypto_hits": 6,
@@ -123,7 +123,7 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+S-1+Bitcoin+treasury&hl=en-US&gl=US&ceid=US:en",
-      "count": 40,
+      "count": 43,
       "error": null
     },
     {
@@ -133,7 +133,7 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+SPCX+Hyperliquid+whale&hl=en-US&gl=US&ceid=US:en",
-      "count": 7,
+      "count": 8,
       "error": null
     },
     {

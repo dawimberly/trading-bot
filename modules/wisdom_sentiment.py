@@ -165,3 +165,42 @@ def resolve_wisdom_regime(
         "wisdom_paused": paused,
         "governor_stress": stress_confirmed,
     }
+
+
+def resolve_backtest_regime(
+    data: pd.DataFrame,
+    ts: pd.Timestamp,
+    monthly_web: pd.Series | None,
+    *,
+    wisdom_mode: str | None = None,
+    gap_threshold: float | None = None,
+) -> tuple[str, str, bool]:
+    """Regime for daily backtests (optional Wayback web + wisdom pause)."""
+    vol = get_volatility(data)
+    if not wisdom_mode:
+        price_sent = get_price_sentiment(data)
+        return get_market_regime(price_sent, vol), vol, False
+
+    mode = wisdom_mode.strip().lower()
+    if mode not in MODES:
+        mode = "baseline"
+    gap_threshold = gap_threshold if gap_threshold is not None else config.WISDOM_GAP_THRESHOLD
+    web_series = monthly_web if monthly_web is not None else pd.Series(dtype=float)
+
+    sent, web, gap = regime_sentiment(
+        data, ts, web_series, mode=mode, gap_threshold=gap_threshold
+    )
+    regime = get_market_regime(sent, vol)
+    stress_confirmed = governor_stress_confirmed(data, vol) if mode == "governor" else None
+    paused = entries_paused(
+        mode,
+        web,
+        gap,
+        gap_threshold,
+        data=data,
+        vol=vol,
+        stress_confirmed=stress_confirmed,
+    )
+    if paused:
+        regime = PAUSE_REGIME
+    return regime, vol, paused

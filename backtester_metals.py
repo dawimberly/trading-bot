@@ -42,6 +42,8 @@ from backtester_macro_hedge import (
     macro_stress,
 )
 from backtester_wisdom import _slice_data
+from modules.wayback_sentiment import load_monthly_web_sentiment
+from modules.wisdom_sentiment import resolve_backtest_regime
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
 from modules.pipeline_strategies import run_crypto_strategy, run_equity_strategy, run_spy_strategy
 from modules.risk_management import RiskManager
@@ -190,6 +192,9 @@ def run_metals_backtest(
     strategy: str,
     *,
     initial_capital: float = 10_000.0,
+    wisdom_mode: str | None = None,
+    monthly_web: pd.Series | None = None,
+    gap_threshold: float | None = None,
 ) -> dict:
     weights = METAL_STRATEGIES[strategy]
     if weights is not None:
@@ -214,6 +219,7 @@ def run_metals_backtest(
     metal_trades = 0
     yield_gate_days = 0
     cash_trims = 0
+    wisdom_pause_days = 0
     halted = False
     start_i = MIN_HISTORY
 
@@ -233,9 +239,16 @@ def run_metals_backtest(
                 halted = True
             continue
 
-        sentiment = get_price_sentiment(window)
-        vol = get_volatility(window)
-        regime = get_market_regime(sentiment, vol)
+        ts = data.index[i]
+        regime, vol, paused = resolve_backtest_regime(
+            window,
+            ts,
+            monthly_web,
+            wisdom_mode=wisdom_mode,
+            gap_threshold=gap_threshold,
+        )
+        if paused:
+            wisdom_pause_days += 1
         stress = macro_stress(window, regime)
 
         executor = BacktestExecutor(portfolio, prices)
@@ -284,6 +297,8 @@ def run_metals_backtest(
         "metal_trades": metal_trades,
         "yield_gate_days": yield_gate_days,
         "cash_trims": cash_trims,
+        "wisdom_pause_days": wisdom_pause_days,
+        "wisdom_mode": wisdom_mode or "price_only",
         "halted": halted,
         "start": data.index[start_i].date(),
         "end": data.index[-1].date(),
@@ -317,6 +332,9 @@ def run_fresh_capital_backtest(
     reset_date: str = "2022-01-01",
     end_date: str = "2022-12-31",
     initial_capital: float = 10_000.0,
+    wisdom_mode: str | None = None,
+    monthly_web: pd.Series | None = None,
+    gap_threshold: float | None = None,
 ) -> dict:
     """Stress test with fresh capital at reset_date (MA warmup from prior bars only).
 
@@ -349,6 +367,7 @@ def run_fresh_capital_backtest(
     metal_trades = 0
     yield_gate_days = 0
     cash_trims = 0
+    wisdom_pause_days = 0
     halted = False
 
     for i in range(start_i, end_i + 1):
@@ -367,9 +386,16 @@ def run_fresh_capital_backtest(
                 halted = True
             continue
 
-        sentiment = get_price_sentiment(window)
-        vol = get_volatility(window)
-        regime = get_market_regime(sentiment, vol)
+        ts = data.index[i]
+        regime, vol, paused = resolve_backtest_regime(
+            window,
+            ts,
+            monthly_web,
+            wisdom_mode=wisdom_mode,
+            gap_threshold=gap_threshold,
+        )
+        if paused:
+            wisdom_pause_days += 1
         stress = macro_stress(window, regime)
 
         executor = BacktestExecutor(portfolio, prices)
@@ -424,6 +450,8 @@ def run_fresh_capital_backtest(
         "metal_trades": metal_trades,
         "yield_gate_days": yield_gate_days,
         "cash_trims": cash_trims,
+        "wisdom_pause_days": wisdom_pause_days,
+        "wisdom_mode": wisdom_mode or "price_only",
         "halted": halted,
         "start": data.index[start_i].date(),
         "end": data.index[end_i].date(),
