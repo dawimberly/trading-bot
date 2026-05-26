@@ -1,3 +1,3 @@
-{"event": "ledger_rebuilt", "at": "2026-05-25T20:43:33", "backup": "trading_history.jsonl.bak.20260525_204333"}
+{"event": "ledger_rebuilt", "at": "2026-05-25T20:47:30", "backup": "trading_history.jsonl.bak.20260525_204730"}
 {"pair": "BTC-USD", "qty": 8.6e-08, "price": 76670.075684013, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "ETH-USD", "qty": 4e-09, "price": 2098.699333333, "status": "open", "source": "alpaca_reconcile"}
