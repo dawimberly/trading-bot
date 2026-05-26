@@ -38,6 +38,7 @@ from modules import alerts
 from modules import wisdom_journal
 from modules.game_plan import run_game_plan_cycle
 from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
+from modules.wisdom_evaluator import maybe_run_daily_evaluation, maybe_run_monthly_rollup
 
 pair_cooldown = {}
 refresh_scheduler = RefreshScheduler()
