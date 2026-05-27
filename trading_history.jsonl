@@ -1,5 +1,4 @@
-{"event": "ledger_rebuilt", "at": "2026-05-27T07:19:17", "backup": "trading_history.jsonl.bak.20260527_071917"}
-{"pair": "BTC-USD", "qty": 8.6e-08, "price": 76699.56, "status": "open", "source": "alpaca_reconcile"}
+{"event": "ledger_rebuilt", "at": "2026-05-27T15:04:03", "backup": "trading_history.jsonl.bak.20260527_150403"}
 {"pair": "CPER", "qty": 51.397126731, "price": 38.98, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "CVX", "qty": 10.547857218, "price": 189.94, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "ETH-USD", "qty": 4e-09, "price": 2099.16, "status": "open", "source": "alpaca_reconcile"}
@@ -9,4 +8,4 @@
 {"pair": "META", "qty": 3.275714916, "price": 611.61, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "RTX", "qty": 11.308244335, "price": 177.168086, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "UNH", "qty": 5.255250997, "price": 381.230126, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "XOM", "qty": 13.027729073, "price": 153.784285, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "XOM", "qty": 0.049351064, "price": 153.784285, "status": "open", "source": "alpaca_reconcile"}
