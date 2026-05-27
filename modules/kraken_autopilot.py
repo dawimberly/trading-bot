@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import config
+from modules import kraken_budget
 from modules.kraken_cleanup import build_cleanup_intents, execute_cleanup_intents
 from modules.kraken_rebalance import run_kraken_rebalance
 from modules.kraken_pairs import kraken_pair_for_symbol
@@ -156,6 +157,8 @@ def run_kraken_autopilot(
         "skipped": [],
     }
 
+    kraken_budget.reset_cycle_budget()
+
     if not config.KRAKEN_AUTOPILOT_ENABLED:
         summary["skipped"].append("KRAKEN_AUTOPILOT_ENABLED=false")
         return summary
@@ -257,6 +260,9 @@ def run_kraken_autopilot(
     summary["wisdom_paused"] = wisdom.get("wisdom_paused")
     summary["regime"] = regime
     summary["stress"] = stress
+    if kraken_budget.cycle_budget_usd() > 0:
+        summary["cycle_buy_budget_usd"] = kraken_budget.cycle_budget_usd()
+        summary["cycle_buy_spent_usd"] = kraken_budget.cycle_buy_spent()
     return summary
 
 
@@ -273,7 +279,14 @@ def format_autopilot_line(summary: dict) -> str:
     mode = "DRY-RUN" if summary.get("dry_run") else ("LIVE" if summary.get("live") else "off")
     pause = " PAUSED" if summary.get("wisdom_paused") else ""
     rb_s = f" rebalance={n_rb}/{n_rb_plan}({profile})" if rb else ""
+    budget_s = ""
+    if summary.get("cycle_buy_budget_usd"):
+        budget_s = (
+            f" buy_budget=${summary.get('cycle_buy_spent_usd', 0):.0f}/"
+            f"${summary['cycle_buy_budget_usd']:.0f}"
+        )
     return (
         f"Kraken autopilot [{mode}]:{rb_s} cleanup={n_clean} stocks_pending={n_app} "
-        f"crypto={n_crypto} mirror={n_mirror} wisdom={summary.get('wisdom_mode')}{pause}"
+        f"crypto={n_crypto} mirror={n_mirror}{budget_s} "
+        f"wisdom={summary.get('wisdom_mode')}{pause}"
     )

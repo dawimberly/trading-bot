@@ -1,5 +1,5 @@
 {
-  "description": "Target weights for Kraken rebalance. stress/calm follow game-plan macro. Edit tickers to match what you want to hold.",
+  "description": "Standard Kraken targets (game-plan stress/calm). No personal hold list.",
   "max_equity_names": 5,
   "core_ticker": "VOO",
   "banned_tickers": ["GUSH", "QQQ", "TQQQ", "SQQQ", "SPXL", "SPXS"],

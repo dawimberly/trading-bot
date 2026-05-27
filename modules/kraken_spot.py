@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import config
+from modules import kraken_budget
 from modules.kraken_pairs import kraken_pair_for_symbol
 
 
@@ -27,8 +28,7 @@ def autopilot_enabled() -> bool:
 
 
 def _cap_usd(amount: float) -> float:
-    cap = float(config.KRAKEN_MAX_ORDER_USD)
-    return round(min(max(float(amount), 0), cap), 2)
+    return kraken_budget.cap_buy_usd(amount)
 
 
 def _submit_order(
@@ -94,7 +94,10 @@ def market_buy_usd(
 
     usd_amount = _cap_usd(usd_amount)
     if usd_amount < config.MIN_NOTIONAL:
-        return {"ok": False, "error": f"below min ${config.MIN_NOTIONAL}"}
+        err = f"below min ${config.MIN_NOTIONAL}"
+        if kraken_budget.cycle_budget_usd() > 0 and kraken_budget.cycle_buy_spent() >= kraken_budget.cycle_budget_usd():
+            err = f"cycle buy budget ${kraken_budget.cycle_budget_usd():.0f} used"
+        return {"ok": False, "error": err}
 
     from kraken.spot import Market
 
@@ -116,6 +119,8 @@ def market_buy_usd(
         asset_class=asset_class,
     )
     result.update({"usd": usd_amount, "price_ref": price, "asset_class": asset_class})
+    if result.get("ok") and not result.get("validate") and not result.get("dry_run"):
+        kraken_budget.record_buy(usd_amount)
     return result
 
 

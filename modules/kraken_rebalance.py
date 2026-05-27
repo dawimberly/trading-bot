@@ -81,6 +81,7 @@ def build_rebalance_plan(
         stress=stress, crypto_allowed=crypto_allowed, targets_cfg=targets_cfg
     )
     banned = {t.upper() for t in targets_cfg.get("banned_tickers") or []} | LEVERAGED_TICKERS
+    hold = {t.upper() for t in targets_cfg.get("hold_tickers") or []}
 
     trades: list[dict] = []
     min_usd = config.MIN_NOTIONAL
@@ -107,6 +108,8 @@ def build_rebalance_plan(
             )
             continue
         if ticker not in target_tickers:
+            if ticker in hold:
+                continue
             trades.append(
                 {
                     "symbol": ticker,

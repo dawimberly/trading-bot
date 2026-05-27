@@ -16,6 +16,7 @@ from modules.kraken_advisor import (
     load_manual_positions,
 )
 from modules.kraken_execute import execute_kraken_trade
+from modules.kraken_rebalance import _load_targets
 from modules.kraken_pairs import (
     equity_pair_likely_unsupported,
     kraken_pair_for_symbol,
@@ -109,10 +110,18 @@ def build_cleanup_intents(
 
     positions = _equity_positions(bal.get("balances") or [], manual)
     tickers = {p["ticker"] for p in positions}
+    hold = {t.upper() for t in (_load_targets().get("hold_tickers") or [])}
+    targets_cfg = _load_targets()
+    profile_name = "stress" if wisdom_stress else "calm"
+    profile = (targets_cfg.get("profiles") or {}).get(profile_name) or {}
+    target_keep = hold | {s.upper() for s in (profile.get("equities") or {})}
+    target_keep |= {s.upper() for s in (profile.get("crypto") or {})}
     intents: list[dict[str, Any]] = []
 
     def _append_sell(phase: str, pos: dict, reason: str) -> None:
         sym = pos["ticker"]
+        if sym in hold:
+            return
         if _skip_symbol(sym, pos, manual_set, done):
             return
         vol = pos.get("volume")
@@ -140,8 +149,11 @@ def build_cleanup_intents(
         if len(pool) >= 2:
             pool.sort(key=lambda p: float(p.get("usd") or 0))
             loser = pool[0]
-            others = [c["ticker"] for c in pool if c != loser]
-            _append_sell("cleanup_duplicate_core", loser, f"overlap with {others}")
+            if loser["ticker"] in hold:
+                pass
+            else:
+                others = [c["ticker"] for c in pool if c != loser]
+                _append_sell("cleanup_duplicate_core", loser, f"overlap with {others}")
 
     if len(positions) > MAX_POSITIONS:
         ranked = sorted(
@@ -150,9 +162,11 @@ def build_cleanup_intents(
         )
         excess = len(positions) - MAX_POSITIONS
         for p in ranked[:excess]:
+            if p["ticker"] in target_keep:
+                continue
             _append_sell("cleanup_trim_small", p, f"simplify toward {MAX_POSITIONS} names")
 
-    if wisdom_stress and bal.get("ok"):
+    if wisdom_stress and bal.get("ok") and "RENDER" not in hold:
         for b in bal.get("balances") or []:
             if b.get("display", "").upper() != "RENDER":
                 continue
