@@ -1,4 +1,4 @@
-{"event": "ledger_rebuilt", "at": "2026-05-26T18:57:49", "backup": "trading_history.jsonl.bak.20260526_185748"}
+{"event": "ledger_rebuilt", "at": "2026-05-26T19:01:33", "backup": "trading_history.jsonl.bak.20260526_190132"}
 {"pair": "BTC-USD", "qty": 8.6e-08, "price": 76670.075684013, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "CPER", "qty": 51.397126731, "price": 38.98, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "CVX", "qty": 10.547857218, "price": 189.94, "status": "open", "source": "alpaca_reconcile"}
