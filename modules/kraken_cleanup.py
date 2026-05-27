@@ -16,7 +16,11 @@ from modules.kraken_advisor import (
     load_manual_positions,
 )
 from modules.kraken_execute import execute_kraken_trade
-from modules.kraken_pairs import kraken_pair_for_symbol, ticker_from_balance_display
+from modules.kraken_pairs import (
+    equity_pair_likely_unsupported,
+    kraken_pair_for_symbol,
+    ticker_from_balance_display,
+)
 
 STATE_FILE = Path(__file__).resolve().parents[1] / "kraken_autopilot_state.json"
 MAX_POSITIONS = 5

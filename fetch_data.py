@@ -11,6 +11,7 @@ import pandas as pd
 import yfinance as yf
 
 import config
+from modules.safe_io import safe_print
 
 
 def _normalize_df(df):
@@ -31,20 +32,20 @@ def fetch_and_store(tickers=None):
     """Live pipeline: 5-minute bars (~5 days, yfinance intraday limit)."""
     tickers = list(config.UNIVERSE if tickers is None else tickers)
     conn = sqlite3.connect(config.DB_PATH)
-    print(f"Fetching 5-minute data for {len(tickers)} tickers...")
+    safe_print(f"Fetching 5-minute data for {len(tickers)} tickers...")
     for ticker in tickers:
         try:
             df = yf.download(ticker, period="5d", interval="5m", progress=False)
             df = _normalize_df(df)
             if df.empty:
-                print("No data for " + ticker)
+                safe_print("No data for " + ticker)
                 continue
             df.to_sql(ticker, conn, if_exists="replace", index=False)
-            print("Stored: " + ticker)
+            safe_print("Stored: " + ticker)
         except Exception as e:
-            print(f"Failed: {ticker} - {e}")
+            safe_print(f"Failed: {ticker} - {e}")
     conn.close()
-    print("Done. Database updated.")
+    safe_print("Done. Database updated.")
 
 
 def fetch_daily_history(days=None, use_max=False):

@@ -1,56 +1,12 @@
-{"event": "ledger_rebuilt", "at": "2026-05-26T03:11:21", "backup": "trading_history.jsonl.bak.20260526_031121"}
+{"event": "ledger_rebuilt", "at": "2026-05-26T18:57:49", "backup": "trading_history.jsonl.bak.20260526_185748"}
 {"pair": "BTC-USD", "qty": 8.6e-08, "price": 76670.075684013, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "CPER", "qty": 51.397126731, "price": 38.98, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "CVX", "qty": 10.547857218, "price": 189.94, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "ETH-USD", "qty": 4e-09, "price": 2098.699333333, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CPER/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "RTX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CPER/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "RTX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CPER/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "RTX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CPER/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "RTX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CPER/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "RTX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "KTOS/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LNG/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "LMT/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "XOM/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "CPER/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}
+{"pair": "KTOS", "qty": 35.228782287, "price": 56.869976, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "LMT", "qty": 3.761683561, "price": 532.596633, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "LNG", "qty": 8.439174389, "price": 237.4, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "META", "qty": 3.275714916, "price": 611.61, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "RTX", "qty": 11.308244335, "price": 177.168086, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "UNH", "qty": 5.255250997, "price": 381.230126, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "XOM", "qty": 13.027729073, "price": 153.784285, "status": "open", "source": "alpaca_reconcile"}

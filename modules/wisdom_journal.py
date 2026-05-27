@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import os
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 
@@ -70,7 +71,9 @@ def _ensure_header() -> None:
     df = pd.read_csv(path)
     for col in missing:
         df[col] = ""
-    df[JOURNAL_FIELDS].to_csv(path, index=False)
+    tmp = f"{path}.tmp"
+    df[JOURNAL_FIELDS].to_csv(tmp, index=False)
+    os.replace(tmp, path)
 
 
 def _shadow_pauses(data, ts, monthly_web: pd.Series, gap_threshold: float) -> dict[str, bool]:
@@ -138,7 +141,9 @@ def log_cycle(
         "crypto_spacex_override": (crypto_gate or {}).get("spacex_override", False),
         "notes": notes,
     }
-    with open(_path(), "a", newline="", encoding="utf-8") as f:
+    path = Path(_path())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=JOURNAL_FIELDS).writerow(row)
 
 

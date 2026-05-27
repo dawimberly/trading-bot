@@ -5,10 +5,11 @@ Preflight: python scripts/account/preflight.py
 """
 
 import datetime
-import json
 import time
+import traceback
 
 import config
+from modules.safe_io import install_safe_stdout, write_json_atomic
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
@@ -242,8 +243,7 @@ def _write_heartbeat(
             "stress_cash_pct": config.STRESS_CASH_PCT,
             "yield_gate_enabled": config.YIELD_GATE_ENABLED,
         }
-    with open(config.HEARTBEAT_FILE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+    write_json_atomic(config.HEARTBEAT_FILE, payload)
 
 
 def main():
@@ -671,12 +671,19 @@ def _print_startup_banner():
 
 
 if __name__ == "__main__":
+    install_safe_stdout()
     _print_startup_banner()
     trade_journal.log_event("startup", notes="run_all.py started")
     while True:
         try:
             main()
         except Exception as e:
+            tb = traceback.format_exc()
             print("Cycle Error: " + str(e))
-            trade_journal.log_event("error", notes=str(e))
+            if tb.strip() and tb.strip() != f"{type(e).__name__}: {e}":
+                print(tb)
+            notes = str(e)
+            if tb.strip():
+                notes = f"{notes}\n{tb[-1500:]}"
+            trade_journal.log_event("error", notes=notes)
         time.sleep(60)

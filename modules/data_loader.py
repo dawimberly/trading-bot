@@ -39,6 +39,8 @@ def load_close_matrix(db_path=None, interval="5m", days=None):
 
     conn.close()
     data.index = pd.to_datetime(data.index, errors="coerce")
+    if data.index.duplicated().any():
+        data = data[~data.index.duplicated(keep="last")]
     data = data.sort_index().ffill().dropna(how="all")
     if days is not None and len(data) > days:
         data = data.iloc[-days:]

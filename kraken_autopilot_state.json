@@ -13,7 +13,7 @@
   "notes": "User sold QQQ; kept VOO. GUSH still manual.",
   "last_rebalance_at": "2026-05-26",
   "last_rebalance_profile": "stress",
-  "last_rebalance_auto_count": 1,
+  "last_rebalance_auto_count": 0,
   "capabilities": {
     "crypto_ok": true,
     "xstock_ok": false,

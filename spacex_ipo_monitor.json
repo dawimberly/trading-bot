@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-26T04:15:12",
+  "fetched_at": "2026-05-26T18:54:41",
   "enabled": true,
   "context": {
     "spacex_btc_disclosed": 18712,
@@ -8,12 +8,24 @@
     "note": "S-1 BTC treasury + SPCX perp/whale headlines vs BTC sleeve"
   },
   "summary": {
-    "headline_count": 192,
-    "btc_linked_count": 140,
-    "spcx_perp_count": 44,
-    "avg_sentiment": 0.0677,
+    "headline_count": 186,
+    "btc_linked_count": 136,
+    "spcx_perp_count": 43,
+    "avg_sentiment": 0.0753,
     "narrative": "hot_btc_narrative",
     "top_headlines": [
+      {
+        "title": "SpaceX IPO filing sends space and satellite stocks soaring, reveals massive Bitcoin treasury - Crypto Briefing",
+        "published": "Tue, 26 May 2026 22:04:00 GMT",
+        "link": "https://news.google.com/rss/articles/CBMia0FVX3lxTE1tYlRrMmRVbm9LRkxWQzNxbUpnSEx5ZVBEQ0dmc0QxeGhOMEJtQU9Dazgxa3M0VjBmbzVWZG50VGVyN2hQMTFKeWtVeEtSOEhocXZDcDR4YjZkMkY5SXlNdUxpd3cxLXhMX3Bj?oc=5",
+        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
+        "spacex_hits": 4,
+        "crypto_hits": 6,
+        "spcx_perp_hits": 0,
+        "btc_linked": true,
+        "spcx_perp": false,
+        "sentiment": 0.0
+      },
       {
         "title": "Next Crypto: SpaceX IPO Reveals $1.29 Billion in Bitcoin as Pepeto, BTC, and SOL Shape 2026 - StreetInsider",
         "published": "Mon, 25 May 2026 08:17:48 GMT",
@@ -51,23 +63,11 @@
         "sentiment": 0.0
       },
       {
-        "title": "SpaceX IPO filing gives crypto investors a new way to price Bitcoin exposure, X payments, and AI compute - CryptoRank",
-        "published": "Fri, 22 May 2026 11:29:00 GMT",
-        "link": "https://news.google.com/rss/articles/CBMikAFBVV95cUxQZjhaQUZ1cllkTDZPbkZ1Z19JWVdKV1EzMHIyYVRrZlpRRGkzNVZoLWk1S0xjYnhFOXJQZ0Rra3Z4WjVLUWxrSU4zTWRoWHY0eFhBQi1TOVZoVEl2a1QwNGJtd0RERXhZT3pya3g4cUVlVFl4MDdaT0lrVVVVSkdVTDZEdExuYnRUelYyRHJVdmk?oc=5",
+        "title": "SpaceX Heads Into Historic IPO With a $1.45 Billion Bitcoin Treasury on Its Books - CryptoRank",
+        "published": "Thu, 21 May 2026 19:44:12 GMT",
+        "link": "https://news.google.com/rss/articles/CBMid0FVX3lxTFBPcXZoQVR5MEFKYlI5RXBqWWFHTThPcFduTXdKcEVrU1NNRW5PTFR3Y3A0c3JQVXFTTjlWQU16a2JiY1kyRVBUWi04cHRyNTdTMFhKS3FaOHRNeGltaU1wR3ViM3hSVWVCc3JyNXE3YmhnODZhODFV?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 4,
-        "crypto_hits": 6,
-        "spcx_perp_hits": 0,
-        "btc_linked": true,
-        "spcx_perp": false,
-        "sentiment": 0.0
-      },
-      {
-        "title": "SpaceX Reveals How Much Bitcoin (BTC) It Owns - CryptoPotato",
-        "published": "Sun, 24 May 2026 16:36:00 GMT",
-        "link": "https://news.google.com/rss/articles/CBMieEFVX3lxTE53WTZMaVNIQWRubnByaWJSQkpQUWFGa1NNdDNlNk9XZTdYVm90empQRW9STmZCZnNmZ2NQRV9XMGhvRnJBNWhRQ0pYNFlqem9mZ0xJV1F4OVhTSkhkNEMyV2J0Q0RRalFaX0xmYmVIenZVYk9BQS1qUg?oc=5",
-        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 2,
         "crypto_hits": 6,
         "spcx_perp_hits": 0,
         "btc_linked": true,
@@ -133,12 +133,12 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+SPCX+Hyperliquid+whale&hl=en-US&gl=US&ceid=US:en",
-      "count": 8,
+      "count": 10,
       "error": null
     },
     {
       "url": "https://news.google.com/rss/search?q=SPCX+token+pre-IPO+perp&hl=en-US&gl=US&ceid=US:en",
-      "count": 31,
+      "count": 28,
       "error": null
     }
   ],

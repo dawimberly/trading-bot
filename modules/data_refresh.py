@@ -3,6 +3,7 @@
 import config
 from fetch_data import fetch_and_store
 from modules.market_hours import is_equity_market_open
+from modules.safe_io import safe_print
 
 
 class RefreshScheduler:
@@ -42,14 +43,14 @@ class RefreshScheduler:
             and self._market_was_open is False
             and market_open
         ):
-            print(f"--- Market open: refreshing {len(equity_symbols)} equity tickers ---")
+            safe_print(f"--- Market open: refreshing {len(equity_symbols)} equity tickers ---")
             fetch_and_store(equity_symbols)
             self.last_equity_refresh = now_ts
 
         if self.refresh_crypto and self._due(self.last_crypto_refresh, now_ts):
             crypto_symbols = config.crypto_universe()
             if crypto_symbols:
-                print(f"--- Refreshing {len(crypto_symbols)} crypto tickers ---")
+                safe_print(f"--- Refreshing {len(crypto_symbols)} crypto tickers ---")
                 fetch_and_store(crypto_symbols)
                 self.last_crypto_refresh = now_ts
 
@@ -59,7 +60,7 @@ class RefreshScheduler:
             and equity_symbols
             and self._due(self.last_equity_refresh, now_ts)
         ):
-            print(f"--- Refreshing {len(equity_symbols)} equity tickers ---")
+            safe_print(f"--- Refreshing {len(equity_symbols)} equity tickers ---")
             fetch_and_store(equity_symbols)
             self.last_equity_refresh = now_ts
 
