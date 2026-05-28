@@ -159,6 +159,8 @@ KRAKEN_MAX_ORDER_USD = float(os.getenv("KRAKEN_MAX_ORDER_USD", "25"))
 KRAKEN_CYCLE_BUDGET_USD = float(os.getenv("KRAKEN_CYCLE_BUDGET_USD", "0"))
 KRAKEN_CRYPTO_NOTIONAL = float(os.getenv("KRAKEN_CRYPTO_NOTIONAL", "15"))
 KRAKEN_CLEANUP_MAX_ACTIONS = int(os.getenv("KRAKEN_CLEANUP_MAX_ACTIONS", "3"))
+# Kraken stocks tab: simplify toward this many names (cleanup mode); not applied to Alpaca
+KRAKEN_MAX_POSITIONS = int(os.getenv("KRAKEN_MAX_POSITIONS", "5"))
 # Min base volume to treat as a real position (skip dust after partial sells)
 KRAKEN_DUST_VOLUME = float(os.getenv("KRAKEN_DUST_VOLUME", "0.1"))
 KRAKEN_REBALANCE_ENABLED = os.getenv("KRAKEN_REBALANCE_ENABLED", "true").lower() in (
@@ -244,7 +246,6 @@ if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
 RISK_PER_TRADE = 0.02
 MAX_NOTIONAL_PER_ORDER = 10000.0
 MIN_NOTIONAL = 10.0
-MAX_OPEN_POSITIONS = 5
 STOP_LOSS_PCT = 0.05
 CRYPTO_MIN_CORRELATION = 0.5
 

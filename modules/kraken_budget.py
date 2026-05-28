@@ -23,19 +23,19 @@ def cycle_buy_spent() -> float:
 def cap_buy_usd(amount: float) -> float:
     """Cap a buy to max order size and remaining cycle budget.
 
-    Returns 0.0 when capped below MIN_NOTIONAL (invalid Kraken order size).
+    Invariant: returns 0.0 or a value >= MIN_NOTIONAL (valid Kraken order size).
     """
     min_n = float(config.MIN_NOTIONAL)
-    amount = min(max(float(amount), 0), float(config.KRAKEN_MAX_ORDER_USD))
+    capped = min(max(float(amount), 0.0), float(config.KRAKEN_MAX_ORDER_USD))
     budget = cycle_budget_usd()
     if budget > 0:
-        remaining = budget - _cycle_buy_spent
-        if remaining < min_n:
-            return 0.0
-        amount = min(amount, remaining)
-    if amount < min_n:
+        capped = min(capped, max(budget - _cycle_buy_spent, 0.0))
+    if capped < min_n:
         return 0.0
-    return round(amount, 2)
+    result = round(capped, 2)
+    if result < min_n:
+        return 0.0
+    return result
 
 
 def record_buy(usd: float) -> None:

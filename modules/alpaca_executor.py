@@ -341,8 +341,6 @@ class AlpacaExecutor:
         side_lower = side.lower()
 
         if not reduce_only:
-            if side_lower == "buy" and self.open_position_count() >= config.MAX_OPEN_POSITIONS:
-                return None
             if side_lower == "sell":
                 if self._find_position(symbol) is None:
                     return None

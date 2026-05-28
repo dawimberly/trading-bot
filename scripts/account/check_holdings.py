@@ -22,7 +22,7 @@ def main() -> None:
     print(f"Equity: ${audit['equity']:,.2f}  Cash: ${audit['cash']:,.2f}")
 
     positions = audit["positions"]
-    print(f"\nOpen positions: {len(positions)} (max {config.MAX_OPEN_POSITIONS})")
+    print(f"\nOpen positions: {len(positions)}")
     if not positions:
         print("  (none — clean slate for run_all.py)")
     else:

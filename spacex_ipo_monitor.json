@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-27T18:57:11",
+  "fetched_at": "2026-05-28T12:58:10",
   "enabled": true,
   "context": {
     "spacex_btc_disclosed": 18712,
@@ -8,28 +8,28 @@
     "note": "S-1 BTC treasury + SPCX perp/whale headlines vs BTC sleeve"
   },
   "summary": {
-    "headline_count": 184,
-    "btc_linked_count": 138,
-    "spcx_perp_count": 39,
-    "avg_sentiment": 0.0652,
+    "headline_count": 178,
+    "btc_linked_count": 133,
+    "spcx_perp_count": 36,
+    "avg_sentiment": 0.1067,
     "narrative": "hot_btc_narrative",
     "top_headlines": [
       {
-        "title": "SpaceX IPO filing sends space and satellite stocks soaring, reveals massive Bitcoin treasury - Crypto Briefing",
-        "published": "Tue, 26 May 2026 22:04:00 GMT",
-        "link": "https://news.google.com/rss/articles/CBMia0FVX3lxTE1tYlRrMmRVbm9LRkxWQzNxbUpnSEx5ZVBEQ0dmc0QxeGhOMEJtQU9Dazgxa3M0VjBmbzVWZG50VGVyN2hQMTFKeWtVeEtSOEhocXZDcDR4YjZkMkY5SXlNdUxpd3cxLXhMX3Bj?oc=5",
-        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 4,
-        "crypto_hits": 6,
+        "title": "Tesla SpaceX bitcoin holdings: Musk\u2019s merger talk tees up $3.3B BTC treasury - The Cryptonomist",
+        "published": "Thu, 28 May 2026 07:36:42 GMT",
+        "link": "https://news.google.com/rss/articles/CBMiiAFBVV95cUxQZnJ5cG1WVllXWVgtZ0ptQ1lmT1dTQmdGS0NZUDctd0R3VktENzk0bDZmTEE3b3VrTzVXNmU3TFllRlJqNDVONDNHYmJfT0JuNVp3ZnlrbzRycGdqNF9NWWNzVlMzOXRjWHZxRzc4Um1ldDJDRWpxc0NXVGZZekxwdk9JWWl6ZmxM?oc=5",
+        "source_feed": "https://news.google.com/rss/search?q=SpaceX+S-1+Bitcoin+treasury&hl=en-US&gl=US&ceid=US:en",
+        "spacex_hits": 2,
+        "crypto_hits": 8,
         "spcx_perp_hits": 0,
         "btc_linked": true,
         "spcx_perp": false,
         "sentiment": 0.0
       },
       {
-        "title": "SpaceX Heads Into Historic IPO With a $1.45 Billion Bitcoin Treasury on Its Books - Bitcoin Magazine",
-        "published": "Thu, 21 May 2026 13:13:15 GMT",
-        "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTFAwNXdvdkRCQW81bFNJdWJ6eThSdm5IWXVZQU42X3hBYXpZem94blpBV0ZDU1pnSW9HRTNCNjNZeVFQLUk5ZHpzTEdxaHJCeVJSS0VBWXRNdHJVWTBxVTMxcFNrQWtJSHI5OWUzb3B1UTM?oc=5",
+        "title": "SpaceX IPO filing sends space and satellite stocks soaring, reveals massive Bitcoin treasury - Crypto Briefing",
+        "published": "Tue, 26 May 2026 22:04:00 GMT",
+        "link": "https://news.google.com/rss/articles/CBMia0FVX3lxTE1tYlRrMmRVbm9LRkxWQzNxbUpnSEx5ZVBEQ0dmc0QxeGhOMEJtQU9Dazgxa3M0VjBmbzVWZG50VGVyN2hQMTFKeWtVeEtSOEhocXZDcDR4YjZkMkY5SXlNdUxpd3cxLXhMX3Bj?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 4,
         "crypto_hits": 6,
@@ -51,9 +51,9 @@
         "sentiment": 0.0
       },
       {
-        "title": "SpaceX set to become largest public company holding bitcoin after IPO, with 18,712 BTC on its balance sheet. - Pluang",
-        "published": "Wed, 27 May 2026 02:04:41 GMT",
-        "link": "https://news.google.com/rss/articles/CBMiogFBVV95cUxOV3BvNEZyTzNPUDFkWGdkaXYtRHV1SmJDNWJ3bkxJTUV0cC1DeDdsTERXeXdGOVU4S2V3V1BENS1pdzF0aDk1Q2RqZXJPVTVOLXAySWx6TlAyaG1ZTlNpVnM3SUszY2ticzBJYmE1NWYwOGk2QkNCLXQ0MTNidTBlelJPOFBGNTA3eDBBdGk5NGRkby0ySU55YkR4c0JPMFJXNkE?oc=5",
+        "title": "SpaceX Heads Into Historic IPO With a $1.45 Billion Bitcoin Treasury on Its Books - Bitcoin Magazine",
+        "published": "Thu, 21 May 2026 13:13:15 GMT",
+        "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTFAwNXdvdkRCQW81bFNJdWJ6eThSdm5IWXVZQU42X3hBYXpZem94blpBV0ZDU1pnSW9HRTNCNjNZeVFQLUk5ZHpzTEdxaHJCeVJSS0VBWXRNdHJVWTBxVTMxcFNrQWtJSHI5OWUzb3B1UTM?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 4,
         "crypto_hits": 6,
@@ -63,11 +63,11 @@
         "sentiment": 0.0
       },
       {
-        "title": "Musk\u2019s Secret Crypto Stash? Why SpaceX and MicroStrategy Keep Loading Up on Bitcoin - 99Bitcoins",
-        "published": "Wed, 27 May 2026 09:57:03 GMT",
-        "link": "https://news.google.com/rss/articles/CBMikgFBVV95cUxOT2x6WmhHMldLSk0tWUU3RVNPazBUQ2Rncnh6bE1Rc2pETVRwbFlLbS16TzhFMHEtbG5mSFByck50cG9ZeEFlSlZSd01HUk5XWGlXY0xwbXBMUnlEc05IcGM0SDVBZkRzX29TTTJzQWR6Z2x2cWx5NDFYUWdJLTVZQjBJZlBhQXgzTHprWXo4ZjZiQQ?oc=5",
+        "title": "SpaceX set to become largest public company holding bitcoin after IPO, with 18,712 BTC on its balance sheet. - Pluang",
+        "published": "Wed, 27 May 2026 02:04:41 GMT",
+        "link": "https://news.google.com/rss/articles/CBMiogFBVV95cUxOV3BvNEZyTzNPUDFkWGdkaXYtRHV1SmJDNWJ3bkxJTUV0cC1DeDdsTERXeXdGOVU4S2V3V1BENS1pdzF0aDk1Q2RqZXJPVTVOLXAySWx6TlAyaG1ZTlNpVnM3SUszY2ticzBJYmE1NWYwOGk2QkNCLXQ0MTNidTBlelJPOFBGNTA3eDBBdGk5NGRkby0ySU55YkR4c0JPMFJXNkE?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 2,
+        "spacex_hits": 4,
         "crypto_hits": 6,
         "spcx_perp_hits": 0,
         "btc_linked": true,
@@ -102,7 +102,7 @@
       },
       {
         "title": "Binance Futures Will Launch USD\u24c8-Margined SPCXUSDT USD\u24c8-Margined Perpetual Contract Pre-IPO Trading (2026-05-21) - Binance",
-        "published": "Thu, 21 May 2026 03:34:43 GMT",
+        "published": "Wed, 20 May 2026 07:00:00 GMT",
         "link": "https://news.google.com/rss/articles/CBMikAFBVV95cUxNV25xclpXNGdXbFJRVTBvVjFoTGplRGZfTE1oU2loZWgyNVZUMlU0bDI1V2VhOFlWQlhFblBGbGdOYlR5M1M1Q2lYLWtuN1pHQmxHcVBTOW0yU01CQmpwU3diaWJnUlFQMGZ6T0Z0S1ZfdE5CU0ZIQzI5VE4ycVBpcTFPUXJMZjRNVUZBeFh3UXg?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SPCX+token+pre-IPO+perp&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 4,
@@ -123,22 +123,22 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+S-1+Bitcoin+treasury&hl=en-US&gl=US&ceid=US:en",
-      "count": 44,
+      "count": 42,
       "error": null
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+IPO+crypto&hl=en-US&gl=US&ceid=US:en",
-      "count": 98,
+      "count": 99,
       "error": null
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+SPCX+Hyperliquid+whale&hl=en-US&gl=US&ceid=US:en",
-      "count": 9,
+      "count": 11,
       "error": null
     },
     {
       "url": "https://news.google.com/rss/search?q=SPCX+token+pre-IPO+perp&hl=en-US&gl=US&ceid=US:en",
-      "count": 24,
+      "count": 19,
       "error": null
     }
   ],

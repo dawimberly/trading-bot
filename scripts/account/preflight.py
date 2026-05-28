@@ -113,7 +113,7 @@ def run():
     print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
     print(f"  Stop loss:          {config.STOP_LOSS_PCT:.0%}")
     print(f"  Max drawdown halt:  {config.MAX_DRAWDOWN_PCT:.0%}")
-    print(f"  Max positions:      {config.MAX_OPEN_POSITIONS}")
+    print(f"  Kraken max names:   {config.KRAKEN_MAX_POSITIONS} (cleanup only)")
     print(f"  Journal:            {config.PAPER_JOURNAL_CSV}")
 
     if ok:

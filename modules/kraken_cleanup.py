@@ -24,7 +24,6 @@ from modules.kraken_pairs import (
 )
 
 STATE_FILE = Path(__file__).resolve().parents[1] / "kraken_autopilot_state.json"
-MAX_POSITIONS = 5
 CRYPTO_TICKERS = frozenset({"BTC", "ETH", "SOL", "RENDER", "ADA", "AVAX", "LINK", "XBT", "XETH"})
 
 
@@ -155,16 +154,17 @@ def build_cleanup_intents(
                 others = [c["ticker"] for c in pool if c != loser]
                 _append_sell("cleanup_duplicate_core", loser, f"overlap with {others}")
 
-    if len(positions) > MAX_POSITIONS:
+    max_pos = config.KRAKEN_MAX_POSITIONS
+    if len(positions) > max_pos:
         ranked = sorted(
             [p for p in positions if p["ticker"] not in LEVERAGED_TICKERS],
             key=lambda p: float(p.get("usd") or 0),
         )
-        excess = len(positions) - MAX_POSITIONS
+        excess = len(positions) - max_pos
         for p in ranked[:excess]:
             if p["ticker"] in target_keep:
                 continue
-            _append_sell("cleanup_trim_small", p, f"simplify toward {MAX_POSITIONS} names")
+            _append_sell("cleanup_trim_small", p, f"simplify toward {max_pos} names")
 
     if wisdom_stress and bal.get("ok") and "RENDER" not in hold:
         for b in bal.get("balances") or []:
