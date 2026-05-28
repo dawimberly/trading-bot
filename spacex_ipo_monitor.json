@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-27T12:56:41",
+  "fetched_at": "2026-05-27T18:57:11",
   "enabled": true,
   "context": {
     "spacex_btc_disclosed": 18712,
@@ -8,10 +8,10 @@
     "note": "S-1 BTC treasury + SPCX perp/whale headlines vs BTC sleeve"
   },
   "summary": {
-    "headline_count": 188,
-    "btc_linked_count": 141,
-    "spcx_perp_count": 41,
-    "avg_sentiment": 0.0691,
+    "headline_count": 184,
+    "btc_linked_count": 138,
+    "spcx_perp_count": 39,
+    "avg_sentiment": 0.0652,
     "narrative": "hot_btc_narrative",
     "top_headlines": [
       {
@@ -63,11 +63,11 @@
         "sentiment": 0.0
       },
       {
-        "title": "SpaceX\u2019s $1.45B Bitcoin Bombshell Revealed in IPO Filing as BTC Buy Price Hits $35K - CryptoNinjas",
-        "published": "Thu, 21 May 2026 17:37:03 GMT",
-        "link": "https://news.google.com/rss/articles/CBMitgFBVV95cUxQTk5xNEswQ3E1ZHFoSFBzaENxS2RQS3k0UUprQmF2MWhOWERZaGtLeFB2VXJ6Z29PcUgtWEpodTlSLXlSN0FqeGVMWGFWa01tZjd6Ql81ZzM2ZGFLWTRaeXBjZkhUbWdmNE1RbkIzN1pSVHJpLWFvc19WZVA5VXpNYW80QXp1RU9RM1dDNVRxT0dUMGV2MnBYNmN6WHNUaHVoSElJMHNodGhNaDRxa1R2SHpGSGtYZ9IBuwFBVV95cUxNN0oxS0Q2TUJEQVpfMy1KRTIyOFFfLUFXaXhIdEF4YkhZZ2U0cW9QTzlmc1pRa2xwWjNkSllzVlRMQ2FPbVp1bDVtVFdJZ3V6bUZXdzdKcFo1Mk9oeWVnd3dqR0VlTWdmUl8td3RVbUlNWi1pNG9VWXFrT3FKYTc1aWs2Rm9BeG1CRl8yeWNlSmZnaUVGODVVNTJpdncwOHV3TGZ2VXVqMnBBWTdseXp4V2QwYXpxSGJiUHIw?oc=5",
+        "title": "Musk\u2019s Secret Crypto Stash? Why SpaceX and MicroStrategy Keep Loading Up on Bitcoin - 99Bitcoins",
+        "published": "Wed, 27 May 2026 09:57:03 GMT",
+        "link": "https://news.google.com/rss/articles/CBMikgFBVV95cUxOT2x6WmhHMldLSk0tWUU3RVNPazBUQ2Rncnh6bE1Rc2pETVRwbFlLbS16TzhFMHEtbG5mSFByck50cG9ZeEFlSlZSd01HUk5XWGlXY0xwbXBMUnlEc05IcGM0SDVBZkRzX29TTTJzQWR6Z2x2cWx5NDFYUWdJLTVZQjBJZlBhQXgzTHprWXo4ZjZiQQ?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 4,
+        "spacex_hits": 2,
         "crypto_hits": 6,
         "spcx_perp_hits": 0,
         "btc_linked": true,
@@ -133,12 +133,12 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+SPCX+Hyperliquid+whale&hl=en-US&gl=US&ceid=US:en",
-      "count": 8,
+      "count": 9,
       "error": null
     },
     {
       "url": "https://news.google.com/rss/search?q=SPCX+token+pre-IPO+perp&hl=en-US&gl=US&ceid=US:en",
-      "count": 27,
+      "count": 24,
       "error": null
     }
   ],
