@@ -1,7 +1,6 @@
-{"event": "ledger_rebuilt", "at": "2026-05-27T15:04:03", "backup": "trading_history.jsonl.bak.20260527_150403"}
+{"event": "ledger_rebuilt", "at": "2026-05-28T14:56:54", "backup": "trading_history.jsonl.bak.20260528_145653"}
 {"pair": "CPER", "qty": 51.397126731, "price": 38.98, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "CVX", "qty": 10.547857218, "price": 189.94, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "ETH-USD", "qty": 4e-09, "price": 2099.16, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "KTOS", "qty": 35.228782287, "price": 56.869976, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "LMT", "qty": 3.761683561, "price": 532.596633, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "LNG", "qty": 8.439174389, "price": 237.4, "status": "open", "source": "alpaca_reconcile"}
