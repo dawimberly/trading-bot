@@ -1,4 +1,4 @@
-{"event": "ledger_rebuilt", "at": "2026-05-30T01:29:02", "backup": "trading_history.jsonl.bak.20260530_012902"}
+{"event": "ledger_rebuilt", "at": "2026-05-30T02:17:41", "backup": "trading_history.jsonl.bak.20260530_021740"}
 {"pair": "AAPL", "qty": 5.802927605, "price": 314.105246, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "AMD", "qty": 3.521902329, "price": 516.854197, "status": "open", "source": "alpaca_reconcile"}
 {"pair": "CPER", "qty": 51.397126731, "price": 38.98, "status": "open", "source": "alpaca_reconcile"}
