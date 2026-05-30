@@ -1,6 +1,6 @@
 {
-  "fetched_at": "2026-05-27T23:56:31.785554",
-  "sentiment": -0.2,
+  "fetched_at": "2026-05-30T01:29:47.109795",
+  "sentiment": -1.0,
   "sources": [
     {
       "url": "https://finance.yahoo.com/",
@@ -8,8 +8,8 @@
     },
     {
       "url": "https://www.cnn.com/business",
-      "sentiment": -0.2,
-      "text_chars": 11977
+      "sentiment": -1.0,
+      "text_chars": 12211
     }
   ]
 }

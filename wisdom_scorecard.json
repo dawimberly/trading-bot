@@ -1,5 +1,5 @@
 {
-  "evaluated_at": "2026-05-28T00:00:09",
+  "evaluated_at": "2026-05-30T01:30:19",
   "window_days": 30,
   "config": {
     "wisdom_mode": "governor",
@@ -7,17 +7,17 @@
     "web_cache_hours": 24
   },
   "live": {
-    "return_pct": -0.01,
-    "sharpe": -0.34,
-    "max_drawdown_pct": -0.13,
-    "samples": 4,
+    "return_pct": 0.18,
+    "sharpe": 3.38,
+    "max_drawdown_pct": -0.15,
+    "samples": 6,
     "mode": "governor",
     "gap_threshold": 0.25,
-    "cycles": 3978,
-    "pause_cycles": 578,
+    "cycles": 7549,
+    "pause_cycles": 784,
     "window_days": 30,
     "from_date": "2026-05-25",
-    "to_date": "2026-05-28"
+    "to_date": "2026-05-30"
   },
   "simulated_modes": {
     "baseline": {
@@ -67,6 +67,6 @@
     }
   },
   "best_sim_mode": "baseline",
-  "recommendation": "Consider reviewing baseline \u2014 sim lead 16.9pp over 30d (live governor -0.0%). Change WISDOM_MODE in .env manually; bot does not auto-switch.",
-  "live_vs_best_sim_return_pp": -16.89
+  "recommendation": "Consider reviewing baseline \u2014 sim lead 16.7pp over 30d (live governor +0.2%). Change WISDOM_MODE in .env manually; bot does not auto-switch.",
+  "live_vs_best_sim_return_pp": -16.7
 }

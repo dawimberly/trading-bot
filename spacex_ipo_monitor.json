@@ -1,5 +1,5 @@
 {
-  "fetched_at": "2026-05-28T12:58:10",
+  "fetched_at": "2026-05-30T01:29:59",
   "enabled": true,
   "context": {
     "spacex_btc_disclosed": 18712,
@@ -8,10 +8,10 @@
     "note": "S-1 BTC treasury + SPCX perp/whale headlines vs BTC sleeve"
   },
   "summary": {
-    "headline_count": 178,
-    "btc_linked_count": 133,
-    "spcx_perp_count": 36,
-    "avg_sentiment": 0.1067,
+    "headline_count": 182,
+    "btc_linked_count": 132,
+    "spcx_perp_count": 50,
+    "avg_sentiment": 0.1099,
     "narrative": "hot_btc_narrative",
     "top_headlines": [
       {
@@ -21,6 +21,18 @@
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+S-1+Bitcoin+treasury&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 2,
         "crypto_hits": 8,
+        "spcx_perp_hits": 0,
+        "btc_linked": true,
+        "spcx_perp": false,
+        "sentiment": 0.0
+      },
+      {
+        "title": "SpaceX Heads Into Historic IPO With a $1.45 Billion Bitcoin Treasury on Its Books - Bitcoin Magazine",
+        "published": "Thu, 21 May 2026 07:00:00 GMT",
+        "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTFAwNXdvdkRCQW81bFNJdWJ6eThSdm5IWXVZQU42X3hBYXpZem94blpBV0ZDU1pnSW9HRTNCNjNZeVFQLUk5ZHpzTEdxaHJCeVJSS0VBWXRNdHJVWTBxVTMxcFNrQWtJSHI5OWUzb3B1UTM?oc=5",
+        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
+        "spacex_hits": 4,
+        "crypto_hits": 6,
         "spcx_perp_hits": 0,
         "btc_linked": true,
         "spcx_perp": false,
@@ -42,18 +54,6 @@
         "title": "SpaceX IPO filing gives crypto investors a new way to price Bitcoin exposure, X payments, and AI compute - CryptoSlate",
         "published": "Fri, 22 May 2026 10:45:52 GMT",
         "link": "https://news.google.com/rss/articles/CBMif0FVX3lxTE5VSWczY1BaRGhvNTRtdnpqSjY0TVUyaHBFT1VQRDlQcHJTdk9zbVJlSzhKODNNZmQ3TTVFRzBQMUtPUDJqVi1fMndCTkFzSzVBNEtpb2ZOOEVDUkg0ZURpTGZFUHo5eWRyODdVdXpPNEtETW1TenVpLVdlNkEwYkk?oc=5",
-        "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 4,
-        "crypto_hits": 6,
-        "spcx_perp_hits": 0,
-        "btc_linked": true,
-        "spcx_perp": false,
-        "sentiment": 0.0
-      },
-      {
-        "title": "SpaceX Heads Into Historic IPO With a $1.45 Billion Bitcoin Treasury on Its Books - Bitcoin Magazine",
-        "published": "Thu, 21 May 2026 13:13:15 GMT",
-        "link": "https://news.google.com/rss/articles/CBMicEFVX3lxTFAwNXdvdkRCQW81bFNJdWJ6eThSdm5IWXVZQU42X3hBYXpZem94blpBV0ZDU1pnSW9HRTNCNjNZeVFQLUk5ZHpzTEdxaHJCeVJSS0VBWXRNdHJVWTBxVTMxcFNrQWtJSHI5OWUzb3B1UTM?oc=5",
         "source_feed": "https://news.google.com/rss/search?q=SpaceX+IPO+Bitcoin&hl=en-US&gl=US&ceid=US:en",
         "spacex_hits": 4,
         "crypto_hits": 6,
@@ -89,18 +89,6 @@
         "sentiment": 0.0
       },
       {
-        "title": "SpaceX Pre-IPO Perpetual Futures Launch on Hyperliquid \u2013 Here\u2019s How it Works - CoinCentral",
-        "published": "Mon, 18 May 2026 07:24:45 GMT",
-        "link": "https://news.google.com/rss/articles/CBMinwFBVV95cUxPMVhCNmQ3WG51SHhfRXZ2NXFNVzFzZFo0SG83OVhJYW1GcHJLQUQ2bzh1VHU4a09ENEE4MjNEd0ctWHJwMk81NnlWcHNyeHktYTBMUk0wMEdwSDJnOFdUMVpLMnczLUpidnBBVmEzd0JzTmtXVnZ0b2dNanEyem5IM1ZHeUhIYW5BaUVPazNZSXJ4eFQ2a3hHcEdhWVBHeVU?oc=5",
-        "source_feed": "https://news.google.com/rss/search?q=SpaceX+SPCX+Hyperliquid+whale&hl=en-US&gl=US&ceid=US:en",
-        "spacex_hits": 4,
-        "crypto_hits": 0,
-        "spcx_perp_hits": 8,
-        "btc_linked": false,
-        "spcx_perp": true,
-        "sentiment": 0.0
-      },
-      {
         "title": "Binance Futures Will Launch USD\u24c8-Margined SPCXUSDT USD\u24c8-Margined Perpetual Contract Pre-IPO Trading (2026-05-21) - Binance",
         "published": "Wed, 20 May 2026 07:00:00 GMT",
         "link": "https://news.google.com/rss/articles/CBMikAFBVV95cUxNV25xclpXNGdXbFJRVTBvVjFoTGplRGZfTE1oU2loZWgyNVZUMlU0bDI1V2VhOFlWQlhFblBGbGdOYlR5M1M1Q2lYLWtuN1pHQmxHcVBTOW0yU01CQmpwU3diaWJnUlFQMGZ6T0Z0S1ZfdE5CU0ZIQzI5VE4ycVBpcTFPUXJMZjRNVUZBeFh3UXg?oc=5",
@@ -109,6 +97,18 @@
         "crypto_hits": 0,
         "spcx_perp_hits": 8,
         "btc_linked": false,
+        "spcx_perp": true,
+        "sentiment": 0.0
+      },
+      {
+        "title": "SPCX PRE-IPO PERP (Derivatives) to Canadian Dollar Price Today | Live SPCX to CAD Converter & Exchange Rate - CryptoRank",
+        "published": "Thu, 21 May 2026 01:10:19 GMT",
+        "link": "https://news.google.com/rss/articles/CBMiXkFVX3lxTE5tazIxRXVNWkwyVEtrUFMwZGpLVHlzM0Yyb19tRDdOTzNSTm5DS2hOWlM0WHpubEZqUzRmUnFzNXZOYzhHaDRKbW0ybGxKRzZUYnRXRU9uZ3N6TWJJLXc?oc=5",
+        "source_feed": "https://news.google.com/rss/search?q=SPCX+token+pre-IPO+perp&hl=en-US&gl=US&ceid=US:en",
+        "spacex_hits": 6,
+        "crypto_hits": 2,
+        "spcx_perp_hits": 8,
+        "btc_linked": true,
         "spcx_perp": true,
         "sentiment": 0.0
       }
@@ -123,12 +123,12 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+S-1+Bitcoin+treasury&hl=en-US&gl=US&ceid=US:en",
-      "count": 42,
+      "count": 38,
       "error": null
     },
     {
       "url": "https://news.google.com/rss/search?q=SpaceX+IPO+crypto&hl=en-US&gl=US&ceid=US:en",
-      "count": 99,
+      "count": 100,
       "error": null
     },
     {
@@ -138,7 +138,7 @@
     },
     {
       "url": "https://news.google.com/rss/search?q=SPCX+token+pre-IPO+perp&hl=en-US&gl=US&ceid=US:en",
-      "count": 19,
+      "count": 23,
       "error": null
     }
   ],
