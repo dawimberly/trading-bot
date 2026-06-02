@@ -20,6 +20,7 @@ from modules.pipeline_strategies import (
     run_equity_strategy,
     run_spy_exits,
     run_spy_strategy,
+    resolve_cycle_deploy,
 )
 from modules.portfolio_manager import PortfolioManager
 from modules.holdings_reconcile import reconcile
@@ -62,7 +63,7 @@ def _gap_wide(gap) -> bool:
 
 def _game_plan_signals(regime: str) -> dict:
     global _macro_daily_bootstrapped
-    if not config.GAME_PLAN_ENABLED:
+    if not config.game_plan_active():
         return {"ok": True, "stress": False, "yield_gate": False}
     if not _macro_daily_bootstrapped:
         ensure_macro_daily(refresh=True)
@@ -200,7 +201,7 @@ def _write_heartbeat(
             "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
-            "metal": config.METAL_SLEEVE_CAP_PCT if config.GAME_PLAN_ENABLED else 0.0,
+            "metal": config.METAL_SLEEVE_CAP_PCT if config.metal_sleeve_enabled() else 0.0,
             "cash_buffer": config.effective_cash_buffer_pct(),
         },
         "crypto_vol_only": config.CRYPTO_VOL_ONLY,
@@ -235,13 +236,20 @@ def _write_heartbeat(
         }
     if game_plan:
         payload["game_plan_state"] = game_plan
-    if config.GAME_PLAN_ENABLED:
+    if config.game_plan_active():
         payload["game_plan"] = {
             "enabled": True,
-            "metal_blend": config.metal_blend_weights(),
-            "metal_cap_pct": config.METAL_SLEEVE_CAP_PCT,
-            "stress_cash_pct": config.STRESS_CASH_PCT,
+            "yield_gate_only": config.GAME_PLAN_YIELD_GATE_ONLY,
             "yield_gate_enabled": config.YIELD_GATE_ENABLED,
+            **(
+                {
+                    "metal_blend": config.metal_blend_weights(),
+                    "metal_cap_pct": config.METAL_SLEEVE_CAP_PCT,
+                    "stress_cash_pct": config.STRESS_CASH_PCT,
+                }
+                if config.metal_sleeve_enabled()
+                else {}
+            ),
         }
     write_json_atomic(config.HEARTBEAT_FILE, payload)
 
@@ -259,11 +267,27 @@ def main():
     cash = float(account.cash)
     _last_equity = equity
 
-    halted = not risk_manager.check_drawdown(equity)
-    if halted:
+    prev_halted = risk_manager.halted
+    can_trade = risk_manager.check_drawdown(equity)
+    if not can_trade:
+        if risk_manager.should_liquidate_on_breach() and market_open:
+            from modules.game_plan import _trim_long_sleeves_for_cash
+
+            target = equity * config.HALT_TARGET_CASH_PCT
+            if cash < target:
+                trim_actions = _trim_long_sleeves_for_cash(executor, target - cash)
+                if trim_actions:
+                    print(
+                        f"--- Halt liquidation: {len(trim_actions)} trim(s) "
+                        f"toward {config.HALT_TARGET_CASH_PCT:.0%} cash ---"
+                    )
+                    account = executor._get_account()
+                    equity = float(account.equity)
+                    cash = float(account.cash)
         peak = risk_manager.peak_equity or equity
-        dd = (peak - equity) / peak if peak else 0
-        print("!!! RISK HALT: Max drawdown reached. Skipping cycle. !!!")
+        dd = risk_manager.current_drawdown(equity)
+        if not prev_halted:
+            print("!!! RISK HALT: Max drawdown reached. Skipping cycle. !!!")
         trade_journal.log_event("halt", equity=equity, cash=cash, notes="drawdown limit")
         alerts.notify_halt(equity, peak, dd)
         try:
@@ -273,6 +297,11 @@ def main():
         _write_heartbeat("HALTED", equity, cash, 0, 0, 0, True, market_open, None)
         return
 
+    if prev_halted and not risk_manager.halted:
+        print(
+            f"--- RISK RESUME: drawdown {risk_manager.current_drawdown(equity):.1%} "
+            f"below {config.HALT_RESUME_DRAWDOWN_PCT:.0%} ---"
+        )
     alerts.clear_halt_flag()
     _maybe_reconcile_startup(executor)
 
@@ -310,10 +339,13 @@ def main():
         if stress is False:
             pause_s = " | governor: gap wide, calm (trust price)"
     gp_s = ""
-    if config.GAME_PLAN_ENABLED:
+    if config.game_plan_active():
         gate = "GATE" if yield_gated else "open"
-        stress = "STRESS" if gp_signals.get("stress") else "calm"
-        gp_s = f" | GamePlan: {stress} | SPY {gate}"
+        if config.GAME_PLAN_YIELD_GATE_ONLY:
+            gp_s = f" | GamePlan: yield-only | SPY {gate}"
+        else:
+            stress = "STRESS" if gp_signals.get("stress") else "calm"
+            gp_s = f" | GamePlan: {stress} | SPY {gate}"
     print(
         f"--- Regime: {regime} | Vol: {vol} | "
         f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{gp_s} | "
@@ -402,6 +434,17 @@ def main():
         print(f"--- Stop-loss exits: {exits} ---")
 
     now = datetime.datetime.now()
+    resolve_cycle_deploy(
+        data,
+        executor,
+        regime,
+        now,
+        pair_cooldown,
+        volatility=vol,
+        spacex_snapshot=spacex_snapshot,
+        yield_gated=yield_gated,
+        market_open=market_open,
+    )
     c = run_crypto_strategy(
         data,
         executor,
@@ -439,6 +482,7 @@ def main():
             pair_cooldown,
             log_fn=_equity_log,
             portfolio_manager=portfolio_manager,
+            yield_gated=yield_gated,
         )
         gp_result = run_game_plan_cycle(
             executor,
@@ -467,7 +511,7 @@ def main():
                     )
     else:
         print("--- Equity session closed; skipping SPY and equity scans ---")
-        if config.GAME_PLAN_ENABLED:
+        if config.game_plan_active():
             gp_result = run_game_plan_cycle(
                 executor,
                 regime,
@@ -521,7 +565,7 @@ def main():
 
     sleeves = executor.sleeve_snapshot()
     metal_line = ""
-    if config.GAME_PLAN_ENABLED and "metal_value" in sleeves:
+    if config.metal_sleeve_enabled() and "metal_value" in sleeves:
         metal_line = (
             f" | Metal ${round(sleeves['metal_value'], 2)}/"
             f"${round(sleeves['metal_cap'], 2)}"
@@ -532,7 +576,7 @@ def main():
         f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)}{metal_line} ---"
     )
     gp_notes = ""
-    if config.GAME_PLAN_ENABLED and gp_result.get("enabled"):
+    if config.game_plan_active() and gp_result.get("enabled"):
         sig = gp_result.get("signals") or {}
         gp_notes = (
             f"game_plan stress={sig.get('stress')} gate={sig.get('yield_gate')} "
@@ -567,7 +611,7 @@ def main():
         wisdom,
         spacex_heartbeat,
         spacex_listing_heartbeat,
-        gp_result if config.GAME_PLAN_ENABLED else None,
+        gp_result if config.game_plan_active() else None,
     )
 
     wisdom_journal.log_cycle(
@@ -609,14 +653,21 @@ def _print_startup_banner():
         f"NYSE {alloc['nyse']:.0%} | "
         f"cash buffer {alloc['cash_buffer']:.0%} ---"
     )
-    if config.GAME_PLAN_ENABLED:
-        blend = config.metal_blend_weights()
-        print(
-            f"--- Game plan ON: metal {alloc['metal']:.0%} "
-            f"({blend['GLD']:.0%} GLD / {blend['SLV']:.0%} SLV / {blend['CPER']:.0%} CPER) | "
-            f"stress cash {config.STRESS_CASH_PCT:.0%} | yield gate "
-            f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'} ---"
-        )
+    if config.game_plan_active():
+        if config.GAME_PLAN_YIELD_GATE_ONLY:
+            print(
+                f"--- Game plan: yield-gate-only | yield gate "
+                f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'} ---"
+            )
+        else:
+            blend = config.metal_blend_weights()
+            print(
+                f"--- Game plan ON: metal {alloc['metal']:.0%} "
+                f"({blend['GLD']:.0%} GLD / {blend['SLV']:.0%} SLV / {blend['CPER']:.0%} CPER) | "
+                f"stress cash {config.STRESS_CASH_PCT:.0%} | yield gate "
+                f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'} ---"
+            )
+    config.print_recommended_stack_flags()
     print(
         f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
         f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"

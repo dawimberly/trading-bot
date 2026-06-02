@@ -49,7 +49,7 @@ def _trim_long_sleeves_for_cash(executor, need: float) -> list[dict]:
 
 
 def trim_to_stress_cash(executor, *, stress: bool) -> list[dict]:
-    if not stress or not config.GAME_PLAN_ENABLED:
+    if not stress or not config.metal_sleeve_enabled():
         return []
     account = executor._get_account()
     equity = float(account.equity)
@@ -63,7 +63,7 @@ def trim_to_stress_cash(executor, *, stress: bool) -> list[dict]:
 
 def rebalance_metal_sleeve(executor, *, stress: bool, market_open: bool) -> list[dict]:
     """Deploy 50/30/20 GLD/SLV/CPER on stress; exit on calm."""
-    if not config.GAME_PLAN_ENABLED or not market_open:
+    if not config.metal_sleeve_enabled() or not market_open:
         return []
 
     actions = []
@@ -105,7 +105,7 @@ def run_game_plan_cycle(
     signals: dict | None = None,
 ) -> dict:
     """One cycle: signals + optional metal rebalance + stress cash trim."""
-    if not config.GAME_PLAN_ENABLED:
+    if not config.game_plan_active():
         return {"enabled": False}
 
     daily = None

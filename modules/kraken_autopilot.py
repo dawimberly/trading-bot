@@ -247,7 +247,9 @@ def run_kraken_autopilot(
                     spy_intent["notional"] = _mirror_notional(config.KRAKEN_MAX_ORDER_USD)
                     summary["paper_mirror"].append(_execute_buy_intent(spy_intent))
 
-            nyse_intent = nyse_mirror_intent(data, regime, now, pair_cooldown)
+            nyse_intent = nyse_mirror_intent(
+                data, regime, now, pair_cooldown, yield_gated=yield_gated
+            )
             if nyse_intent and kraken_pair_for_symbol(nyse_intent["symbol"]):
                 nyse_intent["notional"] = _mirror_notional(config.KRAKEN_MAX_ORDER_USD)
                 summary["paper_mirror"].append(_execute_buy_intent(nyse_intent))

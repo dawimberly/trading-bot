@@ -7,6 +7,7 @@ from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 import config
+from modules import deployment_sizing
 
 
 class AlpacaExecutor:
@@ -26,12 +27,21 @@ class AlpacaExecutor:
         self._equity_session_open = None  # None => check Alpaca clock per order
         self._account = None
         self._positions = None
-
-    def refresh_cache(self):
+        self._cofire_notionals = {}
         """Fetch account + positions once per pipeline cycle."""
         self._account = self.client.get_account()
         self._positions = list(self.client.get_all_positions())
         return self._account
+
+    def begin_deployment_cycle(self):
+        self._cofire_notionals = {}
+        self._sizing_data = None
+
+    def set_sizing_context(self, data=None):
+        self._sizing_data = data
+
+    def set_cofire_allocations(self, allocations):
+        self._cofire_notionals = dict(allocations or {})
 
     def _invalidate_cache(self):
         self._account = None
@@ -186,19 +196,18 @@ class AlpacaExecutor:
     def spy_sleeve_value(self):
         return self._sleeve_exposure(self._is_spy_position)
 
-    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value):
+    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
-        cap = round(equity * sleeve_cap_pct, 2)
-        room = round(cap - sleeve_value, 2)
-        if room < config.MIN_NOTIONAL:
-            return None
-        per_trade = round(equity * config.RISK_PER_TRADE, 2)
-        raw = min(room, per_trade, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
-        if raw < config.MIN_NOTIONAL:
-            return None
-        return raw
+        return deployment_sizing.resolve_sleeve_notional(
+            equity,
+            cash,
+            sleeve_cap_pct,
+            sleeve_value,
+            sleeve_key or "",
+            self._cofire_notionals,
+        )
 
     def compute_notional(self):
         account = self._get_account()
@@ -212,21 +221,27 @@ class AlpacaExecutor:
         return self._compute_capped_notional(
             config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             self.crypto_sleeve_value(),
+            "crypto",
         )
 
     def compute_nyse_notional(self):
         return self._compute_capped_notional(
             config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
             self.nyse_sleeve_value(),
+            "nyse",
         )
 
     def spy_position_value(self):
         return self.spy_sleeve_value()
 
     def compute_spy_notional(self):
-        return self._compute_capped_notional(
+        base = self._compute_capped_notional(
             config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             self.spy_sleeve_value(),
+            "spy",
+        )
+        return deployment_sizing.apply_spy_ladder(
+            base, getattr(self, "_sizing_data", None)
         )
 
     def sleeve_snapshot(self):
@@ -245,7 +260,7 @@ class AlpacaExecutor:
             "nyse_value": nyse_v,
             "nyse_cap": equity * config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
         }
-        if config.GAME_PLAN_ENABLED:
+        if config.metal_sleeve_enabled():
             snap["metal_value"] = metal_v
             snap["metal_cap"] = equity * config.METAL_SLEEVE_CAP_PCT
         return snap

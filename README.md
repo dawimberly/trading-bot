@@ -1,6 +1,6 @@
 # PythonTrading
 
-Personal systematic fund on Alpaca paper: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), an optional **macro game plan** (yield gate + metal hedge + stress cash), shared risk controls, and SQLite market data from yfinance.
+Personal systematic fund on Alpaca paper: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), a **yield-gate-only** macro overlay (blocks hostile-rate SPY entries), shared risk controls, and SQLite market data from yfinance.
 
 ## Architecture
 
@@ -34,15 +34,15 @@ flowchart TB
 
 | Sleeve | Base cap | Strategy | When it trades |
 |--------|----------|----------|----------------|
-| **SPY** | 45% | Price > MA200 | US equity session open |
+| **SPY** | 45% | Price > MA200; exit on MA break | US equity session open |
 | **Crypto** | 20% | Z-score correlated pairs | **High volatility only** (`CRYPTO_VOL_ONLY`) |
 | **NYSE** | 20% | Strongest stock/ETF above MA50 (excludes SPY) | US equity session open |
-| **Metal** | 10% | GLD/SLV/CPER blend | Game plan only, on macro stress |
-| **Cash headroom** | ~15% (baseline) | — | Dry powder inside Alpaca for next automated buys |
+| **Cash buffer** | 15% | — | Structural headroom for next buys |
+| **Metal** | 0% (default) | GLD/SLV/CPER | Only when full game plan is on (not yield-gate-only) |
 
-On a $100k account with game plan **off**, SPY can hold at most ~$45k; crypto at most ~$20k; NYSE at most ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** within the sleeve cap (max $10k per order).
+On a $100k account with the **recommended** stack, SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** (adaptive chunks up to 5% when sleeve room allows; co-fire budget 6% when SPY and NYSE fire together), capped at $10k per order.
 
-When **game plan** is enabled (default), long sleeves are scaled to **90%** of these base caps so **10%** of equity can go to the metal hedge sleeve. Effective caps are computed at runtime by `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`.
+Effective caps come from `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`. With **yield-gate-only** (default), long sleeves use **full** base caps — no 0.9 scale and no metal sleeve.
 
 Tune base caps in `config.py`:
 
@@ -65,65 +65,64 @@ The **~15% cash** is **not** a standalone strategy sleeve. It is **structural he
 | **Dry powder** | Cash sitting in Alpaca above current positions — available for the next automated buy without breaching caps. |
 | **`STRESS_CASH_PCT` (25%)** | **Separate** macro defense. On stress days only, game plan trims toward 25% cash. Not the everyday 15% headroom. |
 
-**Game plan ON (default):**
+**Yield-gate-only (recommended default):** SPY 45% / crypto 20% / NYSE 20% / cash **15%** — full long caps, no metal sleeve.
 
-| Piece | Fraction of equity |
-|-------|-------------------|
-| SPY / crypto / NYSE (each scaled ×0.9) | 40.5% / 18% / 18% |
-| Metal sleeve (stress deploy) | 10% |
-| Calm cash headroom | **~13.5%** |
+**Full game plan** (`GAME_PLAN_YIELD_GATE_ONLY=false`): long sleeves ×0.9, metal 10%, cash ~13.5%; stress cash trim to 25% on macro stress.
 
-**Game plan OFF:** long sleeves use full base caps (85% total); calm cash headroom is **15%**.
+Preflight and `bot_heartbeat.json` report `effective_cash_buffer_pct()` alongside sleeve exposure.
 
-Preflight and `bot_heartbeat.json` report `effective_cash_buffer_pct()` alongside sleeve exposure so you can see headroom vs deployed capital.
+## Current Recommended Configuration (Post-Optimization)
 
-## Game plan (live default: ON)
+Session A/B grids (`scripts/analysis/*_results.md`) selected this stack for live + backtest parity. Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
 
-The **game plan** (`game_plan_gld_slv_cper`) adds macro hedging on top of the base fund. It is wired into `run_all.py` and enabled by default (`GAME_PLAN_ENABLED=true`).
+| Layer | Setting |
+|-------|---------|
+| **Game plan** | Yield-gate-only — `GAME_PLAN_YIELD_GATE_ONLY=true` (metal + stress cash off) |
+| **Sleeves** | 45% SPY / 20% crypto / 20% NYSE / 15% cash |
+| **SPY** | MA200 entry; `SPY_EXIT_ON_MA_BREAK=true` |
+| **NYSE** | Overlap filter when SPY active (`NYSE_SPY_CORR_MAX=0.80`) — optional off per `nyse_anti_overlap_results.md` |
+| **Crypto** | Vol-gated pairs only; min correlation 0.5 |
+| **Sizing** | `ADAPTIVE_CHUNK_ENABLED` + `COFIRE_BUDGET_ENABLED` |
+| **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
+| **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
+| **Wisdom** | `WISDOM_MODE=arbitrage`, `SENTIMENT_SOURCE=price` |
 
-| Piece | What it does |
-|-------|----------------|
-| **Yield gate** | Blocks **new SPY buys** when 10Y yield (TNX) is above MA50 and rising; falls back to TLT weakness |
-| **Stress cash** | On macro stress only, trims SPY/crypto/NYSE toward **25% cash** (not every day) |
-| **Metal sleeve (10%)** | On stress: deploy **50% GLD / 30% SLV / 20% CPER**; on calm: exit metals |
-| **Long sleeve scale** | SPY/crypto/NYSE caps use **90%** of base caps to reserve room for metals |
+Preflight prints the active stack via `config.print_recommended_stack_flags()`.
 
-**Stress** = SPY below MA200, OR TLT below MA50, OR bear/panic RHYME regime.
+## Game plan (yield-gate-only default)
 
-Game plan actions run during the **US equity session** (metals are ETFs). Crypto still runs 24/7 with its own vol gate.
+Macro overlay is wired into `run_all.py`. **Recommended:** yield gate only — blocks **new SPY buys** when 10Y yield (TNX) is above MA50 and rising (TLT weakness fallback). No metal deploy, no stress-cash trim, no 0.9 long-scale haircut.
 
-### Fresh-capital 2022 backtest (fair stress read)
+| Mode | Yield gate | Metal 10% | Stress cash | Long scale |
+|------|------------|-----------|-------------|------------|
+| **Yield-gate-only** (default) | yes | no | no | 1.0 |
+| Full `game_plan_gld_slv_cper` | yes | yes (50/30/20 GLD/SLV/CPER) | yes (25% cash on stress) | 0.9 |
 
-| Strategy | 2022 return | Sharpe |
-|----------|-------------|--------|
-| Baseline fund | +1.6% | 0.19 |
-| **Game plan (live blend)** | **+16.2%** | **0.83** |
-| VTI buy & hold | -20.0% | — |
+**Stress** (full plan only) = SPY below MA200, OR TLT below MA50, OR bear/panic RHYME regime.
 
-Full 2017–2023 window: game plan ~**+292%** vs baseline ~**+289%** (yield gate edge; metals help most in stress years).
+### Game plan A/B (2017–2026)
 
-Re-run:
+| Variant | Full-window return | Avg Sharpe |
+|---------|-------------------|------------|
+| Baseline | +629.67% | 0.56 |
+| yield_gate_only | +628.32% | **0.59** |
+| game_plan_gld_slv_cper | +519.07% | 0.52 |
 
-```powershell
-python scripts/research/backtest_game_plan_live.py
-```
+Fresh 2022: yield_gate_only **−3.94%** vs baseline **−8.63%** (+4.7 pp).
 
-### Game plan `.env` settings
+Re-run: `python scripts/analysis/game_plan_ab_test.py` or `python scripts/research/backtest_game_plan_live.py`.
+
+### Game plan `.env` (recommended)
 
 ```env
 GAME_PLAN_ENABLED=true
+GAME_PLAN_YIELD_GATE_ONLY=true
 YIELD_GATE_ENABLED=true
-METAL_SLEEVE_CAP_PCT=0.10
-METAL_BLEND_GLD=0.50
-METAL_BLEND_SLV=0.30
-METAL_BLEND_CPER=0.20
-STRESS_CASH_PCT=0.25
-WISDOM_MODE=arbitrage
 ```
 
-Set `GAME_PLAN_ENABLED=false` to revert to the baseline fund only.
+Full legacy blend: set `GAME_PLAN_YIELD_GATE_ONLY=false` and keep metal/stress env vars in `.env.example`.
 
-Preflight prints current macro signals (`stress`, `yield_gate`, `bond_stress`) and confirms GLD/SLV/CPER are in the data universe.
+Preflight prints macro signals (`stress`, `yield_gate`, `bond_stress`) when game plan is active.
 
 ## Quick start
 
@@ -175,13 +174,13 @@ python backtester.py --days 500
 python run_all.py
 ```
 
-Preflight checks paper mode, Alpaca connection, market data, and (when enabled) game plan macro signals + metal tickers. The bot then:
+Preflight checks paper mode, Alpaca connection, market data, and game plan macro signals. The bot then:
 
-- Enforces **sleeve caps** (SPY / crypto / NYSE / metal) on each buy
-- Runs **game plan** when enabled: yield gate, stress cash trim, GLD/SLV/CPER sleeve
+- Enforces **sleeve caps** (45/20/20/15%) on each buy
+- Runs **yield-gate-only** game plan by default (blocks hostile-rate SPY entries)
+- Uses **adaptive chunk** + **co-fire budget** sizing when multiple sleeves fire
 - Runs **crypto only in high-volatility** regimes (still skips panic/bear)
-- Applies **5% stop-loss** exits on open positions each cycle
-- **10% max drawdown** halts new trading
+- Applies **5% stop-loss** exits; **10% max drawdown** halt with **8% resume** and optional breach liquidation
 - Requires **0.5+ correlation** on crypto pairs
 - Writes **`paper_journal.csv`** and **`bot_heartbeat.json`** each cycle
 
@@ -261,45 +260,53 @@ Directional backtests remain useful for strategy design; the performance review 
 
 ## Backtesting
 
+Uses the same recommended flags as live (`config.print_recommended_stack_flags()` on startup).
+
 ```powershell
-# Full fund: SPY + vol-gated crypto + NYSE (daily bars)
-python backtester.py
+# Integrated fund (recommended stack; prints sleeve flags)
 python backtester.py --days 500
+python backtester.py --max              # full history with halt
+python backtester.py --max --no-halt    # validate crypto sleeve path
 
-# Game plan + metal sleeves (2017-2023 default)
-python backtester_metals.py
-python backtester_metals.py --from 2022 --to 2022
-
-# Live game plan summary (full window + fresh-capital 2022 stress test)
+# Game plan A/B grid (yield_gate_only vs full blend)
+python scripts/analysis/game_plan_ab_test.py
+python backtester_metals.py --from 2017 --to 2023
 python scripts/research/backtest_game_plan_live.py
 
-# Macro hedge variants (yield gate, GLD, dynamic cash)
+# Risk / sizing / NYSE refinement grids
+python scripts/analysis/risk_layer_ab.py
+python scripts/analysis/deployment_efficiency_ab.py
+python scripts/analysis/refinements_grid_ab.py
+python scripts/analysis/nyse_anti_overlap_ab.py
+
+# Macro hedge variants
 python backtester_macro_hedge.py --game-plan
 
-# SPY sleeve only — grid search all MA/allocation combos
-python backtest_spy.py
-python backtest_spy.py --compare
-python backtest_spy.py --all --days 500
+# SPY sleeve only
+python backtest_spy.py --days 500
 
-# Wisdom sentiment modes + game plan (daily bars)
-python backtester_wisdom.py
+# Wisdom modes
 python backtester_wisdom.py --from 2017 --to 2023
 
-# Fetch longer daily history first (free via yfinance)
 python fetch_data.py --daily --days 500
 ```
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | Integrated fund logic (shared strategies module) |
-| `backtester_metals.py` | Metal sleeves + `game_plan_gld_slv_cper` (50/30/20 GLD/SLV/CPER) |
-| `backtester_macro_hedge.py` | Yield gate, GLD hedge, stress cash, full game plan |
-| `scripts/research/backtest_game_plan_live.py` | Live blend vs baseline; saves `fund_game_plan_*.csv` |
-| `backtest_spy.py` | SPY MA200 sleeve in isolation; saves `spy_backtest_results.csv` |
-| `backtester_wisdom.py` | Price vs wisdom sentiment modes; includes game plan when enabled |
-| `scripts/analysis/live_vs_backtest_snapshot.py` | Aligned live vs sim comparison (`--refresh-eval`, `--reconcile`) |
-| `scripts/analysis/trade_reconciliation.py` | Journal signals vs Alpaca fills |
-| `scripts/maintenance/evaluate_wisdom.py` | Manual daily/monthly wisdom evaluation |
+| `backtester.py` | Integrated fund + sleeve-aware executor; `--max`, `--no-halt` |
+| `backtester_metals.py` | Game plan variants incl. `yield_gate_only` |
+| `backtester_macro_hedge.py` | Yield gate, GLD, stress cash |
+| `scripts/research/backtest_game_plan_live.py` | Live blend vs baseline CSVs |
+| `scripts/analysis/game_plan_ab_test.py` | Yield-gate-only vs full game plan |
+| `scripts/analysis/risk_layer_ab.py` | Halt resume + liquidate grid |
+| `scripts/analysis/deployment_efficiency_ab.py` | Adaptive chunk / co-fire |
+| `scripts/analysis/refinements_grid_ab.py` | SPY exit, ladder, NYSE beta |
+| `scripts/analysis/nyse_anti_overlap_ab.py` | NYSE–SPY correlation filter |
+| `scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md` | Post-optimization stack reference |
+| `backtest_spy.py` | SPY MA200 sleeve in isolation |
+| `backtester_wisdom.py` | Wisdom sentiment modes |
+| `scripts/analysis/live_vs_backtest_snapshot.py` | Aligned live vs sim |
+| `scripts/maintenance/evaluate_wisdom.py` | Manual wisdom evaluation |
 
 Live bot uses **5-minute** bars; backtests and wisdom sims use **daily** bars. Results are directional — use the performance review section for aligned live tracking.
 
@@ -353,11 +360,18 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `SENTIMENT_SOURCE` | No | Default `price` (free). Set `tavily` only if you have API quota |
 | `WISDOM_MODE` | No | Default `arbitrage`. Also: `baseline`, `web_regime`, `wisdom_pause` |
 | `WISDOM_GAP_THRESHOLD` | No | Web vs price divergence gate (default `0.25`) |
-| `GAME_PLAN_ENABLED` | No | Default `true` — yield gate + metal sleeve + stress cash |
+| `GAME_PLAN_ENABLED` | No | Default `true` |
+| `GAME_PLAN_YIELD_GATE_ONLY` | No | Default `true` — yield gate without metal/stress/0.9 scale |
 | `YIELD_GATE_ENABLED` | No | Default `true` — block new SPY buys on hostile rates |
-| `METAL_SLEEVE_CAP_PCT` | No | Metal sleeve cap (default `0.10`) |
-| `METAL_BLEND_GLD` / `SLV` / `CPER` | No | Weights within metal sleeve (default 50/30/20) |
-| `STRESS_CASH_PCT` | No | Cash target on macro stress (default `0.25`) |
+| `ADAPTIVE_CHUNK_ENABLED` | No | Default `true` — larger chunks when sleeve room allows |
+| `COFIRE_BUDGET_ENABLED` | No | Default `true` — shared budget when SPY+NYSE co-fire |
+| `SPY_EXIT_ON_MA_BREAK` | No | Default `true` |
+| `HALT_RESUME_DRAWDOWN_PCT` | No | Default `0.08` (set `0` for legacy never-resume) |
+| `HALT_LIQUIDATE_ON_BREACH` | No | Default `true` |
+| `NYSE_OVERLAP_FILTER_ENABLED` | No | Default `true`; `NYSE_SPY_CORR_MAX=0.80` |
+| `DERIVED_BEAR_PAUSE_ENABLED` | No | Default `false` |
+| `METAL_SLEEVE_CAP_PCT` | No | Full game plan only (default `0.10`) |
+| `STRESS_CASH_PCT` | No | Full game plan only (default `0.25`) |
 | `WISDOM_EVAL_ENABLED` | No | Daily self-eval (default `true`) |
 | `WISDOM_EVAL_DAYS` | No | Rolling window for scorecard (default `30`) |
 | `WISDOM_MONTHLY_ENABLED` | No | Calendar-month rollup + alert (default `true`) |
@@ -393,13 +407,14 @@ PythonTrading/
 │   ├── game_plan.py            # Metal sleeve + stress cash (live)
 │   ├── macro_signals.py        # TNX/TLT daily signals for game plan
 │   ├── alpaca_executor.py      # Sleeve caps + order sizing
+│   ├── deployment_sizing.py    # Adaptive chunk + co-fire budget
 │   ├── wisdom_evaluator.py     # Daily scorecard, live vs sim modes
 │   ├── data_refresh.py         # Session-aware data refresh
 │   ├── market_context.py       # Regime / volatility / sentiment
 │   ├── alerts.py
 │   └── ...
 └── scripts/
-    ├── analysis/           # Live vs backtest snapshot, trade reconciliation
+    ├── analysis/           # A/B grids, OPTIMIZED_SYSTEM_SUMMARY.md, live vs backtest
     ├── research/           # Game plan backtests, projections
     ├── db/                 # SQLite utilities
     ├── account/            # Alpaca + alerts (preflight, preflight_spy, verify)
@@ -414,7 +429,8 @@ PythonTrading/
 python scripts/account/preflight.py          # Pre-flight before paper month
 python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval
 python scripts/maintenance/evaluate_wisdom.py --force
-python scripts/research/backtest_game_plan_live.py  # Game plan backtest summary
+python scripts/research/backtest_game_plan_live.py
+python scripts/analysis/game_plan_ab_test.py
 python scripts/account/preflight_spy.py      # SPY-only standalone check
 python scripts/account/verify.py
 python scripts/account/check_account.py

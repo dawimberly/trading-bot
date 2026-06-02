@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import config
-from modules.pipeline_strategies import PAUSED_REGIMES
+from modules.pipeline_strategies import regime_entries_paused
 
 VALID_NARRATIVES = frozenset({"hot_btc_narrative", "btc_tied", "spcx_perp_active"})
 
@@ -45,12 +45,14 @@ def crypto_trading_allowed(
     regime: str,
     *,
     spacex_snapshot: dict | None = None,
+    data=None,
+    sentiment: float | None = None,
 ) -> dict:
     """
     Return whether crypto entries are allowed and why.
     Keys: allowed, vol, regime, spacex_override, reason
     """
-    if regime in PAUSED_REGIMES:
+    if regime_entries_paused(regime, data, sentiment):
         return {
             "allowed": False,
             "vol": volatility,

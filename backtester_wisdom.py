@@ -140,7 +140,7 @@ def run_fund_backtest(
 
         executor = BacktestExecutor(portfolio, prices)
         if use_game_plan:
-            stress = macro_stress(window, regime)
+            stress = macro_stress(window_full, regime)
             gated = config.YIELD_GATE_ENABLED and _yield_gate(window_full)
             if not gated:
                 total_spy += run_spy_strategy(

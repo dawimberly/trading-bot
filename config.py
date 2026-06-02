@@ -35,10 +35,32 @@ TICKER = "VTI"
 ASSET_TYPE = "STOCK"
 MA_WINDOW = 45
 
+# --- Recommended stack (session analysis; override any flag via .env) ---
+# Game plan ON, yield-gate-only (no metal sleeve / stress cash / 0.9 long scale).
+# NYSE anti-overlap vs SPY when corr > NYSE_SPY_CORR_MAX (default 0.80).
+# SPY_EXIT_ON_MA_BREAK, adaptive chunk + co-fire budget, halt resume 8% + liquidate.
+# DERIVED_BEAR_PAUSE stays off.
+#
 # --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
 FUND_CASH_BUFFER_PCT = 0.15
 SPY_SLEEVE_CAP_PCT = 0.45
 NYSE_SLEEVE_CAP_PCT = 0.20
+# NYSE picks vs SPY sleeve: skip high-beta / high-corr names when SPY is active
+_nyse_overlap_env = os.getenv("NYSE_OVERLAP_FILTER_ENABLED") or os.getenv(
+    "NYSE_ANTI_OVERLAP_ENABLED", "true"
+)
+NYSE_OVERLAP_FILTER_ENABLED = _nyse_overlap_env.lower() in ("1", "true", "yes")
+NYSE_ANTI_OVERLAP_ENABLED = NYSE_OVERLAP_FILTER_ENABLED
+NYSE_SPY_CORR_MAX = float(os.getenv("NYSE_SPY_CORR_MAX", "0.80"))
+NYSE_SPY_BETA_MAX = float(os.getenv("NYSE_SPY_BETA_MAX", "1.6"))
+NYSE_SPY_CORR_LOOKBACK = int(os.getenv("NYSE_SPY_CORR_LOOKBACK", "60"))
+NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Max Tech names in top-3 momentum when SPY on (0 = disabled; 1 = sector test variant)
+NYSE_SECTOR_TECH_CAP = int(os.getenv("NYSE_SECTOR_TECH_CAP", "0"))
 CRYPTO_SLEEVE_CAP_PCT = 0.20
 CRYPTO_VOL_ONLY = True  # crypto pairs only when cross-asset volatility is High
 
@@ -46,9 +68,18 @@ CRYPTO_VOL_ONLY = True  # crypto pairs only when cross-asset volatility is High
 SPY_BOT_SYMBOL = "SPY"
 SPY_MA_WINDOW = 200
 SPY_RISK_PER_TRADE = SPY_SLEEVE_CAP_PCT  # legacy alias for backtests
-SPY_EXIT_ON_MA_BREAK = False
+SPY_EXIT_ON_MA_BREAK = os.getenv("SPY_EXIT_ON_MA_BREAK", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 SPY_MA_WINDOWS = [20, 50, 100, 200]
 SPY_ALLOCATIONS = [0.10, 0.25, 0.50, 1.00]
+SPY_LADDER_SIZING_ENABLED = os.getenv("SPY_LADDER_SIZING_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 SPY_BACKTEST_RESULTS = "spy_backtest_results.csv"
 SPY_HEARTBEAT_FILE = "spy_bot_heartbeat.json"
 SPY_TRADE_HISTORY_LOG = "spy_trade_history.log"
@@ -56,11 +87,29 @@ SPY_PAPER_JOURNAL_CSV = "spy_paper_journal.csv"
 SPY_LEDGER_PATH = "spy_trading_history.jsonl"
 SPY_RISK_EVENTS_LOG = "spy_risk_events.log"
 REFRESH_INTERVAL = 900
-MAX_DRAWDOWN_PCT = 0.10
+MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "0.10"))
+# Resume entries when drawdown falls below this (0 = never resume, legacy halt)
+HALT_RESUME_DRAWDOWN_PCT = float(os.getenv("HALT_RESUME_DRAWDOWN_PCT", "0.08"))
+HALT_LIQUIDATE_ON_BREACH = os.getenv("HALT_LIQUIDATE_ON_BREACH", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+HALT_TARGET_CASH_PCT = float(os.getenv("HALT_TARGET_CASH_PCT", "0.25"))
 BACKTEST_DAYS = 365
 
 # --- Sentiment (regime input) — "price" is free and matches backtests ---
 SENTIMENT_SOURCE = os.getenv("SENTIMENT_SOURCE", "price").strip().lower()
+# Daily bars rarely hit ±0.5; lower for RHYME_B/E pause (0.5 = legacy, never fires)
+REGIME_SENTIMENT_THRESHOLD = float(os.getenv("REGIME_SENTIMENT_THRESHOLD", "0.5"))
+DERIVED_BEAR_PAUSE_ENABLED = os.getenv("DERIVED_BEAR_PAUSE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DERIVED_BEAR_SENTIMENT_THRESHOLD = float(
+    os.getenv("DERIVED_BEAR_SENTIMENT_THRESHOLD", "0.10")
+)
 
 # --- Wisdom layer (web mood + price math -> RHYME; see backtester_wisdom.py) ---
 # baseline | web_regime | arbitrage | wisdom_pause | governor
@@ -217,6 +266,12 @@ GAME_PLAN_ENABLED = os.getenv("GAME_PLAN_ENABLED", "true").lower() in (
     "true",
     "yes",
 )
+# Yield gate only: block SPY on hostile rates; no metal sleeve, stress cash, or 0.9 long scale
+GAME_PLAN_YIELD_GATE_ONLY = os.getenv("GAME_PLAN_YIELD_GATE_ONLY", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 YIELD_GATE_ENABLED = os.getenv("YIELD_GATE_ENABLED", "true").lower() in (
     "1",
     "true",
@@ -245,6 +300,18 @@ if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
 # --- Risk & sizing (paper month defaults) ---
 RISK_PER_TRADE = 0.02
 MAX_NOTIONAL_PER_ORDER = 10000.0
+ADAPTIVE_CHUNK_ENABLED = os.getenv("ADAPTIVE_CHUNK_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+COFIRE_BUDGET_ENABLED = os.getenv("COFIRE_BUDGET_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+ADAPTIVE_CHUNK_MAX_PCT = float(os.getenv("ADAPTIVE_CHUNK_MAX_PCT", "0.05"))
+COFIRE_BUDGET_PCT = float(os.getenv("COFIRE_BUDGET_PCT", "0.06"))
 MIN_NOTIONAL = 10.0
 STOP_LOSS_PCT = 0.05
 CRYPTO_MIN_CORRELATION = 0.5
@@ -389,9 +456,43 @@ def validate_metal_weights(
     return dict(weights)
 
 
+def metal_sleeve_enabled() -> bool:
+    """Full game plan metal sleeve (disabled in yield-gate-only mode)."""
+    return GAME_PLAN_ENABLED and not GAME_PLAN_YIELD_GATE_ONLY
+
+
+def game_plan_active() -> bool:
+    """Any game-plan mode (full or yield-gate-only)."""
+    return GAME_PLAN_ENABLED or GAME_PLAN_YIELD_GATE_ONLY
+
+
+def print_recommended_stack_flags() -> None:
+    """Log active recommended-stack flags (preflight / backtest startup)."""
+    gp = "yield-gate-only" if (
+        game_plan_active() and GAME_PLAN_YIELD_GATE_ONLY
+    ) else ("full" if game_plan_active() else "off")
+    print("--- Recommended stack flags ---")
+    print(f"  game_plan:              {gp}")
+    print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
+    print(f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} (corr max {NYSE_SPY_CORR_MAX})")
+    print(f"  spy_exit_on_ma_break:   {SPY_EXIT_ON_MA_BREAK}")
+    print(f"  adaptive_chunk:         {ADAPTIVE_CHUNK_ENABLED}")
+    print(f"  cofire_budget:          {COFIRE_BUDGET_ENABLED}")
+    print(
+        f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
+        f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
+    )
+    print(f"  derived_bear_pause:     {DERIVED_BEAR_PAUSE_ENABLED}")
+    alloc = fund_allocation_pct()
+    print(
+        f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
+        f"NYSE {alloc['nyse']:.0%} | metal {alloc['metal']:.0%} | cash {alloc['cash_buffer']:.0%}"
+    )
+
+
 def long_fund_scale() -> float:
-    """Reserve headroom for metal sleeve when game plan is on."""
-    if GAME_PLAN_ENABLED:
+    """Reserve headroom for metal sleeve when full game plan is on."""
+    if metal_sleeve_enabled():
         return max(0.5, 1.0 - METAL_SLEEVE_CAP_PCT)
     return 1.0
 
@@ -402,7 +503,7 @@ def effective_sleeve_cap(base_pct: float) -> float:
 
 def effective_cash_buffer_pct() -> float:
     """Cash headroom so long + metal sleeve caps sum to 100% of equity."""
-    metal = METAL_SLEEVE_CAP_PCT if GAME_PLAN_ENABLED else 0.0
+    metal = METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0
     long_caps = (
         SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
     ) * long_fund_scale()
@@ -421,7 +522,7 @@ def fund_allocation_pct() -> dict[str, float]:
         "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
         "crypto": effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT),
         "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),
-        "metal": METAL_SLEEVE_CAP_PCT if GAME_PLAN_ENABLED else 0.0,
+        "metal": METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0,
         "cash_buffer": effective_cash_buffer_pct(),
     }
 

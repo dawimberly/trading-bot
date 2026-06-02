@@ -1,8 +1,50 @@
 """Crypto pair and equity MA50 strategies shared by run_all.py and backtester.py."""
 
+import numpy as np
+
 import config
+from modules import deployment_sizing
 
 PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
+
+
+def regime_entries_paused(regime, data=None, sentiment=None):
+    """True when new entries should be blocked (rhyme pause or derived bear)."""
+    if regime in PAUSED_REGIMES:
+        return True
+    if not config.DERIVED_BEAR_PAUSE_ENABLED or data is None:
+        return False
+    if sentiment is None:
+        from modules.market_context import get_price_sentiment
+
+        sentiment = get_price_sentiment(data)
+    bullish, _ = _spy_market_up_signal(data, config.SPY_BOT_SYMBOL, config.SPY_MA_WINDOW)
+    if not bullish and sentiment < config.DERIVED_BEAR_SENTIMENT_THRESHOLD:
+        return True
+    return False
+# Sector tags for NYSE anti-overlap tests (subset of equity universe)
+NYSE_SECTOR_MAP = {
+    "AAPL": "Tech",
+    "MSFT": "Tech",
+    "NVDA": "Tech",
+    "AMD": "Tech",
+    "GOOGL": "Tech",
+    "AMZN": "Tech",
+    "TSLA": "Tech",
+    "META": "Tech",
+    "XOM": "Energy",
+    "CVX": "Energy",
+    "LNG": "Energy",
+    "RTX": "Defense",
+    "LMT": "Defense",
+    "KTOS": "Defense",
+    "JPM": "Financials",
+    "BAC": "Financials",
+    "GS": "Financials",
+    "JNJ": "Healthcare",
+    "UNH": "Healthcare",
+    "PFE": "Healthcare",
+}
 CRYPTO_Z_THRESHOLD = 2.0
 MAX_CRYPTO_TRADES = 2
 MAX_EQUITY_TRADES = 1
@@ -53,7 +95,10 @@ def crypto_trade_intents(
     if len(crypto_cols) < 2:
         return []
     gate = crypto_trading_allowed(
-        volatility or "Low", regime, spacex_snapshot=spacex_snapshot
+        volatility or "Low",
+        regime,
+        spacex_snapshot=spacex_snapshot,
+        data=data,
     )
     if not gate["allowed"]:
         return []
@@ -175,6 +220,102 @@ def _equity_momentum_candidates(data, equity_cols):
     return [s for _, s in rows]
 
 
+def _is_nyse_tech(symbol):
+    return NYSE_SECTOR_MAP.get(symbol) == "Tech"
+
+
+def _spy_vs_equity_metrics(data, symbol, lookback=None):
+    """60d return correlation and beta vs SPY (0, 0 if insufficient data)."""
+    lookback = lookback or config.NYSE_SPY_CORR_LOOKBACK
+    spy = config.SPY_BOT_SYMBOL
+    if symbol not in data.columns or spy not in data.columns:
+        return 0.0, 0.0
+    rets = data[[symbol, spy]].pct_change().dropna().tail(lookback)
+    if len(rets) < 20:
+        return 0.0, 0.0
+    corr = float(rets[symbol].corr(rets[spy]))
+    if not np.isfinite(corr):
+        corr = 0.0
+    spy_var = float(rets[spy].var())
+    if spy_var < 1e-12:
+        return corr, 0.0
+    beta = float(rets[symbol].cov(rets[spy]) / spy_var)
+    if not np.isfinite(beta):
+        beta = 0.0
+    return corr, beta
+
+
+def _spy_sleeve_active(data, *, yield_gated=False, regime=None):
+    if regime_entries_paused(regime, data) or yield_gated:
+        return False
+    bullish, _ = _spy_market_up_signal(data, config.SPY_BOT_SYMBOL, config.SPY_MA_WINDOW)
+    return bullish
+
+
+def _filter_nyse_anti_overlap(data, ranked):
+    """Drop names too correlated / high-beta vs SPY; keep momentum order."""
+    if not ranked:
+        return ranked
+    out = []
+    for symbol in ranked:
+        corr, beta = _spy_vs_equity_metrics(data, symbol)
+        if corr > config.NYSE_SPY_CORR_MAX or beta > config.NYSE_SPY_BETA_MAX:
+            continue
+        out.append(symbol)
+    return out
+
+
+def _apply_sector_tech_cap(ranked, *, top_n=3, max_tech=None):
+    """At most max_tech Tech names in the first top_n momentum slots."""
+    max_tech = config.NYSE_SECTOR_TECH_CAP if max_tech is None else max_tech
+    if max_tech <= 0 or not ranked:
+        return ranked
+    primary = []
+    deferred = []
+    tech_count = 0
+    for sym in ranked:
+        if len(primary) < top_n:
+            if _is_nyse_tech(sym) and tech_count >= max_tech:
+                deferred.append(sym)
+                continue
+            if _is_nyse_tech(sym):
+                tech_count += 1
+            primary.append(sym)
+        else:
+            deferred.append(sym)
+    fill = []
+    remaining = []
+    for sym in deferred:
+        if len(primary) + len(fill) < top_n:
+            if _is_nyse_tech(sym) and tech_count >= max_tech:
+                remaining.append(sym)
+                continue
+            if _is_nyse_tech(sym):
+                tech_count += 1
+            fill.append(sym)
+        else:
+            remaining.append(sym)
+    return primary + fill + remaining
+
+
+def _equity_momentum_ranked(
+    data,
+    equity_cols,
+    *,
+    yield_gated=False,
+    regime=None,
+):
+    ranked = _equity_momentum_candidates(data, equity_cols)
+    if not ranked:
+        return ranked
+    if _spy_sleeve_active(data, yield_gated=yield_gated, regime=regime):
+        if config.NYSE_SECTOR_TECH_CAP > 0:
+            ranked = _apply_sector_tech_cap(ranked)
+        if config.NYSE_OVERLAP_FILTER_ENABLED:
+            ranked = _filter_nyse_anti_overlap(data, ranked)
+    return ranked
+
+
 def _spy_market_up_signal(data, symbol, ma_window):
     """True when price is above the moving average (market-up bet)."""
     if symbol not in data.columns:
@@ -195,6 +336,190 @@ def _holds_symbol(executor, symbol):
         return any(p.symbol == symbol for p in executor.client.get_all_positions())
     except Exception:
         return False
+
+
+def _sleeve_room(executor, cap_pct, value_fn):
+    if hasattr(executor, "portfolio"):
+        equity = executor.portfolio.equity(executor.prices)
+    else:
+        account = executor._get_account()
+        equity = float(account.equity)
+    cap = round(equity * cap_pct, 2)
+    return round(cap - value_fn(), 2)
+
+
+def _spy_buy_intent(
+    data,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    yield_gated=False,
+    symbol=None,
+    ma_window=None,
+):
+    symbol = symbol or config.SPY_BOT_SYMBOL
+    ma_window = ma_window or config.SPY_MA_WINDOW
+    if regime_entries_paused(regime, data) or yield_gated:
+        return False
+    bullish, _ = _spy_market_up_signal(data, symbol, ma_window)
+    if not bullish:
+        return False
+    pair_key = f"{symbol}/MA{ma_window}"
+    return not _on_cooldown(
+        pair_cooldown,
+        pair_key,
+        now,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+    )
+
+
+def _nyse_buy_intent(
+    data,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    yield_gated=False,
+):
+    if regime_entries_paused(regime, data):
+        return False
+    equity_cols = [
+        c
+        for c in data.columns
+        if not config.is_crypto(c)
+        and c != config.SPY_BOT_SYMBOL
+        and not config.is_metal_symbol(c)
+    ]
+    ranked = _equity_momentum_ranked(
+        data, equity_cols, yield_gated=yield_gated, regime=regime
+    )
+    if not ranked:
+        return False
+    pair_key = ranked[0] + "/MA50"
+    return not _on_cooldown(
+        pair_cooldown,
+        pair_key,
+        now,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+    )
+
+
+def _crypto_buy_intent(
+    data,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    volatility=None,
+    spacex_snapshot=None,
+):
+    intents = crypto_trade_intents(
+        data,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        volatility=volatility,
+        spacex_snapshot=spacex_snapshot,
+    )
+    return any(i.get("side") == "buy" for i in intents)
+
+
+def resolve_cycle_deploy(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    volatility=None,
+    spacex_snapshot=None,
+    yield_gated=False,
+    market_open=True,
+):
+    """Pre-compute co-fire sleeve notionals when 2+ sleeves want to buy."""
+    if hasattr(executor, "begin_deployment_cycle"):
+        executor.begin_deployment_cycle()
+    else:
+        executor.set_cofire_allocations({})
+        return
+
+    if hasattr(executor, "set_sizing_context"):
+        executor.set_sizing_context(data)
+
+    if not config.COFIRE_BUDGET_ENABLED:
+        return
+
+    rooms = {}
+    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
+    crypto_cap = config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
+    nyse_cap = config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT)
+
+    if market_open and _spy_buy_intent(
+        data,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        yield_gated=yield_gated,
+    ):
+        room = _sleeve_room(executor, spy_cap, executor.spy_sleeve_value)
+        if room >= config.MIN_NOTIONAL:
+            rooms["spy"] = room
+
+    if _crypto_buy_intent(
+        data,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        volatility=volatility,
+        spacex_snapshot=spacex_snapshot,
+    ):
+        room = _sleeve_room(executor, crypto_cap, executor.crypto_sleeve_value)
+        if room >= config.MIN_NOTIONAL:
+            rooms["crypto"] = room
+
+    if market_open and _nyse_buy_intent(
+        data,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        yield_gated=yield_gated,
+    ):
+        room = _sleeve_room(executor, nyse_cap, executor.nyse_sleeve_value)
+        if room >= config.MIN_NOTIONAL:
+            rooms["nyse"] = room
+
+    if len(rooms) < 2:
+        return
+
+    if hasattr(executor, "portfolio"):
+        equity = executor.portfolio.equity(executor.prices)
+        cash = executor.portfolio.cash
+    else:
+        account = executor._get_account()
+        equity = float(account.equity)
+        cash = float(account.cash)
+
+    allocations = deployment_sizing.compute_cofire_allocations(equity, cash, rooms)
+    executor.set_cofire_allocations(allocations)
 
 
 def run_spy_exits(
@@ -250,7 +575,7 @@ def run_spy_strategy(
     """Buy SPY when above MA — a simple bet that the broad market keeps rising."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
-    if regime in PAUSED_REGIMES:
+    if regime_entries_paused(regime, data):
         return 0
     if yield_gated:
         return 0
@@ -298,9 +623,10 @@ def run_equity_strategy(
     max_trades=MAX_EQUITY_TRADES,
     log_fn=None,
     portfolio_manager=None,
+    yield_gated=False,
 ):
     """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
-    if regime in PAUSED_REGIMES:
+    if regime_entries_paused(regime, data):
         return 0
     equity_cols = [
         c
@@ -309,7 +635,9 @@ def run_equity_strategy(
         and c != config.SPY_BOT_SYMBOL
         and not config.is_metal_symbol(c)
     ]
-    ranked = _equity_momentum_candidates(data, equity_cols)
+    ranked = _equity_momentum_ranked(
+        data, equity_cols, yield_gated=yield_gated, regime=regime
+    )
     if not ranked:
         return 0
 
@@ -331,6 +659,12 @@ def run_equity_strategy(
             notional = executor.compute_nyse_notional()
             if notional is None:
                 continue
+            if config.NYSE_BETA_SCALING_ENABLED:
+                _, beta = _spy_vs_equity_metrics(data, symbol)
+                scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
+                if scaled < config.MIN_NOTIONAL:
+                    continue
+                notional = scaled
         order = executor.execute_order(symbol, "buy", notional=notional)
         if not _count_if_filled(executor, order):
             continue
@@ -359,7 +693,7 @@ def spy_mirror_intent(
     """Intent to mirror SPY sleeve buy on Kraken (QQQ/SPY .EQ), or None."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
-    if regime in PAUSED_REGIMES or yield_gated:
+    if regime_entries_paused(regime, data) or yield_gated:
         return None
     bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
     if not bullish:
@@ -383,9 +717,10 @@ def nyse_mirror_intent(
     pair_cooldown,
     *,
     cooldown_seconds=COOLDOWN_SECONDS,
+    yield_gated=False,
 ) -> dict | None:
     """Top MA50 momentum equity intent for Kraken mirror."""
-    if regime in PAUSED_REGIMES:
+    if regime_entries_paused(regime, data):
         return None
     equity_cols = [
         c
@@ -394,7 +729,9 @@ def nyse_mirror_intent(
         and c != config.SPY_BOT_SYMBOL
         and not config.is_metal_symbol(c)
     ]
-    ranked = _equity_momentum_candidates(data, equity_cols)
+    ranked = _equity_momentum_ranked(
+        data, equity_cols, yield_gated=yield_gated, regime=regime
+    )
     if not ranked:
         return None
     symbol = ranked[0]

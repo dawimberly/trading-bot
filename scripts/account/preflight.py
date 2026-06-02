@@ -45,7 +45,7 @@ def run():
     print("\n--- Refreshing 5m market data ---")
     try:
         symbols = list(config.equity_universe())
-        if config.GAME_PLAN_ENABLED:
+        if config.metal_sleeve_enabled():
             symbols.extend(s for s in config.live_metal_universe() if s not in symbols)
         fetch_and_store(symbols)
         print(f"[OK] fetch_data complete ({len(symbols)} equity tickers incl. metals)")
@@ -67,24 +67,32 @@ def run():
     else:
         print("[WARN] VTI missing from data")
 
-    if config.GAME_PLAN_ENABLED:
-        print("\n--- Game plan (game_plan_gld_slv_cper) ---")
-        blend = config.metal_blend_weights()
+    if config.game_plan_active():
         alloc = config.fund_allocation_pct()
-        print(
-            f"[OK] Enabled | metal {alloc['metal']:.0%} "
-            f"({blend['GLD']:.0%} GLD / {blend['SLV']:.0%} SLV / {blend['CPER']:.0%} CPER)"
-        )
-        print(
-            f"     Cash buffer {alloc['cash_buffer']:.0%} | "
-            f"stress cash {config.STRESS_CASH_PCT:.0%} | "
-            f"yield gate {'ON' if config.YIELD_GATE_ENABLED else 'OFF'}"
-        )
-        for sym in config.live_metal_universe():
-            if sym in data.columns or sym in config.UNIVERSE:
-                print(f"[OK] {sym} in universe")
-            else:
-                print(f"[WARN] {sym} missing from price data")
+        if config.GAME_PLAN_YIELD_GATE_ONLY:
+            print("\n--- Game plan (yield-gate-only) ---")
+            print(
+                f"[OK] Enabled | full sleeve caps | yield gate "
+                f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'}"
+            )
+            print(f"     Cash buffer {alloc['cash_buffer']:.0%} | metal sleeve off")
+        else:
+            print("\n--- Game plan (game_plan_gld_slv_cper) ---")
+            blend = config.metal_blend_weights()
+            print(
+                f"[OK] Enabled | metal {alloc['metal']:.0%} "
+                f"({blend['GLD']:.0%} GLD / {blend['SLV']:.0%} SLV / {blend['CPER']:.0%} CPER)"
+            )
+            print(
+                f"     Cash buffer {alloc['cash_buffer']:.0%} | "
+                f"stress cash {config.STRESS_CASH_PCT:.0%} | "
+                f"yield gate {'ON' if config.YIELD_GATE_ENABLED else 'OFF'}"
+            )
+            for sym in config.live_metal_universe():
+                if sym in data.columns or sym in config.UNIVERSE:
+                    print(f"[OK] {sym} in universe")
+                else:
+                    print(f"[WARN] {sym} missing from price data")
         try:
             ensure_macro_daily(refresh=True)
             daily = load_daily_matrix(days=450)
@@ -99,7 +107,10 @@ def run():
         except Exception as e:
             print(f"[WARN] Macro daily bootstrap: {e}")
     else:
-        print("\n[INFO] GAME_PLAN_ENABLED=false — baseline fund only")
+        print("\n[INFO] game_plan off — baseline fund only")
+
+    print()
+    config.print_recommended_stack_flags()
 
     print("\n--- Settings ---")
     wisdom_mode = config.WISDOM_MODE.strip().lower()

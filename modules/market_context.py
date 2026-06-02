@@ -67,12 +67,13 @@ def get_sentiment(data):
 
 def get_market_regime(sentiment, volatility):
     """Classify market into one of five regime 'rhymes'."""
-    if sentiment > 0.5 and volatility == "High":
+    thresh = config.REGIME_SENTIMENT_THRESHOLD
+    if sentiment > thresh and volatility == "High":
         return "RHYME_A: Euphoric_Volatility"
-    if sentiment < -0.5 and volatility == "High":
+    if sentiment < -thresh and volatility == "High":
         return "RHYME_B: Panic_Volatility"
-    if sentiment > 0.5 and volatility == "Low":
+    if sentiment > thresh and volatility == "Low":
         return "RHYME_C: Steady_Bullish_Growth"
-    if sentiment < -0.5 and volatility == "Low":
+    if sentiment < -thresh and volatility == "Low":
         return "RHYME_E: Steady_Bearish_Decline"
     return "RHYME_D: Range_Bound_Neutral"

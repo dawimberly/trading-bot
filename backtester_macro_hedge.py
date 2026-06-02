@@ -314,7 +314,7 @@ def run_macro_backtest(
         sentiment = get_price_sentiment(window)
         vol = get_volatility(window)
         regime = get_market_regime(sentiment, vol)
-        stress = macro_stress(window, regime)
+        stress = macro_stress(window_full, regime)
         if stress:
             stress_days += 1
 
@@ -363,9 +363,9 @@ def run_macro_backtest(
 
         if sh_book and "SH" in prices_full.index and np.isfinite(prices_full["SH"]):
             sh_px = float(prices_full["SH"])
-            if _sh_enter(regime, window):
+            if _sh_enter(regime, window_full):
                 sh_trades += sh_book.deploy("SH", sh_px)
-            elif _sh_exit(regime, window):
+            elif _sh_exit(regime, window_full):
                 sh_trades += sh_book.exit_all("SH", sh_px)
 
     curve = pd.Series(equity_curve, index=data.index[start_i:])
