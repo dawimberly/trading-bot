@@ -23,7 +23,10 @@ def load_close_matrix(db_path=None, interval="5m", days=None):
     tables = [t[0] for t in cursor.fetchall()]
 
     if interval == "1d":
-        tables = [t for t in tables if t.endswith("_daily")]
+        # Only fund-universe tickers (exclude macro-only tables like SH_daily that can
+        # cap the shared index before newer sleeve bars are visible).
+        allowed = {f"{ticker}_daily" for ticker in config.UNIVERSE}
+        tables = [t for t in tables if t.endswith("_daily") and t in allowed]
     else:
         tables = [t for t in tables if "_5m" not in t and "_daily" not in t]
 

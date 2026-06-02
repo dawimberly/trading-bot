@@ -68,6 +68,11 @@ def _metrics_from_equity(series: pd.Series) -> dict:
     }
 
 
+def _daily_equity_from_journal(df: pd.DataFrame) -> pd.Series:
+    """Last equity per calendar day — matches daily sim bar cadence."""
+    return df.groupby(df["timestamp"].dt.date)["equity"].last().astype(float)
+
+
 def live_metrics(window_days: int) -> dict | None:
     df = load_journal()
     if df.empty:
@@ -77,27 +82,36 @@ def live_metrics(window_days: int) -> dict | None:
     if df.empty:
         return None
 
-    daily = df.groupby(df["timestamp"].dt.date)["equity"].last()
+    daily = _daily_equity_from_journal(df)
     active_mode = df["active_mode"].iloc[-1]
     pause_cycles = int(
         df["wisdom_paused"].astype(str).str.lower().isin(("true", "1", "yes")).sum()
     )
-    metrics = _metrics_from_equity(daily.astype(float))
+    metrics = _metrics_from_equity(daily)
     metrics.update(
         {
             "mode": active_mode,
             "gap_threshold": float(df["gap_threshold"].iloc[-1]),
+            "equity_basis": "daily_last",
+            "daily_samples": int(len(daily)),
+            "intraday_cycles": int(len(df)),
             "cycles": int(len(df)),
             "pause_cycles": pause_cycles,
             "window_days": window_days,
             "from_date": str(daily.index.min()),
             "to_date": str(daily.index.max()),
+            "start_equity": round(float(daily.iloc[0]), 2),
+            "end_equity": round(float(daily.iloc[-1]), 2),
         }
     )
     return metrics
 
 
-def simulate_modes(window_days: int) -> dict[str, dict]:
+def simulate_modes(
+    window_days: int,
+    period_start: date | None = None,
+    period_end: date | None = None,
+) -> dict[str, dict]:
     data = load_close_matrix(interval="1d")
     if len(data) < MIN_HISTORY + 5:
         data = _ensure_daily_data(window_days + MIN_HISTORY + 30, refresh=False)
@@ -106,6 +120,11 @@ def simulate_modes(window_days: int) -> dict[str, dict]:
         data = data.iloc[-need:]
     if len(data) < MIN_HISTORY + 5:
         return {}
+
+    if period_end is None:
+        period_end = data.index[-1].date() if len(data) else date.today()
+    if period_start is None:
+        period_start = period_end - timedelta(days=window_days)
 
     monthly_web = load_monthly_web_sentiment()
     results = {}
@@ -117,15 +136,20 @@ def simulate_modes(window_days: int) -> dict[str, dict]:
                 mode,
                 gap_threshold=config.WISDOM_GAP_THRESHOLD,
             )
-            results[mode] = {
-                "return_pct": row["total_return_pct"],
-                "sharpe": row["sharpe"],
-                "max_drawdown_pct": row["max_drawdown_pct"],
-                "orders": row["orders"],
-                "paused_days": row["paused_days"],
-                "from_date": str(row["start"]),
-                "to_date": str(row["end"]),
-            }
+            aligned = _period_metrics_from_backtest_row(row, period_start, period_end)
+            if "return_pct" in aligned:
+                results[mode] = aligned
+                if row.get("game_plan"):
+                    results[mode]["game_plan"] = True
+                    results[mode]["yield_gate_days"] = row.get("yield_gate_days", 0)
+                    results[mode]["cash_trims"] = row.get("cash_trims", 0)
+                    results[mode]["metal_trades"] = row.get("metal_trades", 0)
+            else:
+                results[mode] = {
+                    "error": aligned.get("error", "alignment failed"),
+                    "backtest_from": str(row["start"]),
+                    "backtest_to": str(row["end"]),
+                }
         except Exception as exc:
             results[mode] = {"error": str(exc)}
     return results
@@ -146,15 +170,18 @@ def live_metrics_for_month(year: int, month: int) -> dict | None:
     if df.empty:
         return None
 
-    daily = df.groupby(df["timestamp"].dt.date)["equity"].last()
+    daily = _daily_equity_from_journal(df)
     pause_cycles = int(
         df["wisdom_paused"].astype(str).str.lower().isin(("true", "1", "yes")).sum()
     )
-    metrics = _metrics_from_equity(daily.astype(float))
+    metrics = _metrics_from_equity(daily)
     metrics.update(
         {
             "mode": df["active_mode"].iloc[-1],
             "gap_threshold": float(df["gap_threshold"].iloc[-1]),
+            "equity_basis": "daily_last",
+            "daily_samples": int(len(daily)),
+            "intraday_cycles": int(len(df)),
             "cycles": int(len(df)),
             "pause_cycles": pause_cycles,
             "month": f"{year:04d}-{month:02d}",
@@ -347,7 +374,11 @@ def run_evaluation(force: bool = False) -> dict | None:
 
     window = config.WISDOM_EVAL_DAYS
     live = live_metrics(window)
-    simulated = simulate_modes(window)
+    period_start = period_end = None
+    if live:
+        period_start = date.fromisoformat(str(live["from_date"]))
+        period_end = date.fromisoformat(str(live["to_date"]))
+    simulated = simulate_modes(window, period_start=period_start, period_end=period_end)
     best_sim = None
     valid = {k: v for k, v in simulated.items() if "return_pct" in v}
     if valid:
@@ -360,6 +391,8 @@ def run_evaluation(force: bool = False) -> dict | None:
             "wisdom_mode": config.WISDOM_MODE,
             "gap_threshold": config.WISDOM_GAP_THRESHOLD,
             "web_cache_hours": config.WEB_SENTIMENT_CACHE_HOURS,
+            "game_plan_enabled": config.GAME_PLAN_ENABLED,
+            "live_equity_basis": "daily_last",
         },
         "live": live,
         "simulated_modes": simulated,
@@ -369,6 +402,11 @@ def run_evaluation(force: bool = False) -> dict | None:
     if live and best_sim and best_sim in valid:
         scorecard["live_vs_best_sim_return_pp"] = round(
             live.get("return_pct", 0) - valid[best_sim]["return_pct"], 2
+        )
+    active_mode = (live or {}).get("mode", config.WISDOM_MODE)
+    if live and active_mode in valid:
+        scorecard["live_vs_active_sim_return_pp"] = round(
+            live.get("return_pct", 0) - valid[active_mode]["return_pct"], 2
         )
 
     with open(_scorecard_path(), "w", encoding="utf-8") as f:

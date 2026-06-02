@@ -46,30 +46,81 @@ def _slice_data(data: pd.DataFrame, year_from: int, year_to: int) -> pd.DataFram
     return data.loc[(data.index >= start) & (data.index <= end)]
 
 
+def _attach_macro_columns(data: pd.DataFrame) -> pd.DataFrame:
+    """Merge TLT/TNX for yield gate and bond stress (lazy import avoids cycles)."""
+    out = data.copy()
+    from backtester_macro_hedge import _load_macro_column
+
+    for col in ("TLT", "TNX"):
+        if col in out.columns and out[col].notna().sum() >= 50:
+            continue
+        series = _load_macro_column(col)
+        if not series.empty:
+            out[col] = series.reindex(out.index).ffill()
+    return out
+
+
 def run_fund_backtest(
     data: pd.DataFrame,
     monthly_web: pd.Series,
     mode: str,
     gap_threshold: float = 0.25,
+    *,
+    game_plan: bool | None = None,
+    initial_capital: float = 10_000.0,
 ) -> dict:
     if len(data) < MIN_HISTORY:
         raise ValueError(f"Need {MIN_HISTORY}+ rows; got {len(data)}")
 
-    portfolio = BacktestPortfolio()
+    use_game_plan = config.GAME_PLAN_ENABLED if game_plan is None else game_plan
+    if use_game_plan:
+        from backtester_macro_hedge import (
+            HedgeSleevePortfolio,
+            _trim_to_cash_target,
+            _yield_gate,
+            fund_columns,
+            macro_stress,
+        )
+        from backtester_metals import _deploy_metal_basket, _exit_metal_basket
+
+        data = _attach_macro_columns(data)
+        fund_cols = fund_columns(data)
+        metal_weights = config.metal_blend_weights()
+        long_cap = initial_capital * config.long_fund_scale()
+        metal_cap = initial_capital * config.METAL_SLEEVE_CAP_PCT
+        portfolio = BacktestPortfolio(long_cap)
+        metal_book = HedgeSleevePortfolio(metal_cap)
+    else:
+        fund_cols = None
+        metal_weights = None
+        metal_book = None
+        portfolio = BacktestPortfolio(initial_capital)
+
     pair_cooldown = {}
     risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
     equity_curve = []
     regime_counts = {}
     total_crypto = total_equity = total_spy = total_orders = 0
     paused_days = 0
+    yield_gate_days = 0
+    cash_trims = 0
+    metal_trades = 0
     halted = False
     start_i = MIN_HISTORY
 
     for i in range(start_i, len(data)):
-        window = data.iloc[: i + 1]
+        window_full = data.iloc[: i + 1]
+        window = window_full[fund_cols] if fund_cols is not None else window_full
         prices = window.iloc[-1]
+        prices_full = window_full.iloc[-1]
         ts = data.index[i]
-        eq = portfolio.equity(prices)
+
+        if use_game_plan:
+            long_eq = portfolio.equity(prices)
+            metal_eq = metal_book.equity(prices_full)
+            eq = long_eq + metal_eq
+        else:
+            eq = portfolio.equity(prices)
         equity_curve.append(eq)
 
         if halted or not risk_manager.check_drawdown(eq):
@@ -88,6 +139,30 @@ def run_fund_backtest(
         regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
         executor = BacktestExecutor(portfolio, prices)
+        if use_game_plan:
+            stress = macro_stress(window, regime)
+            gated = config.YIELD_GATE_ENABLED and _yield_gate(window_full)
+            if not gated:
+                total_spy += run_spy_strategy(
+                    window,
+                    executor,
+                    regime,
+                    i,
+                    pair_cooldown,
+                    cooldown_bars=DAILY_COOLDOWN_BARS,
+                )
+            else:
+                yield_gate_days += 1
+        else:
+            total_spy += run_spy_strategy(
+                window,
+                executor,
+                regime,
+                i,
+                pair_cooldown,
+                cooldown_bars=DAILY_COOLDOWN_BARS,
+            )
+
         total_crypto += run_crypto_strategy(
             window,
             executor,
@@ -96,14 +171,6 @@ def run_fund_backtest(
             pair_cooldown,
             cooldown_bars=DAILY_COOLDOWN_BARS,
             volatility=vol,
-        )
-        total_spy += run_spy_strategy(
-            window,
-            executor,
-            regime,
-            i,
-            pair_cooldown,
-            cooldown_bars=DAILY_COOLDOWN_BARS,
         )
         total_equity += run_equity_strategy(
             window,
@@ -115,16 +182,31 @@ def run_fund_backtest(
         )
         total_orders += len(executor.orders)
 
+        if use_game_plan:
+            if stress:
+                cash_trims += _trim_to_cash_target(
+                    portfolio, prices, config.STRESS_CASH_PCT
+                )
+            if stress:
+                metal_trades += _deploy_metal_basket(
+                    metal_book, metal_weights, prices_full
+                )
+            else:
+                metal_trades += _exit_metal_basket(
+                    metal_book, metal_weights, prices_full
+                )
+
     curve = pd.Series(equity_curve, index=data.index[start_i:])
     returns = curve.pct_change().dropna()
-    total_ret = (curve.iloc[-1] / portfolio.initial_capital - 1) * 100
+    total_ret = (curve.iloc[-1] / initial_capital - 1) * 100
     sharpe = (
         (returns.mean() / returns.std()) * np.sqrt(252) if returns.std() != 0 else 0.0
     )
     max_dd = ((curve / curve.cummax()) - 1).min() * 100
-    bench = _benchmark_return(data, start_i)
+    bench_data = data[fund_cols] if fund_cols is not None else data
+    bench = _benchmark_return(bench_data, start_i)
 
-    return {
+    result = {
         "mode": mode,
         "final_equity": round(curve.iloc[-1], 2),
         "total_return_pct": round(total_ret, 2),
@@ -143,6 +225,18 @@ def run_fund_backtest(
         "equity_index": [ts.isoformat() for ts in curve.index],
         "equity_values": [round(v, 2) for v in curve.values],
     }
+    if use_game_plan:
+        result.update(
+            {
+                "game_plan": True,
+                "metal_blend": metal_weights,
+                "metal_final": round(metal_book.equity(data.iloc[-1]), 2),
+                "metal_trades": metal_trades,
+                "yield_gate_days": yield_gate_days,
+                "cash_trims": cash_trims,
+            }
+        )
+    return result
 
 
 def main() -> None:
@@ -158,10 +252,12 @@ def main() -> None:
         print("Missing wayback_sentiment.csv — run simulate_wayback_sentiment.py first.")
         return
 
+    gp = "on" if config.GAME_PLAN_ENABLED else "off"
     print("=== FUND WISDOM BACKTEST (SPY + crypto + NYSE) ===")
     print(f"Wayback window: {monthly_web.index.min().date()} -> {monthly_web.index.max().date()}")
     print(f"Simulation:     {args.year_from} -> {args.year_to}")
     print(f"Gap threshold:  {args.gap}")
+    print(f"Game plan:      {gp} (yield gate + metal sleeve + stress cash when on)")
 
     data = _ensure_daily_data(0, refresh=args.refresh, use_max=True)
     data = _slice_data(data, args.year_from, args.year_to)
@@ -172,9 +268,15 @@ def main() -> None:
         print(f"\n--- Running {mode} ---")
         row = run_fund_backtest(data, monthly_web, mode, gap_threshold=args.gap)
         results.append(row)
+        extra = ""
+        if row.get("game_plan"):
+            extra = (
+                f"  metal ${row.get('metal_final', 0):,.0f}  "
+                f"gate {row.get('yield_gate_days', 0)}d  trims {row.get('cash_trims', 0)}"
+            )
         print(
             f"  return {row['total_return_pct']:+.2f}%  Sharpe {row['sharpe']:.2f}  "
-            f"max DD {row['max_drawdown_pct']:.2f}%  equity ${row['final_equity']:,.0f}"
+            f"max DD {row['max_drawdown_pct']:.2f}%  equity ${row['final_equity']:,.0f}{extra}"
         )
         if mode == "wisdom_pause":
             print(f"  wisdom-pause days: {row['paused_days']}")
