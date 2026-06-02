@@ -69,7 +69,7 @@ Set `GAME_PLAN_YIELD_GATE_ONLY=false` and `GAME_PLAN_ENABLED=true` to restore fu
 | `SPY_LADDER_SIZING_ENABLED` | `false` | Ladder helped 2000d Sharpe but hurt 500d — not default |
 | `NYSE_OVERLAP_FILTER_ENABLED` | `true` | Skip NYSE pick when corr to SPY > 0.80 (config default) |
 | `NYSE_SPY_CORR_MAX` | `0.80` | Grid found corr filter costly on recent_750d — optional off |
-| `NYSE_BETA_SCALING_ENABLED` | `false` | Beta scaling marginal on 500d |
+| `NYSE_BETA_SCALING_ENABLED` | **`true`** | Best cross-window single toggle in refinements grid (500d + 2000d) |
 
 ## Wisdom & sentiment
 
@@ -114,6 +114,7 @@ SPY_EXIT_ON_MA_BREAK=true
 HALT_RESUME_DRAWDOWN_PCT=0.08
 HALT_LIQUIDATE_ON_BREACH=true
 DERIVED_BEAR_PAUSE_ENABLED=false
+NYSE_BETA_SCALING_ENABLED=true
 WISDOM_MODE=arbitrage
 SENTIMENT_SOURCE=price
 ```

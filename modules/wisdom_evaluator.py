@@ -107,24 +107,40 @@ def live_metrics(window_days: int) -> dict | None:
     return metrics
 
 
+def _slice_backtest_data(
+    data: pd.DataFrame, period_start: date, period_end: date
+) -> pd.DataFrame:
+    """Warmup through period_end so sim equity covers the live journal window."""
+    warmup = period_start - timedelta(days=MIN_HISTORY + 45)
+    warmup_ts = pd.Timestamp(warmup)
+    end_ts = pd.Timestamp(period_end)
+    if len(data) and data.index.tz is not None:
+        warmup_ts = warmup_ts.tz_localize(data.index.tz)
+        end_ts = end_ts.tz_localize(data.index.tz)
+    return data.loc[(data.index >= warmup_ts) & (data.index <= end_ts)]
+
+
 def simulate_modes(
     window_days: int,
     period_start: date | None = None,
     period_end: date | None = None,
 ) -> dict[str, dict]:
+    if period_end is None:
+        period_end = date.today()
+    if period_start is None:
+        period_start = period_end - timedelta(days=window_days)
+
     data = load_close_matrix(interval="1d")
-    if len(data) < MIN_HISTORY + 5:
-        data = _ensure_daily_data(window_days + MIN_HISTORY + 30, refresh=False)
-    need = window_days + MIN_HISTORY + 5
-    if len(data) > need:
-        data = data.iloc[-need:]
+    data_max = data.index.max().date() if len(data) else None
+    if data_max is None or data_max < period_end:
+        span = (date.today() - period_start).days + MIN_HISTORY + 60
+        data = _ensure_daily_data(span, refresh=True)
+
+    data = _slice_backtest_data(data, period_start, period_end)
     if len(data) < MIN_HISTORY + 5:
         return {}
 
-    if period_end is None:
-        period_end = data.index[-1].date() if len(data) else date.today()
-    if period_start is None:
-        period_start = period_end - timedelta(days=window_days)
+    align_end = min(period_end, data.index[-1].date())
 
     monthly_web = load_monthly_web_sentiment()
     results = {}
@@ -136,7 +152,7 @@ def simulate_modes(
                 mode,
                 gap_threshold=config.WISDOM_GAP_THRESHOLD,
             )
-            aligned = _period_metrics_from_backtest_row(row, period_start, period_end)
+            aligned = _period_metrics_from_backtest_row(row, period_start, align_end)
             if "return_pct" in aligned:
                 results[mode] = aligned
                 if row.get("game_plan"):
@@ -215,7 +231,11 @@ def _period_metrics_from_backtest_row(row: dict, period_start: date, period_end:
     pend = pd.Timestamp(period_end)
     sub = curve.loc[(curve.index >= pstart) & (curve.index <= pend)]
     if len(sub) < 2:
-        return {"error": "no bars in month window"}
+        return {
+            "error": "no bars in alignment window",
+            "curve_from": str(curve.index.min().date()),
+            "curve_to": str(curve.index.max().date()),
+        }
     metrics = _metrics_from_equity(sub.astype(float))
     metrics.update(
         {

@@ -80,7 +80,7 @@ Session A/B grids (`scripts/analysis/*_results.md`) selected this stack for live
 | **Game plan** | Yield-gate-only — `GAME_PLAN_YIELD_GATE_ONLY=true` (metal + stress cash off) |
 | **Sleeves** | 45% SPY / 20% crypto / 20% NYSE / 15% cash |
 | **SPY** | MA200 entry; `SPY_EXIT_ON_MA_BREAK=true` |
-| **NYSE** | Overlap filter when SPY active (`NYSE_SPY_CORR_MAX=0.80`) — optional off per `nyse_anti_overlap_results.md` |
+| **NYSE** | Overlap filter when SPY active (`NYSE_SPY_CORR_MAX=0.80`); beta scaling on by default |
 | **Crypto** | Vol-gated pairs only; min correlation 0.5 |
 | **Sizing** | `ADAPTIVE_CHUNK_ENABLED` + `COFIRE_BUDGET_ENABLED` |
 | **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
@@ -369,6 +369,7 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `HALT_RESUME_DRAWDOWN_PCT` | No | Default `0.08` (set `0` for legacy never-resume) |
 | `HALT_LIQUIDATE_ON_BREACH` | No | Default `true` |
 | `NYSE_OVERLAP_FILTER_ENABLED` | No | Default `true`; `NYSE_SPY_CORR_MAX=0.80` |
+| `NYSE_BETA_SCALING_ENABLED` | No | Default `true` — size NYSE picks by inverse beta vs SPY |
 | `DERIVED_BEAR_PAUSE_ENABLED` | No | Default `false` |
 | `METAL_SLEEVE_CAP_PCT` | No | Full game plan only (default `0.10`) |
 | `STRESS_CASH_PCT` | No | Full game plan only (default `0.25`) |

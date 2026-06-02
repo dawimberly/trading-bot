@@ -54,7 +54,7 @@ NYSE_ANTI_OVERLAP_ENABLED = NYSE_OVERLAP_FILTER_ENABLED
 NYSE_SPY_CORR_MAX = float(os.getenv("NYSE_SPY_CORR_MAX", "0.80"))
 NYSE_SPY_BETA_MAX = float(os.getenv("NYSE_SPY_BETA_MAX", "1.6"))
 NYSE_SPY_CORR_LOOKBACK = int(os.getenv("NYSE_SPY_CORR_LOOKBACK", "60"))
-NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "false").lower() in (
+NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "true").lower() in (
     "1",
     "true",
     "yes",
@@ -475,6 +475,7 @@ def print_recommended_stack_flags() -> None:
     print(f"  game_plan:              {gp}")
     print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
     print(f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} (corr max {NYSE_SPY_CORR_MAX})")
+    print(f"  nyse_beta_scaling:      {NYSE_BETA_SCALING_ENABLED}")
     print(f"  spy_exit_on_ma_break:   {SPY_EXIT_ON_MA_BREAK}")
     print(f"  adaptive_chunk:         {ADAPTIVE_CHUNK_ENABLED}")
     print(f"  cofire_budget:          {COFIRE_BUDGET_ENABLED}")
