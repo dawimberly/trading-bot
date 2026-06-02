@@ -32,26 +32,50 @@ flowchart TB
 
 ## Fund sleeves (default allocation)
 
-| Sleeve | Cap | Strategy | When it trades |
-|--------|-----|----------|----------------|
+| Sleeve | Base cap | Strategy | When it trades |
+|--------|----------|----------|----------------|
 | **SPY** | 45% | Price > MA200 | US equity session open |
 | **Crypto** | 20% | Z-score correlated pairs | **High volatility only** (`CRYPTO_VOL_ONLY`) |
 | **NYSE** | 20% | Strongest stock/ETF above MA50 (excludes SPY) | US equity session open |
-| **Cash buffer** | 15% | — | Held as dry powder |
+| **Metal** | 10% | GLD/SLV/CPER blend | Game plan only, on macro stress |
+| **Cash headroom** | ~15% (baseline) | — | Dry powder inside Alpaca for next automated buys |
 
-On a $100k account, SPY can hold at most ~$45k; total crypto positions at most ~$20k; NYSE names at most ~$20k. Each buy is **2% of equity per order** within the sleeve cap (max $10k per order).
+On a $100k account with game plan **off**, SPY can hold at most ~$45k; crypto at most ~$20k; NYSE at most ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** within the sleeve cap (max $10k per order).
 
-When **game plan** is enabled (default), long sleeves are scaled to **90%** of these caps so **10%** of equity can go to the metal hedge sleeve.
+When **game plan** is enabled (default), long sleeves are scaled to **90%** of these base caps so **10%** of equity can go to the metal hedge sleeve. Effective caps are computed at runtime by `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`.
 
-Tune caps in `config.py`:
+Tune base caps in `config.py`:
 
 ```python
 SPY_SLEEVE_CAP_PCT = 0.45
 CRYPTO_SLEEVE_CAP_PCT = 0.20
 NYSE_SLEEVE_CAP_PCT = 0.20
-FUND_CASH_BUFFER_PCT = 0.15
+FUND_CASH_BUFFER_PCT = 0.15  # reference; see effective_cash_buffer_pct()
 CRYPTO_VOL_ONLY = True
 ```
+
+## Fund allocation & cash buffer
+
+The **~15% cash** is **not** a standalone strategy sleeve. It is **structural headroom** from the fund’s max long deployment: base SPY + crypto + NYSE caps sum to **85%**, leaving **15%** unallocated so buys never assume 100% of equity is deployable.
+
+| Concept | What it means |
+|---------|----------------|
+| **`FUND_CASH_BUFFER_PCT`** | Config reference (0.15). The live value comes from `effective_cash_buffer_pct()`. |
+| **`effective_cash_buffer_pct()`** | `1 − metal sleeve − scaled long caps`. Ensures all sleeve caps sum to 100%. |
+| **Dry powder** | Cash sitting in Alpaca above current positions — available for the next automated buy without breaching caps. |
+| **`STRESS_CASH_PCT` (25%)** | **Separate** macro defense. On stress days only, game plan trims toward 25% cash. Not the everyday 15% headroom. |
+
+**Game plan ON (default):**
+
+| Piece | Fraction of equity |
+|-------|-------------------|
+| SPY / crypto / NYSE (each scaled ×0.9) | 40.5% / 18% / 18% |
+| Metal sleeve (stress deploy) | 10% |
+| Calm cash headroom | **~13.5%** |
+
+**Game plan OFF:** long sleeves use full base caps (85% total); calm cash headroom is **15%**.
+
+Preflight and `bot_heartbeat.json` report `effective_cash_buffer_pct()` alongside sleeve exposure so you can see headroom vs deployed capital.
 
 ## Game plan (live default: ON)
 
@@ -170,6 +194,71 @@ Market regime comes from `modules/market_context.py` (sentiment + volatility). A
 
 Crypto has an additional gate: when `CRYPTO_VOL_ONLY=true`, pairs are skipped unless cross-asset volatility is **High**.
 
+## How to review bot performance
+
+The bot writes a **wisdom journal** every cycle and runs a **daily self-evaluation** (when `WISDOM_EVAL_ENABLED=true`) that compares live equity to aligned backtest sims on the same calendar window. Live equity is resampled to **daily last** so returns match daily-bar sim cadence.
+
+### Quick aligned snapshot (recommended)
+
+```powershell
+# Regenerate scorecard + print live vs sim for the active WISDOM_MODE window
+python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval
+
+# Same, plus trade-level journal vs Alpaca fill reconciliation
+python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval --reconcile
+```
+
+The snapshot reports live return, active-mode sim return, `live_minus_active_sim_pp`, VTI benchmark, and trade signal count for the window.
+
+### Manual evaluation
+
+```powershell
+# Daily rolling scorecard (same hook as run_all, but on demand)
+python scripts/maintenance/evaluate_wisdom.py
+python scripts/maintenance/evaluate_wisdom.py --force
+
+# Calendar-month rollup
+python scripts/maintenance/evaluate_wisdom.py --monthly --force
+python scripts/maintenance/evaluate_wisdom.py --monthly --month 2026-05 --force
+```
+
+Outputs: `wisdom_scorecard.json`, append-only `wisdom_evaluations.jsonl`, and optional `wisdom_monthly_YYYY-MM.json`.
+
+### Trade reconciliation only
+
+```powershell
+python scripts/analysis/trade_reconciliation.py
+python scripts/analysis/trade_reconciliation.py --days 30 --json reconcile_report.json
+```
+
+Matches `paper_journal.csv` signals to Alpaca fills and estimates notional/slippage vs sim sizing.
+
+### What to read
+
+| File | Purpose |
+|------|---------|
+| `wisdom_scorecard.json` | Latest daily eval: live vs all sim modes |
+| `wisdom_evaluations.jsonl` | History of daily scorecards |
+| `wisdom_journal.csv` | Per-cycle equity, regime, wisdom mode |
+| `paper_journal.csv` | Trade signals and game plan events |
+| `bot_heartbeat.json` | Last cycle: sleeves, cash headroom, halted state |
+
+## Live vs backtest expectations
+
+Short live history is normal. Live P&L will **diverge** from simulation for several structural reasons:
+
+| Factor | Live | Backtest / wisdom sim |
+|--------|------|------------------------|
+| Bar cadence | 5-minute bars | Daily bars |
+| Fills | Alpaca market orders, fees, partial fills | Model fills at daily close |
+| Sleeve enforcement | Real-time cap checks on each order | Same logic, daily rebalance |
+| Gates | Yield gate, vol gate, regime skip in real time | Forward-filled daily macro |
+| Game plan | `backtester_wisdom.py` and wisdom sim include game plan when enabled | Aligned window in scorecard |
+
+Use the snapshot script for an **apples-to-apples** read: same calendar dates, daily-resampled live equity, and sim modes run over that exact window. Large gaps early on often mean too few live days — check `daily_samples` in the scorecard.
+
+Directional backtests remain useful for strategy design; the performance review tools are for **tracking live drift** once paper trading is running.
+
 ## Backtesting
 
 ```powershell
@@ -192,6 +281,10 @@ python backtest_spy.py
 python backtest_spy.py --compare
 python backtest_spy.py --all --days 500
 
+# Wisdom sentiment modes + game plan (daily bars)
+python backtester_wisdom.py
+python backtester_wisdom.py --from 2017 --to 2023
+
 # Fetch longer daily history first (free via yfinance)
 python fetch_data.py --daily --days 500
 ```
@@ -203,8 +296,12 @@ python fetch_data.py --daily --days 500
 | `backtester_macro_hedge.py` | Yield gate, GLD hedge, stress cash, full game plan |
 | `scripts/research/backtest_game_plan_live.py` | Live blend vs baseline; saves `fund_game_plan_*.csv` |
 | `backtest_spy.py` | SPY MA200 sleeve in isolation; saves `spy_backtest_results.csv` |
+| `backtester_wisdom.py` | Price vs wisdom sentiment modes; includes game plan when enabled |
+| `scripts/analysis/live_vs_backtest_snapshot.py` | Aligned live vs sim comparison (`--refresh-eval`, `--reconcile`) |
+| `scripts/analysis/trade_reconciliation.py` | Journal signals vs Alpaca fills |
+| `scripts/maintenance/evaluate_wisdom.py` | Manual daily/monthly wisdom evaluation |
 
-Live bot uses **5-minute** bars; backtests use **daily** bars. Results are directional, not identical to live fills.
+Live bot uses **5-minute** bars; backtests and wisdom sims use **daily** bars. Results are directional — use the performance review section for aligned live tracking.
 
 ## Optional: standalone SPY bot
 
@@ -289,22 +386,25 @@ PythonTrading/
 ├── backtester_metals.py    # Metal hedge + game_plan_gld_slv_cper backtests
 ├── backtester_macro_hedge.py  # Yield gate, GLD, stress cash variants
 ├── backtest_spy.py         # SPY sleeve backtest + grid search
+├── backtester_wisdom.py    # Wisdom sentiment modes + game plan backtest
 ├── simulate.py             # Mean-reversion research
 ├── modules/
 │   ├── pipeline_strategies.py  # SPY, crypto, NYSE strategies
 │   ├── game_plan.py            # Metal sleeve + stress cash (live)
 │   ├── macro_signals.py        # TNX/TLT daily signals for game plan
 │   ├── alpaca_executor.py      # Sleeve caps + order sizing
+│   ├── wisdom_evaluator.py     # Daily scorecard, live vs sim modes
 │   ├── data_refresh.py         # Session-aware data refresh
 │   ├── market_context.py       # Regime / volatility / sentiment
 │   ├── alerts.py
 │   └── ...
 └── scripts/
+    ├── analysis/           # Live vs backtest snapshot, trade reconciliation
     ├── research/           # Game plan backtests, projections
     ├── db/                 # SQLite utilities
     ├── account/            # Alpaca + alerts (preflight, preflight_spy, verify)
     ├── exchange/           # Kraken checks
-    ├── maintenance/        # Cleanup, universe CSV
+    ├── maintenance/        # Cleanup, universe CSV, evaluate_wisdom.py
     └── dev/                # Tests and legacy loops
 ```
 
@@ -312,6 +412,8 @@ PythonTrading/
 
 ```powershell
 python scripts/account/preflight.py          # Pre-flight before paper month
+python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval
+python scripts/maintenance/evaluate_wisdom.py --force
 python scripts/research/backtest_game_plan_live.py  # Game plan backtest summary
 python scripts/account/preflight_spy.py      # SPY-only standalone check
 python scripts/account/verify.py
