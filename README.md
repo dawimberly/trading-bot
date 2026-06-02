@@ -87,7 +87,21 @@ Session A/B grids (`scripts/analysis/*_results.md`) selected this stack for live
 | **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
 | **Wisdom** | `WISDOM_MODE=arbitrage`, `SENTIMENT_SOURCE=price` |
 
-Preflight prints the active stack via `config.print_recommended_stack_flags()`.
+Preflight prints the active stack via `config.print_recommended_stack_flags()`:
+
+```
+--- Recommended stack flags ---
+  game_plan:              yield-gate-only
+  yield_gate:             True
+  nyse_overlap_filter:    True (corr max 0.8)
+  nyse_beta_scaling:      True
+  spy_exit_on_ma_break:   True
+  adaptive_chunk:         True
+  cofire_budget:          True
+  halt_resume_dd:         8% | liquidate_on_breach: True
+  derived_bear_pause:     False
+  sleeves: SPY 45% | crypto 20% | NYSE 20% | metal 0% | cash 15%
+```
 
 ## Game plan (yield-gate-only default)
 
@@ -102,13 +116,15 @@ Macro overlay is wired into `run_all.py`. **Recommended:** yield gate only — b
 
 ### Game plan A/B (2017–2026)
 
-| Variant | Full-window return | Avg Sharpe |
-|---------|-------------------|------------|
-| Baseline | +629.67% | 0.56 |
-| yield_gate_only | +628.32% | **0.59** |
-| game_plan_gld_slv_cper | +519.07% | 0.52 |
+Verified 2026-06-02 (`game_plan_ab_test.py`, max daily history):
 
-Fresh 2022: yield_gate_only **−3.94%** vs baseline **−8.63%** (+4.7 pp).
+| Variant | Full-window return | Sharpe | Fresh 2022 return |
+|---------|-------------------|--------|-------------------|
+| Baseline | +259.75% | 0.75 | −21.40% |
+| yield_gate_only (recommended) | +259.16% | 0.75 | **−17.75%** (+3.65 pp vs baseline) |
+| game_plan_gld_slv_cper | +257.01% | 0.80 | −13.16% |
+
+Yield-gate-only keeps full caps with ~0.6 pp return drag on the long window while avoiding metal sleeve, stress-cash trims, and 0.9 long-scale complexity. Full metal plan helps fresh 2022 MaxDD but costs return on recent windows.
 
 Re-run: `python scripts/analysis/game_plan_ab_test.py` or `python scripts/research/backtest_game_plan_live.py`.
 

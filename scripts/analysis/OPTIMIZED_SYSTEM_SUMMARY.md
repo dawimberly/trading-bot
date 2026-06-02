@@ -29,7 +29,17 @@ Caps are enforced per buy in `modules/alpaca_executor.py`. `config.fund_allocati
 | Stress cash | off | No trim-to-25% on macro stress |
 | Long scale 0.9 | off | SPY/crypto/NYSE use **full** base caps |
 
-**A/B (`game_plan_ab_test.py`):** `yield_gate_only` matched baseline return on full 2017–2026 window (~−1.35 pp) with best average Sharpe across windows vs full `game_plan_gld_slv_cper`. Full metal plan cost ~110 pp return on the long window.
+**A/B (`game_plan_ab_test.py`, verified 2026-06-02, max daily history):**
+
+| Window | Baseline | yield_gate_only | game_plan_gld_slv_cper |
+|--------|----------|-----------------|------------------------|
+| Full 2017–2026 (+259.75% / Sharpe 0.75) | — | +259.16% / 0.75 (−0.59 pp) | +257.01% / 0.80 |
+| Fresh 2022 | −21.40% | **−17.75%** (+3.65 pp) | −13.16% (+8.24 pp) |
+| Recent 750d | +44.90% | +44.85% (−0.05 pp) | +37.99% (−6.91 pp) |
+
+**Live recommendation stays yield-gate-only:** near-baseline long-window return with full 45/20/20/15% caps, no metal deploy, no stress-cash trim, simpler live ops. Full `game_plan_gld_slv_cper` wins on averaged Sharpe in the grid but drags recent-window return and adds metal/stress complexity — use only if you explicitly want the metal sleeve.
+
+`backtest_game_plan_live.py` (full metal blend reference, 2017–2023): baseline +97.78% vs `game_plan_gld_slv_cper` +89.55%; fresh 2022 baseline −21.40% vs full plan −13.16% (+8.24 pp).
 
 Set `GAME_PLAN_YIELD_GATE_ONLY=false` and `GAME_PLAN_ENABLED=true` to restore full game plan (metal + stress cash + 0.9 scale).
 
@@ -66,10 +76,10 @@ Set `GAME_PLAN_YIELD_GATE_ONLY=false` and `GAME_PLAN_ENABLED=true` to restore fu
 | Flag | Default | A/B note |
 |------|---------|----------|
 | `SPY_EXIT_ON_MA_BREAK` | `true` | Keeps SPY from riding through MA200 breaks |
-| `SPY_LADDER_SIZING_ENABLED` | `false` | Ladder helped 2000d Sharpe but hurt 500d — not default |
+| `SPY_LADDER_SIZING_ENABLED` | `false` | **Do not enable by default** — ladder helped 2000d Sharpe but hurt 500d |
 | `NYSE_OVERLAP_FILTER_ENABLED` | `true` | Skip NYSE pick when corr to SPY > 0.80 (config default) |
 | `NYSE_SPY_CORR_MAX` | `0.80` | Grid found corr filter costly on recent_750d — optional off |
-| `NYSE_BETA_SCALING_ENABLED` | **`true`** | Best cross-window single toggle in refinements grid (500d + 2000d) |
+| `NYSE_BETA_SCALING_ENABLED` | **`true`** | **Recommended default** — best cross-window single toggle in refinements grid |
 
 ## Wisdom & sentiment
 
@@ -87,7 +97,36 @@ Set `GAME_PLAN_YIELD_GATE_ONLY=false` and `GAME_PLAN_ENABLED=true` to restore fu
 | `backtester_wisdom.py` | Wisdom modes + game plan |
 | `scripts/research/backtest_game_plan_live.py` | Live blend vs baseline CSVs |
 
-Startup prints `config.print_recommended_stack_flags()` from preflight and backtesters.
+Startup prints `config.print_recommended_stack_flags()` from preflight and backtesters:
+
+```
+--- Recommended stack flags ---
+  game_plan:              yield-gate-only
+  yield_gate:             True
+  nyse_overlap_filter:    True (corr max 0.8)
+  nyse_beta_scaling:      True
+  spy_exit_on_ma_break:   True
+  adaptive_chunk:         True
+  cofire_budget:          True
+  halt_resume_dd:         8% | liquidate_on_breach: True
+  derived_bear_pause:     False
+  sleeves: SPY 45% | crypto 20% | NYSE 20% | metal 0% | cash 15%
+```
+
+## Live vs backtest verification (2026-06-02)
+
+`python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval`:
+
+| Metric | Value |
+|--------|-------|
+| Live window | 2026-05-25 → 2026-05-30 (6 daily samples) |
+| Live return | +0.18% |
+| Active mode sim (governor) | +0.11% |
+| Live − sim | +0.07 pp |
+| VTI benchmark | +1.57% |
+| Trade signals in window | 248 |
+
+Short live window — use for drift tracking, not strategy validation. Re-run after each paper week.
 
 ## Analysis artifacts (repo)
 
