@@ -38,6 +38,7 @@ from modules.risk_management import RiskManager, trim_long_sleeves_to_cash_targe
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 MIN_HISTORY = max(50, config.SPY_MA_WINDOW)
+WARMUP_CALENDAR_BUFFER = 45  # calendar days before period_start for indicator warmup
 TX_COST = 0.001
 BENCHMARK = "VTI"
 # One daily bar ≈ one pipeline day; ~1h cooldown ≈ 1 session on daily data
@@ -59,6 +60,20 @@ class BacktestExecutor:
 
     def set_sizing_context(self, data=None):
         self._sizing_data = data
+
+    def set_wisdom_sizing_multiplier(self, multiplier: float = 1.0) -> None:
+        self._wisdom_sizing_multiplier = float(multiplier)
+
+    def _apply_wisdom_multiplier(self, notional: float | None) -> float | None:
+        if notional is None:
+            return None
+        mult = getattr(self, "_wisdom_sizing_multiplier", 1.0)
+        if mult >= 0.999:
+            return notional
+        scaled = round(notional * mult, 2)
+        if scaled < config.MIN_NOTIONAL:
+            return None
+        return scaled
 
     def set_cofire_allocations(self, allocations):
         self._cofire_notionals = dict(allocations or {})
@@ -109,7 +124,7 @@ class BacktestExecutor:
     def spy_sleeve_value(self):
         return self._sleeve_exposure(self._is_spy_position)
 
-    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
+    def _compute_capped_notional_raw(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
         equity = self.portfolio.equity(self.prices)
         cash = self.portfolio.cash
         return deployment_sizing.resolve_sleeve_notional(
@@ -121,12 +136,17 @@ class BacktestExecutor:
             self._cofire_notionals,
         )
 
+    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
+        return self._apply_wisdom_multiplier(
+            self._compute_capped_notional_raw(sleeve_cap_pct, sleeve_value, sleeve_key)
+        )
+
     def compute_notional(self):
         equity = self.portfolio.equity(self.prices)
         cash = self.portfolio.cash
         raw = round(equity * config.RISK_PER_TRADE, 2)
         capped = min(raw, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
-        return max(config.MIN_NOTIONAL, capped)
+        return self._apply_wisdom_multiplier(max(config.MIN_NOTIONAL, capped))
 
     def compute_crypto_notional(self):
         return self._compute_capped_notional(
@@ -258,7 +278,15 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
     return load_close_matrix(interval="1d", days=days)
 
 
-def run_backtest(data, *, track_spy_fill=False, verbose=False):
+def run_backtest(
+    data,
+    *,
+    track_spy_fill=False,
+    verbose=False,
+    wisdom_mode=None,
+    monthly_web=None,
+    track_metrics=False,
+):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
     start_date = data.index[MIN_HISTORY]
     end_date = data.index[-1]
@@ -277,6 +305,12 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
     total_orders = 0
     pause_days = 0
     halt_liquidations = 0
+    exposure_samples = []
+    crypto_exposure_samples = []
+    cofire_days = 0
+    prev_crypto_value = 0.0
+    crypto_pnl_contribution = 0.0
+    trade_days = 0
 
     spy_cap_pct = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
     macro_daily = None
@@ -321,12 +355,26 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
                 f"(equity ${round(eq, 2)}, DD {risk_manager.current_drawdown(eq):.1%}) ---"
             )
 
-        sentiment = get_price_sentiment(window)
-        vol = get_volatility(window)
-        regime = get_market_regime(sentiment, vol)
+        if wisdom_mode:
+            from modules.wisdom_sentiment import resolve_backtest_regime
+
+            regime, vol, wisdom_paused, sizing_mult = resolve_backtest_regime(
+                window,
+                data.index[i],
+                monthly_web,
+                wisdom_mode=wisdom_mode,
+            )
+            sentiment = get_price_sentiment(window)
+            if wisdom_paused:
+                pause_days += 1
+        else:
+            sentiment = get_price_sentiment(window)
+            vol = get_volatility(window)
+            regime = get_market_regime(sentiment, vol)
+            sizing_mult = 1.0
+            if regime_entries_paused(regime, window, sentiment):
+                pause_days += 1
         regime_counts[regime] = regime_counts.get(regime, 0) + 1
-        if regime_entries_paused(regime, window, sentiment):
-            pause_days += 1
 
         yield_gated = False
         if macro_daily is not None and not macro_daily.empty:
@@ -337,6 +385,7 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
 
         executor = BacktestExecutor(portfolio, prices)
         executor.set_sizing_context(window)
+        executor.set_wisdom_sizing_multiplier(sizing_mult)
         resolve_cycle_deploy(
             window,
             executor,
@@ -348,6 +397,9 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
             market_open=True,
             yield_gated=yield_gated,
         )
+        if track_metrics and getattr(executor, "_cofire_notionals", None):
+            if len(executor._cofire_notionals) >= 1:
+                cofire_days += 1
         total_crypto += run_crypto_strategy(
             window,
             executor,
@@ -377,6 +429,15 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
             yield_gated=yield_gated,
         )
         total_orders += len(executor.orders)
+        trade_days += 1
+
+        if track_metrics:
+            invested = eq - portfolio.cash
+            exposure_samples.append(invested / eq if eq > 0 else 0.0)
+            crypto_val = executor.crypto_sleeve_value()
+            crypto_exposure_samples.append(crypto_val / eq if eq > 0 else 0.0)
+            crypto_pnl_contribution += crypto_val - prev_crypto_value
+            prev_crypto_value = crypto_val
 
         if track_spy_fill:
             spy_val = executor.spy_sleeve_value()
@@ -411,16 +472,25 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
     sharpe = (
         (returns.mean() / returns.std()) * sharpe_scale if returns.std() != 0 else 0
     )
+    downside = returns[returns < 0]
+    sortino = (
+        (returns.mean() / downside.std()) * sharpe_scale
+        if len(downside) > 0 and downside.std() != 0
+        else 0
+    )
     max_dd = ((curve / curve.cummax()) - 1).min() * 100
+    calmar = (total_ret / abs(max_dd)) if max_dd != 0 else 0.0
     bench = _benchmark_return(data, MIN_HISTORY)
 
-    return {
+    result = {
         "start_date": str(start_date.date()),
         "end_date": str(end_date.date()),
         "sim_days": sim_days,
         "final_equity": round(curve.iloc[-1], 2),
         "total_return_pct": round(total_ret, 2),
         "sharpe": round(sharpe, 2),
+        "sortino": round(sortino, 2),
+        "calmar": round(calmar, 2),
         "max_drawdown_pct": round(max_dd, 2),
         "benchmark_return_pct": round(bench, 2) if bench is not None else None,
         "spy_signals": total_spy,
@@ -434,6 +504,32 @@ def run_backtest(data, *, track_spy_fill=False, verbose=False):
         "pause_days": pause_days,
         "halt_liquidations": halt_liquidations,
     }
+    if track_metrics:
+        init = portfolio.initial_capital
+        result.update(
+            {
+                "avg_exposure_pct": round(
+                    100 * (sum(exposure_samples) / len(exposure_samples))
+                    if exposure_samples
+                    else 0.0,
+                    1,
+                ),
+                "avg_crypto_exposure_pct": round(
+                    100
+                    * (sum(crypto_exposure_samples) / len(crypto_exposure_samples))
+                    if crypto_exposure_samples
+                    else 0.0,
+                    1,
+                ),
+                "cofire_pct": round(
+                    100 * cofire_days / trade_days if trade_days else 0.0, 1
+                ),
+                "crypto_contribution_pct": round(
+                    100 * crypto_pnl_contribution / init if init else 0.0, 2
+                ),
+            }
+        )
+    return result
 
 
 def run_performance_test(days=None, refresh=False, use_max=False):

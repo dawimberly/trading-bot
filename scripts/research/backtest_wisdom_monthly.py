@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 import config
-from backtester import MIN_HISTORY, _ensure_daily_data
+from backtester import MIN_HISTORY, WARMUP_CALENDAR_BUFFER, _ensure_daily_data
 from backtester_wisdom import run_fund_backtest
 from modules.wayback_sentiment import load_monthly_web_sentiment
 from modules.wisdom_evaluator import _metrics_from_equity, _month_bounds, _recommendation
@@ -93,10 +93,10 @@ def run_backtest(year_from: int, year_to: int) -> None:
 
     data = _ensure_daily_data(0, refresh=False, use_max=True)
     if data.index.tz is not None:
-        w = pd.Timestamp(start).tz_localize(data.index.tz) - pd.Timedelta(days=MIN_HISTORY + 60)
+        w = pd.Timestamp(start).tz_localize(data.index.tz) - pd.Timedelta(days=MIN_HISTORY + WARMUP_CALENDAR_BUFFER)
         e = pd.Timestamp(end).tz_localize(data.index.tz)
     else:
-        w = pd.Timestamp(start) - pd.Timedelta(days=MIN_HISTORY + 60)
+        w = pd.Timestamp(start) - pd.Timedelta(days=MIN_HISTORY + WARMUP_CALENDAR_BUFFER)
         e = pd.Timestamp(end)
     data = data.loc[(data.index >= w) & (data.index <= e)]
     print(f"Data: {len(data)} daily bars ({data.index.min().date()} -> {data.index.max().date()})")

@@ -85,7 +85,7 @@ Session A/B grids (`scripts/analysis/*_results.md`) selected this stack for live
 | **Sizing** | `ADAPTIVE_CHUNK_ENABLED` + `COFIRE_BUDGET_ENABLED` |
 | **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
 | **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
-| **Wisdom** | `WISDOM_MODE=arbitrage`, `SENTIMENT_SOURCE=price` |
+| **Wisdom** | `WISDOM_MODE=dynamic`, `SENTIMENT_SOURCE=price` |
 
 Preflight prints the active stack via `config.print_recommended_stack_flags()`:
 
@@ -374,7 +374,7 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `PAPER_TRADING` | No | Default `true` — keep paper keys during evaluation |
 | `ALLOW_LIVE_TRADING` | No | Must be `yes` to enable live (with `PAPER_TRADING=false`) |
 | `SENTIMENT_SOURCE` | No | Default `price` (free). Set `tavily` only if you have API quota |
-| `WISDOM_MODE` | No | Default `arbitrage`. Also: `baseline`, `web_regime`, `wisdom_pause` |
+| `WISDOM_MODE` | No | Default `dynamic`. Fallback: `baseline`. Legacy modes (`arbitrage`, `governor`, etc.) map to dynamic with a warning |
 | `WISDOM_GAP_THRESHOLD` | No | Web vs price divergence gate (default `0.25`) |
 | `GAME_PLAN_ENABLED` | No | Default `true` |
 | `GAME_PLAN_YIELD_GATE_ONLY` | No | Default `true` — yield gate without metal/stress/0.9 scale |

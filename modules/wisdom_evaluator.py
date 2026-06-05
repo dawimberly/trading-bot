@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 import config
-from backtester import MIN_HISTORY, _ensure_daily_data
+from backtester import MIN_HISTORY, WARMUP_CALENDAR_BUFFER, _ensure_daily_data
 from backtester_wisdom import run_fund_backtest
 from modules.data_loader import load_close_matrix
 from modules.wayback_sentiment import load_monthly_web_sentiment
@@ -111,13 +111,30 @@ def _slice_backtest_data(
     data: pd.DataFrame, period_start: date, period_end: date
 ) -> pd.DataFrame:
     """Warmup through period_end so sim equity covers the live journal window."""
-    warmup = period_start - timedelta(days=MIN_HISTORY + 45)
+    warmup = period_start - timedelta(days=MIN_HISTORY + WARMUP_CALENDAR_BUFFER)
     warmup_ts = pd.Timestamp(warmup)
     end_ts = pd.Timestamp(period_end)
     if len(data) and data.index.tz is not None:
         warmup_ts = warmup_ts.tz_localize(data.index.tz)
         end_ts = end_ts.tz_localize(data.index.tz)
     return data.loc[(data.index >= warmup_ts) & (data.index <= end_ts)]
+
+
+def _prepare_daily_backtest_data(
+    period_start: date, period_end: date
+) -> tuple[pd.DataFrame, date, date] | None:
+    """Load daily bars, refresh if stale, slice warmup window, clamp period_end."""
+    data = load_close_matrix(interval="1d")
+    if not len(data) or data.index.max().date() < period_end:
+        span = (period_end - period_start).days + MIN_HISTORY + 60
+        data = _ensure_daily_data(span, refresh=True)
+
+    data = _slice_backtest_data(data, period_start, period_end)
+    if len(data) < MIN_HISTORY + 5:
+        return None
+
+    period_end = min(period_end, data.index[-1].date())
+    return data, period_start, period_end
 
 
 def simulate_modes(
@@ -130,17 +147,10 @@ def simulate_modes(
     if period_start is None:
         period_start = period_end - timedelta(days=window_days)
 
-    data = load_close_matrix(interval="1d")
-    data_max = data.index.max().date() if len(data) else None
-    if data_max is None or data_max < period_end:
-        span = (date.today() - period_start).days + MIN_HISTORY + 60
-        data = _ensure_daily_data(span, refresh=True)
-
-    data = _slice_backtest_data(data, period_start, period_end)
-    if len(data) < MIN_HISTORY + 5:
+    prep = _prepare_daily_backtest_data(period_start, period_end)
+    if prep is None:
         return {}
-
-    align_end = min(period_end, data.index[-1].date())
+    data, period_start, period_end = prep
 
     monthly_web = load_monthly_web_sentiment()
     results = {}
@@ -152,7 +162,7 @@ def simulate_modes(
                 mode,
                 gap_threshold=config.WISDOM_GAP_THRESHOLD,
             )
-            aligned = _period_metrics_from_backtest_row(row, period_start, align_end)
+            aligned = _period_metrics_from_backtest_row(row, period_start, period_end)
             if "return_pct" in aligned:
                 results[mode] = aligned
                 if row.get("game_plan"):
@@ -175,11 +185,7 @@ def live_metrics_for_month(year: int, month: int) -> dict | None:
     df = load_journal()
     if df.empty:
         return None
-    start = date(year, month, 1)
-    if month == 12:
-        end = date(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        end = date(year, month + 1, 1) - timedelta(days=1)
+    start, end = _month_bounds(year, month)
 
     mask = (df["timestamp"].dt.date >= start) & (df["timestamp"].dt.date <= end)
     df = df.loc[mask]
@@ -250,19 +256,10 @@ def _period_metrics_from_backtest_row(row: dict, period_start: date, period_end:
 
 def simulate_modes_for_month(year: int, month: int) -> dict[str, dict]:
     period_start, period_end = _month_bounds(year, month)
-    data = load_close_matrix(interval="1d")
-    if len(data) < MIN_HISTORY + 5:
-        data = _ensure_daily_data(MIN_HISTORY + 60, refresh=False)
-    warmup = period_start - timedelta(days=MIN_HISTORY + 45)
-    if data.index.tz is not None:
-        warmup_ts = pd.Timestamp(warmup).tz_localize(data.index.tz)
-        end_ts = pd.Timestamp(period_end).tz_localize(data.index.tz)
-    else:
-        warmup_ts = pd.Timestamp(warmup)
-        end_ts = pd.Timestamp(period_end)
-    data = data.loc[(data.index >= warmup_ts) & (data.index <= end_ts)]
-    if len(data) < MIN_HISTORY + 5:
+    prep = _prepare_daily_backtest_data(period_start, period_end)
+    if prep is None:
         return {}
+    data, period_start, period_end = prep
 
     monthly_web = load_monthly_web_sentiment()
     results = {}

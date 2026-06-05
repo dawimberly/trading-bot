@@ -12,7 +12,7 @@ import config
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
-from modules.wisdom_sentiment import MODES
+from modules.wisdom_sentiment import LIVE_MODES, DEPRECATED_MODES, MODES
 from fetch_data import fetch_and_store
 
 
@@ -115,12 +115,14 @@ def run():
     print("\n--- Settings ---")
     wisdom_mode = config.WISDOM_MODE.strip().lower()
     if wisdom_mode not in MODES:
-        print(f"  Wisdom mode:        {config.WISDOM_MODE} [INVALID — use one of: {', '.join(MODES)}]")
+        print(f"  Wisdom mode:        {config.WISDOM_MODE} [INVALID — use one of: {', '.join(LIVE_MODES)}]")
         ok = False
     else:
         print(f"  Wisdom mode:        {wisdom_mode}")
-        if wisdom_mode == "governor" and not config.GAME_PLAN_ENABLED:
-            print("  [WARN] governor mode works best with GAME_PLAN_ENABLED=true")
+        if wisdom_mode in DEPRECATED_MODES:
+            print("  [WARN] mode is deprecated — maps to dynamic at runtime")
+        elif wisdom_mode == "dynamic" and not config.AUTO_DYNAMIC_ENABLED:
+            print("  [WARN] AUTO_DYNAMIC_ENABLED=false — dynamic runs price-only")
     print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
     print(f"  Stop loss:          {config.STOP_LOSS_PCT:.0%}")
     print(f"  Max drawdown halt:  {config.MAX_DRAWDOWN_PCT:.0%}")

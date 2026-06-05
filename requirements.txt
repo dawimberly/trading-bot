@@ -12,3 +12,7 @@ backtesting
 
 # Kraken — scripts/exchange/
 python-kraken-sdk
+
+# Dashboard — dashboard.py
+streamlit
+plotly

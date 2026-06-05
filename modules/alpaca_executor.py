@@ -31,7 +31,6 @@ class AlpacaExecutor:
         """Fetch account + positions once per pipeline cycle."""
         self._account = self.client.get_account()
         self._positions = list(self.client.get_all_positions())
-        return self._account
 
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
@@ -40,12 +39,30 @@ class AlpacaExecutor:
     def set_sizing_context(self, data=None):
         self._sizing_data = data
 
+    def set_wisdom_sizing_multiplier(self, multiplier: float = 1.0) -> None:
+        self._wisdom_sizing_multiplier = float(multiplier)
+
+    def _apply_wisdom_multiplier(self, notional: float | None) -> float | None:
+        if notional is None:
+            return None
+        mult = getattr(self, "_wisdom_sizing_multiplier", 1.0)
+        if mult >= 0.999:
+            return notional
+        scaled = round(notional * mult, 2)
+        if scaled < config.MIN_NOTIONAL:
+            return None
+        return scaled
+
     def set_cofire_allocations(self, allocations):
         self._cofire_notionals = dict(allocations or {})
 
     def _invalidate_cache(self):
         self._account = None
         self._positions = None
+
+    def refresh_cache(self):
+        self._account = self.client.get_account()
+        self._positions = list(self.client.get_all_positions())
 
     @property
     def equity_session_open(self):
@@ -196,7 +213,7 @@ class AlpacaExecutor:
     def spy_sleeve_value(self):
         return self._sleeve_exposure(self._is_spy_position)
 
-    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
+    def _compute_capped_notional_raw(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
@@ -209,13 +226,18 @@ class AlpacaExecutor:
             self._cofire_notionals,
         )
 
+    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
+        return self._apply_wisdom_multiplier(
+            self._compute_capped_notional_raw(sleeve_cap_pct, sleeve_value, sleeve_key)
+        )
+
     def compute_notional(self):
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
         raw = round(equity * config.RISK_PER_TRADE, 2)
         capped = min(raw, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
-        return max(config.MIN_NOTIONAL, capped)
+        return self._apply_wisdom_multiplier(max(config.MIN_NOTIONAL, capped))
 
     def compute_crypto_notional(self):
         return self._compute_capped_notional(

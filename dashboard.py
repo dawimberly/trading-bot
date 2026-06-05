@@ -1,0 +1,535 @@
+"""Streamlit dashboard for PythonTrading bot status, positions, journal, wisdom, and price charts."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import streamlit as st
+
+import config
+from modules.alpaca_executor import get_trading_client
+
+REFRESH_SECONDS = 60
+CHART_DAYS = 30
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_path(relative: str) -> Path:
+    return PROJECT_ROOT / relative
+
+
+def _load_json(path: Path) -> dict | None:
+    if not path.is_file():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _infer_sleeve(symbol: str) -> str:
+    sym = config.normalize_symbol(symbol or "")
+    if sym == config.SPY_BOT_SYMBOL:
+        return "SPY"
+    if config.is_crypto(sym):
+        return "Crypto"
+    if config.is_metal_symbol(sym):
+        return "Metal"
+    if sym:
+        return "NYSE"
+    return ""
+
+
+def _active_sleeves(heartbeat: dict) -> list[str]:
+    exposure = heartbeat.get("sleeve_exposure") or {}
+    active: list[str] = []
+    checks = [
+        ("SPY", "spy_value"),
+        ("Crypto", "crypto_value"),
+        ("NYSE", "nyse_value"),
+        ("Metal", "metal_value"),
+    ]
+    for label, key in checks:
+        if float(exposure.get(key) or 0) > 0:
+            active.append(label)
+    return active
+
+
+def _sleeve_exposure_rows(heartbeat: dict) -> list[dict]:
+    exposure = heartbeat.get("sleeve_exposure") or {}
+    caps = heartbeat.get("sleeve_caps") or {}
+    equity = float(exposure.get("equity") or heartbeat.get("equity") or 0)
+    rows: list[dict] = []
+    for key, label in (
+        ("spy", "SPY"),
+        ("crypto", "Crypto"),
+        ("nyse", "NYSE"),
+        ("metal", "Metal"),
+    ):
+        value = float(exposure.get(f"{key}_value") or 0)
+        cap = float(exposure.get(f"{key}_cap") or 0)
+        cap_pct = float(caps.get(key) or 0)
+        util = (value / cap * 100) if cap > 0 else 0.0
+        eq_pct = (value / equity * 100) if equity > 0 else 0.0
+        rows.append(
+            {
+                "Sleeve": label,
+                "Value ($)": value,
+                "Cap ($)": cap,
+                "Cap Target (%)": cap_pct * 100,
+                "Utilization (%)": util,
+                "Equity (%)": eq_pct,
+            }
+        )
+    cash = float(heartbeat.get("cash") or 0)
+    cash_pct = float(caps.get("cash_buffer") or 0) * 100
+    cash_eq = (cash / equity * 100) if equity > 0 else 0.0
+    rows.append(
+        {
+            "Sleeve": "Cash",
+            "Value ($)": cash,
+            "Cap ($)": equity * float(caps.get("cash_buffer") or 0),
+            "Cap Target (%)": cash_pct,
+            "Utilization (%)": (cash_eq / cash_pct * 100) if cash_pct > 0 else 0.0,
+            "Equity (%)": cash_eq,
+        }
+    )
+    return rows
+
+
+def _fetch_positions() -> tuple[pd.DataFrame | None, str | None]:
+    try:
+        client = get_trading_client()
+        positions = client.get_all_positions()
+    except ValueError as exc:
+        return None, f"Alpaca credentials not configured: {exc}"
+    except Exception as exc:  # noqa: BLE001 — surface API errors in UI
+        return None, f"Could not fetch Alpaca positions: {exc}"
+
+    if not positions:
+        return pd.DataFrame(
+            columns=[
+                "Ticker",
+                "Qty",
+                "Entry",
+                "Current",
+                "Unrealized P&L ($)",
+                "Unrealized P&L (%)",
+            ]
+        ), None
+
+    rows = []
+    for pos in positions:
+        entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+        current = float(getattr(pos, "current_price", 0) or 0)
+        upl = float(getattr(pos, "unrealized_pl", 0) or 0)
+        upl_pct = float(getattr(pos, "unrealized_plpc", 0) or 0) * 100
+        rows.append(
+            {
+                "Ticker": config.normalize_symbol(pos.symbol),
+                "Qty": float(pos.qty),
+                "Entry": entry,
+                "Current": current,
+                "Unrealized P&L ($)": upl,
+                "Unrealized P&L (%)": upl_pct,
+            }
+        )
+    return pd.DataFrame(rows), None
+
+
+def _style_pnl_df(df: pd.DataFrame):
+    def _color_pnl(val):
+        if pd.isna(val):
+            return ""
+        if val > 0:
+            return "color: #198754; font-weight: 600"
+        if val < 0:
+            return "color: #dc3545; font-weight: 600"
+        return ""
+
+    styler = df.style
+    for col in ("Unrealized P&L ($)", "Unrealized P&L (%)"):
+        if col in df.columns:
+            styler = styler.map(_color_pnl, subset=[col])
+    fmt = {
+        "Qty": "{:.4f}",
+        "Entry": "${:,.2f}",
+        "Current": "${:,.2f}",
+        "Unrealized P&L ($)": "${:+,.2f}",
+        "Unrealized P&L (%)": "{:+.2f}%",
+    }
+    for col, spec in fmt.items():
+        if col in df.columns:
+            styler = styler.format({col: spec})
+    return styler
+
+
+def _load_journal(limit: int = 20) -> pd.DataFrame | None:
+    path = _resolve_path(config.PAPER_JOURNAL_CSV)
+    if not path.is_file():
+        return None
+    try:
+        df = pd.read_csv(path)
+    except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
+        return None
+    if df.empty:
+        return df
+    df["sleeve"] = df["symbol"].fillna("").astype(str).map(_infer_sleeve)
+    return df.tail(limit).iloc[::-1].reset_index(drop=True)
+
+
+def _daily_table_name(symbol: str) -> str:
+    return f"{config.normalize_symbol(symbol)}_daily"
+
+
+def _load_daily_ohlcv(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | None:
+    """Load last N daily bars from market_data.db ({ticker}_daily tables).
+
+    Tables store Date + Close only; OHLC is derived for candlestick display.
+    """
+    table = _daily_table_name(symbol)
+    db_path = _resolve_path(config.DB_PATH)
+    if not db_path.is_file():
+        return None
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        )
+        if cur.fetchone() is None:
+            return None
+        df = pd.read_sql(
+            f'SELECT Date, Close FROM "{table}" ORDER BY Date DESC LIMIT ?',
+            conn,
+            params=(days,),
+        )
+    finally:
+        conn.close()
+
+    if df.empty:
+        return None
+
+    df = df.sort_values("Date").reset_index(drop=True)
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    close = pd.to_numeric(df["Close"], errors="coerce")
+    open_ = close.shift(1)
+    open_.iloc[0] = close.iloc[0]
+    df["Open"] = open_
+    df["High"] = pd.concat([open_, close], axis=1).max(axis=1)
+    df["Low"] = pd.concat([open_, close], axis=1).min(axis=1)
+    df["Close"] = close
+    df["MA50"] = close.rolling(50, min_periods=1).mean()
+    df["MA200"] = close.rolling(200, min_periods=1).mean()
+    return df.dropna(subset=["Date", "Close"])
+
+
+def _build_candlestick_figure(symbol: str, df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(
+        go.Candlestick(
+            x=df["Date"],
+            open=df["Open"],
+            high=df["High"],
+            low=df["Low"],
+            close=df["Close"],
+            name=symbol,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["Date"],
+            y=df["MA50"],
+            mode="lines",
+            name="MA50",
+            line=dict(color="#fd7e14", width=1.5),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["Date"],
+            y=df["MA200"],
+            mode="lines",
+            name="MA200",
+            line=dict(color="#0d6efd", width=1.5),
+        )
+    )
+    fig.update_layout(
+        title=f"{symbol} — last {len(df)} daily bars ({config.DB_PATH})",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        height=480,
+        margin=dict(t=48, b=32),
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    return fig
+
+
+def render_bot_status(heartbeat: dict | None) -> None:
+    st.subheader("Bot Status")
+    if heartbeat is None:
+        st.info(f"No heartbeat file found at `{config.HEARTBEAT_FILE}`. Is `run_all.py` running?")
+        return
+
+    regime = heartbeat.get("regime", "—")
+    halted = bool(heartbeat.get("halted"))
+    last_cycle = heartbeat.get("timestamp", "—")
+    active = _active_sleeves(heartbeat)
+    paper = heartbeat.get("paper", config.PAPER_TRADING)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Regime", regime)
+    c2.metric("Active Sleeves", ", ".join(active) if active else "None")
+    c3.metric("Halt Status", "HALTED" if halted else "Running")
+    c4.metric("Last Cycle", last_cycle)
+
+    st.caption(
+        f"Account: {'Paper' if paper else 'Live'} | "
+        f"Equity: ${float(heartbeat.get('equity') or 0):,.2f} | "
+        f"Cash: ${float(heartbeat.get('cash') or 0):,.2f} | "
+        f"Session open: {heartbeat.get('equity_session_open', '—')}"
+    )
+
+    exposure_rows = _sleeve_exposure_rows(heartbeat)
+    exp_df = pd.DataFrame(exposure_rows)
+
+    st.markdown("**Sleeve exposure**")
+    for row in exposure_rows:
+        if row["Sleeve"] == "Cash":
+            continue
+        pct = min(max(float(row["Equity (%)"]) / 100.0, 0.0), 1.0)
+        st.progress(
+            pct,
+            text=f"{row['Sleeve']}: {row['Equity (%)']:.1f}% of equity "
+            f"({row['Utilization (%)']:.0f}% of cap)",
+        )
+
+    show_df = exp_df.copy()
+    for col in ("Value ($)", "Cap ($)"):
+        show_df[col] = show_df[col].map(lambda v: f"${v:,.2f}")
+    for col in ("Cap Target (%)", "Utilization (%)", "Equity (%)"):
+        show_df[col] = show_df[col].map(lambda v: f"{v:.1f}%")
+    st.dataframe(show_df, use_container_width=True, hide_index=True)
+
+    chart_df = exp_df[exp_df["Sleeve"] != "Cash"].copy()
+    if not chart_df.empty:
+        fig = px.bar(
+            chart_df,
+            x="Sleeve",
+            y="Equity (%)",
+            color="Sleeve",
+            title="Sleeve allocation (% of equity)",
+            text=chart_df["Equity (%)"].map(lambda v: f"{v:.1f}%"),
+        )
+        fig.update_layout(showlegend=False, height=320, margin=dict(t=40, b=20))
+        fig.update_traces(textposition="outside")
+        st.plotly_chart(fig, use_container_width=True)
+
+    wisdom = heartbeat.get("wisdom")
+    if wisdom:
+        st.markdown("**Wisdom (live heartbeat)**")
+        w1, w2, w3, w4 = st.columns(4)
+        w1.metric("Mode", wisdom.get("mode", "—"))
+        w2.metric("Web sentiment", f"{float(wisdom.get('web_sentiment') or 0):+.2f}")
+        w3.metric("Gap", f"{float(wisdom.get('gap') or 0):+.2f}")
+        w4.metric("Paused", "Yes" if wisdom.get("paused") else "No")
+
+
+def render_positions(df: pd.DataFrame | None, err: str | None) -> None:
+    st.subheader("Live Positions & P&L")
+    if err:
+        st.warning(err)
+        return
+    if df is None:
+        st.warning("Unable to load positions.")
+        return
+    if df.empty:
+        st.info("No open Alpaca positions.")
+        return
+    st.dataframe(_style_pnl_df(df), use_container_width=True, hide_index=True)
+    total_upl = df["Unrealized P&L ($)"].sum()
+    st.metric("Total unrealized P&L", f"${total_upl:+,.2f}")
+
+
+def render_recent_trades() -> None:
+    st.subheader("Recent Trades")
+    sleeve_filter = st.selectbox(
+        "Filter by sleeve",
+        options=["All", "SPY", "NYSE", "Crypto"],
+        key="journal_sleeve_filter",
+    )
+    df = _load_journal(limit=500)
+    if df is None:
+        st.info(f"No journal found at `{config.PAPER_JOURNAL_CSV}`.")
+        return
+    if df.empty:
+        st.info("Journal file is empty.")
+        return
+
+    if sleeve_filter != "All":
+        df = df[df["sleeve"] == sleeve_filter]
+    display = df.head(20).copy()
+    if display.empty:
+        st.info(f"No journal rows for sleeve **{sleeve_filter}**.")
+        return
+
+    cols = [c for c in display.columns if c != "sleeve"]
+    show = display[cols + (["sleeve"] if "sleeve" in display.columns else [])]
+    st.dataframe(show, use_container_width=True, hide_index=True)
+
+
+def render_wisdom_scorecard(scorecard: dict | None) -> None:
+    st.subheader("Wisdom Scorecard")
+    if scorecard is None:
+        st.info(f"No scorecard found at `{config.WISDOM_SCORECARD_FILE}`.")
+        return
+
+    evaluated = scorecard.get("evaluated_at", "—")
+    window = scorecard.get("window_days", "—")
+    st.caption(f"Evaluated: {evaluated} | Window: {window} days")
+
+    live = scorecard.get("live") or {}
+    if live:
+        st.markdown("**Live performance (daily self-evaluation)**")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Return", f"{float(live.get('return_pct') or 0):+.2f}%")
+        m2.metric("Sharpe", f"{float(live.get('sharpe') or 0):.2f}")
+        m3.metric("Max drawdown", f"{float(live.get('max_drawdown_pct') or 0):+.2f}%")
+        m4.metric("Mode", live.get("mode", "—"))
+
+        m5, m6, m7, m8 = st.columns(4)
+        m5.metric("Start equity", f"${float(live.get('start_equity') or 0):,.2f}")
+        m6.metric("End equity", f"${float(live.get('end_equity') or 0):,.2f}")
+        m7.metric("Pause cycles", f"{int(live.get('pause_cycles') or 0):,}")
+        m8.metric("Total cycles", f"{int(live.get('cycles') or 0):,}")
+
+        if live.get("from_date") and live.get("to_date"):
+            st.caption(f"Period: {live['from_date']} → {live['to_date']}")
+
+    rec = scorecard.get("recommendation")
+    if rec:
+        st.markdown("**Recommendation**")
+        st.write(rec)
+
+    best = scorecard.get("best_sim_mode")
+    live_vs_best = scorecard.get("live_vs_best_sim_return_pp")
+    if best is not None:
+        st.caption(
+            f"Best simulated mode: **{best}** | "
+            f"Live vs best sim: {float(live_vs_best or 0):+.2f} pp"
+        )
+
+    sim_modes = scorecard.get("simulated_modes") or {}
+    if sim_modes:
+        sim_rows = []
+        for mode, stats in sim_modes.items():
+            sim_rows.append(
+                {
+                    "Mode": mode,
+                    "Return (%)": float(stats.get("return_pct") or 0),
+                    "Sharpe": float(stats.get("sharpe") or 0),
+                    "Max DD (%)": float(stats.get("max_drawdown_pct") or 0),
+                    "Orders": int(stats.get("orders") or 0),
+                    "Paused days": int(stats.get("paused_days") or 0),
+                }
+            )
+        st.markdown("**Simulated modes comparison**")
+        st.dataframe(pd.DataFrame(sim_rows), use_container_width=True, hide_index=True)
+
+
+def render_price_chart(positions_df: pd.DataFrame | None) -> None:
+    st.subheader("Price Chart")
+    if positions_df is None or positions_df.empty:
+        st.info("Open an Alpaca position to chart a ticker from `market_data.db`.")
+        return
+
+    tickers = sorted(positions_df["Ticker"].dropna().unique().tolist())
+    selected = st.selectbox("Ticker (open positions)", options=tickers, key="chart_ticker")
+    if not selected:
+        return
+
+    bars = _load_daily_ohlcv(selected, days=CHART_DAYS)
+    if bars is None or bars.empty:
+        st.warning(
+            f"No daily data for `{_daily_table_name(selected)}` in `{config.DB_PATH}`. "
+            "Run `python fetch_data.py --daily --days 365`."
+        )
+        return
+
+    st.caption(
+        f"DB table `{_daily_table_name(selected)}` — {len(bars)} rows "
+        f"(Close-only stored; OHLC derived for candlesticks)"
+    )
+    st.plotly_chart(_build_candlestick_figure(selected, bars), use_container_width=True)
+
+
+def _auto_refresh() -> None:
+    """Re-run the app every REFRESH_SECONDS via sleep + st.rerun (no st.fragment)."""
+    now = time.time()
+    if "last_refresh" not in st.session_state:
+        st.session_state.last_refresh = now
+
+    elapsed = now - float(st.session_state.last_refresh)
+    remaining = max(0.0, REFRESH_SECONDS - elapsed)
+
+    if elapsed >= REFRESH_SECONDS:
+        st.session_state.last_refresh = time.time()
+        st.rerun()
+
+    st.sidebar.caption(f"Next auto-refresh in ~{int(remaining)}s")
+    time.sleep(remaining)
+    st.session_state.last_refresh = time.time()
+    st.rerun()
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="PythonTrading Dashboard",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+    st.title("PythonTrading Bot Dashboard")
+    st.sidebar.header("Controls")
+    if st.sidebar.button("Refresh now"):
+        st.session_state.last_refresh = 0
+
+    mode_label = "Paper" if config.PAPER_TRADING else "Live"
+    st.sidebar.metric("Trading mode", mode_label)
+    st.sidebar.caption(f"Heartbeat: `{config.HEARTBEAT_FILE}`")
+    st.sidebar.caption(f"Journal: `{config.PAPER_JOURNAL_CSV}`")
+    st.sidebar.caption(f"Scorecard: `{config.WISDOM_SCORECARD_FILE}`")
+    st.sidebar.caption(f"Database: `{config.DB_PATH}`")
+
+    heartbeat = _load_json(_resolve_path(config.HEARTBEAT_FILE))
+    scorecard = _load_json(_resolve_path(config.WISDOM_SCORECARD_FILE))
+    positions_df, pos_err = _fetch_positions()
+
+    render_bot_status(heartbeat)
+    st.divider()
+    render_positions(positions_df, pos_err)
+    st.divider()
+    render_recent_trades()
+    st.divider()
+    render_wisdom_scorecard(scorecard)
+    st.divider()
+    render_price_chart(positions_df)
+
+    updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.caption(f"Last updated: {updated} (auto-refresh every {REFRESH_SECONDS}s)")
+
+    _auto_refresh()
+
+
+if __name__ == "__main__":
+    main()

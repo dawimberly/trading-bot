@@ -11,7 +11,7 @@ import pandas as pd
 
 import config
 from modules.wayback_sentiment import load_monthly_web_sentiment
-from modules.wisdom_sentiment import MODES, entries_paused, regime_sentiment
+from modules.wisdom_sentiment import MODES, DEPRECATED_MODES, LIVE_MODES, entries_paused, regime_sentiment
 from modules.market_context import get_volatility
 
 JOURNAL_FIELDS = [
@@ -34,6 +34,8 @@ JOURNAL_FIELDS = [
     "shadow_would_pause_web_regime",
     "shadow_would_pause_wisdom_pause",
     "shadow_would_pause_governor",
+    "shadow_would_pause_dynamic",
+    "sizing_multiplier",
     "spacex_ipo_narrative",
     "spacex_btc_headlines",
     "spacex_ipo_sentiment",
@@ -133,6 +135,8 @@ def log_cycle(
         "shadow_would_pause_web_regime": shadows.get("web_regime", False),
         "shadow_would_pause_wisdom_pause": shadows.get("wisdom_pause", False),
         "shadow_would_pause_governor": shadows.get("governor", False),
+        "shadow_would_pause_dynamic": shadows.get("dynamic", False),
+        "sizing_multiplier": wisdom.get("sizing_multiplier", ""),
         "spacex_ipo_narrative": summary.get("narrative", ""),
         "spacex_btc_headlines": summary.get("btc_linked_count", ""),
         "spacex_ipo_sentiment": summary.get("avg_sentiment", ""),

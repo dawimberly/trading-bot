@@ -219,6 +219,8 @@ def _write_heartbeat(
             "gap": wisdom.get("sentiment_gap"),
             "paused": wisdom.get("wisdom_paused"),
             "governor_stress": wisdom.get("governor_stress"),
+            "gap_tier": wisdom.get("gap_tier"),
+            "sizing_multiplier": wisdom.get("sizing_multiplier"),
         }
     if spacex_ipo:
         payload["spacex_ipo"] = spacex_ipo
@@ -320,6 +322,8 @@ def main():
     wisdom = resolve_wisdom_regime(data)
     regime = wisdom["regime"]
     vol = wisdom["volatility"]
+    if hasattr(executor, "set_wisdom_sizing_multiplier"):
+        executor.set_wisdom_sizing_multiplier(wisdom.get("sizing_multiplier", 1.0))
     gp_signals = _game_plan_signals(regime)
     yield_gated = bool(gp_signals.get("yield_gate"))
     _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=yield_gated)
@@ -329,11 +333,15 @@ def main():
     gap_s = f"{gap:+.2f}" if gap is not None else "n/a"
     pause_s = ""
     if wisdom.get("wisdom_paused"):
-        pause_s = (
-            " | GOVERNOR PAUSE"
-            if wisdom.get("wisdom_mode") == "governor"
-            else " | WISDOM PAUSE"
-        )
+        tier = wisdom.get("gap_tier") or wisdom.get("wisdom_mode")
+        pause_s = f" | DYNAMIC PAUSE ({tier})"
+    elif wisdom.get("wisdom_mode") == "dynamic":
+        tier = wisdom.get("gap_tier")
+        mult = wisdom.get("sizing_multiplier", 1.0)
+        if tier and tier != "no_web":
+            pause_s = f" | dynamic: {tier} x{mult:.2f}"
+        elif mult and mult < 0.999:
+            pause_s = f" | dynamic: sizing x{mult:.2f}"
     elif wisdom.get("wisdom_mode") == "governor" and _gap_wide(gap):
         stress = wisdom.get("governor_stress")
         if stress is False:
@@ -673,9 +681,17 @@ def _print_startup_banner():
         f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"
     )
     print(f"--- Sentiment: {config.SENTIMENT_SOURCE} (RHYME regimes) ---")
-    print(
-        f"--- Wisdom: {config.WISDOM_MODE} | gap threshold {config.WISDOM_GAP_THRESHOLD} ---"
-    )
+    if config.WISDOM_MODE == "dynamic":
+        print(
+            f"--- Wisdom: dynamic | gap agg<{config.SENTIMENT_GAP_THRESHOLD_AGGRESSIVE} "
+            f"normal<{config.SENTIMENT_GAP_THRESHOLD_NORMAL} "
+            f"def>{config.SENTIMENT_GAP_THRESHOLD_DEFENSIVE} | "
+            f"sizing {config.DYNAMIC_SIZING_MULTIPLIER_MIN}-{config.DYNAMIC_SIZING_MULTIPLIER_MAX} ---"
+        )
+    else:
+        print(
+            f"--- Wisdom: {config.WISDOM_MODE} | gap threshold {config.WISDOM_GAP_THRESHOLD} ---"
+        )
     if config.WISDOM_EVAL_ENABLED:
         print(
             f"--- Wisdom eval: every {config.WISDOM_EVAL_DAYS}d -> "

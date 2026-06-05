@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -11,11 +12,30 @@ import config
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
 from modules.wayback_sentiment import normalize_price_sentiment, web_sentiment_for_date
 from modules.web_sentiment_live import get_live_web_sentiment
+from modules.wisdom_adaptor import get_dynamic_wisdom_signal
 
-MODES = ("baseline", "web_regime", "arbitrage", "wisdom_pause", "governor")
+LIVE_MODES = ("baseline", "dynamic")
+DEPRECATED_MODES = ("web_regime", "arbitrage", "wisdom_pause", "governor")
+MODES = LIVE_MODES + DEPRECATED_MODES
 PAUSE_REGIME = "RHYME_E: Steady_Bearish_Decline"
 BEAR_REGIME = "RHYME_E: Steady_Bearish_Decline"
 PANIC_REGIME = "RHYME_B: Panic_Volatility"
+
+
+def normalize_wisdom_mode(mode: str | None) -> str:
+    """Resolve WISDOM_MODE for live bot; map config-level deprecated modes to dynamic."""
+    raw = (mode or config.WISDOM_MODE).strip().lower()
+    from_config = mode is None or raw == config.WISDOM_MODE.strip().lower()
+    if raw in DEPRECATED_MODES and from_config:
+        warnings.warn(
+            f"WISDOM_MODE={raw!r} is deprecated; using dynamic.",
+            stacklevel=2,
+        )
+        return "dynamic"
+    if raw not in MODES:
+        print(f"Unknown WISDOM_MODE '{raw}', falling back to baseline.")
+        return "baseline"
+    return raw
 
 
 def regime_sentiment(
@@ -40,6 +60,17 @@ def regime_sentiment(
 
     if mode == "baseline" or np.isnan(web):
         return price, (None if np.isnan(web) else web), gap
+
+    if mode == "dynamic":
+        vol = get_volatility(data)
+        dyn = get_dynamic_wisdom_signal(
+            data,
+            price_sentiment=price,
+            web_sentiment=web,
+            gap=gap,
+            vol=vol,
+        )
+        return dyn["effective_sentiment"], web, gap
 
     if mode == "web_regime":
         return web, web, gap
@@ -87,7 +118,22 @@ def entries_paused(
     data=None,
     vol: str | None = None,
     stress_confirmed: bool | None = None,
+    dynamic_signal: dict | None = None,
 ) -> bool:
+    if mode == "dynamic":
+        if dynamic_signal is not None:
+            return bool(dynamic_signal.get("wisdom_paused"))
+        if data is None or vol is None:
+            return False
+        price = get_price_sentiment(data)
+        dyn = get_dynamic_wisdom_signal(
+            data,
+            price_sentiment=price,
+            web_sentiment=web,
+            gap=gap,
+            vol=vol,
+        )
+        return bool(dyn.get("wisdom_paused"))
     if web is None or np.isnan(web) or not _gap_exceeds(gap, gap_threshold):
         return False
     if mode == "wisdom_pause":
@@ -99,6 +145,25 @@ def entries_paused(
             return False
         return governor_stress_confirmed(data, vol)
     return False
+
+
+def _resolve_dynamic(
+    data: pd.DataFrame,
+    *,
+    price_sent: float,
+    web: float | None,
+    gap: float | None,
+    vol: str,
+    macro_stress: bool | None = None,
+) -> dict:
+    return get_dynamic_wisdom_signal(
+        data,
+        price_sentiment=price_sent,
+        web_sentiment=web,
+        gap=gap,
+        vol=vol,
+        macro_stress=macro_stress,
+    )
 
 
 def resolve_wisdom_regime(
@@ -113,10 +178,7 @@ def resolve_wisdom_regime(
     Full wisdom cycle: vol + web + price -> RHYME regime (optional entry pause).
     Live bot uses cached web fetch; backtests pass monthly_web from Wayback CSV.
     """
-    mode = (mode or config.WISDOM_MODE).strip().lower()
-    if mode not in MODES:
-        print(f"Unknown WISDOM_MODE '{mode}', falling back to baseline.")
-        mode = "baseline"
+    mode = normalize_wisdom_mode(mode)
     gap_threshold = gap_threshold if gap_threshold is not None else config.WISDOM_GAP_THRESHOLD
     ts = pd.Timestamp(ts or datetime.datetime.now())
 
@@ -125,10 +187,13 @@ def resolve_wisdom_regime(
 
     web: float | None = None
     if mode != "baseline":
-        web = get_live_web_sentiment()
-        if web is None and monthly_web is not None and not monthly_web.empty:
-            w = web_sentiment_for_date(monthly_web, ts)
-            web = None if np.isnan(w) else w
+        if mode == "dynamic" and not config.AUTO_DYNAMIC_ENABLED:
+            web = None
+        else:
+            web = get_live_web_sentiment()
+            if web is None and monthly_web is not None and not monthly_web.empty:
+                w = web_sentiment_for_date(monthly_web, ts)
+                web = None if np.isnan(w) else w
 
     sent, web_used, gap = regime_sentiment(
         data,
@@ -138,6 +203,21 @@ def resolve_wisdom_regime(
         gap_threshold=gap_threshold,
         web_override=web,
     )
+
+    dynamic_signal = None
+    sizing_multiplier = 1.0
+    gap_tier = None
+    macro_stress = None
+
+    if mode == "dynamic" and config.AUTO_DYNAMIC_ENABLED:
+        dynamic_signal = _resolve_dynamic(
+            data, price_sent=price_sent, web=web_used, gap=gap, vol=vol
+        )
+        sent = dynamic_signal["effective_sentiment"]
+        sizing_multiplier = dynamic_signal["sizing_multiplier"]
+        gap_tier = dynamic_signal["gap_tier"]
+        macro_stress = dynamic_signal["macro_stress"]
+
     regime = get_market_regime(sent, vol)
     stress_confirmed = (
         governor_stress_confirmed(data, vol) if mode == "governor" else None
@@ -150,6 +230,7 @@ def resolve_wisdom_regime(
         data=data,
         vol=vol,
         stress_confirmed=stress_confirmed,
+        dynamic_signal=dynamic_signal,
     )
     if paused:
         regime = PAUSE_REGIME
@@ -163,7 +244,10 @@ def resolve_wisdom_regime(
         "effective_sentiment": sent,
         "wisdom_mode": mode,
         "wisdom_paused": paused,
-        "governor_stress": stress_confirmed,
+        "governor_stress": stress_confirmed if mode == "governor" else macro_stress,
+        "sizing_multiplier": sizing_multiplier,
+        "gap_tier": gap_tier,
+        "dynamic_stress": macro_stress,
     }
 
 
@@ -174,12 +258,12 @@ def resolve_backtest_regime(
     *,
     wisdom_mode: str | None = None,
     gap_threshold: float | None = None,
-) -> tuple[str, str, bool]:
+) -> tuple[str, str, bool, float]:
     """Regime for daily backtests (optional Wayback web + wisdom pause)."""
     vol = get_volatility(data)
     if not wisdom_mode:
         price_sent = get_price_sentiment(data)
-        return get_market_regime(price_sent, vol), vol, False
+        return get_market_regime(price_sent, vol), vol, False, 1.0
 
     mode = wisdom_mode.strip().lower()
     if mode not in MODES:
@@ -187,9 +271,20 @@ def resolve_backtest_regime(
     gap_threshold = gap_threshold if gap_threshold is not None else config.WISDOM_GAP_THRESHOLD
     web_series = monthly_web if monthly_web is not None else pd.Series(dtype=float)
 
+    price_sent = get_price_sentiment(data)
     sent, web, gap = regime_sentiment(
         data, ts, web_series, mode=mode, gap_threshold=gap_threshold
     )
+
+    dynamic_signal = None
+    sizing_multiplier = 1.0
+    if mode == "dynamic" and config.AUTO_DYNAMIC_ENABLED:
+        dynamic_signal = _resolve_dynamic(
+            data, price_sent=price_sent, web=web, gap=gap, vol=vol
+        )
+        sent = dynamic_signal["effective_sentiment"]
+        sizing_multiplier = dynamic_signal["sizing_multiplier"]
+
     regime = get_market_regime(sent, vol)
     stress_confirmed = governor_stress_confirmed(data, vol) if mode == "governor" else None
     paused = entries_paused(
@@ -200,7 +295,8 @@ def resolve_backtest_regime(
         data=data,
         vol=vol,
         stress_confirmed=stress_confirmed,
+        dynamic_signal=dynamic_signal,
     )
     if paused:
         regime = PAUSE_REGIME
-    return regime, vol, paused
+    return regime, vol, paused, sizing_multiplier

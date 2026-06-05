@@ -281,7 +281,7 @@ def run_metals_backtest(
                 continue
 
             ts = data.index[i]
-            regime, vol, paused = resolve_backtest_regime(
+            regime, vol, paused, sizing_mult = resolve_backtest_regime(
                 window,
                 ts,
                 monthly_web,
@@ -293,6 +293,7 @@ def run_metals_backtest(
             stress = macro_stress(window_full, regime)
 
             executor = BacktestExecutor(portfolio, prices)
+            executor.set_wisdom_sizing_multiplier(sizing_mult)
             gated = use_yield_gate and _yield_gate(window_full)
             if not gated:
                 run_spy_strategy(
@@ -430,7 +431,7 @@ def run_fresh_capital_backtest(
                 continue
 
             ts = data.index[i]
-            regime, vol, paused = resolve_backtest_regime(
+            regime, vol, paused, sizing_mult = resolve_backtest_regime(
                 window,
                 ts,
                 monthly_web,
@@ -442,6 +443,7 @@ def run_fresh_capital_backtest(
             stress = macro_stress(window_full, regime)
 
             executor = BacktestExecutor(portfolio, prices)
+            executor.set_wisdom_sizing_multiplier(sizing_mult)
             gated = use_yield_gate and _yield_gate(window_full)
             if not gated:
                 run_spy_strategy(

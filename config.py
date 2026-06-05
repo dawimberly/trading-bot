@@ -112,8 +112,30 @@ DERIVED_BEAR_SENTIMENT_THRESHOLD = float(
 )
 
 # --- Wisdom layer (web mood + price math -> RHYME; see backtester_wisdom.py) ---
-# baseline | web_regime | arbitrage | wisdom_pause | governor
-WISDOM_MODE = os.getenv("WISDOM_MODE", "arbitrage").strip().lower()
+# dynamic (default) | baseline — legacy modes map to dynamic with a warning
+WISDOM_MODE = os.getenv("WISDOM_MODE", "dynamic").strip().lower()
+AUTO_DYNAMIC_ENABLED = os.getenv("AUTO_DYNAMIC_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+SENTIMENT_GAP_THRESHOLD_AGGRESSIVE = float(
+    os.getenv("SENTIMENT_GAP_THRESHOLD_AGGRESSIVE", "0.25")
+)
+SENTIMENT_GAP_THRESHOLD_NORMAL = float(
+    os.getenv("SENTIMENT_GAP_THRESHOLD_NORMAL", "0.35")
+)
+SENTIMENT_GAP_THRESHOLD_DEFENSIVE = float(
+    os.getenv("SENTIMENT_GAP_THRESHOLD_DEFENSIVE", "0.40")
+)
+DYNAMIC_SIZING_MULTIPLIER_MAX = float(os.getenv("DYNAMIC_SIZING_MULTIPLIER_MAX", "1.5"))
+DYNAMIC_SIZING_MULTIPLIER_MIN = float(os.getenv("DYNAMIC_SIZING_MULTIPLIER_MIN", "0.5"))
+DYNAMIC_HIGH_VOL_WEB_SCALE = float(os.getenv("DYNAMIC_HIGH_VOL_WEB_SCALE", "0.5"))
+DYNAMIC_LOW_VOL_TREND_BOOST = float(os.getenv("DYNAMIC_LOW_VOL_TREND_BOOST", "1.1"))
+DYNAMIC_SPY_TREND_STRONG_PCT = float(os.getenv("DYNAMIC_SPY_TREND_STRONG_PCT", "0.05"))
+DYNAMIC_SPY_TREND_NEAR_PCT = float(os.getenv("DYNAMIC_SPY_TREND_NEAR_PCT", "0.02"))
+DYNAMIC_SPY_TREND_BOOST_SCALE = float(os.getenv("DYNAMIC_SPY_TREND_BOOST_SCALE", "5.0"))
+# Legacy gap gate for deprecated modes and journal shadows
 WISDOM_GAP_THRESHOLD = float(os.getenv("WISDOM_GAP_THRESHOLD", "0.25"))
 WEB_SENTIMENT_CACHE_FILE = "web_sentiment_live.json"
 WEB_SENTIMENT_CACHE_HOURS = int(os.getenv("WEB_SENTIMENT_CACHE_HOURS", "24"))
@@ -464,6 +486,26 @@ def metal_sleeve_enabled() -> bool:
 def game_plan_active() -> bool:
     """Any game-plan mode (full or yield-gate-only)."""
     return GAME_PLAN_ENABLED or GAME_PLAN_YIELD_GATE_ONLY
+
+
+def print_dynamic_wisdom_config() -> None:
+    """Print dynamic WISDOM_MODE thresholds and sizing knobs (preflight / tuning)."""
+    print("--- Dynamic wisdom config ---")
+    print(f"  WISDOM_MODE:                    {WISDOM_MODE}")
+    print(f"  AUTO_DYNAMIC_ENABLED:           {AUTO_DYNAMIC_ENABLED}")
+    print(f"  SENTIMENT_GAP_THRESHOLD_AGGRESSIVE: {SENTIMENT_GAP_THRESHOLD_AGGRESSIVE}")
+    print(f"  SENTIMENT_GAP_THRESHOLD_NORMAL:     {SENTIMENT_GAP_THRESHOLD_NORMAL}")
+    print(f"  SENTIMENT_GAP_THRESHOLD_DEFENSIVE:  {SENTIMENT_GAP_THRESHOLD_DEFENSIVE}")
+    print(
+        f"  DYNAMIC_SIZING_MULTIPLIER:      {DYNAMIC_SIZING_MULTIPLIER_MIN} .. "
+        f"{DYNAMIC_SIZING_MULTIPLIER_MAX}"
+    )
+    print(f"  DYNAMIC_HIGH_VOL_WEB_SCALE:     {DYNAMIC_HIGH_VOL_WEB_SCALE}")
+    print(f"  DYNAMIC_LOW_VOL_TREND_BOOST:      {DYNAMIC_LOW_VOL_TREND_BOOST}")
+    print(f"  DYNAMIC_SPY_TREND_STRONG_PCT:     {DYNAMIC_SPY_TREND_STRONG_PCT}")
+    print(f"  DYNAMIC_SPY_TREND_NEAR_PCT:       {DYNAMIC_SPY_TREND_NEAR_PCT}")
+    print(f"  DYNAMIC_SPY_TREND_BOOST_SCALE:    {DYNAMIC_SPY_TREND_BOOST_SCALE}")
+    print(f"  WISDOM_GAP_THRESHOLD (legacy):    {WISDOM_GAP_THRESHOLD}")
 
 
 def print_recommended_stack_flags() -> None:

@@ -1,47 +1,47 @@
 # Game Plan A/B Results
 
-Generated: 2026-06-01 22:10
+Generated: 2026-06-02 09:44
 
 Variants:
 - **baseline** — no game plan (full caps: SPY 45%, crypto 20%, NYSE 20%, 15% cash)
 - **game_plan_gld_slv_cper** — full plan (yield gate + 10% metal + stress cash + 0.9 long scale)
 - **yield_gate_only** — yield gate only (full caps, no metal, no stress cash)
 
-### full_2017_2026 (2017-10-18 to 2026-05-22)
+### full_2017_2026 (2017-07-20 to 2026-06-02)
 
 | Strategy | Return | Sharpe | Max DD | Gate days | Cash trims | Metal $ |
 |----------|--------|--------|--------|-----------|------------|---------|
-| baseline | +629.67% | 1.05 | -35.81% | 0 | 0 | $0 |
-| game_plan_gld_slv_cper | +519.07% | 1.06 | -32.71% | 137 | 0 | $3,320 |
-| yield_gate_only | +628.32% | 1.05 | -35.85% | 130 | 0 | $0 |
+| baseline | +259.75% | 0.75 | -25.10% | 0 | 0 | $0 |
+| game_plan_gld_slv_cper | +257.01% | 0.80 | -24.83% | 205 | 0 | $3,383 |
+| yield_gate_only | +259.16% | 0.75 | -25.08% | 205 | 0 | $0 |
 
-**game_plan_gld_slv_cper** vs baseline: return -110.60 pp, Sharpe +0.01, MaxDD +3.10 pp
-**yield_gate_only** vs baseline: return -1.35 pp, Sharpe +0.00, MaxDD -0.04 pp
+**game_plan_gld_slv_cper** vs baseline: return -2.74 pp, Sharpe +0.05, MaxDD +0.27 pp
+**yield_gate_only** vs baseline: return -0.59 pp, Sharpe +0.00, MaxDD +0.02 pp
 
-### fresh_2022 (2022-01-03 to 2022-12-30)
-
-| Strategy | Return | Sharpe | Max DD | Gate days | Cash trims | Metal $ |
-|----------|--------|--------|--------|-----------|------------|---------|
-| baseline | -8.63% | -0.38 | -15.80% | 0 | 0 | $0 |
-| game_plan_gld_slv_cper | -4.14% | -0.33 | -10.08% | 81 | 0 | $990 |
-| yield_gate_only | -3.94% | -0.27 | -9.04% | 138 | 0 | $0 |
-
-**game_plan_gld_slv_cper** vs baseline: return +4.49 pp, Sharpe +0.05, MaxDD +5.72 pp
-**yield_gate_only** vs baseline: return +4.69 pp, Sharpe +0.11, MaxDD +6.76 pp
-
-### recent_750d (2023-05-26 to 2026-05-22)
+### fresh_2022 (2022-01-01 to 2022-12-31)
 
 | Strategy | Return | Sharpe | Max DD | Gate days | Cash trims | Metal $ |
 |----------|--------|--------|--------|-----------|------------|---------|
-| baseline | +128.35% | 1.00 | -40.94% | 0 | 0 | $0 |
-| game_plan_gld_slv_cper | +89.12% | 0.82 | -35.36% | 73 | 21 | $1,023 |
-| yield_gate_only | +126.70% | 0.99 | -40.98% | 73 | 0 | $0 |
+| baseline | -21.40% | -0.78 | -26.96% | 0 | 0 | $0 |
+| game_plan_gld_slv_cper | -13.16% | -0.71 | -19.25% | 35 | 0 | $975 |
+| yield_gate_only | -17.75% | -0.81 | -22.94% | 35 | 0 | $0 |
 
-**game_plan_gld_slv_cper** vs baseline: return -39.23 pp, Sharpe -0.18, MaxDD +5.58 pp
-**yield_gate_only** vs baseline: return -1.65 pp, Sharpe -0.01, MaxDD -0.04 pp
+**game_plan_gld_slv_cper** vs baseline: return +8.24 pp, Sharpe +0.07, MaxDD +7.71 pp
+**yield_gate_only** vs baseline: return +3.65 pp, Sharpe -0.03, MaxDD +4.02 pp
+
+### recent_750d (2024-05-14 to 2026-06-02)
+
+| Strategy | Return | Sharpe | Max DD | Gate days | Cash trims | Metal $ |
+|----------|--------|--------|--------|-----------|------------|---------|
+| baseline | +44.90% | 1.03 | -18.43% | 0 | 0 | $0 |
+| game_plan_gld_slv_cper | +37.99% | 1.03 | -16.28% | 192 | 12 | $1,253 |
+| yield_gate_only | +44.85% | 1.03 | -18.43% | 82 | 0 | $0 |
+
+**game_plan_gld_slv_cper** vs baseline: return -6.91 pp, Sharpe +0.00, MaxDD +2.15 pp
+**yield_gate_only** vs baseline: return -0.05 pp, Sharpe +0.00, MaxDD +0.00 pp
 
 ## Recommendation
 
-Average Sharpe across windows: baseline=0.56, game_plan_gld_slv_cper=0.52, yield_gate_only=0.59
+Average Sharpe across windows: baseline=0.33, game_plan_gld_slv_cper=0.37, yield_gate_only=0.32
 
-**Adopt yield-gate-only.** It keeps the macro SPY filter without metal sleeve drag, stress cash trims, or 0.9 long scaling. Set `GAME_PLAN_YIELD_GATE_ONLY=true` and `GAME_PLAN_ENABLED=false` (or disable metal/stress in live via the flag).
+**Keep full game plan** (metals + stress cash + yield gate + 0.9 scale). The simplified yield-gate-only variant did not improve risk-adjusted returns.

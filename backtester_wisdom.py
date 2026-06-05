@@ -132,13 +132,37 @@ def run_fund_backtest(
         sent, web, gap = regime_sentiment(
             window, ts, monthly_web, mode=mode, gap_threshold=gap_threshold
         )
+        dynamic_signal = None
+        sizing_mult = 1.0
+        if mode == "dynamic" and config.AUTO_DYNAMIC_ENABLED:
+            from modules.wisdom_adaptor import get_dynamic_wisdom_signal
+            from modules.market_context import get_price_sentiment
+
+            dynamic_signal = get_dynamic_wisdom_signal(
+                window,
+                price_sentiment=get_price_sentiment(window),
+                web_sentiment=web,
+                gap=gap,
+                vol=vol,
+            )
+            sent = dynamic_signal["effective_sentiment"]
+            sizing_mult = dynamic_signal["sizing_multiplier"]
         regime = get_market_regime(sent, vol)
-        if entries_paused(mode, web, gap, gap_threshold, data=window, vol=vol):
+        if entries_paused(
+            mode,
+            web,
+            gap,
+            gap_threshold,
+            data=window,
+            vol=vol,
+            dynamic_signal=dynamic_signal,
+        ):
             regime = PAUSE_REGIME
             paused_days += 1
         regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
         executor = BacktestExecutor(portfolio, prices)
+        executor.set_wisdom_sizing_multiplier(sizing_mult)
         if use_game_plan:
             stress = macro_stress(window_full, regime)
             gated = config.YIELD_GATE_ENABLED and _yield_gate(window_full)
@@ -278,10 +302,8 @@ def main() -> None:
             f"  return {row['total_return_pct']:+.2f}%  Sharpe {row['sharpe']:.2f}  "
             f"max DD {row['max_drawdown_pct']:.2f}%  equity ${row['final_equity']:,.0f}{extra}"
         )
-        if mode == "wisdom_pause":
-            print(f"  wisdom-pause days: {row['paused_days']}")
-        if mode == "governor":
-            print(f"  governor-pause days: {row['paused_days']}")
+        if mode in ("wisdom_pause", "governor", "dynamic"):
+            print(f"  {mode}-pause days: {row['paused_days']}")
 
     print("\n=== COMPARISON ===")
     header = f"{'Mode':<16} {'Return':>9} {'Sharpe':>7} {'MaxDD':>8} {'Orders':>7}"
