@@ -35,10 +35,9 @@ TICKER = "VTI"
 ASSET_TYPE = "STOCK"
 MA_WINDOW = 45
 
-# --- Recommended stack (session analysis; override any flag via .env) ---
-# Game plan ON, yield-gate-only (no metal sleeve / stress cash / 0.9 long scale).
-# NYSE anti-overlap vs SPY when corr > NYSE_SPY_CORR_MAX (default 0.80).
-# SPY_EXIT_ON_MA_BREAK, adaptive chunk + co-fire budget, halt resume 8% + liquidate.
+# --- Live stack: current_dynamic (Sharpe phase winner; override via .env) ---
+# WISDOM_MODE=dynamic, game plan yield-gate-only, halt resume 8% + liquidate.
+# Opt-in (default off): NYSE overlap, beta scaling, SPY MA exit, adaptive/cofire.
 # DERIVED_BEAR_PAUSE stays off.
 #
 # --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
@@ -47,14 +46,14 @@ SPY_SLEEVE_CAP_PCT = 0.45
 NYSE_SLEEVE_CAP_PCT = 0.20
 # NYSE picks vs SPY sleeve: skip high-beta / high-corr names when SPY is active
 _nyse_overlap_env = os.getenv("NYSE_OVERLAP_FILTER_ENABLED") or os.getenv(
-    "NYSE_ANTI_OVERLAP_ENABLED", "true"
+    "NYSE_ANTI_OVERLAP_ENABLED", "false"
 )
 NYSE_OVERLAP_FILTER_ENABLED = _nyse_overlap_env.lower() in ("1", "true", "yes")
 NYSE_ANTI_OVERLAP_ENABLED = NYSE_OVERLAP_FILTER_ENABLED
 NYSE_SPY_CORR_MAX = float(os.getenv("NYSE_SPY_CORR_MAX", "0.80"))
 NYSE_SPY_BETA_MAX = float(os.getenv("NYSE_SPY_BETA_MAX", "1.6"))
 NYSE_SPY_CORR_LOOKBACK = int(os.getenv("NYSE_SPY_CORR_LOOKBACK", "60"))
-NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "true").lower() in (
+NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "false").lower() in (
     "1",
     "true",
     "yes",
@@ -68,7 +67,7 @@ CRYPTO_VOL_ONLY = True  # crypto pairs only when cross-asset volatility is High
 SPY_BOT_SYMBOL = "SPY"
 SPY_MA_WINDOW = 200
 SPY_RISK_PER_TRADE = SPY_SLEEVE_CAP_PCT  # legacy alias for backtests
-SPY_EXIT_ON_MA_BREAK = os.getenv("SPY_EXIT_ON_MA_BREAK", "true").lower() in (
+SPY_EXIT_ON_MA_BREAK = os.getenv("SPY_EXIT_ON_MA_BREAK", "false").lower() in (
     "1",
     "true",
     "yes",
@@ -322,12 +321,12 @@ if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
 # --- Risk & sizing (paper month defaults) ---
 RISK_PER_TRADE = 0.02
 MAX_NOTIONAL_PER_ORDER = 10000.0
-ADAPTIVE_CHUNK_ENABLED = os.getenv("ADAPTIVE_CHUNK_ENABLED", "true").lower() in (
+ADAPTIVE_CHUNK_ENABLED = os.getenv("ADAPTIVE_CHUNK_ENABLED", "false").lower() in (
     "1",
     "true",
     "yes",
 )
-COFIRE_BUDGET_ENABLED = os.getenv("COFIRE_BUDGET_ENABLED", "true").lower() in (
+COFIRE_BUDGET_ENABLED = os.getenv("COFIRE_BUDGET_ENABLED", "false").lower() in (
     "1",
     "true",
     "yes",
@@ -509,11 +508,11 @@ def print_dynamic_wisdom_config() -> None:
 
 
 def print_recommended_stack_flags() -> None:
-    """Log active recommended-stack flags (preflight / backtest startup)."""
+    """Log active current_dynamic live stack flags (preflight / backtest startup)."""
     gp = "yield-gate-only" if (
         game_plan_active() and GAME_PLAN_YIELD_GATE_ONLY
     ) else ("full" if game_plan_active() else "off")
-    print("--- Recommended stack flags ---")
+    print("--- current_dynamic live stack ---")
     print(f"  game_plan:              {gp}")
     print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
     print(f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} (corr max {NYSE_SPY_CORR_MAX})")

@@ -71,18 +71,18 @@ The **~15% cash** is **not** a standalone strategy sleeve. It is **structural he
 
 Preflight and `bot_heartbeat.json` report `effective_cash_buffer_pct()` alongside sleeve exposure.
 
-## Current Recommended Configuration (Post-Optimization)
+## Current Recommended Configuration (current_dynamic live stack)
 
-Session A/B grids (`scripts/analysis/*_results.md`) selected this stack for live + backtest parity. Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+Sharpe phase backtests (`scripts/analysis/sharpe_phase_compare.py`) selected **current_dynamic** as the live baseline: dynamic wisdom + yield-gate-only + halt resume/liquidate, with NYSE overlap, beta scaling, SPY MA exit, and adaptive/cofire **off by default** (opt-in via `.env`). Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
 
 | Layer | Setting |
 |-------|---------|
 | **Game plan** | Yield-gate-only — `GAME_PLAN_YIELD_GATE_ONLY=true` (metal + stress cash off) |
 | **Sleeves** | 45% SPY / 20% crypto / 20% NYSE / 15% cash |
-| **SPY** | MA200 entry; `SPY_EXIT_ON_MA_BREAK=true` |
-| **NYSE** | Overlap filter when SPY active (`NYSE_SPY_CORR_MAX=0.80`); beta scaling on by default |
+| **SPY** | MA200 entry; `SPY_EXIT_ON_MA_BREAK=false` (opt-in) |
+| **NYSE** | Overlap filter off by default; beta scaling off by default |
 | **Crypto** | Vol-gated pairs only; min correlation 0.5 |
-| **Sizing** | `ADAPTIVE_CHUNK_ENABLED` + `COFIRE_BUDGET_ENABLED` |
+| **Sizing** | Adaptive chunk + co-fire off by default (opt-in) |
 | **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
 | **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
 | **Wisdom** | `WISDOM_MODE=dynamic`, `SENTIMENT_SOURCE=price` |
@@ -90,14 +90,14 @@ Session A/B grids (`scripts/analysis/*_results.md`) selected this stack for live
 Preflight prints the active stack via `config.print_recommended_stack_flags()`:
 
 ```
---- Recommended stack flags ---
+--- current_dynamic live stack ---
   game_plan:              yield-gate-only
   yield_gate:             True
-  nyse_overlap_filter:    True (corr max 0.8)
-  nyse_beta_scaling:      True
-  spy_exit_on_ma_break:   True
-  adaptive_chunk:         True
-  cofire_budget:          True
+  nyse_overlap_filter:    False (corr max 0.8)
+  nyse_beta_scaling:      False
+  spy_exit_on_ma_break:   False
+  adaptive_chunk:         False
+  cofire_budget:          False
   halt_resume_dd:         8% | liquidate_on_breach: True
   derived_bear_pause:     False
   sleeves: SPY 45% | crypto 20% | NYSE 20% | metal 0% | cash 15%
@@ -379,13 +379,13 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `GAME_PLAN_ENABLED` | No | Default `true` |
 | `GAME_PLAN_YIELD_GATE_ONLY` | No | Default `true` — yield gate without metal/stress/0.9 scale |
 | `YIELD_GATE_ENABLED` | No | Default `true` — block new SPY buys on hostile rates |
-| `ADAPTIVE_CHUNK_ENABLED` | No | Default `true` — larger chunks when sleeve room allows |
-| `COFIRE_BUDGET_ENABLED` | No | Default `true` — shared budget when SPY+NYSE co-fire |
-| `SPY_EXIT_ON_MA_BREAK` | No | Default `true` |
+| `ADAPTIVE_CHUNK_ENABLED` | No | Default `false` (opt-in) — larger chunks when sleeve room allows |
+| `COFIRE_BUDGET_ENABLED` | No | Default `false` (opt-in) — shared budget when SPY+NYSE co-fire |
+| `SPY_EXIT_ON_MA_BREAK` | No | Default `false` (opt-in) |
 | `HALT_RESUME_DRAWDOWN_PCT` | No | Default `0.08` (set `0` for legacy never-resume) |
 | `HALT_LIQUIDATE_ON_BREACH` | No | Default `true` |
-| `NYSE_OVERLAP_FILTER_ENABLED` | No | Default `true`; `NYSE_SPY_CORR_MAX=0.80` |
-| `NYSE_BETA_SCALING_ENABLED` | No | Default `true` — size NYSE picks by inverse beta vs SPY |
+| `NYSE_OVERLAP_FILTER_ENABLED` | No | Default `false` (opt-in); `NYSE_SPY_CORR_MAX=0.80` |
+| `NYSE_BETA_SCALING_ENABLED` | No | Default `false` (opt-in) — size NYSE picks by inverse beta vs SPY |
 | `DERIVED_BEAR_PAUSE_ENABLED` | No | Default `false` |
 | `METAL_SLEEVE_CAP_PCT` | No | Full game plan only (default `0.10`) |
 | `STRESS_CASH_PCT` | No | Full game plan only (default `0.25`) |
