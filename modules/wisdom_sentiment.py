@@ -11,6 +11,7 @@ import pandas as pd
 import config
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
 from modules.wayback_sentiment import normalize_price_sentiment, web_sentiment_for_date
+from modules.felix_sentiment import apply_felix_web_blend
 from modules.web_sentiment_live import get_live_web_sentiment
 from modules.wisdom_adaptor import get_dynamic_wisdom_signal
 
@@ -186,14 +187,17 @@ def resolve_wisdom_regime(
     price_sent = get_price_sentiment(data)
 
     web: float | None = None
+    headline_web: float | None = None
+    felix_meta: dict | None = None
     if mode != "baseline":
         if mode == "dynamic" and not config.AUTO_DYNAMIC_ENABLED:
             web = None
         else:
-            web = get_live_web_sentiment()
-            if web is None and monthly_web is not None and not monthly_web.empty:
+            headline_web = get_live_web_sentiment()
+            if headline_web is None and monthly_web is not None and not monthly_web.empty:
                 w = web_sentiment_for_date(monthly_web, ts)
-                web = None if np.isnan(w) else w
+                headline_web = None if np.isnan(w) else w
+            web, felix_meta = apply_felix_web_blend(headline_web)
 
     sent, web_used, gap = regime_sentiment(
         data,
@@ -240,6 +244,7 @@ def resolve_wisdom_regime(
         "volatility": vol,
         "price_sentiment": price_sent,
         "web_sentiment": web_used,
+        "headline_web_sentiment": headline_web,
         "sentiment_gap": gap,
         "effective_sentiment": sent,
         "wisdom_mode": mode,
@@ -248,6 +253,10 @@ def resolve_wisdom_regime(
         "sizing_multiplier": sizing_multiplier,
         "gap_tier": gap_tier,
         "dynamic_stress": macro_stress,
+        "felix_sentiment": (felix_meta or {}).get("sentiment"),
+        "felix_video_id": (felix_meta or {}).get("video_id"),
+        "felix_video_title": (felix_meta or {}).get("title"),
+        "felix_blend_weight": (felix_meta or {}).get("blend_weight"),
     }
 
 

@@ -42,6 +42,10 @@ JOURNAL_FIELDS = [
     "spacex_ipo_alert",
     "spacex_spcx_perp",
     "crypto_spacex_override",
+    "headline_web_sentiment",
+    "felix_sentiment",
+    "felix_video_id",
+    "felix_video_title",
     "notes",
 ]
 
@@ -143,6 +147,10 @@ def log_cycle(
         "spacex_ipo_alert": (spacex_ipo or {}).get("alert", False),
         "spacex_spcx_perp": summary.get("spcx_perp_count", ""),
         "crypto_spacex_override": (crypto_gate or {}).get("spacex_override", False),
+        "headline_web_sentiment": wisdom.get("headline_web_sentiment", ""),
+        "felix_sentiment": wisdom.get("felix_sentiment", ""),
+        "felix_video_id": wisdom.get("felix_video_id", ""),
+        "felix_video_title": wisdom.get("felix_video_title", ""),
         "notes": notes,
     }
     path = Path(_path())

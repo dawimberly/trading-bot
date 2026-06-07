@@ -27,6 +27,8 @@ def run_position_exits(
 
     for pos in positions:
         symbol = _position_symbol(pos.symbol)
+        if config.vti_core_enabled() and symbol == config.VTI_CORE_SYMBOL:
+            continue
         if not equity_session_open and not config.is_crypto(symbol):
             continue
         qty = float(pos.qty)

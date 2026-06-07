@@ -266,8 +266,8 @@ def maybe_spacex_listing_alert(listing: dict) -> None:
             f"Status:     {alpaca.get('status', 'n/a')}\n"
             f"Expected:   {listing.get('expected_listing_date')} "
             f"({listing.get('days_until_expected')} days)\n\n"
-            f"PAPER auto-buy: ${config.SPACEX_IPO_BUY_NOTIONAL:,.0f} "
-            f"({'on' if config.SPACEX_IPO_AUTO_BUY and config.PAPER_TRADING else 'off'})\n\n"
+            f"Alpaca auto-buy: ${config.SPACEX_IPO_BUY_NOTIONAL:,.0f} "
+            f"({'on' if config.SPACEX_IPO_AUTO_BUY and (config.PAPER_TRADING or config.ALLOW_LIVE_TRADING) else 'off'})\n\n"
             f"Kraken:     {'tradable' if kraken.get('tradable') else 'scanning for SPCXx/USD'}\n"
             f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
         )

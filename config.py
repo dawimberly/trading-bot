@@ -40,6 +40,36 @@ MA_WINDOW = 45
 # Opt-in (default off): NYSE overlap, beta scaling, SPY MA exit, adaptive/cofire.
 # DERIVED_BEAR_PAUSE stays off.
 #
+# --- VTI passive core + active satellite (backtest winner: 80/20 Sharpe vs active-only) ---
+VTI_CORE_ENABLED = os.getenv("VTI_CORE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+VTI_CORE_PCT = float(os.getenv("VTI_CORE_PCT", "0.80"))
+VTI_CORE_SYMBOL = os.getenv("VTI_CORE_SYMBOL", "VTI").strip().upper()
+# Rebalance VTI when |current - target| / equity exceeds this (avoids daily churn)
+VTI_CORE_REBALANCE_DRIFT_PCT = float(os.getenv("VTI_CORE_REBALANCE_DRIFT_PCT", "0.02"))
+
+# Paper research book (PAPER_APCA_*) — aggressive profit mode; live ~$100 stays conservative
+PAPER_AGGRESSIVE_ENABLED = os.getenv("PAPER_AGGRESSIVE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_VTI_CORE_PCT = float(os.getenv("PAPER_VTI_CORE_PCT", "0.20"))
+PAPER_SOCIAL_SLEEVE_CAP_PCT = float(os.getenv("PAPER_SOCIAL_SLEEVE_CAP_PCT", "0.20"))
+PAPER_ACTIVE_SLEEVE_BOOST = float(os.getenv("PAPER_ACTIVE_SLEEVE_BOOST", "1.40"))
+PAPER_WISDOM_SIZING_FLOOR = float(os.getenv("PAPER_WISDOM_SIZING_FLOOR", "1.0"))
+PAPER_CRYPTO_VOL_ONLY = os.getenv("PAPER_CRYPTO_VOL_ONLY", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
+
+_paper_aggressive_ctx = False
+
 # --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
 FUND_CASH_BUFFER_PCT = 0.15
 SPY_SLEEVE_CAP_PCT = 0.45
@@ -86,6 +116,21 @@ SPY_PAPER_JOURNAL_CSV = "spy_paper_journal.csv"
 SPY_LEDGER_PATH = "spy_trading_history.jsonl"
 SPY_RISK_EVENTS_LOG = "spy_risk_events.log"
 REFRESH_INTERVAL = 900
+
+# --- Scan schedule (run_all.py): crypto overnight; SPY/NYSE around US open ---
+SCAN_SCHEDULE_ENABLED = os.getenv("SCAN_SCHEDULE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Equity prep starts this many minutes before the regular open (default 9:25 ET).
+EQUITY_SCAN_BEFORE_OPEN_MIN = int(os.getenv("EQUITY_SCAN_BEFORE_OPEN_MIN", "5"))
+# SPY/NYSE scans begin this many minutes after the open (default 9:35 ET).
+EQUITY_SCAN_AFTER_OPEN_MIN = int(os.getenv("EQUITY_SCAN_AFTER_OPEN_MIN", "5"))
+# Loop cadence: 60s during open prep + RTH; slower overnight (crypto-only).
+CYCLE_INTERVAL_SEC = int(os.getenv("CYCLE_INTERVAL_SEC", "60"))
+# 300s (5m) balances crypto stop-loss vs API noise; 900 aligns with REFRESH_INTERVAL.
+CRYPTO_ONLY_CYCLE_INTERVAL_SEC = int(os.getenv("CRYPTO_ONLY_CYCLE_INTERVAL_SEC", "300"))
 MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "0.10"))
 # Resume entries when drawdown falls below this (0 = never resume, legacy halt)
 HALT_RESUME_DRAWDOWN_PCT = float(os.getenv("HALT_RESUME_DRAWDOWN_PCT", "0.08"))
@@ -136,8 +181,59 @@ DYNAMIC_SPY_TREND_NEAR_PCT = float(os.getenv("DYNAMIC_SPY_TREND_NEAR_PCT", "0.02
 DYNAMIC_SPY_TREND_BOOST_SCALE = float(os.getenv("DYNAMIC_SPY_TREND_BOOST_SCALE", "5.0"))
 # Legacy gap gate for deprecated modes and journal shadows
 WISDOM_GAP_THRESHOLD = float(os.getenv("WISDOM_GAP_THRESHOLD", "0.25"))
-WEB_SENTIMENT_CACHE_FILE = "web_sentiment_live.json"
+
+# --- Sentiment data layout (all mood archives under sentiment/) ---
+SENTIMENT_DIR = os.getenv("SENTIMENT_DIR", "sentiment")
+WEB_SENTIMENT_CACHE_FILE = os.path.join(SENTIMENT_DIR, "live", "web_sentiment_live.json")
+WAYBACK_SENTIMENT_FILE = os.path.join(SENTIMENT_DIR, "archive", "wayback_sentiment.csv")
 WEB_SENTIMENT_CACHE_HOURS = int(os.getenv("WEB_SENTIMENT_CACHE_HOURS", "24"))
+# Felix & Friends / Goat Academy YouTube transcripts (optional macro overlay)
+FELIX_SYNC_ENABLED = os.getenv("FELIX_SYNC_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+FELIX_SYNC_INTERVAL_HOURS = int(os.getenv("FELIX_SYNC_INTERVAL_HOURS", "24"))
+FELIX_SYNC_MAX_VIDEOS = int(os.getenv("FELIX_SYNC_MAX_VIDEOS", "15"))
+FELIX_SENTIMENT_ENABLED = os.getenv("FELIX_SENTIMENT_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+FELIX_SENTIMENT_BLEND_WEIGHT = float(os.getenv("FELIX_SENTIMENT_BLEND_WEIGHT", "0.25"))
+FELIX_SENTIMENT_MAX_AGE_DAYS = int(os.getenv("FELIX_SENTIMENT_MAX_AGE_DAYS", "14"))
+FELIX_YOUTUBE_CHANNEL_URL = os.getenv(
+    "FELIX_YOUTUBE_CHANNEL_URL",
+    "https://www.youtube.com/@FelixFriends/videos",
+).strip()
+FELIX_TRANSCRIPTS_DIR = os.path.join(
+    SENTIMENT_DIR, "sources", "youtube", "felix_and_friends", "transcripts"
+)
+FELIX_MANIFEST_FILE = os.path.join(
+    SENTIMENT_DIR, "sources", "youtube", "felix_and_friends", "manifest.jsonl"
+)
+
+# --- Social / creator sleeve (Felix + shared sources): paper book, optional live mirror ---
+SOCIAL_SLEEVE_ENABLED = os.getenv("SOCIAL_SLEEVE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Share of account equity for social macro tilt (paper account; mirror uses cap * MIRROR_PCT on live)
+SOCIAL_SLEEVE_CAP_PCT = float(os.getenv("SOCIAL_SLEEVE_CAP_PCT", "0.10"))
+SOCIAL_SLEEVE_PAPER = os.getenv("SOCIAL_SLEEVE_PAPER", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Fraction of social sleeve also placed on live (0.15 = 15% of social cap on live; ~1.5% equity at 10% cap)
+SOCIAL_MIRROR_TO_LIVE_PCT = float(os.getenv("SOCIAL_MIRROR_TO_LIVE_PCT", "0.0"))
+SOCIAL_FELIX_WEIGHT = float(os.getenv("SOCIAL_FELIX_WEIGHT", "0.65"))
+SOCIAL_HEADLINE_WEIGHT = float(os.getenv("SOCIAL_HEADLINE_WEIGHT", "0.35"))
+# Score thresholds → GLD / XLE / SPY (Felix: gold + energy when macro bearish)
+SOCIAL_BEAR_GLD_THRESHOLD = float(os.getenv("SOCIAL_BEAR_GLD_THRESHOLD", "-0.12"))
+SOCIAL_BEAR_ENERGY_THRESHOLD = float(os.getenv("SOCIAL_BEAR_ENERGY_THRESHOLD", "-0.04"))
+SOCIAL_BULL_SPY_THRESHOLD = float(os.getenv("SOCIAL_BULL_SPY_THRESHOLD", "0.08"))
 
 # --- SpaceX IPO ↔ crypto monitor (headline watch; S-1 BTC treasury narrative) ---
 SPACEX_IPO_MONITOR_ENABLED = os.getenv("SPACEX_IPO_MONITOR_ENABLED", "true").lower() in (
@@ -176,12 +272,13 @@ SPACEX_IPO_LISTING_CACHE_FILE = "spacex_ipo_listing.json"
 SPACEX_IPO_LISTING_HISTORY_FILE = "spacex_ipo_listing_history.jsonl"
 SPACEX_IPO_LISTING_CACHE_HOURS = int(os.getenv("SPACEX_IPO_LISTING_CACHE_HOURS", "1"))
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "PythonTradingBot/1.0 (personal research)")
-# Optional: market buy SPCX on Alpaca the first cycle it becomes tradable (paper only by default)
+# Optional: one-shot market buy SPCX on Alpaca when it becomes tradable (paper default on)
 _auto_buy_env = os.getenv("SPACEX_IPO_AUTO_BUY")
 if _auto_buy_env is None:
     SPACEX_IPO_AUTO_BUY = PAPER_TRADING
 else:
     SPACEX_IPO_AUTO_BUY = _auto_buy_env.lower() in ("1", "true", "yes")
+# Dollar notional cap (also capped at 25% of equity / 95% of cash in spacex_ipo_buy.py)
 SPACEX_IPO_BUY_NOTIONAL = float(os.getenv("SPACEX_IPO_BUY_NOTIONAL", "2500"))
 
 # Kraken Pro SPCX (xStock or equity pair) when IPO lists on Kraken API
@@ -318,9 +415,13 @@ if _metal_not_in_universe:
 if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
     raise ValueError("LIVE_METAL_SYMBOLS must be a subset of METAL_SYMBOLS")
 
-# --- Risk & sizing (paper month defaults) ---
-RISK_PER_TRADE = 0.02
-MAX_NOTIONAL_PER_ORDER = 10000.0
+# --- Risk & sizing (tuned at REFERENCE_EQUITY; scales down for small live accounts) ---
+REFERENCE_EQUITY = float(os.getenv("REFERENCE_EQUITY", "100000"))
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.02"))
+MAX_NOTIONAL_PER_ORDER = float(os.getenv("MAX_NOTIONAL_PER_ORDER", "10000"))
+# Min order at REFERENCE_EQUITY; effective_min_notional() scales with live equity (floor $1 Alpaca).
+MIN_NOTIONAL = float(os.getenv("MIN_NOTIONAL", "10"))
+ALPACA_MIN_NOTIONAL = float(os.getenv("ALPACA_MIN_NOTIONAL", "1"))
 ADAPTIVE_CHUNK_ENABLED = os.getenv("ADAPTIVE_CHUNK_ENABLED", "false").lower() in (
     "1",
     "true",
@@ -333,9 +434,38 @@ COFIRE_BUDGET_ENABLED = os.getenv("COFIRE_BUDGET_ENABLED", "false").lower() in (
 )
 ADAPTIVE_CHUNK_MAX_PCT = float(os.getenv("ADAPTIVE_CHUNK_MAX_PCT", "0.05"))
 COFIRE_BUDGET_PCT = float(os.getenv("COFIRE_BUDGET_PCT", "0.06"))
-MIN_NOTIONAL = 10.0
 STOP_LOSS_PCT = 0.05
 CRYPTO_MIN_CORRELATION = 0.5
+# Alpaca: US stocks/ETFs commission-free; crypto market orders charge taker fee per leg
+ALPACA_CRYPTO_FEE_AWARE = os.getenv("ALPACA_CRYPTO_FEE_AWARE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+ALPACA_CRYPTO_TAKER_FEE_PCT = float(os.getenv("ALPACA_CRYPTO_TAKER_FEE_PCT", "0.0025"))
+
+# --- Cost basis / buy-price awareness (Alpaca avg_entry_price) ---
+COST_BASIS_AWARE_ENABLED = os.getenv("COST_BASIS_AWARE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+UNDERWATER_SIZING_SCALE = float(os.getenv("UNDERWATER_SIZING_SCALE", "0.75"))
+# Block discretionary exits (e.g. SPY MA break) while position is below cost; stops still fire
+DISCRETIONARY_SELL_BELOW_COST = os.getenv("DISCRETIONARY_SELL_BELOW_COST", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+# --- Scheduled macro event guard (NFP, CPI, FOMC, PPI, GDP) ---
+MACRO_EVENT_GUARD_ENABLED = os.getenv("MACRO_EVENT_GUARD_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+MACRO_EVENT_HOURS_BEFORE = int(os.getenv("MACRO_EVENT_HOURS_BEFORE", "18"))
+MACRO_EVENT_SIZING_SCALE = float(os.getenv("MACRO_EVENT_SIZING_SCALE", "0.7"))
 
 # Crypto tickers in UNIVERSE use NAME-USD (e.g. BTC-USD), not bare "USD" substring
 CRYPTO_TICKERS = frozenset(
@@ -403,6 +533,26 @@ def get_smtp_config():
         "to": os.getenv("ALERT_EMAIL_TO", "").strip(),
         "from": os.getenv("ALERT_EMAIL_FROM", "").strip(),
     }
+
+
+def effective_min_notional(equity: float | None = None) -> float:
+    """Scale min order with account: $10 at REFERENCE_EQUITY, down to ALPACA_MIN_NOTIONAL."""
+    if equity is None or equity <= 0:
+        return MIN_NOTIONAL
+    ref = REFERENCE_EQUITY if REFERENCE_EQUITY > 0 else 100_000.0
+    scaled = MIN_NOTIONAL * (float(equity) / ref)
+    return max(ALPACA_MIN_NOTIONAL, round(scaled, 2))
+
+
+def effective_max_notional_per_order(equity: float | None = None) -> float:
+    """Scale per-order cap with account; never above 25% of equity."""
+    if equity is None or equity <= 0:
+        return MAX_NOTIONAL_PER_ORDER
+    ref = REFERENCE_EQUITY if REFERENCE_EQUITY > 0 else 100_000.0
+    scaled = MAX_NOTIONAL_PER_ORDER * (float(equity) / ref)
+    pct_cap = round(float(equity) * 0.25, 2)
+    floor = effective_min_notional(equity)
+    return max(floor, min(round(scaled, 2), pct_cap))
 
 
 def is_crypto(symbol: str) -> bool:
@@ -526,34 +676,134 @@ def print_recommended_stack_flags() -> None:
     )
     print(f"  derived_bear_pause:     {DERIVED_BEAR_PAUSE_ENABLED}")
     alloc = fund_allocation_pct()
+    if vti_core_enabled():
+        print(
+            f"  vti_core:             {alloc['vti_core']:.0%} {VTI_CORE_SYMBOL} passive | "
+            f"active {active_fund_fraction():.0%}"
+        )
     print(
         f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
         f"NYSE {alloc['nyse']:.0%} | metal {alloc['metal']:.0%} | cash {alloc['cash_buffer']:.0%}"
     )
+    if SOCIAL_SLEEVE_ENABLED:
+        print(
+            f"  social_sleeve:      {SOCIAL_SLEEVE_CAP_PCT:.0%} paper "
+            f"| live mirror {SOCIAL_MIRROR_TO_LIVE_PCT:.0%} of social cap"
+        )
+
+
+def set_paper_aggressive_context(active: bool) -> None:
+    """Thread-local style flag: paper research runner / social paper book."""
+    global _paper_aggressive_ctx
+    _paper_aggressive_ctx = bool(active)
+
+
+def paper_aggressive_context() -> bool:
+    return PAPER_AGGRESSIVE_ENABLED and _paper_aggressive_ctx
+
+
+def effective_crypto_vol_only() -> bool:
+    if paper_aggressive_context():
+        return PAPER_CRYPTO_VOL_ONLY
+    return CRYPTO_VOL_ONLY
+
+
+def effective_social_sleeve_cap_pct() -> float:
+    if paper_aggressive_context():
+        return PAPER_SOCIAL_SLEEVE_CAP_PCT
+    return SOCIAL_SLEEVE_CAP_PCT
+
+
+def effective_vti_rebalance_drift_pct() -> float:
+    if paper_aggressive_context():
+        return PAPER_VTI_REBALANCE_DRIFT_PCT
+    return VTI_CORE_REBALANCE_DRIFT_PCT
+
+
+def vti_core_allocation_pct() -> float:
+    if not VTI_CORE_ENABLED:
+        return 0.0
+    pct = PAPER_VTI_CORE_PCT if paper_aggressive_context() else VTI_CORE_PCT
+    return round(min(0.95, pct), 6) if pct > 0 else 0.0
+
+
+def vti_core_enabled() -> bool:
+    return vti_core_allocation_pct() > 0
+
+
+def active_fund_fraction() -> float:
+    """Share of equity for active sleeves (remainder after VTI core)."""
+    if not vti_core_enabled():
+        return 1.0
+    return round(1.0 - vti_core_allocation_pct(), 6)
+
+
+def social_live_reserve_pct() -> float:
+    """Live equity reserved for social mirror (reduces main fund sleeves)."""
+    if not SOCIAL_SLEEVE_ENABLED or SOCIAL_MIRROR_TO_LIVE_PCT <= 0:
+        return 0.0
+    return round(SOCIAL_SLEEVE_CAP_PCT * SOCIAL_MIRROR_TO_LIVE_PCT, 6)
 
 
 def long_fund_scale() -> float:
-    """Reserve headroom for metal sleeve when full game plan is on."""
+    """Reserve headroom for metal sleeve and social live mirror."""
+    scale = 1.0
     if metal_sleeve_enabled():
-        return max(0.5, 1.0 - METAL_SLEEVE_CAP_PCT)
-    return 1.0
+        scale = max(0.5, 1.0 - METAL_SLEEVE_CAP_PCT)
+    reserve = social_live_reserve_pct()
+    if reserve > 0:
+        scale = round(scale * (1.0 - reserve), 6)
+    return scale
+
+
+def active_sleeve_scale() -> float:
+    """Scale active SPY/crypto/NYSE caps (VTI core + metal/social reserves)."""
+    af = active_fund_fraction()
+    lf = long_fund_scale()
+    long_sum = (
+        SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
+    )
+    if long_sum <= 0:
+        return 0.0
+    base_scale = round(lf * af, 6)
+    if not paper_aggressive_context():
+        return base_scale
+    # Boost deploys more of the active slice; never exceed active fund headroom.
+    base_deploy = round(base_scale * long_sum, 6)
+    max_active = base_scale
+    target_deploy = round(
+        min(max_active, base_deploy * PAPER_ACTIVE_SLEEVE_BOOST), 6
+    )
+    return round(target_deploy / long_sum, 6)
+
+
+def apply_paper_wisdom_floor(wisdom: dict | None) -> dict | None:
+    """On paper aggressive, do not shrink sizing below floor (profit-seeking)."""
+    if not wisdom or not paper_aggressive_context():
+        return wisdom
+    mult = float(wisdom.get("sizing_multiplier", 1.0))
+    if mult < PAPER_WISDOM_SIZING_FLOOR:
+        wisdom = dict(wisdom)
+        wisdom["sizing_multiplier"] = PAPER_WISDOM_SIZING_FLOOR
+    return wisdom
 
 
 def effective_sleeve_cap(base_pct: float) -> float:
-    return round(base_pct * long_fund_scale(), 6)
+    return round(base_pct * active_sleeve_scale(), 6)
 
 
 def effective_cash_buffer_pct() -> float:
-    """Cash headroom so long + metal sleeve caps sum to 100% of equity."""
+    """Cash headroom so VTI core + active sleeves + metal sum to 100% of equity."""
     metal = METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0
+    vti = vti_core_allocation_pct()
     long_caps = (
         SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
-    ) * long_fund_scale()
-    cash = round(1.0 - metal - long_caps, 6)
+    ) * active_sleeve_scale()
+    cash = round(1.0 - metal - vti - long_caps, 6)
     if cash < 0:
         raise ValueError(
-            f"Fund over-allocated: metal {metal:.2%} + long sleeves {long_caps:.2%} "
-            f"> 100%; reduce METAL_SLEEVE_CAP_PCT or base sleeve caps"
+            f"Fund over-allocated: vti {vti:.2%} + metal {metal:.2%} + "
+            f"long sleeves {long_caps:.2%} > 100%; reduce VTI_CORE_PCT or sleeve caps"
         )
     return cash
 
@@ -561,6 +811,7 @@ def effective_cash_buffer_pct() -> float:
 def fund_allocation_pct() -> dict[str, float]:
     """Current sleeve + cash cap fractions (sum to 1.0)."""
     return {
+        "vti_core": vti_core_allocation_pct(),
         "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
         "crypto": effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT),
         "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),

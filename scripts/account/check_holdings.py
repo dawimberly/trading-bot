@@ -41,7 +41,8 @@ def main() -> None:
     for pair in ledger:
         print(f"  {pair}")
 
-    if o["crypto"] >= config.MIN_NOTIONAL or o["spy"] >= config.MIN_NOTIONAL or o["nyse"] >= config.MIN_NOTIONAL:
+    min_n = config.effective_min_notional(audit["equity"])
+    if o["crypto"] >= min_n or o["spy"] >= min_n or o["nyse"] >= min_n:
         print(
             "\nFix: python scripts/account/reconcile_holdings.py --apply --trim"
         )

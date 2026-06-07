@@ -100,6 +100,7 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
     """Sell down sleeves that exceed config caps (proportional within sleeve)."""
     account = executor.client.get_account()
     equity = float(account.equity)
+    min_n = config.effective_min_notional(equity)
     actions = []
 
     sleeve_defs = (
@@ -112,7 +113,7 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
         cap = equity * cap_pct
         value = value_fn()
         excess = round(value - cap, 2)
-        if excess < config.MIN_NOTIONAL:
+        if excess < min_n:
             continue
 
         positions = [p for p in executor.client.get_all_positions() if pred(p)]
@@ -122,13 +123,13 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
         total = sum(_position_value(p) for p in positions)
         remaining = excess
         for pos in positions:
-            if remaining < config.MIN_NOTIONAL:
+            if remaining < min_n:
                 break
             mv = _position_value(pos)
             if mv <= 0 or total <= 0:
                 continue
             sell_notional = round(min(remaining, excess * (mv / total), mv), 2)
-            if sell_notional < config.MIN_NOTIONAL:
+            if sell_notional < min_n:
                 continue
             sym = normalize_symbol(pos.symbol)
             order = executor.execute_reduce_notional(sym, sell_notional)
@@ -146,7 +147,7 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
         metal_cap = equity * config.METAL_SLEEVE_CAP_PCT
         metal_val = executor.metal_sleeve_value()
         excess = round(metal_val - metal_cap, 2)
-        if excess >= config.MIN_NOTIONAL:
+        if excess >= min_n:
             positions = [
                 p
                 for p in executor.client.get_all_positions()
@@ -155,13 +156,13 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
             total = sum(_position_value(p) for p in positions)
             remaining = excess
             for pos in positions:
-                if remaining < config.MIN_NOTIONAL:
+                if remaining < min_n:
                     break
                 mv = _position_value(pos)
                 if mv <= 0 or total <= 0:
                     continue
                 sell_notional = round(min(remaining, excess * (mv / total), mv), 2)
-                if sell_notional < config.MIN_NOTIONAL:
+                if sell_notional < min_n:
                     continue
                 sym = normalize_symbol(pos.symbol)
                 order = executor.execute_reduce_notional(sym, sell_notional)

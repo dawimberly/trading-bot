@@ -8,6 +8,7 @@ from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 import config
 from modules import deployment_sizing
+from modules.cost_basis import underwater_sizing_scale
 
 
 class AlpacaExecutor:
@@ -35,21 +36,38 @@ class AlpacaExecutor:
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
         self._sizing_data = None
+        self._sleeve_pnl = None
 
     def set_sizing_context(self, data=None):
         self._sizing_data = data
 
+    def set_sleeve_pnl(self, sleeve_pnl: dict | None) -> None:
+        self._sleeve_pnl = sleeve_pnl
+
     def set_wisdom_sizing_multiplier(self, multiplier: float = 1.0) -> None:
         self._wisdom_sizing_multiplier = float(multiplier)
 
-    def _apply_wisdom_multiplier(self, notional: float | None) -> float | None:
+    def _account_equity(self) -> float:
+        return float(self._get_account().equity)
+
+    def _min_notional(self) -> float:
+        return config.effective_min_notional(self._account_equity())
+
+    def _max_notional(self) -> float:
+        return config.effective_max_notional_per_order(self._account_equity())
+
+    def _apply_sizing_multiplier(
+        self, notional: float | None, *, sleeve_key: str | None = None
+    ) -> float | None:
         if notional is None:
             return None
         mult = getattr(self, "_wisdom_sizing_multiplier", 1.0)
+        if sleeve_key:
+            mult *= underwater_sizing_scale(sleeve_key, getattr(self, "_sleeve_pnl", None))
         if mult >= 0.999:
             return notional
         scaled = round(notional * mult, 2)
-        if scaled < config.MIN_NOTIONAL:
+        if scaled < self._min_notional():
             return None
         return scaled
 
@@ -182,12 +200,18 @@ class AlpacaExecutor:
         return config.is_metal_symbol(pos.symbol)
 
     @staticmethod
+    def _is_vti_core_position(pos):
+        return config.normalize_symbol(pos.symbol) == config.VTI_CORE_SYMBOL
+
+    @staticmethod
     def _is_nyse_sleeve_position(pos):
         if AlpacaExecutor._is_crypto_position(pos):
             return False
         if AlpacaExecutor._is_spy_position(pos):
             return False
         if AlpacaExecutor._is_metal_position(pos):
+            return False
+        if AlpacaExecutor._is_vti_core_position(pos):
             return False
         return True
 
@@ -227,8 +251,9 @@ class AlpacaExecutor:
         )
 
     def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
-        return self._apply_wisdom_multiplier(
-            self._compute_capped_notional_raw(sleeve_cap_pct, sleeve_value, sleeve_key)
+        return self._apply_sizing_multiplier(
+            self._compute_capped_notional_raw(sleeve_cap_pct, sleeve_value, sleeve_key),
+            sleeve_key=sleeve_key,
         )
 
     def compute_notional(self):
@@ -236,14 +261,17 @@ class AlpacaExecutor:
         equity = float(account.equity)
         cash = float(account.cash)
         raw = round(equity * config.RISK_PER_TRADE, 2)
-        capped = min(raw, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
-        return self._apply_wisdom_multiplier(max(config.MIN_NOTIONAL, capped))
+        capped = min(raw, self._max_notional(), round(cash * 0.95, 2))
+        return self._apply_sizing_multiplier(max(self._min_notional(), capped))
 
     def compute_crypto_notional(self):
-        return self._compute_capped_notional(
+        raw = self._compute_capped_notional(
             config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             self.crypto_sleeve_value(),
             "crypto",
+        )
+        return deployment_sizing.apply_alpaca_crypto_fee_reserve(
+            raw, equity=self._account_equity()
         )
 
     def compute_nyse_notional(self):
@@ -263,7 +291,9 @@ class AlpacaExecutor:
             "spy",
         )
         return deployment_sizing.apply_spy_ladder(
-            base, getattr(self, "_sizing_data", None)
+            base,
+            getattr(self, "_sizing_data", None),
+            equity=self._account_equity(),
         )
 
     def sleeve_snapshot(self):
@@ -282,9 +312,17 @@ class AlpacaExecutor:
             "nyse_value": nyse_v,
             "nyse_cap": equity * config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
         }
+        if config.vti_core_enabled():
+            from modules.vti_core import vti_core_value
+
+            snap["vti_core_value"] = vti_core_value(self)
+            snap["vti_core_cap"] = equity * config.vti_core_allocation_pct()
         if config.metal_sleeve_enabled():
             snap["metal_value"] = metal_v
             snap["metal_cap"] = equity * config.METAL_SLEEVE_CAP_PCT
+        sleeve_pnl = getattr(self, "_sleeve_pnl", None)
+        if sleeve_pnl:
+            snap["sleeve_pnl"] = sleeve_pnl
         return snap
 
     @staticmethod
@@ -314,7 +352,7 @@ class AlpacaExecutor:
 
         mv = qty * price
         sell_notional = min(float(sell_notional), mv)
-        if sell_notional < config.MIN_NOTIONAL:
+        if sell_notional < self._min_notional():
             return None
 
         self._cancel_open_orders_for(symbol)
@@ -385,7 +423,11 @@ class AlpacaExecutor:
         self._cancel_open_orders_for(symbol)
 
         target_notional = notional if notional is not None else self.compute_notional()
-        if target_notional < config.MIN_NOTIONAL:
+        if is_crypto_sym and side_lower == "buy":
+            target_notional = deployment_sizing.apply_alpaca_crypto_fee_reserve(
+                target_notional, equity=self._account_equity()
+            )
+        if target_notional is None or target_notional < self._min_notional():
             return None
 
         order_side = OrderSide.BUY if side_lower == "buy" else OrderSide.SELL

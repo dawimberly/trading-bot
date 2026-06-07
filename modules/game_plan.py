@@ -20,7 +20,9 @@ def metal_sleeve_value(executor) -> float:
 def _trim_long_sleeves_for_cash(executor, need: float) -> list[dict]:
     """Sell from SPY/crypto/NYSE (not metals) to raise cash."""
     actions = []
-    if need < config.MIN_NOTIONAL:
+    equity = float(executor._get_account().equity)
+    min_n = config.effective_min_notional(equity)
+    if need < min_n:
         return actions
     preds = (
         executor._is_spy_position,
@@ -29,6 +31,8 @@ def _trim_long_sleeves_for_cash(executor, need: float) -> list[dict]:
     )
     positions = []
     for pos in executor._get_positions():
+        if config.vti_core_enabled() and executor._is_vti_core_position(pos):
+            continue
         if any(pred(pos) for pred in preds) and not config.is_metal_symbol(pos.symbol):
             positions.append(pos)
     total = sum(executor._position_market_value(p) for p in positions)
@@ -36,7 +40,7 @@ def _trim_long_sleeves_for_cash(executor, need: float) -> list[dict]:
         return actions
     remaining = need
     for pos in positions:
-        if remaining < config.MIN_NOTIONAL:
+        if remaining < min_n:
             break
         mv = executor._position_market_value(pos)
         sell = min(mv, remaining / 0.999)
@@ -71,10 +75,11 @@ def rebalance_metal_sleeve(executor, *, stress: bool, market_open: bool) -> list
     equity = float(account.equity)
     cap = equity * config.METAL_SLEEVE_CAP_PCT
     weights = config.metal_blend_weights()
+    min_n = config.effective_min_notional(equity)
 
     if not stress:
         for symbol in weights:
-            if _metal_position_value(executor, symbol) >= config.MIN_NOTIONAL:
+            if _metal_position_value(executor, symbol) >= min_n:
                 order = executor.execute_full_exit(symbol)
                 if order:
                     actions.append({"symbol": symbol, "phase": "exit_metal"})
@@ -87,8 +92,8 @@ def rebalance_metal_sleeve(executor, *, stress: bool, market_open: bool) -> list
         if current >= target * 0.95:
             continue
         buy = min(target - current, float(executor._get_account().cash) * 0.95)
-        buy = round(max(config.MIN_NOTIONAL, buy), 2)
-        if buy < config.MIN_NOTIONAL:
+        buy = round(max(min_n, buy), 2)
+        if buy < min_n:
             continue
         order = executor.execute_order(symbol, "buy", notional=buy)
         if order and executor.order_filled(order):

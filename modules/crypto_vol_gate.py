@@ -61,7 +61,7 @@ def crypto_trading_allowed(
             "reason": "regime_paused",
         }
 
-    if not config.CRYPTO_VOL_ONLY:
+    if not config.effective_crypto_vol_only():
         return {
             "allowed": True,
             "vol": volatility,

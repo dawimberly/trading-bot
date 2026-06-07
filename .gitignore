@@ -25,7 +25,12 @@ fund_*.csv
 wisdom_journal.csv
 spacex_ipo_listing.json
 trading_history.jsonl.bak.*
+sentiment/live/*.json
 web_sentiment_live.json
+sentiment/sources/youtube/felix_and_friends/transcripts/*.txt
+sentiment/sources/youtube/felix_and_friends/sync_state.json
+sentiment/sources/youtube/felix_and_friends/manifest.jsonl
+sentiment/social_sleeve_journal.csv
 
 # IDE
 .idea/

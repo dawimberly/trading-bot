@@ -32,18 +32,20 @@ class RefreshScheduler:
             return True
         return (now_ts - last_refresh).total_seconds() >= config.REFRESH_INTERVAL
 
-    def sync(self, trading_client, now_ts):
+    def sync(self, trading_client, now_ts, *, equity_prep=False):
         """Run due refreshes. Returns whether the equity session is open."""
         market_open = is_equity_market_open(trading_client)
         equity_symbols = self._equity_symbols()
+        refresh_equities = market_open or equity_prep
 
         if (
             self.refresh_equity
             and equity_symbols
             and self._market_was_open is False
-            and market_open
+            and refresh_equities
         ):
-            safe_print(f"--- Market open: refreshing {len(equity_symbols)} equity tickers ---")
+            label = "Market open" if market_open else "Open prep"
+            safe_print(f"--- {label}: refreshing {len(equity_symbols)} equity tickers ---")
             fetch_and_store(equity_symbols)
             self.last_equity_refresh = now_ts
 
@@ -56,7 +58,7 @@ class RefreshScheduler:
 
         if (
             self.refresh_equity
-            and market_open
+            and refresh_equities
             and equity_symbols
             and self._due(self.last_equity_refresh, now_ts)
         ):

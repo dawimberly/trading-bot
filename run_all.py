@@ -31,7 +31,9 @@ from modules.spacex_ipo_listing_monitor import (
     format_listing_line,
     get_spacex_ipo_listing_status,
 )
-from modules.spacex_ipo_buy import maybe_buy_spacex_ipo
+from modules.felix_sentiment import maybe_sync_felix_transcripts
+from modules.social_sleeve import run_social_sleeve_cycle, social_paper_available
+from modules.vti_core import rebalance_vti_core, vti_core_value
 from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
 from modules.kraken_autopilot import format_autopilot_line, run_kraken_autopilot
 from modules.position_exits import run_position_exits
@@ -41,7 +43,14 @@ from modules import alerts
 from modules import wisdom_journal
 from modules.game_plan import run_game_plan_cycle
 from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
+from modules.macro_calendar import macro_event_context
+from modules.cost_basis import compute_sleeve_pnl, format_sleeve_pnl_line
 from modules.wisdom_evaluator import maybe_run_daily_evaluation, maybe_run_monthly_rollup
+from modules.scan_schedule import (
+    cycle_sleep_seconds,
+    equity_scan_state,
+    format_scan_schedule_line,
+)
 
 pair_cooldown = {}
 refresh_scheduler = RefreshScheduler()
@@ -50,6 +59,7 @@ portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
 _startup_reconciled = False
 _startup_rebalanced = False
 _macro_daily_bootstrapped = False
+_last_cycle_schedule = None
 
 
 def _gap_wide(gap) -> bool:
@@ -116,7 +126,8 @@ def _maybe_reconcile_startup(executor):
             trim=config.TRIM_OVER_CAP_ON_STARTUP,
         )
         over = result["before"]["over_cap"]
-        if any(v >= config.MIN_NOTIONAL for v in over.values()):
+        min_n = config.effective_min_notional(result["before"]["equity"])
+        if any(v >= min_n for v in over.values()):
             print("--- Holdings reconcile (startup) ---")
             print(f"  Over-cap before: SPY ${over['spy']:,.0f} | crypto ${over['crypto']:,.0f} | NYSE ${over['nyse']:,.0f}")
             if result.get("trim_actions"):
@@ -188,6 +199,11 @@ def _write_heartbeat(
     spacex_ipo=None,
     spacex_listing=None,
     game_plan=None,
+    macro_event=None,
+    sleeve_pnl=None,
+    scan_schedule=None,
+    social_sleeve=None,
+    vti_core=None,
 ):
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
@@ -198,6 +214,7 @@ def _write_heartbeat(
         "equity_trades_last_cycle": equity_trades,
         "spy_trades_last_cycle": spy_trades,
         "sleeve_caps": {
+            "vti_core": config.vti_core_allocation_pct(),
             "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
@@ -209,6 +226,8 @@ def _write_heartbeat(
         "halted": halted,
         "paper": config.PAPER_TRADING,
     }
+    if scan_schedule:
+        payload["scan_schedule"] = scan_schedule
     if sleeves:
         payload["sleeve_exposure"] = sleeves
     if wisdom:
@@ -221,6 +240,10 @@ def _write_heartbeat(
             "governor_stress": wisdom.get("governor_stress"),
             "gap_tier": wisdom.get("gap_tier"),
             "sizing_multiplier": wisdom.get("sizing_multiplier"),
+            "headline_web_sentiment": wisdom.get("headline_web_sentiment"),
+            "felix_sentiment": wisdom.get("felix_sentiment"),
+            "felix_video_id": wisdom.get("felix_video_id"),
+            "felix_video_title": wisdom.get("felix_video_title"),
         }
     if spacex_ipo:
         payload["spacex_ipo"] = spacex_ipo
@@ -238,6 +261,27 @@ def _write_heartbeat(
         }
     if game_plan:
         payload["game_plan_state"] = game_plan
+    if macro_event:
+        payload["macro_event"] = macro_event
+    if sleeve_pnl:
+        payload["sleeve_pnl"] = sleeve_pnl
+    if vti_core and vti_core.get("enabled"):
+        payload["vti_core"] = {
+            "target_pct": vti_core.get("target_pct"),
+            "target_value": vti_core.get("target_value"),
+            "current_value": vti_core.get("current_value"),
+            "drift_pct": vti_core.get("drift_pct"),
+            "last_action": vti_core.get("action"),
+        }
+    if social_sleeve and social_sleeve.get("enabled"):
+        payload["social_sleeve"] = {
+            "score": social_sleeve.get("score"),
+            "target": social_sleeve.get("target"),
+            "cap_pct": social_sleeve.get("cap_pct"),
+            "paper_equity": social_sleeve.get("paper_equity"),
+            "paper_ok": social_sleeve.get("paper_ok"),
+            "felix_video_id": social_sleeve.get("felix_video_id"),
+        }
     if config.game_plan_active():
         payload["game_plan"] = {
             "enabled": True,
@@ -257,10 +301,16 @@ def _write_heartbeat(
 
 
 def main():
-    global _last_equity
+    global _last_equity, _last_cycle_schedule
     now_ts = datetime.datetime.now()
     executor = AlpacaExecutor()
-    market_open = refresh_scheduler.sync(executor.client, now_ts)
+    schedule = equity_scan_state(executor.client, now_ts)
+    _last_cycle_schedule = schedule
+    market_open = refresh_scheduler.sync(
+        executor.client, now_ts, equity_prep=schedule.get("equity_prep", False)
+    )
+    schedule = equity_scan_state(executor.client, now_ts)
+    equity_scans = schedule.get("equity_scans", market_open)
     executor.equity_session_open = market_open
     executor.refresh_cache()
 
@@ -296,7 +346,9 @@ def main():
             alerts.maybe_daily_summary(equity, cash, "HALTED", True)
         except Exception as exc:
             print(f"Alert error (non-fatal): {exc}")
-        _write_heartbeat("HALTED", equity, cash, 0, 0, 0, True, market_open, None)
+        _write_heartbeat(
+            "HALTED", equity, cash, 0, 0, 0, True, market_open, None, scan_schedule=schedule
+        )
         return
 
     if prev_halted and not risk_manager.halted:
@@ -313,20 +365,58 @@ def main():
             print(f"--- Canceled {canceled} stale equity order(s) (session closed) ---")
 
     print("--- Pipeline Cycle: " + str(datetime.datetime.now()) + " ---")
+    print(f"--- {format_scan_schedule_line(schedule)} ---")
     data = load_close_matrix()
     if data.empty or len(data) < 20:
         print("Insufficient market data. Skipping cycle.")
         trade_journal.log_event("skip", equity=equity, notes="empty or short data")
         return
 
+    felix_sync = maybe_sync_felix_transcripts()
+    if felix_sync:
+        if felix_sync.get("ok"):
+            print(
+                f"--- Felix transcript sync: +{felix_sync.get('added', 0)} videos "
+                f"(skipped {felix_sync.get('skipped', 0)}) ---"
+            )
+        elif felix_sync.get("error"):
+            print(f"--- Felix transcript sync skipped: {felix_sync['error']} ---")
+
     wisdom = resolve_wisdom_regime(data)
     regime = wisdom["regime"]
     vol = wisdom["volatility"]
+    if wisdom.get("felix_video_id"):
+        print(
+            f"--- Felix overlay: {wisdom.get('felix_video_title', '')[:50]} | "
+            f"felix {wisdom.get('felix_sentiment')} headline "
+            f"{wisdom.get('headline_web_sentiment')} -> web {wisdom.get('web_sentiment')} ---"
+        )
+
+    macro_ctx = macro_event_context()
+    if macro_ctx.get("active"):
+        wisdom["sizing_multiplier"] = round(
+            float(wisdom.get("sizing_multiplier", 1.0)) * macro_ctx["sizing_scale"],
+            3,
+        )
+        wisdom["macro_event_guard"] = macro_ctx.get("event")
+
+    sleeve_pnl = None
+    if config.COST_BASIS_AWARE_ENABLED:
+        sleeve_pnl = compute_sleeve_pnl(executor)
+        executor.set_sleeve_pnl(sleeve_pnl)
+    elif hasattr(executor, "set_sleeve_pnl"):
+        executor.set_sleeve_pnl(None)
+
     if hasattr(executor, "set_wisdom_sizing_multiplier"):
         executor.set_wisdom_sizing_multiplier(wisdom.get("sizing_multiplier", 1.0))
-    gp_signals = _game_plan_signals(regime)
+    if schedule.get("crypto_only"):
+        gp_signals = {"ok": True, "stress": False, "yield_gate": False}
+    else:
+        gp_signals = _game_plan_signals(regime)
     yield_gated = bool(gp_signals.get("yield_gate"))
-    _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=yield_gated)
+    _maybe_rebalance_startup(
+        executor, data, regime, vol, equity_scans, yield_gated=yield_gated
+    )
     web = wisdom.get("web_sentiment")
     gap = wisdom.get("sentiment_gap")
     web_s = f"{web:+.2f}" if web is not None else "n/a"
@@ -354,13 +444,31 @@ def main():
         else:
             stress = "STRESS" if gp_signals.get("stress") else "calm"
             gp_s = f" | GamePlan: {stress} | SPY {gate}"
+    macro_s = ""
+    if macro_ctx.get("active"):
+        ev = macro_ctx.get("event") or {}
+        macro_s = (
+            f" | MACRO GUARD: {ev.get('name', '?')} "
+            f"x{macro_ctx.get('sizing_scale', 1):.2f}"
+        )
+    elif macro_ctx.get("next"):
+        nxt = macro_ctx["next"]
+        macro_s = f" | Next macro: {nxt.get('name')} {nxt.get('date')}"
+    pnl_s = ""
+    if sleeve_pnl:
+        pnl_line = format_sleeve_pnl_line(sleeve_pnl)
+        if pnl_line != "flat":
+            pnl_s = f" | P&L: {pnl_line}"
     print(
         f"--- Regime: {regime} | Vol: {vol} | "
-        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{gp_s} | "
-        f"Equity session: {'OPEN' if market_open else 'CLOSED'} ---"
+        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{gp_s}{macro_s}{pnl_s} | "
+        f"Equity session: {'OPEN' if market_open else 'CLOSED'} | "
+        f"phase: {schedule.get('phase', '?')} ---"
     )
 
-    spacex_snapshot = get_spacex_ipo_monitor()
+    spacex_snapshot = None
+    if not schedule.get("crypto_only") or config.SPACEX_IPO_CRYPTO_OVERRIDE:
+        spacex_snapshot = get_spacex_ipo_monitor()
     spacex_heartbeat = None
     crypto_gate = crypto_trading_allowed(vol, regime, spacex_snapshot=spacex_snapshot)
     if spacex_snapshot:
@@ -388,7 +496,9 @@ def main():
         except Exception as exc:
             print(f"SpaceX IPO alert error (non-fatal): {exc}")
 
-    listing_snapshot = get_spacex_ipo_listing_status(executor=executor)
+    listing_snapshot = None
+    if not schedule.get("crypto_only"):
+        listing_snapshot = get_spacex_ipo_listing_status(executor=executor)
     spacex_listing_heartbeat = None
     ipo_buy_result = None
     if listing_snapshot:
@@ -415,14 +525,6 @@ def main():
             alerts.maybe_spacex_ipo_countdown_alert(listing_snapshot)
         except Exception as exc:
             print(f"SpaceX listing alert error (non-fatal): {exc}")
-        if market_open and listing_snapshot.get("ready_to_buy_alpaca"):
-            ipo_buy_result = maybe_buy_spacex_ipo(executor, listing_snapshot)
-            if ipo_buy_result:
-                print(
-                    f"--- SpaceX IPO paper buy {config.SPACEX_IPO_TICKER}: "
-                    f"${ipo_buy_result.get('notional', 0):,.0f} "
-                    f"({'ok' if ipo_buy_result.get('ok') else 'failed'}) ---"
-                )
         if listing_snapshot.get("ready_to_buy_kraken"):
             kraken_buy = maybe_buy_kraken_spcx(listing_snapshot)
             if kraken_buy:
@@ -434,6 +536,44 @@ def main():
                     )
                 elif kraken_buy.get("error"):
                     print(f"--- Kraken SPCX buy skipped/failed: {kraken_buy['error']} ---")
+
+    vti_result = None
+    if config.vti_core_enabled() and market_open:
+        vti_result = rebalance_vti_core(executor, market_open=market_open)
+        if vti_result.get("action"):
+            print(
+                f"--- VTI core: {vti_result['action']} {vti_result.get('notional', 0):,.2f} "
+                f"-> {vti_result.get('current_value', 0):,.2f} / "
+                f"{vti_result.get('target_value', 0):,.2f} "
+                f"({config.VTI_CORE_PCT:.0%} target) ---"
+            )
+        elif vti_result.get("enabled") and not vti_result.get("skipped"):
+            print(
+                f"--- VTI core: {vti_result.get('current_value', 0):,.2f} / "
+                f"{vti_result.get('target_value', 0):,.2f} ---"
+            )
+
+    social_result = None
+    if config.SOCIAL_SLEEVE_ENABLED and market_open:
+        social_result = run_social_sleeve_cycle(wisdom, executor, market_open=market_open)
+        if social_result.get("enabled"):
+            tgt = social_result.get("target") or "cash"
+            score = social_result.get("score")
+            print(
+                f"--- Social sleeve: score {score} -> {tgt} "
+                f"(cap {config.SOCIAL_SLEEVE_CAP_PCT:.0%} paper"
+                f"{'' if social_result.get('paper_ok') else ', paper keys missing'}) ---"
+            )
+            for act in social_result.get("paper_actions") or []:
+                print(
+                    f"  social paper {act['action']} {act['symbol']} "
+                    f"${act.get('notional', 0):,.2f}"
+                )
+            for act in social_result.get("live_mirror_actions") or []:
+                print(
+                    f"  social live mirror {act['action']} {act['symbol']} "
+                    f"${act.get('notional', 0):,.2f}"
+                )
 
     exits = run_position_exits(
         executor, risk_manager, trade_journal, equity_session_open=market_open
@@ -451,7 +591,7 @@ def main():
         volatility=vol,
         spacex_snapshot=spacex_snapshot,
         yield_gated=yield_gated,
-        market_open=market_open,
+        market_open=equity_scans,
     )
     c = run_crypto_strategy(
         data,
@@ -470,7 +610,7 @@ def main():
 
     market_open = is_equity_market_open(executor.client)
     executor.equity_session_open = market_open
-    if market_open:
+    if equity_scans:
         s += run_spy_exits(data, executor, regime, log_fn=_spy_log)
         s += run_spy_strategy(
             data,
@@ -517,8 +657,20 @@ def main():
                         notional=notional,
                         notes=phase,
                     )
+    elif schedule.get("equity_prep"):
+        print(
+            f"--- Open prep: refreshing regime; SPY/NYSE scans start "
+            f"{config.EQUITY_SCAN_AFTER_OPEN_MIN}m after the bell ---"
+        )
+        if config.game_plan_active():
+            gp_result = run_game_plan_cycle(
+                executor,
+                regime,
+                market_open=False,
+                signals=gp_signals,
+            )
     else:
-        print("--- Equity session closed; skipping SPY and equity scans ---")
+        print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
         if config.game_plan_active():
             gp_result = run_game_plan_cycle(
                 executor,
@@ -590,6 +742,16 @@ def main():
             f"game_plan stress={sig.get('stress')} gate={sig.get('yield_gate')} "
             f"metal=${gp_result.get('metal_value', 0)}"
         )
+    extra_notes = []
+    if macro_ctx.get("active"):
+        ev = macro_ctx.get("event") or {}
+        extra_notes.append(
+            f"macro_guard={ev.get('name')} x{macro_ctx.get('sizing_scale', 1):.2f}"
+        )
+    if sleeve_pnl:
+        extra_notes.append(f"sleeve_pnl={format_sleeve_pnl_line(sleeve_pnl)}")
+    if extra_notes:
+        gp_notes = f"{gp_notes}; {'; '.join(extra_notes)}".strip("; ")
     trade_journal.log_cycle(
         regime,
         equity,
@@ -620,6 +782,11 @@ def main():
         spacex_heartbeat,
         spacex_listing_heartbeat,
         gp_result if config.game_plan_active() else None,
+        macro_event=macro_ctx,
+        sleeve_pnl=sleeve_pnl,
+        scan_schedule=schedule,
+        social_sleeve=social_result,
+        vti_core=vti_result,
     )
 
     wisdom_journal.log_cycle(
@@ -650,17 +817,52 @@ def main():
             print(f"Monthly wisdom alert error (non-fatal): {exc}")
 
 
+def _print_kraken_banner():
+    if not config.KRAKEN_AUTOPILOT_ENABLED:
+        print("--- Kraken autopilot: off ---")
+        return
+    from modules.kraken_capabilities import probe_kraken_capabilities
+    from modules.kraken_spot import autopilot_enabled, trading_allowed
+
+    if not autopilot_enabled():
+        print("--- Kraken autopilot: enabled but API keys missing ---")
+        return
+    mode = "DRY-RUN" if config.KRAKEN_DRY_RUN else (
+        "LIVE" if trading_allowed() else "BLOCKED (set ALLOW_KRAKEN_TRADING=yes)"
+    )
+    print(
+        f"--- Kraken autopilot: {mode} | max ${config.KRAKEN_MAX_ORDER_USD:.0f}/order | "
+        f"cycle buy budget ${config.KRAKEN_CYCLE_BUDGET_USD:.0f} ---"
+    )
+    cap = probe_kraken_capabilities()
+    if not cap.get("crypto_ok"):
+        print("!!! Kraken crypto API failed — run scripts/account/preflight_kraken.py !!!")
+    if not cap.get("xstock_ok"):
+        print(
+            "!!! Kraken xStocks API off — SPY/NYSE will not auto-trade "
+            "(enable tokenized permission on API key) !!!"
+        )
+
+
 def _print_startup_banner():
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
-    print(f"--- Alpaca mode: {mode} (Kraken not used) ---")
+    print(f"--- Alpaca mode: {mode} (signals / paper execution) ---")
+    _print_kraken_banner()
     alloc = config.fund_allocation_pct()
-    print(
-        f"--- Fund: SPY {alloc['spy']:.0%} | "
-        f"crypto {alloc['crypto']:.0%} (vol-only) | "
-        f"NYSE {alloc['nyse']:.0%} | "
-        f"cash buffer {alloc['cash_buffer']:.0%} ---"
-    )
+    if config.vti_core_enabled():
+        print(
+            f"--- Fund: {alloc['vti_core']:.0%} {config.VTI_CORE_SYMBOL} core | "
+            f"active SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
+            f"NYSE {alloc['nyse']:.0%} | cash {alloc['cash_buffer']:.0%} ---"
+        )
+    else:
+        print(
+            f"--- Fund: SPY {alloc['spy']:.0%} | "
+            f"crypto {alloc['crypto']:.0%} (vol-only) | "
+            f"NYSE {alloc['nyse']:.0%} | "
+            f"cash buffer {alloc['cash_buffer']:.0%} ---"
+        )
     if config.game_plan_active():
         if config.GAME_PLAN_YIELD_GATE_ONLY:
             print(
@@ -680,7 +882,25 @@ def _print_startup_banner():
         f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
         f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"
     )
+    print(
+        f"--- Order sizing: scales with equity (ref ${config.REFERENCE_EQUITY:,.0f} -> "
+        f"min ${config.MIN_NOTIONAL:.0f}; $100 account -> min "
+        f"${config.effective_min_notional(100):.2f}) ---"
+    )
+    if config.ALPACA_CRYPTO_FEE_AWARE:
+        print(
+            f"--- Alpaca fees: equities $0 | crypto taker "
+            f"{config.ALPACA_CRYPTO_TAKER_FEE_PCT:.2%}/leg reserved in sizing ---"
+        )
     print(f"--- Sentiment: {config.SENTIMENT_SOURCE} (RHYME regimes) ---")
+    if config.FELIX_SYNC_ENABLED or config.FELIX_SENTIMENT_ENABLED:
+        print(
+            f"--- Felix channel: sync={'on' if config.FELIX_SYNC_ENABLED else 'off'} "
+            f"every {config.FELIX_SYNC_INTERVAL_HOURS}h | "
+            f"blend={'on' if config.FELIX_SENTIMENT_ENABLED else 'off'} "
+            f"({config.FELIX_SENTIMENT_BLEND_WEIGHT:.0%} weight) -> "
+            f"{config.FELIX_MANIFEST_FILE} ---"
+        )
     if config.WISDOM_MODE == "dynamic":
         print(
             f"--- Wisdom: dynamic | gap agg<{config.SENTIMENT_GAP_THRESHOLD_AGGRESSIVE} "
@@ -702,6 +922,26 @@ def _print_startup_banner():
             f"--- Wisdom monthly: rollup + alert -> wisdom_monthly_YYYY-MM.json "
             f"(history: {config.WISDOM_MONTHLY_HISTORY_FILE}) ---"
         )
+    if config.MACRO_EVENT_GUARD_ENABLED:
+        print(
+            f"--- Macro event guard: {config.MACRO_EVENT_HOURS_BEFORE}h window | "
+            f"sizing x{config.MACRO_EVENT_SIZING_SCALE} (NFP/CPI/FOMC/PPI/GDP) ---"
+        )
+    if config.COST_BASIS_AWARE_ENABLED:
+        print(
+            f"--- Cost basis aware: underwater buys x{config.UNDERWATER_SIZING_SCALE} | "
+            f"block discretionary sells below cost: {config.DISCRETIONARY_SELL_BELOW_COST} ---"
+        )
+    if config.SCAN_SCHEDULE_ENABLED:
+        print(
+            f"--- Scan schedule: crypto overnight every "
+            f"{config.CRYPTO_ONLY_CYCLE_INTERVAL_SEC // 60}m | equity prep "
+            f"{config.EQUITY_SCAN_BEFORE_OPEN_MIN}m before open | "
+            f"SPY/NYSE {config.EQUITY_SCAN_AFTER_OPEN_MIN}m after open -> close "
+            f"(cycle {config.CYCLE_INTERVAL_SEC}s) ---"
+        )
+    else:
+        print("--- Scan schedule: off (legacy: equity scans when session open) ---")
     if config.SPACEX_IPO_MONITOR_ENABLED:
         print(
             f"--- SpaceX IPO monitor: RSS headlines -> {config.SPACEX_IPO_CACHE_FILE} "
@@ -712,17 +952,19 @@ def _print_startup_banner():
             "--- SpaceX crypto override: opens BTC pairs when IPO/BTC or SPCX-perp "
             "narrative hot (despite Low 5m vol) ---"
         )
+    if config.SOCIAL_SLEEVE_ENABLED:
+        paper_note = "yes" if social_paper_available() else "need PAPER_APCA_* or SOCIAL_APCA_*"
+        print(
+            f"--- Social sleeve: {config.SOCIAL_SLEEVE_CAP_PCT:.0%} on paper ({paper_note}) | "
+            f"live mirror {config.SOCIAL_MIRROR_TO_LIVE_PCT:.0%} of social cap | "
+            f"GLD/XLE/SPY (no IPOs) ---"
+        )
     if config.SPACEX_IPO_LISTING_MONITOR_ENABLED:
         print(
             f"--- SpaceX IPO listing: SEC + Alpaca scan for {config.SPACEX_IPO_TICKER} "
             f"(expected {config.SPACEX_IPO_EXPECTED_DATE}) -> "
             f"{config.SPACEX_IPO_LISTING_CACHE_FILE} ---"
         )
-        if config.SPACEX_IPO_AUTO_BUY and config.PAPER_TRADING:
-            print(
-                f"--- SpaceX IPO paper auto-buy: ${config.SPACEX_IPO_BUY_NOTIONAL:,.0f} "
-                f"when {config.SPACEX_IPO_TICKER} tradable on Alpaca ---"
-            )
         if config.KRAKEN_SPCX_BUY_ENABLED:
             print(
                 f"--- Kraken SPCX live buy: ${config.KRAKEN_SPCX_BUY_USD:,.0f} "
@@ -753,4 +995,4 @@ if __name__ == "__main__":
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
-        time.sleep(60)
+        time.sleep(cycle_sleep_seconds(_last_cycle_schedule))

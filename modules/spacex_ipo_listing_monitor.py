@@ -241,7 +241,8 @@ def get_spacex_ipo_listing_status(
         "ready_to_buy_alpaca": bool(alpaca.get("tradable")),
         "ready_to_buy_kraken": bool(kraken.get("tradable")),
         "ready_to_buy": bool(alpaca.get("tradable") or kraken.get("tradable")),
-        "auto_buy_alpaca": config.SPACEX_IPO_AUTO_BUY and config.PAPER_TRADING,
+        "auto_buy_alpaca": config.SPACEX_IPO_AUTO_BUY
+        and (config.PAPER_TRADING or config.ALLOW_LIVE_TRADING),
         "auto_buy_kraken": config.KRAKEN_SPCX_BUY_ENABLED,
     }
 

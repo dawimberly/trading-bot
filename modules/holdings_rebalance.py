@@ -18,6 +18,10 @@ from modules.portfolio_manager import PortfolioManager
 SLEEVE_ORDER = ("crypto", "spy", "nyse")
 
 
+def _min_notional(executor: AlpacaExecutor) -> float:
+    return config.effective_min_notional(float(executor.client.get_account().equity))
+
+
 def _position_value(pos) -> float:
     mv = getattr(pos, "market_value", None)
     if mv is not None:
@@ -49,8 +53,8 @@ def target_sleeves(
     spacex_snapshot: dict | None = None,
 ) -> dict[str, float]:
     """Target market value per sleeve (strategy-aware crypto target)."""
-    crypto_target = equity * config.CRYPTO_SLEEVE_CAP_PCT
-    if config.CRYPTO_VOL_ONLY and not crypto_target_allowed(
+    crypto_target = equity * config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
+    if config.effective_crypto_vol_only() and not crypto_target_allowed(
         volatility, regime, spacex_snapshot=spacex_snapshot
     ):
         crypto_target = 0.0
@@ -76,10 +80,11 @@ def _reduce_sleeve(
     positions = [p for p in executor.client.get_all_positions() if pred(p)]
     current = sum(_position_value(p) for p in positions)
     excess = round(current - target_value, 2)
-    if excess < config.MIN_NOTIONAL or not positions:
+    min_n = _min_notional(executor)
+    if excess < min_n or not positions:
         return []
 
-    liquidate = target_value < config.MIN_NOTIONAL
+    liquidate = target_value < min_n
     actions = []
     if liquidate:
         for pos in positions:
@@ -100,13 +105,13 @@ def _reduce_sleeve(
     total = current
     remaining = excess
     for pos in positions:
-        if remaining < config.MIN_NOTIONAL:
+        if remaining < min_n:
             break
         mv = _position_value(pos)
         if mv <= 0 or total <= 0:
             continue
         sell_notional = round(min(remaining, excess * (mv / total), mv), 2)
-        if sell_notional < config.MIN_NOTIONAL:
+        if sell_notional < min_n:
             continue
         sym = normalize_symbol(pos.symbol)
         action = {
@@ -141,9 +146,10 @@ def _deploy_spy(
     if not bullish:
         return []
 
+    min_n = _min_notional(executor)
     current = executor.spy_sleeve_value()
     room = round(target_value - current, 2)
-    if room < config.MIN_NOTIONAL:
+    if room < min_n:
         return []
 
     notional = min(
@@ -151,7 +157,7 @@ def _deploy_spy(
         executor.compute_spy_notional() or 0,
         round(float(executor.client.get_account().cash) * 0.95, 2),
     )
-    if notional < config.MIN_NOTIONAL:
+    if notional < min_n:
         return []
 
     action = {
@@ -178,9 +184,10 @@ def _deploy_nyse(
     if regime in PAUSED_REGIMES:
         return []
 
+    min_n = _min_notional(executor)
     current = executor.nyse_sleeve_value()
     room = round(target_value - current, 2)
-    if room < config.MIN_NOTIONAL:
+    if room < min_n:
         return []
 
     equity_cols = [
@@ -198,13 +205,13 @@ def _deploy_nyse(
     remaining_room = room
     cash = float(executor.client.get_account().cash)
     for symbol in ranked[:max_names]:
-        if remaining_room < config.MIN_NOTIONAL:
+        if remaining_room < min_n:
             break
         per = executor.compute_nyse_notional()
         if per is None:
             break
         notional = round(min(remaining_room, per, cash * 0.95), 2)
-        if notional < config.MIN_NOTIONAL:
+        if notional < min_n:
             break
         action = {
             "phase": "buy",

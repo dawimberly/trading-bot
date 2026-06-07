@@ -394,6 +394,7 @@ def _nyse_buy_intent(
         for c in data.columns
         if not config.is_crypto(c)
         and c != config.SPY_BOT_SYMBOL
+        and c != config.VTI_CORE_SYMBOL
         and not config.is_metal_symbol(c)
     ]
     ranked = _equity_momentum_ranked(
@@ -467,6 +468,12 @@ def resolve_cycle_deploy(
     crypto_cap = config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
     nyse_cap = config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT)
 
+    if hasattr(executor, "portfolio"):
+        equity = executor.portfolio.equity(executor.prices)
+    else:
+        equity = float(executor._get_account().equity)
+    min_n = config.effective_min_notional(equity)
+
     if market_open and _spy_buy_intent(
         data,
         regime,
@@ -477,7 +484,7 @@ def resolve_cycle_deploy(
         yield_gated=yield_gated,
     ):
         room = _sleeve_room(executor, spy_cap, executor.spy_sleeve_value)
-        if room >= config.MIN_NOTIONAL:
+        if room >= min_n:
             rooms["spy"] = room
 
     if _crypto_buy_intent(
@@ -491,7 +498,7 @@ def resolve_cycle_deploy(
         spacex_snapshot=spacex_snapshot,
     ):
         room = _sleeve_room(executor, crypto_cap, executor.crypto_sleeve_value)
-        if room >= config.MIN_NOTIONAL:
+        if room >= min_n:
             rooms["crypto"] = room
 
     if market_open and _nyse_buy_intent(
@@ -504,18 +511,16 @@ def resolve_cycle_deploy(
         yield_gated=yield_gated,
     ):
         room = _sleeve_room(executor, nyse_cap, executor.nyse_sleeve_value)
-        if room >= config.MIN_NOTIONAL:
+        if room >= min_n:
             rooms["nyse"] = room
 
     if len(rooms) < 2:
         return
 
     if hasattr(executor, "portfolio"):
-        equity = executor.portfolio.equity(executor.prices)
         cash = executor.portfolio.cash
     else:
         account = executor._get_account()
-        equity = float(account.equity)
         cash = float(account.cash)
 
     allocations = deployment_sizing.compute_cofire_allocations(equity, cash, rooms)
@@ -541,6 +546,16 @@ def run_spy_exits(
     bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
     if bullish:
         return 0
+
+    if (
+        config.COST_BASIS_AWARE_ENABLED
+        and config.DISCRETIONARY_SELL_BELOW_COST
+        and hasattr(executor, "_find_position")
+    ):
+        from modules.cost_basis import position_below_cost
+
+        if position_below_cost(executor, symbol):
+            return 0
 
     if hasattr(executor, "execute_full_exit"):
         order = executor.execute_full_exit(symbol)
@@ -633,6 +648,7 @@ def run_equity_strategy(
         for c in data.columns
         if not config.is_crypto(c)
         and c != config.SPY_BOT_SYMBOL
+        and c != config.VTI_CORE_SYMBOL
         and not config.is_metal_symbol(c)
     ]
     ranked = _equity_momentum_ranked(
@@ -662,7 +678,8 @@ def run_equity_strategy(
             if config.NYSE_BETA_SCALING_ENABLED:
                 _, beta = _spy_vs_equity_metrics(data, symbol)
                 scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
-                if scaled < config.MIN_NOTIONAL:
+                min_n = config.effective_min_notional(float(executor._get_account().equity))
+                if scaled < min_n:
                     continue
                 notional = scaled
         order = executor.execute_order(symbol, "buy", notional=notional)
@@ -727,6 +744,7 @@ def nyse_mirror_intent(
         for c in data.columns
         if not config.is_crypto(c)
         and c != config.SPY_BOT_SYMBOL
+        and c != config.VTI_CORE_SYMBOL
         and not config.is_metal_symbol(c)
     ]
     ranked = _equity_momentum_ranked(

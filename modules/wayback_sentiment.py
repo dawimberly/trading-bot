@@ -5,13 +5,20 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import config
+
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CACHE = ROOT / "wayback_sentiment.csv"
+
+
+def wayback_sentiment_path() -> Path:
+    primary = ROOT / config.WAYBACK_SENTIMENT_FILE
+    legacy = ROOT / "wayback_sentiment.csv"
+    return primary if primary.exists() or not legacy.exists() else legacy
 
 
 def load_monthly_web_sentiment(path: Path | None = None) -> pd.Series:
     """Average archive sources per month -> Series indexed by month-start Timestamp."""
-    cache = path or DEFAULT_CACHE
+    cache = path or wayback_sentiment_path()
     if not cache.exists():
         return pd.Series(dtype=float, name="web_sentiment")
     df = pd.read_csv(cache, parse_dates=["month"])

@@ -18,11 +18,16 @@ from fetch_data import fetch_and_store
 
 def run():
     ok = True
-    print("=== PAPER TRADING PREFLIGHT ===\n")
+    live = not config.PAPER_TRADING
+    title = "LIVE TRADING PREFLIGHT" if live else "PAPER TRADING PREFLIGHT"
+    print(f"=== {title} ===\n")
 
-    if not config.PAPER_TRADING:
-        print("[FAIL] PAPER_TRADING is false. Use paper keys only.")
-        ok = False
+    if live:
+        if config.ALLOW_LIVE_TRADING:
+            print("[OK] Live mode enabled (ALLOW_LIVE_TRADING=yes)")
+        else:
+            print("[FAIL] PAPER_TRADING=false but ALLOW_LIVE_TRADING is not yes")
+            ok = False
     else:
         print("[OK] Paper mode enabled")
 
@@ -34,12 +39,28 @@ def run():
         ok = False
         return
 
+    acct = None
     try:
         ex = AlpacaExecutor()
         acct = ex.client.get_account()
-        print(f"[OK] Alpaca connected | equity=${float(acct.equity):,.2f} cash=${float(acct.cash):,.2f}")
+        mode = "LIVE" if live else "PAPER"
+        print(
+            f"[OK] Alpaca connected ({mode}) | "
+            f"equity=${float(acct.equity):,.2f} cash=${float(acct.cash):,.2f}"
+        )
+        if live and float(acct.equity) < 500:
+            print(
+                f"[INFO] Small account (${float(acct.equity):,.2f}) — "
+                f"order min ${config.effective_min_notional(float(acct.equity)):.2f}, "
+                f"2% chunk ${float(acct.equity) * config.RISK_PER_TRADE:.2f}"
+            )
     except Exception as e:
-        print(f"[FAIL] Alpaca connection: {e}")
+        hint = ""
+        if live and "401" in str(e):
+            hint = " (check live keys + PAPER_TRADING=false)"
+        elif not live and "401" in str(e):
+            hint = " (live keys need PAPER_TRADING=false; paper keys need PAPER_TRADING=true)"
+        print(f"[FAIL] Alpaca connection: {e}{hint}")
         ok = False
 
     print("\n--- Refreshing 5m market data ---")
@@ -124,13 +145,37 @@ def run():
         elif wisdom_mode == "dynamic" and not config.AUTO_DYNAMIC_ENABLED:
             print("  [WARN] AUTO_DYNAMIC_ENABLED=false — dynamic runs price-only")
     print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
+    try:
+        live_eq = float(acct.equity)
+        print(
+            f"  Order sizing:       min ${config.effective_min_notional(live_eq):.2f} "
+            f"| max ${config.effective_max_notional_per_order(live_eq):.2f} "
+            f"(ref ${config.REFERENCE_EQUITY:,.0f})"
+        )
+        print(
+            f"  At $100 account:   min ${config.effective_min_notional(100):.2f} "
+            f"| 2% chunk ${100 * config.RISK_PER_TRADE:.2f}"
+        )
+    except Exception:
+        pass
     print(f"  Stop loss:          {config.STOP_LOSS_PCT:.0%}")
     print(f"  Max drawdown halt:  {config.MAX_DRAWDOWN_PCT:.0%}")
     print(f"  Kraken max names:   {config.KRAKEN_MAX_POSITIONS} (cleanup only)")
+    if config.KRAKEN_AUTOPILOT_ENABLED and not config.KRAKEN_DRY_RUN:
+        print(
+            f"  Kraken autopilot:   ON (live trades, budget ${config.KRAKEN_CYCLE_BUDGET_USD:.0f}/cycle)"
+        )
+        if live:
+            print("  [WARN] Kraken + Alpaca both live — set KRAKEN_AUTOPILOT_ENABLED=false for Alpaca-only")
+    else:
+        print("  Kraken autopilot:   off or dry-run")
     print(f"  Journal:            {config.PAPER_JOURNAL_CSV}")
 
     if ok:
-        print("\n=== READY: python run_all.py ===")
+        if live:
+            print("\n=== READY (LIVE): python run_all.py ===")
+        else:
+            print("\n=== READY: python run_all.py ===")
     else:
         print("\n=== FIX ISSUES ABOVE BEFORE STARTING ===")
         sys.exit(1)

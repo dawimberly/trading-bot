@@ -16,3 +16,10 @@ python-kraken-sdk
 # Dashboard — dashboard.py
 streamlit
 plotly
+
+# Felix transcript sync (optional — scripts/maintenance/sync_felix_transcripts.py)
+# yt-dlp
+# youtube-transcript-api
+
+# NerdMiner monitor — nerdminer/
+pyserial

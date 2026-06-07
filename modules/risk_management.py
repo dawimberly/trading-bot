@@ -88,7 +88,14 @@ def _is_long_sleeve_symbol(symbol):
     return True
 
 
-def trim_long_sleeves_to_cash_target(portfolio, prices, target_pct, tx_cost=0.001):
+def trim_long_sleeves_to_cash_target(
+    portfolio,
+    prices,
+    target_pct,
+    tx_cost=0.001,
+    *,
+    protect_symbols: frozenset[str] | None = None,
+):
     """Sell long-sleeve holdings until cash >= target_pct of equity."""
     eq = portfolio.equity(prices)
     if eq <= 0:
@@ -98,9 +105,13 @@ def trim_long_sleeves_to_cash_target(portfolio, prices, target_pct, tx_cost=0.00
         return 0
     need = target_cash - portfolio.cash
     sells = 0
+    protected = protect_symbols or frozenset()
     for symbol in list(portfolio.positions.keys()):
         if need <= 0:
             break
+        sym = config.normalize_symbol(symbol)
+        if sym in protected:
+            continue
         if not _is_long_sleeve_symbol(symbol):
             continue
         qty = portfolio.positions.get(symbol, 0)

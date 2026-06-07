@@ -30,6 +30,15 @@ flowchart TB
 
 **One process:** `run_all.py` runs all sleeves on a single Alpaca account with per-sleeve capital caps enforced by `modules/alpaca_executor.py`.
 
+**Two Alpaca books (optional):**
+
+| Book | Keys | Role |
+|------|------|------|
+| **Live / main** | `APCA_*` | Small live account (~$100) or primary paper keys |
+| **Paper research** | `PAPER_APCA_*` | Isolated ~$98k paper book for strategy research (`scripts/research/run_paper_piece.py`) |
+
+Live and paper research use **different allocation profiles** — see [VTI core](#vti-passive-core-live) and [Paper aggressive research](#paper-aggressive-research-profile).
+
 ## Fund sleeves (default allocation)
 
 | Sleeve | Base cap | Strategy | When it trades |
@@ -43,6 +52,8 @@ flowchart TB
 On a $100k account with the **recommended** stack, SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** (adaptive chunks up to 5% when sleeve room allows; co-fire budget 6% when SPY and NYSE fire together), capped at $10k per order.
 
 Effective caps come from `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`. With **yield-gate-only** (default), long sleeves use **full** base caps — no 0.9 scale and no metal sleeve.
+
+When **VTI core** is enabled (live default), active sleeves are scaled to the **remaining equity slice** after the passive VTI allocation — e.g. 80% VTI + 20% active → SPY cap ≈ 9% of total equity (45% × 20%).
 
 Tune base caps in `config.py`:
 
@@ -140,6 +151,82 @@ Full legacy blend: set `GAME_PLAN_YIELD_GATE_ONLY=false` and keep metal/stress e
 
 Preflight prints macro signals (`stress`, `yield_gate`, `bond_stress`) when game plan is active.
 
+## VTI passive core (live)
+
+Backtests showed **80/20 VTI + active bot** beat active-only on Sharpe (+28% vs +16% over 365d in a recent window). Live default:
+
+| Layer | Setting |
+|-------|---------|
+| **VTI core** | `VTI_CORE_ENABLED=true`, `VTI_CORE_PCT=0.80` |
+| **Rebalance** | `modules/vti_core.py` — buys/sells VTI when drift exceeds `VTI_CORE_REBALANCE_DRIFT_PCT` (2%) |
+| **Active sleeves** | Remaining ~20% of equity across SPY / crypto / NYSE (scaled caps) |
+| **Protection** | VTI is excluded from halt liquidation, stop-loss, and NYSE momentum picks |
+
+```env
+VTI_CORE_ENABLED=true
+VTI_CORE_PCT=0.80
+VTI_CORE_REBALANCE_DRIFT_PCT=0.02
+```
+
+Backtest compare:
+
+```powershell
+python backtester.py --days 365 --compare-vti-core
+python backtester.py --days 365 --vti-core 0.8
+```
+
+## Social / Felix sleeve
+
+Creator-macro sleeve driven by **Felix & Friends** YouTube transcripts + headline web sentiment. Runs on the **paper research book** (`PAPER_APCA_*`); optional **live mirror** on the main account.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `SOCIAL_SLEEVE_ENABLED` | `false` (opt-in) | Turn on Felix + social rotation |
+| `SOCIAL_SLEEVE_CAP_PCT` | `0.10` | Paper social book cap (% of that account) |
+| `SOCIAL_MIRROR_TO_LIVE_PCT` | `0.15` | Live reserve = social cap × this (e.g. 1.5% of live equity) |
+| `FELIX_SENTIMENT_ENABLED` | `true` | Score latest synced transcript |
+| `SPACEX_IPO_AUTO_BUY` | `false` on live | IPO auto-buy disabled |
+
+Targets: **GLD** (bearish macro), **XLE** (bullish energy), **SPY** (neutral). Live mirror skips SPY when the main fund already runs the SPY sleeve.
+
+Sync Felix transcripts:
+
+```powershell
+python scripts/maintenance/sync_felix_transcripts.py --max 30 --backfill-dates
+```
+
+## Paper aggressive research profile
+
+The **paper research book** (`PAPER_APCA_*`) can run a profit-seeking profile **without changing live caps**. Enabled when `PAPER_AGGRESSIVE=true` and you use `run_paper_piece.py` (or the social paper cycle).
+
+| Setting | Live (~$100) | Paper aggressive |
+|---------|--------------|------------------|
+| VTI core | 80% | **20%** (`PAPER_VTI_CORE_PCT`) |
+| Active sleeves | ~17% total | **~79%** (`PAPER_ACTIVE_SLEEVE_BOOST=1.40`) |
+| Social cap | 10% | **20%** (`PAPER_SOCIAL_SLEEVE_CAP_PCT`) |
+| Crypto vol gate | High vol only | **Off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| Wisdom sizing floor | defensive cuts | **1.0** (no shrink) |
+
+```powershell
+# Inspect profile (dry-run)
+python scripts/research/run_paper_piece.py --piece status --piece alloc
+
+# Deploy when US market is open
+python scripts/research/run_paper_piece.py --piece all-active --apply
+
+# Mirror live-like caps on paper
+python scripts/research/run_paper_piece.py --piece alloc --conservative
+```
+
+Backtest the paper profile:
+
+```powershell
+python backtester.py --days 365 --compare-paper-aggressive
+python backtester.py --days 365 --paper-aggressive
+```
+
+Recent 365d A/B (2025-04 → 2026-06): live-like 80/20 **+28.2%** Sharpe 1.43; paper aggressive 20/80 **+16.5%** Sharpe 0.85; active-only +15.1%. Paper aggressive wins on active deployment but lags when VTI has a strong year.
+
 ## Quick start
 
 ```powershell
@@ -197,6 +284,8 @@ Preflight checks paper mode, Alpaca connection, market data, and game plan macro
 - Uses **adaptive chunk** + **co-fire budget** sizing when multiple sleeves fire
 - Runs **crypto only in high-volatility** regimes (still skips panic/bear)
 - Applies **5% stop-loss** exits; **10% max drawdown** halt with **8% resume** and optional breach liquidation
+- **Cost-basis aware**: scales buys when a sleeve is underwater on avg entry; blocks discretionary sells below cost (stops still fire)
+- **Macro event guard**: reduces sizing before NFP/CPI/FOMC/PPI/GDP releases (hardcoded calendar in `modules/macro_calendar.py`)
 - Requires **0.5+ correlation** on crypto pairs
 - Writes **`paper_journal.csv`** and **`bot_heartbeat.json`** each cycle
 
@@ -284,6 +373,14 @@ python backtester.py --days 500
 python backtester.py --max              # full history with halt
 python backtester.py --max --no-halt    # validate crypto sleeve path
 
+# VTI core A/B (70/30, 80/20 vs active-only)
+python backtester.py --days 365 --compare-vti-core
+python backtester.py --days 365 --vti-core 0.8
+
+# Paper aggressive research profile (20% VTI, boosted sleeves, Felix social)
+python backtester.py --days 365 --compare-paper-aggressive
+python backtester.py --days 365 --paper-aggressive
+
 # Game plan A/B grid (yield_gate_only vs full blend)
 python scripts/analysis/game_plan_ab_test.py
 python backtester_metals.py --from 2017 --to 2023
@@ -309,7 +406,9 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | Integrated fund + sleeve-aware executor; `--max`, `--no-halt` |
+| `backtester.py` | Integrated fund + sleeve-aware executor; `--vti-core`, `--compare-vti-core`, `--paper-aggressive`, `--compare-paper-aggressive` |
+| `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
+| `scripts/maintenance/sync_felix_transcripts.py` | Bulk-sync Felix YouTube transcripts for social sleeve |
 | `backtester_metals.py` | Game plan variants incl. `yield_gate_only` |
 | `backtester_macro_hedge.py` | Yield gate, GLD, stress cash |
 | `scripts/research/backtest_game_plan_live.py` | Live blend vs baseline CSVs |
@@ -389,6 +488,16 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `DERIVED_BEAR_PAUSE_ENABLED` | No | Default `false` |
 | `METAL_SLEEVE_CAP_PCT` | No | Full game plan only (default `0.10`) |
 | `STRESS_CASH_PCT` | No | Full game plan only (default `0.25`) |
+| `VTI_CORE_ENABLED` | No | Passive VTI slice (default `true`) |
+| `VTI_CORE_PCT` | No | Live VTI target (default `0.80`) |
+| `PAPER_APCA_API_KEY_ID` | No | Separate Alpaca paper book for research |
+| `PAPER_APCA_API_SECRET_KEY` | No | Same |
+| `PAPER_AGGRESSIVE` | No | Paper research profit profile (default `true` in `.env.example`) |
+| `PAPER_VTI_CORE_PCT` | No | Paper VTI target (default `0.20`) |
+| `PAPER_ACTIVE_SLEEVE_BOOST` | No | Active sleeve multiplier on paper (default `1.40`) |
+| `SOCIAL_SLEEVE_ENABLED` | No | Felix / social macro sleeve |
+| `SOCIAL_MIRROR_TO_LIVE_PCT` | No | Fraction of social cap mirrored to live account |
+| `FELIX_SENTIMENT_ENABLED` | No | Blend Felix transcript mood into social score |
 | `WISDOM_EVAL_ENABLED` | No | Daily self-eval (default `true`) |
 | `WISDOM_EVAL_DAYS` | No | Rolling window for scorecard (default `30`) |
 | `WISDOM_MONTHLY_ENABLED` | No | Calendar-month rollup + alert (default `true`) |
@@ -421,6 +530,12 @@ PythonTrading/
 ├── simulate.py             # Mean-reversion research
 ├── modules/
 │   ├── pipeline_strategies.py  # SPY, crypto, NYSE strategies
+│   ├── vti_core.py             # Passive VTI rebalance (live + paper)
+│   ├── social_sleeve.py        # Felix / social macro (paper + live mirror)
+│   ├── social_sleeve_backtest.py  # Parallel social book in backtester
+│   ├── felix_sentiment.py      # Transcript sync + scoring
+│   ├── cost_basis.py           # Avg-entry sizing guard
+│   ├── macro_calendar.py       # NFP/CPI/FOMC sizing reduction
 │   ├── game_plan.py            # Metal sleeve + stress cash (live)
 │   ├── macro_signals.py        # TNX/TLT daily signals for game plan
 │   ├── alpaca_executor.py      # Sleeve caps + order sizing
@@ -432,11 +547,11 @@ PythonTrading/
 │   └── ...
 └── scripts/
     ├── analysis/           # A/B grids, OPTIMIZED_SYSTEM_SUMMARY.md, live vs backtest
-    ├── research/           # Game plan backtests, projections
+    ├── research/           # Game plan backtests, run_paper_piece.py
+    ├── maintenance/        # evaluate_wisdom, sync_felix_transcripts, cleanup
     ├── db/                 # SQLite utilities
     ├── account/            # Alpaca + alerts (preflight, preflight_spy, verify)
     ├── exchange/           # Kraken checks
-    ├── maintenance/        # Cleanup, universe CSV, evaluate_wisdom.py
     └── dev/                # Tests and legacy loops
 ```
 
@@ -500,6 +615,6 @@ The bot is lightweight (Python + API calls + SQLite). A **$5–12/mo Linux VPS**
 - **`write_bot.py`:** Regenerates `fetch_data.py` only. Does **not** overwrite `run_all.py`.
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
 - **Strategy sharing:** `run_all.py`, `backtester.py`, and `backtest_spy.py` share `modules/pipeline_strategies.py`.
-- **Alpaca crypto fees:** ~0.25% taker per leg on market orders. Kraken keys are available for future crypto-only execution but are not wired to `run_all.py`.
+- **Alpaca fees:** US stocks/ETFs are commission-free. Crypto market orders use `ALPACA_CRYPTO_TAKER_FEE_PCT` (default 0.25% per leg); live sizing and `backtester.py` reserve that fee on crypto buys only (`ALPACA_CRYPTO_FEE_AWARE=true`).
 - **NYSE overlap:** SPY and NYSE sleeves both hold US equities; caps limit double exposure. SPY is excluded from the NYSE MA50 picker. GLD, SLV, and CPER are excluded from NYSE momentum and counted in the metal sleeve.
 - **Game plan metals:** GLD, SLV, CPER are in `UNIVERSE` for data refresh but not in the NYSE momentum picker. Macro daily bars (TLT, TNX) bootstrap on first `run_all.py` cycle.

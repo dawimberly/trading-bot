@@ -39,8 +39,18 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 MIN_HISTORY = max(50, config.SPY_MA_WINDOW)
 WARMUP_CALENDAR_BUFFER = 45  # calendar days before period_start for indicator warmup
-TX_COST = 0.001
+TX_COST = 0.001  # legacy fallback when ALPACA_CRYPTO_FEE_AWARE=false
 BENCHMARK = "VTI"
+VTI_CORE_SYMBOL = "VTI"
+
+
+def _tx_cost_for_symbol(symbol: str) -> float:
+    """Alpaca: $0 equity commissions; crypto taker fee per leg when fee-aware."""
+    if config.is_crypto(symbol):
+        if config.ALPACA_CRYPTO_FEE_AWARE:
+            return config.ALPACA_CRYPTO_TAKER_FEE_PCT
+        return TX_COST
+    return 0.0
 # One daily bar ≈ one pipeline day; ~1h cooldown ≈ 1 session on daily data
 DAILY_COOLDOWN_BARS = 1
 
@@ -48,11 +58,24 @@ DAILY_COOLDOWN_BARS = 1
 class BacktestExecutor:
     """Mirrors AlpacaExecutor: equity-based sizing with per-sleeve caps."""
 
-    def __init__(self, portfolio, prices):
+    def __init__(
+        self,
+        portfolio,
+        prices,
+        *,
+        active_fraction: float = 1.0,
+        cap_scale: float | None = None,
+    ):
         self.portfolio = portfolio
         self.prices = prices
         self.orders = []
         self._cofire_notionals = {}
+        self._active_fraction = max(0.0, min(1.0, float(active_fraction)))
+        self._cap_scale = (
+            max(0.0, float(cap_scale))
+            if cap_scale is not None
+            else self._active_fraction
+        )
 
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
@@ -113,6 +136,8 @@ class BacktestExecutor:
             return False
         if BacktestExecutor._is_metal_position(symbol):
             return False
+        if config.normalize_symbol(symbol) == VTI_CORE_SYMBOL:
+            return False
         return True
 
     def crypto_sleeve_value(self):
@@ -124,13 +149,16 @@ class BacktestExecutor:
     def spy_sleeve_value(self):
         return self._sleeve_exposure(self._is_spy_position)
 
+    def _scaled_cap_pct(self, sleeve_cap_pct: float) -> float:
+        return round(sleeve_cap_pct * self._cap_scale, 6)
+
     def _compute_capped_notional_raw(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
         equity = self.portfolio.equity(self.prices)
         cash = self.portfolio.cash
         return deployment_sizing.resolve_sleeve_notional(
             equity,
             cash,
-            sleeve_cap_pct,
+            self._scaled_cap_pct(sleeve_cap_pct),
             sleeve_value,
             sleeve_key or "",
             self._cofire_notionals,
@@ -150,21 +178,21 @@ class BacktestExecutor:
 
     def compute_crypto_notional(self):
         return self._compute_capped_notional(
-            config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
+            config.CRYPTO_SLEEVE_CAP_PCT,
             self.crypto_sleeve_value(),
             "crypto",
         )
 
     def compute_nyse_notional(self):
         return self._compute_capped_notional(
-            config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
+            config.NYSE_SLEEVE_CAP_PCT,
             self.nyse_sleeve_value(),
             "nyse",
         )
 
     def compute_spy_notional(self):
         base = self._compute_capped_notional(
-            config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            config.SPY_SLEEVE_CAP_PCT,
             self.spy_sleeve_value(),
             "spy",
         )
@@ -192,8 +220,18 @@ class BacktestExecutor:
         price = self.prices.get(symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None
+        if config.is_crypto(symbol) and side.lower() == "buy":
+            notional = deployment_sizing.apply_alpaca_crypto_fee_reserve(
+                notional, equity=self.portfolio.equity(self.prices)
+            )
+            if notional is None:
+                return None
         order = self.portfolio.trade(
-            symbol, side.lower(), price, tx_cost=TX_COST, notional=notional
+            symbol,
+            side.lower(),
+            price,
+            tx_cost=_tx_cost_for_symbol(symbol),
+            notional=notional,
         )
         if order:
             self.orders.append(order)
@@ -250,6 +288,32 @@ class BacktestPortfolio:
         return None
 
 
+def _rebalance_vti_core(portfolio, prices, core_pct: float) -> None:
+    """Hold passive VTI at core_pct of total equity (commission-free)."""
+    if core_pct <= 0 or VTI_CORE_SYMBOL not in prices.index:
+        return
+    price = prices.get(VTI_CORE_SYMBOL)
+    if price is None or not np.isfinite(price) or float(price) <= 0:
+        return
+    price = float(price)
+    eq = portfolio.equity(prices)
+    target = round(eq * core_pct, 2)
+    qty = portfolio.positions.get(VTI_CORE_SYMBOL, 0)
+    current = float(qty) * price
+    delta = round(target - current, 2)
+    min_n = config.effective_min_notional(eq)
+    if abs(delta) < min_n:
+        return
+    if delta > 0:
+        portfolio.trade(
+            VTI_CORE_SYMBOL, "buy", price, tx_cost=0.0, notional=delta
+        )
+    else:
+        portfolio.trade(
+            VTI_CORE_SYMBOL, "sell", price, tx_cost=0.0, notional=-delta
+        )
+
+
 def _benchmark_return(data, start_idx):
     if BENCHMARK not in data.columns:
         return None
@@ -257,6 +321,15 @@ def _benchmark_return(data, start_idx):
     if len(col) < 2 or col.iloc[0] <= 0:
         return None
     return (col.iloc[-1] / col.iloc[0] - 1) * 100
+
+
+def _calendar_days_to_fetch(sim_days: int) -> int:
+    """yfinance period is calendar days; reserve MA warmup + buffer for trading bars."""
+    return int(sim_days + MIN_HISTORY + WARMUP_CALENDAR_BUFFER)
+
+
+def _min_rows_for_backtest(sim_days: int) -> int:
+    return MIN_HISTORY + max(10, int(sim_days * 0.85))
 
 
 def _ensure_daily_data(days, refresh=False, use_max=False):
@@ -268,14 +341,34 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
         print("--- Downloading max daily history (may take a few minutes) ---")
         fetch_daily_history(use_max=True)
         return load_close_matrix(interval="1d")
-    min_rows = max(MIN_HISTORY + 10, int(days * 0.85))
+
+    sim_days = days or config.BACKTEST_DAYS
+    need_rows = _min_rows_for_backtest(sim_days)
     if not refresh:
-        data = load_close_matrix(interval="1d", days=days)
-        if len(data) >= min_rows:
+        data = load_close_matrix(interval="1d")
+        if len(data) >= need_rows:
             return data
-    print(f"--- Downloading {days} days of daily history ---")
-    fetch_daily_history(days)
-    return load_close_matrix(interval="1d", days=days)
+
+    fetch_days = _calendar_days_to_fetch(sim_days)
+    print(
+        f"--- Downloading {fetch_days} calendar days of daily history "
+        f"({MIN_HISTORY}-bar SPY MA warmup + ~{sim_days} sim days) ---"
+    )
+    fetch_daily_history(fetch_days)
+    data = load_close_matrix(interval="1d")
+    if len(data) < MIN_HISTORY:
+        print(
+            f"--- Still short ({len(data)} rows); downloading max daily history ---"
+        )
+        fetch_daily_history(use_max=True)
+        data = load_close_matrix(interval="1d")
+    return data
+
+
+def _backtest_cap_scale(vti_core_pct: float, *, paper_aggressive: bool) -> float:
+    if paper_aggressive:
+        return config.active_sleeve_scale()
+    return round(config.long_fund_scale() * max(0.0, 1.0 - vti_core_pct), 6)
 
 
 def run_backtest(
@@ -286,13 +379,25 @@ def run_backtest(
     wisdom_mode=None,
     monthly_web=None,
     track_metrics=False,
+    vti_core_pct: float = 0.0,
+    paper_aggressive: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
+    if paper_aggressive:
+        vti_core_pct = config.PAPER_VTI_CORE_PCT
+
+    saved_paper_ctx = config.paper_aggressive_context()
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.set_paper_aggressive_context(paper_aggressive)
+    if paper_aggressive:
+        config.SOCIAL_SLEEVE_ENABLED = True
+
     start_date = data.index[MIN_HISTORY]
     end_date = data.index[-1]
     cooldown_bars = DAILY_COOLDOWN_BARS
     sharpe_scale = np.sqrt(252)
     sim_days = (end_date - start_date).days
+    cap_scale = _backtest_cap_scale(vti_core_pct, paper_aggressive=paper_aggressive)
 
     portfolio = BacktestPortfolio()
     pair_cooldown = {}
@@ -311,8 +416,24 @@ def run_backtest(
     prev_crypto_value = 0.0
     crypto_pnl_contribution = 0.0
     trade_days = 0
+    total_social = 0
+    social_portfolio = None
+    social_curve = []
+    monthly_web = None
+    if config.SOCIAL_SLEEVE_ENABLED:
+        from modules.social_sleeve_backtest import (
+            run_social_backtest_day,
+            social_score_for_backtest,
+        )
+        from modules.wayback_sentiment import load_monthly_web_sentiment
 
-    spy_cap_pct = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
+        try:
+            monthly_web = load_monthly_web_sentiment()
+        except Exception:
+            monthly_web = None
+        social_portfolio = BacktestPortfolio(initial_capital=portfolio.initial_capital)
+
+    spy_cap_pct = round(config.SPY_SLEEVE_CAP_PCT * cap_scale, 6)
     macro_daily = None
     if config.game_plan_active() and config.YIELD_GATE_ENABLED:
         try:
@@ -341,7 +462,13 @@ def run_backtest(
         if not can_trade:
             if risk_manager.should_liquidate_on_breach():
                 halt_liquidations += trim_long_sleeves_to_cash_target(
-                    portfolio, prices, config.HALT_TARGET_CASH_PCT, TX_COST
+                    portfolio,
+                    prices,
+                    config.HALT_TARGET_CASH_PCT,
+                    TX_COST,
+                    protect_symbols=(
+                        frozenset({VTI_CORE_SYMBOL}) if vti_core_pct > 0 else None
+                    ),
                 )
             if verbose and not prev_halted and risk_manager.halted:
                 print(
@@ -383,7 +510,19 @@ def run_backtest(
             if len(macro_window) >= 50:
                 yield_gated = yield_gate_blocks(macro_window)
 
-        executor = BacktestExecutor(portfolio, prices)
+        if vti_core_pct > 0:
+            _rebalance_vti_core(portfolio, prices, vti_core_pct)
+        active_fraction = max(0.0, 1.0 - vti_core_pct)
+        if paper_aggressive:
+            sizing_mult = max(
+                float(sizing_mult), config.PAPER_WISDOM_SIZING_FLOOR
+            )
+        executor = BacktestExecutor(
+            portfolio,
+            prices,
+            active_fraction=active_fraction,
+            cap_scale=cap_scale,
+        )
         executor.set_sizing_context(window)
         executor.set_wisdom_sizing_multiplier(sizing_mult)
         resolve_cycle_deploy(
@@ -428,6 +567,13 @@ def run_backtest(
             cooldown_bars=cooldown_bars,
             yield_gated=yield_gated,
         )
+        if social_portfolio is not None:
+            agg = social_score_for_backtest(data.index[i], window, monthly_web)
+            social_actions = run_social_backtest_day(
+                social_portfolio, prices, agg, market_open=True
+            )
+            total_social += len(social_actions)
+            social_curve.append(social_portfolio.equity(prices))
         total_orders += len(executor.orders)
         trade_days += 1
 
@@ -503,7 +649,21 @@ def run_backtest(
         "resume_events": risk_manager.resume_events,
         "pause_days": pause_days,
         "halt_liquidations": halt_liquidations,
+        "vti_core_pct": vti_core_pct,
+        "paper_aggressive": paper_aggressive,
+        "cap_scale": cap_scale,
     }
+    if social_portfolio is not None and social_curve:
+        social_init = social_portfolio.initial_capital
+        social_final = round(social_curve[-1], 2)
+        result["social_sleeve"] = {
+            "enabled": True,
+            "cap_pct": config.effective_social_sleeve_cap_pct(),
+            "initial_capital": social_init,
+            "final_equity": social_final,
+            "return_pct": round((social_final / social_init - 1) * 100, 2),
+            "trades": total_social,
+        }
     if track_metrics:
         init = portfolio.initial_capital
         result.update(
@@ -529,37 +689,179 @@ def run_backtest(
                 ),
             }
         )
+    config.set_paper_aggressive_context(saved_paper_ctx)
+    config.SOCIAL_SLEEVE_ENABLED = saved_social
     return result
 
 
-def run_performance_test(days=None, refresh=False, use_max=False):
+def run_paper_aggressive_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare live-like 80/20 vs paper aggressive 20/80 profile."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        ("Live-like 80/20 VTI", {"vti_core_pct": 0.80, "paper_aggressive": False}),
+        (
+            f"Paper aggressive {config.PAPER_VTI_CORE_PCT:.0%} VTI",
+            {"vti_core_pct": 0.0, "paper_aggressive": True},
+        ),
+        ("Active only (no VTI)", {"vti_core_pct": 0.0, "paper_aggressive": False}),
+    ]
+    print("--- PAPER AGGRESSIVE A/B (Felix social sleeve on for paper profile) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"Paper boost: {config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x | "
+        f"social {config.PAPER_SOCIAL_SLEEVE_CAP_PCT:.0%} | "
+        f"crypto vol-only {config.PAPER_CRYPTO_VOL_ONLY}"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Final $':>10} {'Social':>8}"
+    )
+    print("-" * 78)
+
+    for label, kwargs in configs:
+        result = run_backtest(data, **kwargs)
+        social = result.get("social_sleeve")
+        social_ret = f"{social['return_pct']:+.1f}%" if social else "—"
+        print(
+            f"{label:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result['final_equity']:>10,.2f} "
+            f"{social_ret:>8}"
+        )
+    print("-" * 78)
+
+
+def run_vti_core_compare(days=None, refresh=False, use_max=False) -> None:
+    """Run baseline vs 70/30 and 80/20 VTI core + active bot."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        ("Active only (current)", 0.0),
+        ("70% VTI core / 30% active", 0.70),
+        ("80% VTI core / 20% active", 0.80),
+    ]
+    print("--- VTI CORE A/B (same window, parallel social sleeve off) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} {'Final $':>10}")
+    print("-" * 70)
+
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.SOCIAL_SLEEVE_ENABLED = False
+    try:
+        for label, core in configs:
+            result = run_backtest(data, vti_core_pct=core)
+            print(
+                f"{label:<32} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{result['final_equity']:>10,.2f}"
+            )
+    finally:
+        config.SOCIAL_SLEEVE_ENABLED = saved_social
+    print("-" * 70)
+
+
+def run_performance_test(
+    days=None,
+    refresh=False,
+    use_max=False,
+    vti_core_pct: float = 0.0,
+    paper_aggressive: bool = False,
+):
     if use_max:
         print("--- STARTING FUND BACKTEST (max available daily history) ---")
     else:
         days = days or config.BACKTEST_DAYS
         print(f"--- STARTING FUND BACKTEST ({days} days) ---")
+    if paper_aggressive:
+        print(
+            f"--- PAPER AGGRESSIVE: {config.PAPER_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
+            f"{1 - config.PAPER_VTI_CORE_PCT:.0%} active (boost "
+            f"{config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x) ---"
+        )
+    elif vti_core_pct > 0:
+        print(
+            f"--- VTI core: {vti_core_pct:.0%} passive {VTI_CORE_SYMBOL} | "
+            f"{1 - vti_core_pct:.0%} active sleeves ---"
+        )
     try:
         data = _ensure_daily_data(days or 0, refresh=refresh, use_max=use_max)
     except Exception as e:
         print("Database error: " + str(e))
         return
     if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} rows; got {len(data)}.")
-        print("Run: python fetch_data.py --daily --max")
+        sim_target = days or config.BACKTEST_DAYS
+        print(
+            f"Need at least {MIN_HISTORY} daily bars for SPY MA{config.SPY_MA_WINDOW} "
+            f"warmup; got {len(data)}."
+        )
+        print(
+            "Run: python fetch_data.py --daily --days "
+            f"{_calendar_days_to_fetch(sim_target)}"
+        )
+        print("Or:  python fetch_data.py --daily --max")
         return
 
     start_date = data.index[MIN_HISTORY]
     end_date = data.index[-1]
     cooldown_bars = DAILY_COOLDOWN_BARS
     bar_label = "daily bars"
+    sim_bars = len(data) - MIN_HISTORY
     sim_days = (end_date - start_date).days
 
     print(f"Loaded {len(data.columns)} tickers over {len(data)} {bar_label}.")
-    print(f"Simulation: {start_date.date()} to {end_date.date()}")
+    print(
+        f"Warmup: {MIN_HISTORY} bars (SPY MA{config.SPY_MA_WINDOW}) | "
+        f"Simulation: {sim_bars} bars"
+    )
+    print(f"Simulation window: {start_date.date()} to {end_date.date()} ({sim_days} calendar days)")
     print(f"Cooldown: {cooldown_bars} bar(s) (~{COOLDOWN_SECONDS // 60} min live logic)")
     config.print_recommended_stack_flags()
 
-    result = run_backtest(data, track_spy_fill=False, verbose=True)
+    saved_paper_ctx = config.paper_aggressive_context()
+    config.set_paper_aggressive_context(paper_aggressive)
+    try:
+        alloc = config.fund_allocation_pct()
+    finally:
+        config.set_paper_aggressive_context(saved_paper_ctx)
+
+    result = run_backtest(
+        data,
+        track_spy_fill=False,
+        verbose=True,
+        vti_core_pct=vti_core_pct,
+        paper_aggressive=paper_aggressive,
+    )
     curve_end = result["final_equity"]
     total_ret = result["total_return_pct"]
     sharpe = result["sharpe"]
@@ -576,15 +878,17 @@ def run_performance_test(days=None, refresh=False, use_max=False):
         f"Simulation:       {start_date.date()} to {end_date.date()} "
         f"(~{sim_days} days, {len(data)} {bar_label})"
     )
-    alloc = config.fund_allocation_pct()
+    tag = " (paper aggressive)" if paper_aggressive else ""
     print(
-        f"Sleeves:          SPY {alloc['spy']:.0%} | "
-        f"crypto {alloc['crypto']:.0%} | "
-        f"NYSE {alloc['nyse']:.0%} | "
-        f"metal {alloc['metal']:.0%} | "
-        f"cash {alloc['cash_buffer']:.0%}"
+        f"Sleeves{tag}:      SPY {alloc['spy']:.1%} | "
+        f"crypto {alloc['crypto']:.1%} | "
+        f"NYSE {alloc['nyse']:.1%} | "
+        f"metal {alloc['metal']:.1%} | "
+        f"cash {alloc['cash_buffer']:.1%}"
     )
-    print(f"Crypto vol-only:  {config.CRYPTO_VOL_ONLY}")
+    if alloc.get("vti_core"):
+        print(f"VTI core:         {alloc['vti_core']:.1%}")
+    print(f"Crypto vol-only:  {config.effective_crypto_vol_only()}")
     print(f"Final Equity:     ${curve_end}")
     print(f"Total Return:     {round(total_ret, 2)}%")
     if bench is not None:
@@ -595,6 +899,16 @@ def run_performance_test(days=None, refresh=False, use_max=False):
     print(f"Crypto signals:   {total_crypto}")
     print(f"NYSE signals:     {total_equity}")
     print(f"Total orders:     {total_orders}")
+    social = result.get("social_sleeve")
+    if social:
+        print(
+            f"Social sleeve:    {social['trades']} trades | "
+            f"{social['cap_pct']:.0%} parallel paper book | "
+            f"${social['final_equity']} ({social['return_pct']:+.2f}%)"
+        )
+        print("                  (XOM proxies XLE when XLE daily bars missing)")
+    elif config.SOCIAL_SLEEVE_ENABLED:
+        print("Social sleeve:    enabled (no trades)")
     print("Regime distribution:")
     for name, count in sorted(regime_counts.items(), key=lambda x: -x[1]):
         print(f"  {name}: {count}")
@@ -619,5 +933,40 @@ if __name__ == "__main__":
         action="store_true",
         help="Use maximum available daily history (full universe, yfinance max)",
     )
+    parser.add_argument(
+        "--vti-core",
+        type=float,
+        default=0.0,
+        metavar="PCT",
+        help="Passive VTI core fraction (e.g. 0.7 = 70%% VTI, 30%% active bot)",
+    )
+    parser.add_argument(
+        "--compare-vti-core",
+        action="store_true",
+        help="Run baseline vs 70/30 and 80/20 VTI core (table output)",
+    )
+    parser.add_argument(
+        "--paper-aggressive",
+        action="store_true",
+        help="Paper research profile: 20%% VTI, boosted sleeves, social 20%%, crypto all vol",
+    )
+    parser.add_argument(
+        "--compare-paper-aggressive",
+        action="store_true",
+        help="Compare live 80/20 vs paper aggressive vs active-only (table)",
+    )
     args = parser.parse_args()
-    run_performance_test(days=args.days, refresh=args.refresh, use_max=args.max)
+    if args.compare_vti_core:
+        run_vti_core_compare(days=args.days, refresh=args.refresh, use_max=args.max)
+    elif args.compare_paper_aggressive:
+        run_paper_aggressive_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    else:
+        run_performance_test(
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            vti_core_pct=max(0.0, min(1.0, args.vti_core)),
+            paper_aggressive=args.paper_aggressive,
+        )

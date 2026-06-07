@@ -15,6 +15,8 @@ import streamlit as st
 
 import config
 from modules.alpaca_executor import get_trading_client
+from nerdminer import config as nm_config
+from nerdminer.monitor import assess_health, load_history, load_state
 
 REFRESH_SECONDS = 60
 CHART_DAYS = 30
@@ -103,6 +105,17 @@ def _sleeve_exposure_rows(heartbeat: dict) -> list[dict]:
         }
     )
     return rows
+
+
+def _fetch_account_summary() -> tuple[float | None, float | None, str | None]:
+    try:
+        client = get_trading_client()
+        acct = client.get_account()
+        return float(acct.equity), float(acct.cash), None
+    except ValueError as exc:
+        return None, None, f"Alpaca credentials not configured: {exc}"
+    except Exception as exc:  # noqa: BLE001
+        return None, None, f"Could not fetch Alpaca account: {exc}"
 
 
 def _fetch_positions() -> tuple[pd.DataFrame | None, str | None]:
@@ -344,6 +357,41 @@ def render_bot_status(heartbeat: dict | None) -> None:
         w3.metric("Gap", f"{float(wisdom.get('gap') or 0):+.2f}")
         w4.metric("Paused", "Yes" if wisdom.get("paused") else "No")
 
+    macro = heartbeat.get("macro_event")
+    if macro:
+        st.markdown("**Macro calendar**")
+        if macro.get("active") and macro.get("event"):
+            ev = macro["event"]
+            st.warning(
+                f"Event guard active: **{ev.get('name')}** ({ev.get('date')}) — "
+                f"sizing x{macro.get('sizing_scale', 1):.2f}"
+            )
+        elif macro.get("next"):
+            nxt = macro["next"]
+            st.caption(
+                f"Next release: **{nxt.get('name')}** on {nxt.get('date')} "
+                f"({nxt.get('hours_until', 0):+.0f}h)"
+            )
+
+    sleeve_pnl = heartbeat.get("sleeve_pnl")
+    if sleeve_pnl:
+        pnl_rows = []
+        for key, label in (("spy", "SPY"), ("crypto", "Crypto"), ("nyse", "NYSE")):
+            row = sleeve_pnl.get(key) or {}
+            if row.get("positions", 0) <= 0:
+                continue
+            pnl_rows.append(
+                {
+                    "Sleeve": label,
+                    "Unrealized ($)": row.get("unrealized_pnl", 0),
+                    "Unrealized (%)": row.get("unrealized_pnl_pct", 0) * 100,
+                    "Underwater": "Yes" if row.get("underwater") else "No",
+                }
+            )
+        if pnl_rows:
+            st.markdown("**Sleeve cost basis (heartbeat)**")
+            st.dataframe(pd.DataFrame(pnl_rows), use_container_width=True, hide_index=True)
+
 
 def render_positions(df: pd.DataFrame | None, err: str | None) -> None:
     st.subheader("Live Positions & P&L")
@@ -447,6 +495,75 @@ def render_wisdom_scorecard(scorecard: dict | None) -> None:
         st.dataframe(pd.DataFrame(sim_rows), use_container_width=True, hide_index=True)
 
 
+def render_nerdminer() -> None:
+    st.subheader("NerdMiner v2")
+    state = load_state(nm_config.STATE_FILE)
+
+    with st.expander("Setup tips (WiFi, power, pool)"):
+        st.markdown(
+            """
+            - **WiFi:** Use 2.4 GHz only; aim for RSSI better than **-70 dBm** (move closer to the router).
+            - **USB:** Prefer a **direct rear USB port** or powered hub — avoid flaky front-panel ports.
+            - **Pool:** Default NerdMiner solo pool (`solobtc.nmminer.com`) is fine; lower latency = fewer stale shares.
+            - **Firmware:** You're near the ESP32 hash ceiling on v1.8.x; gains come from stability, not overclocking.
+            - **Monitor:** Keep `python -m nerdminer` running while the dashboard is open.
+            """
+        )
+
+    if state is None:
+        st.info(
+            f"No miner data at `{nm_config.STATE_FILE}`. "
+            "Run `python -m nerdminer --once` or start the background monitor."
+        )
+        return
+
+    status, warnings = assess_health(state, stale_seconds=nm_config.STALE_SECONDS)
+    status_labels = {"ok": "OK", "warning": "Warning", "offline": "Offline"}
+    st.caption(
+        f"Port `{state.get('port', '—')}` | "
+        f"Firmware v{state.get('firmware', '—')} | "
+        f"Pool `{state.get('pool', '—')}` | "
+        f"Updated `{state.get('updated_at', '—')}`"
+    )
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Status", status_labels.get(status, status))
+    hr = state.get("hash_rate_mhs")
+    m2.metric("Hash rate", f"{float(hr):.4f} MH/s" if hr is not None else "—")
+    accepted = int(state.get("shares_accepted") or 0)
+    rejected = int(state.get("shares_rejected") or 0)
+    m3.metric("Shares (R/A)", f"{rejected} / {accepted}")
+    reject_pct = state.get("reject_pct")
+    m4.metric("Reject %", f"{float(reject_pct):.2f}%" if reject_pct is not None else "—")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("Best diff", state.get("best_diff", "—"))
+    m6.metric("RSSI", f"{state.get('rssi_dbm')} dBm" if state.get("rssi_dbm") is not None else "—")
+    share_ms = state.get("last_share_ms")
+    m7.metric("Last share", f"{share_ms} ms" if share_ms is not None else "—")
+    m8.metric("Block hits", str(state.get("hits", "—")))
+
+    if warnings:
+        st.warning(" · ".join(warnings))
+
+    history = load_history(limit=300, path=nm_config.HISTORY_FILE)
+    if history:
+        hist_df = pd.DataFrame(history)
+        if "ts" in hist_df.columns and "hash_rate_mhs" in hist_df.columns:
+            hist_df["ts"] = pd.to_datetime(hist_df["ts"], errors="coerce", utc=True)
+            hist_df = hist_df.dropna(subset=["ts", "hash_rate_mhs"])
+            if not hist_df.empty:
+                fig = px.line(
+                    hist_df,
+                    x="ts",
+                    y="hash_rate_mhs",
+                    title="Hash rate (monitor history)",
+                    labels={"ts": "Time (UTC)", "hash_rate_mhs": "MH/s"},
+                )
+                fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=280)
+                st.plotly_chart(fig, use_container_width=True)
+
+
 def render_price_chart(positions_df: pd.DataFrame | None) -> None:
     st.subheader("Price Chart")
     if positions_df is None or positions_df.empty:
@@ -500,12 +617,20 @@ def main() -> None:
         initial_sidebar_state="expanded",
     )
     st.title("PythonTrading Bot Dashboard")
+    if not config.PAPER_TRADING:
+        st.error("LIVE TRADING — connected to your real-money Alpaca account.")
     st.sidebar.header("Controls")
     if st.sidebar.button("Refresh now"):
         st.session_state.last_refresh = 0
 
     mode_label = "Paper" if config.PAPER_TRADING else "Live"
     st.sidebar.metric("Trading mode", mode_label)
+    acct_eq, acct_cash, acct_err = _fetch_account_summary()
+    if acct_err:
+        st.sidebar.warning(acct_err)
+    elif acct_eq is not None:
+        st.sidebar.metric("Alpaca equity", f"${acct_eq:,.2f}")
+        st.sidebar.metric("Alpaca cash", f"${acct_cash:,.2f}")
     st.sidebar.caption(f"Heartbeat: `{config.HEARTBEAT_FILE}`")
     st.sidebar.caption(f"Journal: `{config.PAPER_JOURNAL_CSV}`")
     st.sidebar.caption(f"Scorecard: `{config.WISDOM_SCORECARD_FILE}`")
@@ -516,6 +641,8 @@ def main() -> None:
     positions_df, pos_err = _fetch_positions()
 
     render_bot_status(heartbeat)
+    st.divider()
+    render_nerdminer()
     st.divider()
     render_positions(positions_df, pos_err)
     st.divider()

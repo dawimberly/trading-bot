@@ -22,8 +22,10 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+import config
+
 ROOT = Path(__file__).resolve().parents[2]
-CACHE_PATH = ROOT / "wayback_sentiment.csv"
+CACHE_PATH = ROOT / config.WAYBACK_SENTIMENT_FILE
 RESULTS_PATH = ROOT / "wayback_simulation_results.csv"
 
 USER_AGENT = "PythonTradingResearch/1.0 (sentiment backtest; contact: local)"

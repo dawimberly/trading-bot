@@ -7,6 +7,36 @@ import config
 
 SLEEVE_KEYS = ("spy", "crypto", "nyse")
 
+
+def crypto_cash_cap(cash: float) -> float:
+    """Cash budget for crypto buys (fee + 5% buffer). Equities use cash * 0.95."""
+    buffer = round(cash * 0.95, 2)
+    if not config.ALPACA_CRYPTO_FEE_AWARE:
+        return buffer
+    fee = config.ALPACA_CRYPTO_TAKER_FEE_PCT
+    if fee <= 0:
+        return buffer
+    return round(buffer / (1 + fee), 2)
+
+
+def apply_alpaca_crypto_fee_reserve(
+    notional: float | None,
+    *,
+    equity: float | None = None,
+) -> float | None:
+    """Haircut crypto buy notional so order + taker fee fits cash and min order rules."""
+    if notional is None:
+        return None
+    if not config.ALPACA_CRYPTO_FEE_AWARE:
+        return notional
+    fee = config.ALPACA_CRYPTO_TAKER_FEE_PCT
+    if fee <= 0:
+        return notional
+    adjusted = round(notional / (1 + fee), 2)
+    if adjusted < config.effective_min_notional(equity):
+        return None
+    return adjusted
+
 # MA200 → 10% chunk; +MA100 → 25%; +MA50 → 50%; +MA20 → 100%
 _SPY_LADDER_TIERS = tuple(
     zip(reversed(config.SPY_MA_WINDOWS), reversed(config.SPY_ALLOCATIONS))
@@ -35,11 +65,16 @@ def spy_ladder_scale(data: pd.DataFrame | None) -> float:
     return float(scale)
 
 
-def apply_spy_ladder(notional: float | None, data: pd.DataFrame | None) -> float | None:
+def apply_spy_ladder(
+    notional: float | None,
+    data: pd.DataFrame | None,
+    *,
+    equity: float | None = None,
+) -> float | None:
     if notional is None:
         return None
     scaled = round(notional * spy_ladder_scale(data), 2)
-    if scaled < config.MIN_NOTIONAL:
+    if scaled < config.effective_min_notional(equity):
         return None
     return scaled
 
@@ -71,19 +106,22 @@ def compute_sleeve_notional(
     sleeve_value: float,
     *,
     chunk: float | None = None,
+    cash_cap: float | None = None,
 ) -> float | None:
+    min_n = config.effective_min_notional(equity)
+    max_n = config.effective_max_notional_per_order(equity)
     cap = round(equity * sleeve_cap_pct, 2)
     room = round(cap - sleeve_value, 2)
-    if room < config.MIN_NOTIONAL:
+    if room < min_n:
         return None
     trade_chunk = chunk if chunk is not None else per_trade_chunk(equity, room)
     raw = min(
         room,
         trade_chunk,
-        config.MAX_NOTIONAL_PER_ORDER,
-        round(cash * 0.95, 2),
+        max_n,
+        cash_cap if cash_cap is not None else round(cash * 0.95, 2),
     )
-    if raw < config.MIN_NOTIONAL:
+    if raw < min_n:
         return None
     return round(raw, 2)
 
@@ -94,10 +132,12 @@ def compute_cofire_allocations(
     sleeve_rooms: dict[str, float],
 ) -> dict[str, float]:
     """Split COFIRE_BUDGET_PCT across sleeves proportional to remaining room."""
+    min_n = config.effective_min_notional(equity)
+    max_n = config.effective_max_notional_per_order(equity)
     active = {
         k: round(v, 2)
         for k, v in sleeve_rooms.items()
-        if v >= config.MIN_NOTIONAL
+        if v >= min_n
     }
     if not config.COFIRE_BUDGET_ENABLED or len(active) < 2:
         return {}
@@ -105,7 +145,7 @@ def compute_cofire_allocations(
     pool = round(equity * config.COFIRE_BUDGET_PCT, 2)
     pool = min(pool, round(cash * 0.95, 2))
     total_room = sum(active.values())
-    if total_room <= 0 or pool < config.MIN_NOTIONAL:
+    if total_room <= 0 or pool < min_n:
         return {}
 
     out: dict[str, float] = {}
@@ -117,8 +157,8 @@ def compute_cofire_allocations(
         else:
             share = round(pool * room / total_room, 2)
             remaining = round(remaining - share, 2)
-        share = min(share, room, config.MAX_NOTIONAL_PER_ORDER)
-        if share >= config.MIN_NOTIONAL:
+        share = min(share, room, max_n)
+        if share >= min_n:
             out[name] = share
     return out
 
@@ -132,21 +172,33 @@ def resolve_sleeve_notional(
     cofire_notionals: dict[str, float] | None,
 ) -> float | None:
     """Per-sleeve notional: co-fire override when set, else adaptive chunk rules."""
+    min_n = config.effective_min_notional(equity)
+    max_n = config.effective_max_notional_per_order(equity)
     cap = round(equity * sleeve_cap_pct, 2)
     room = round(cap - sleeve_value, 2)
-    if room < config.MIN_NOTIONAL:
+    if room < min_n:
         return None
+
+    cash_cap = crypto_cash_cap(cash) if sleeve_key == "crypto" else round(cash * 0.95, 2)
 
     cofire = cofire_notionals or {}
     if sleeve_key in cofire:
         raw = min(
             cofire[sleeve_key],
             room,
-            config.MAX_NOTIONAL_PER_ORDER,
-            round(cash * 0.95, 2),
+            max_n,
+            cash_cap,
         )
-        if raw < config.MIN_NOTIONAL:
+        if raw < min_n:
             return None
-        return round(raw, 2)
+        out = round(raw, 2)
+        if sleeve_key == "crypto":
+            return apply_alpaca_crypto_fee_reserve(out, equity=equity)
+        return out
 
-    return compute_sleeve_notional(equity, cash, sleeve_cap_pct, sleeve_value)
+    out = compute_sleeve_notional(
+        equity, cash, sleeve_cap_pct, sleeve_value, cash_cap=cash_cap
+    )
+    if sleeve_key == "crypto":
+        return apply_alpaca_crypto_fee_reserve(out, equity=equity)
+    return out
