@@ -1,6 +1,6 @@
 # PythonTrading
 
-Personal systematic fund on Alpaca paper: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), a **yield-gate-only** macro overlay (blocks hostile-rate SPY entries), shared risk controls, and SQLite market data from yfinance.
+Personal systematic fund on Alpaca: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), a **yield-gate-only** macro overlay (blocks hostile-rate SPY entries), optional **VTI passive core**, shared risk controls, and SQLite market data from yfinance. Supports **paper research** (~$98k book) and a **small live account** (~$100) with automatic conservative sizing.
 
 ## Architecture
 
@@ -49,7 +49,9 @@ Live and paper research use **different allocation profiles** — see [VTI core]
 | **Cash buffer** | 15% | — | Structural headroom for next buys |
 | **Metal** | 0% (default) | GLD/SLV/CPER | Only when full game plan is on (not yield-gate-only) |
 
-On a $100k account with the **recommended** stack, SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** (adaptive chunks up to 5% when sleeve room allows; co-fire budget 6% when SPY and NYSE fire together), capped at $10k per order.
+On a $100k account with the **recommended** stack, SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** (capped at $10k per order). **Adaptive chunk** and **co-fire budget** are off by default (opt-in).
+
+On a **~$100 live account** (equity &lt; $500), `config.configure_account_profile()` auto-applies **1% risk**, **$10 max per order**, and **90% VTI core** — active sleeves scale to the remaining ~10%.
 
 Effective caps come from `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`. With **yield-gate-only** (default), long sleeves use **full** base caps — no 0.9 scale and no metal sleeve.
 
@@ -177,7 +179,7 @@ python backtester.py --days 365 --vti-core 0.8
 
 ## Social / Felix sleeve
 
-Creator-macro sleeve driven by **Felix & Friends** YouTube transcripts + headline web sentiment. Runs on the **paper research book** (`PAPER_APCA_*`); optional **live mirror** on the main account.
+Creator-macro sleeve driven by **YouTube transcripts** (Felix & Friends + **Andrei Jikh**) blended with headline web sentiment. Runs on the **paper research book** (`PAPER_APCA_*`); optional **live mirror** on the main account.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
@@ -189,11 +191,14 @@ Creator-macro sleeve driven by **Felix & Friends** YouTube transcripts + headlin
 
 Targets: **GLD** (bearish macro), **XLE** (bullish energy), **SPY** (neutral). Live mirror skips SPY when the main fund already runs the SPY sleeve.
 
-Sync Felix transcripts:
+Sync creator transcripts:
 
 ```powershell
 python scripts/maintenance/sync_felix_transcripts.py --max 30 --backfill-dates
+python scripts/maintenance/sync_felix_transcripts.py --channel andrei_jikh --max 15
 ```
+
+Registered channels: `felix_and_friends`, `andrei_jikh` (`UCGy7SkBjcIAgTiwkXEtPnYg`). Weights: `SOCIAL_FELIX_CHANNEL_WEIGHT` / `SOCIAL_ANDREI_JIKH_WEIGHT` (default 50/50).
 
 ## Paper aggressive research profile
 
@@ -242,6 +247,8 @@ python fetch_data.py
 python run_all.py
 ```
 
+**Small live account (~$100):** after preflight (below), double-click **`launch.bat`** or run `python dashboard_app.py --launch-bot` to start the **desktop monitor + bot** together. See [Desktop monitor](#desktop-monitor-customtkinter).
+
 Always run commands from the **project root** so relative paths (`market_data.db`, logs) resolve correctly.
 
 ## Paper trading on Alpaca (recommended first month)
@@ -269,6 +276,64 @@ python run_all.py
 
 **Safety:** Live trading is blocked unless you set `PAPER_TRADING=false` **and** `ALLOW_LIVE_TRADING=yes` in `.env`. Do not set those during your paper month.
 
+### Before going live (real money)
+
+Use **live** Alpaca keys in `.env` (`APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`), set `PAPER_TRADING=false` and `ALLOW_LIVE_TRADING=yes`. Keep paper research keys in `PAPER_APCA_*` if you run the social sleeve on paper.
+
+**Recommended live defaults** (already the code defaults — no extra flags required):
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `WISDOM_MODE` | `dynamic` | Price + sentiment sizing |
+| `GAME_PLAN_YIELD_GATE_ONLY` | `true` | Blocks hostile-rate SPY entries |
+| `VTI_CORE_ENABLED` | `true` | Passive core sleeve |
+| `VTI_CORE_PCT` | `0.80` | Large accounts; **90%** auto when equity &lt; $500 |
+| `NYSE_OVERLAP_FILTER_ENABLED` | `false` | Opt-in |
+| `ADAPTIVE_CHUNK_ENABLED` | `false` | Opt-in |
+| `COFIRE_BUDGET_ENABLED` | `false` | Opt-in |
+| `SPY_EXIT_ON_MA_BREAK` | `false` | Opt-in |
+
+**Small account safety** (equity &lt; $500, e.g. ~$100 live): automatically applies `RISK_PER_TRADE=1%`, `MAX_NOTIONAL_PER_ORDER=$10`, and `VTI_CORE_PCT=90%`.
+
+Run this checklist **in order** before starting `run_all.py`:
+
+```powershell
+# 1. Full preflight (includes Live Trading Checklist when PAPER_TRADING=false)
+python scripts/account/preflight.py
+
+# 2. Refresh 5m bars (preflight also fetches; re-run if checklist flagged stale data)
+python fetch_data.py
+
+# 3. Confirm Telegram/email alerts fire
+python scripts/account/test_alerts.py
+
+# 4. Start monitor + bot (recommended)
+.\launch.bat
+
+# Or terminal only (10-second abort window on first startup)
+python run_all.py
+```
+
+`preflight.py` verifies: `ALLOW_LIVE_TRADING=yes`, equity &gt; $50, alerts configured, recent `market_data.db` refresh, and prints small-account sizing when applicable. `run_all.py` prints a loud **LIVE TRADING ENABLED** banner with equity and waits 10 seconds before the first cycle.
+
+**Daily use:** double-click **`launch.bat`** (or a desktop shortcut to it). Use the dashboard **Stop Bot** button before restarting to avoid duplicate `run_all.py` processes.
+
+**Stop bot from terminal:**
+
+```powershell
+python -c "from dashboard_app import _stop_bot_processes; print(_stop_bot_processes())"
+```
+
+Set `KRAKEN_AUTOPILOT_ENABLED=false` in `.env` if you want **Alpaca-only** live (preflight warns when Kraken autopilot is also live).
+
+Optional sanity checks:
+
+```powershell
+python scripts/account/verify.py
+python scripts/account/check_account.py
+python backtester.py --days 365
+```
+
 ### Before a one-month paper run
 
 ```powershell
@@ -279,9 +344,9 @@ python run_all.py
 
 Preflight checks paper mode, Alpaca connection, market data, and game plan macro signals. The bot then:
 
-- Enforces **sleeve caps** (45/20/20/15%) on each buy
+- Enforces **sleeve caps** (scaled by VTI core and account size) on each buy
 - Runs **yield-gate-only** game plan by default (blocks hostile-rate SPY entries)
-- Uses **adaptive chunk** + **co-fire budget** sizing when multiple sleeves fire
+- **Adaptive chunk** and **co-fire budget** are off by default (opt-in via `.env`)
 - Runs **crypto only in high-volatility** regimes (still skips panic/bear)
 - Applies **5% stop-loss** exits; **10% max drawdown** halt with **8% resume** and optional breach liquidation
 - **Cost-basis aware**: scales buys when a sleeve is underwater on avg entry; blocks discretionary sells below cost (stops still fire)
@@ -297,6 +362,152 @@ Market regime comes from `modules/market_context.py` (sentiment + volatility). A
 - `RHYME_E: Steady_Bearish_Decline`
 
 Crypto has an additional gate: when `CRYPTO_VOL_ONLY=true`, pairs are skipped unless cross-asset volatility is **High**.
+
+## Desktop monitor (CustomTkinter)
+
+Primary monitor for a small live account — dark theme, auto-refresh, calm layout.
+
+### One-click launch (recommended)
+
+Double-click **`launch.bat`** in the project root. It activates `.venv`, starts the dashboard (no console window), and runs the trading bot:
+
+```text
+launch.bat  →  pythonw dashboard_app.py --launch-bot
+```
+
+**Desktop shortcut (Windows):**
+
+1. Right-click `launch.bat` → **Show more options** → **Send to** → **Desktop (create shortcut)**.
+2. Right-click the new shortcut → **Properties**.
+3. **Start in:** set to your project folder, e.g. `C:\Users\Owner\PythonTrading` (must match where `.env` and `run_all.py` live).
+4. **Run:** `Minimized` (optional — hides the brief cmd window if `pythonw` is unavailable).
+5. **Change Icon…** → Browse to `assets\dashboard.ico` (generate first: `python scripts/generate_dashboard_icon.py`).
+6. Rename the shortcut to e.g. **PythonTrading Live**.
+
+Ensure `.env` exists in the project folder before going live. Errors are appended to `logs\dashboard_launch.log`.
+
+**Troubleshooting:**
+
+| Issue | Fix |
+|-------|-----|
+| Dashboard window missing | Run `python dashboard_app.py --launch-bot` in a terminal to see errors |
+| Multiple bots running | **Stop Bot** in dashboard, or `_stop_bot_processes()` above, then `launch.bat` once |
+| `No run_all.py process found` | Normal after stop — run `launch.bat` to start again |
+| Stale heartbeat | Bot not running — relaunch with `launch.bat` |
+
+### Manual launch
+
+```powershell
+pip install -r requirements.txt
+python dashboard_app.py
+python dashboard_app.py --launch-bot   # also start run_all.py
+```
+
+Tabs: **Overview**, **Positions**, **Trades**, **Wisdom**, **Charts** (VTI + SPY by default). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, equity sparkline, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Stop Bot** ends `run_all.py` (does not liquidate positions). Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
+
+Auto-refresh every **60 seconds**. On first launch without `.env`, a setup wizard prompts for Alpaca keys (Telegram optional). Data sources: `bot_heartbeat.json`, Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
+
+### Build a Windows .exe (optional)
+
+For a standalone monitor executable (bot still uses `.venv` Python via `--launch-bot`):
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+pip install pyinstaller pillow
+python scripts/generate_dashboard_icon.py
+python -m PyInstaller dashboard.spec
+```
+
+Use **`python -m PyInstaller`** (not bare `pyinstaller`) so you don't need PyInstaller on PATH. Install into **`.venv`**, not global Python.
+
+Output: `dist\PythonTradingMonitor\PythonTradingMonitor.exe`
+
+**Deploy the .exe in the project root** next to `.env`, `run_all.py`, and `.venv` so `--launch-bot` can spawn the bot. Shortcut target example:
+
+```text
+C:\Users\Owner\PythonTrading\dist\PythonTradingMonitor\PythonTradingMonitor.exe --launch-bot
+```
+
+Or copy `PythonTradingMonitor.exe` to the project root and shortcut that with `--launch-bot`.
+
+**Streamlit backup** (browser UI):
+
+```powershell
+streamlit run dashboard.py
+```
+
+## Friends: download from GitHub and run locally
+
+Share this repo with programmer friends. Each person runs the bot **on their own computer** with **their own Alpaca paper account** (or live, if they choose).
+
+**Repo:** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)
+
+### Windows (easiest)
+
+1. **Install [Python 3.11+](https://www.python.org/downloads/)** (check “Add python.exe to PATH”).
+2. **Clone the repo:**
+   ```powershell
+   git clone https://github.com/dawimberly/trading-bot.git
+   cd trading-bot
+   ```
+3. **Double-click `friend_setup.bat`** — installs dependencies and opens the portal in the browser.
+4. In the portal:
+   - **Register** an account (local to their PC)
+   - **Connect Alpaca** — paste [paper API keys](https://app.alpaca.markets/paper/dashboard/overview); keep **Paper trading** checked
+   - **Bot** tab → **Download market data** (once) → **Start bot**
+5. **Dashboard** tab shows equity, regime, and sleeves.
+
+No manual `.env` editing. Keys are stored under `data/portal/users/<username>/.env` on their machine only.
+
+### Mac / Linux
+
+```bash
+git clone https://github.com/dawimberly/trading-bot.git
+cd trading-bot
+chmod +x friend_setup.sh
+./friend_setup.sh
+```
+
+### Manual setup (any OS)
+
+```powershell
+cd trading-bot
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1   # Mac/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python fetch_data.py
+streamlit run portal.py
+```
+
+### What friends get
+
+| Step | What happens |
+|------|----------------|
+| Login | Local account in `data/portal/users.db` |
+| Alpaca page | Their API keys, paper or live |
+| Bot page | Start/stop `run_all.py` with their keys |
+| Dashboard | Their heartbeat, positions, regime |
+
+**Paper first:** friends should use Alpaca **paper** keys until they trust the stack. Live requires checking **Allow live trading** on the Alpaca setup page and `ALLOW_LIVE_TRADING=yes` in their saved config.
+
+**Optional:** `python scripts/account/preflight.py` still works if they copy their portal `.env` to the project root as `.env` for CLI checks.
+
+### Optional: you host one server
+
+If you prefer one shared server instead of everyone cloning:
+
+```powershell
+$env:PORTAL_INVITE_CODE = "your-secret-code"
+streamlit run portal.py --server.address 0.0.0.0 --server.port 8501
+```
+
+Share URL + invite code. For most friends, **clone + `friend_setup.bat` on their PC** is simpler.
+
+| File | Purpose |
+|------|---------|
+| `friend_setup.bat` / `friend_setup.sh` | One-click install + open portal |
+| `portal.py` | Login, Alpaca keys, dashboard, bot |
+| `launch.bat` | Owner’s local desktop monitor + bot (not required for friends) |
 
 ## How to review bot performance
 
@@ -489,7 +700,11 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `METAL_SLEEVE_CAP_PCT` | No | Full game plan only (default `0.10`) |
 | `STRESS_CASH_PCT` | No | Full game plan only (default `0.25`) |
 | `VTI_CORE_ENABLED` | No | Passive VTI slice (default `true`) |
-| `VTI_CORE_PCT` | No | Live VTI target (default `0.80`) |
+| `VTI_CORE_PCT` | No | Live VTI target (default `0.80`; **0.90** auto when equity &lt; $500) |
+| `SMALL_ACCOUNT_EQUITY_THRESHOLD` | No | Small-account cutoff (default `500`) |
+| `SMALL_ACCOUNT_RISK_PER_TRADE` | No | Risk when small (default `0.01`) |
+| `SMALL_ACCOUNT_MAX_NOTIONAL` | No | Max order when small (default `10`) |
+| `SMALL_ACCOUNT_VTI_CORE_PCT` | No | VTI % when small (default `0.90`) |
 | `PAPER_APCA_API_KEY_ID` | No | Separate Alpaca paper book for research |
 | `PAPER_APCA_API_SECRET_KEY` | No | Same |
 | `PAPER_AGGRESSIVE` | No | Paper research profit profile (default `true` in `.env.example`) |
@@ -518,6 +733,14 @@ Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 
 ```
 PythonTrading/
+├── friend_setup.bat        # Friends: clone → install → open portal (Windows)
+├── friend_setup.sh         # Friends: same on Mac/Linux
+├── portal.py               # Friends: login + Alpaca keys + bot (browser)
+├── launch.bat              # One-click: dashboard + bot (pythonw, no console)
+├── dashboard_app.py        # Desktop monitor (CustomTkinter) — owner UI
+├── dashboard.py            # Streamlit monitor (backup)
+├── dashboard.spec          # PyInstaller config for Windows .exe
+├── assets/dashboard.ico    # Shortcut / exe icon
 ├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
 ├── run_spy.py              # Optional standalone SPY loop
 ├── fetch_data.py           # yfinance → SQLite (5m live, daily backtest)
@@ -551,6 +774,7 @@ PythonTrading/
     ├── maintenance/        # evaluate_wisdom, sync_felix_transcripts, cleanup
     ├── db/                 # SQLite utilities
     ├── account/            # Alpaca + alerts (preflight, preflight_spy, verify)
+    ├── generate_dashboard_icon.py  # Icon for launch shortcut / PyInstaller
     ├── exchange/           # Kraken checks
     └── dev/                # Tests and legacy loops
 ```
@@ -558,6 +782,7 @@ PythonTrading/
 ## Utility scripts
 
 ```powershell
+python scripts/generate_dashboard_icon.py    # assets/dashboard.ico for shortcuts
 python scripts/account/preflight.py          # Pre-flight before paper month
 python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval
 python scripts/maintenance/evaluate_wisdom.py --force
@@ -591,6 +816,7 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `risk_events.log` | Drawdown halt and stop events |
 | `paper_journal.csv` | Structured log for paper-month analysis (`game_plan` events when enabled) |
 | `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, game plan state, trades, halted |
+| `logs/dashboard_launch.log` | stderr from `launch.bat` / `pythonw` if dashboard fails silently |
 | `wisdom_journal.csv` | Every cycle: wisdom config, web/price/gap, equity, shadow modes |
 | `wisdom_scorecard.json` | Latest daily self-evaluation (live vs sim modes) |
 | `wisdom_evaluations.jsonl` | Append-only history of daily scorecards (perpetual log) |
@@ -614,6 +840,8 @@ The bot is lightweight (Python + API calls + SQLite). A **$5–12/mo Linux VPS**
 - **Single virtualenv:** Use `.venv` only. Reinstall with `pip install -r requirements.txt` after pulling changes.
 - **`write_bot.py`:** Regenerates `fetch_data.py` only. Does **not** overwrite `run_all.py`.
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
+- **Desktop launch:** `launch.bat` → `pythonw dashboard_app.py --launch-bot`. Shortcut **Start in** must be the project root (where `.env` lives).
+- **Small account:** equity &lt; $500 triggers 1% risk, $10 max order, 90% VTI — see `config.configure_account_profile()`.
 - **Strategy sharing:** `run_all.py`, `backtester.py`, and `backtest_spy.py` share `modules/pipeline_strategies.py`.
 - **Alpaca fees:** US stocks/ETFs are commission-free. Crypto market orders use `ALPACA_CRYPTO_TAKER_FEE_PCT` (default 0.25% per leg); live sizing and `backtester.py` reserve that fee on crypto buys only (`ALPACA_CRYPTO_FEE_AWARE=true`).
 - **NYSE overlap:** SPY and NYSE sleeves both hold US equities; caps limit double exposure. SPY is excluded from the NYSE MA50 picker. GLD, SLV, and CPER are excluded from NYSE momentum and counted in the metal sleeve.

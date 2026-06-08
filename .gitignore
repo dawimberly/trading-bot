@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+data/portal/users/
 .venv/
 venv/
 
@@ -27,9 +28,9 @@ spacex_ipo_listing.json
 trading_history.jsonl.bak.*
 sentiment/live/*.json
 web_sentiment_live.json
-sentiment/sources/youtube/felix_and_friends/transcripts/*.txt
-sentiment/sources/youtube/felix_and_friends/sync_state.json
-sentiment/sources/youtube/felix_and_friends/manifest.jsonl
+sentiment/sources/youtube/*/transcripts/*.txt
+sentiment/sources/youtube/*/sync_state.json
+sentiment/sources/youtube/*/manifest.jsonl
 sentiment/social_sleeve_journal.csv
 
 # IDE

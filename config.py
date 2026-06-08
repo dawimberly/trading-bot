@@ -3,7 +3,11 @@
 import os
 from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv())
+_env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
+if _env_override and os.path.isfile(_env_override):
+    load_dotenv(_env_override, override=True)
+else:
+    load_dotenv(find_dotenv())
 
 # --- Alpaca (canonical: APCA_*; legacy ALPACA_* supported via get_alpaca_credentials) ---
 # Paper-only by default. Set ALLOW_LIVE_TRADING=yes in .env to override PAPER_TRADING=False.
@@ -27,8 +31,8 @@ DB_PATH = "market_data.db"
 LEDGER_PATH = "trading_history.jsonl"
 TRADE_HISTORY_LOG = "trade_history.log"
 RISK_EVENTS_LOG = "risk_events.log"
-PAPER_JOURNAL_CSV = "paper_journal.csv"
-HEARTBEAT_FILE = "bot_heartbeat.json"
+PAPER_JOURNAL_CSV = os.getenv("PAPER_JOURNAL_CSV", "paper_journal.csv")
+HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "bot_heartbeat.json")
 
 # --- Strategy ---
 TICKER = "VTI"
@@ -212,6 +216,55 @@ FELIX_TRANSCRIPTS_DIR = os.path.join(
 FELIX_MANIFEST_FILE = os.path.join(
     SENTIMENT_DIR, "sources", "youtube", "felix_and_friends", "manifest.jsonl"
 )
+# Andrei Jikh — personal finance / macro (blended into creator sentiment with Felix)
+ANDREI_JIKH_YOUTUBE_ENABLED = os.getenv("ANDREI_JIKH_YOUTUBE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+ANDREI_JIKH_YOUTUBE_CHANNEL_URL = os.getenv(
+    "ANDREI_JIKH_YOUTUBE_CHANNEL_URL",
+    "https://www.youtube.com/channel/UCGy7SkBjcIAgTiwkXEtPnYg/videos",
+).strip()
+SOCIAL_FELIX_CHANNEL_WEIGHT = float(os.getenv("SOCIAL_FELIX_CHANNEL_WEIGHT", "0.50"))
+SOCIAL_ANDREI_JIKH_WEIGHT = float(os.getenv("SOCIAL_ANDREI_JIKH_WEIGHT", "0.50"))
+
+
+def youtube_channel_specs() -> list[dict]:
+    """Registered YouTube channels for creator/social sentiment sync."""
+    channels: list[dict] = []
+    if FELIX_SYNC_ENABLED or FELIX_SENTIMENT_ENABLED:
+        channels.append(
+            {
+                "id": "felix_and_friends",
+                "name": "Felix & Friends",
+                "url": FELIX_YOUTUBE_CHANNEL_URL,
+                "weight": SOCIAL_FELIX_CHANNEL_WEIGHT,
+            }
+        )
+    if ANDREI_JIKH_YOUTUBE_ENABLED:
+        channels.append(
+            {
+                "id": "andrei_jikh",
+                "name": "Andrei Jikh",
+                "url": ANDREI_JIKH_YOUTUBE_CHANNEL_URL,
+                "weight": SOCIAL_ANDREI_JIKH_WEIGHT,
+            }
+        )
+    return channels
+
+
+def youtube_channel_dir(channel_id: str) -> str:
+    return os.path.join(SENTIMENT_DIR, "sources", "youtube", channel_id)
+
+
+def youtube_manifest_file(channel_id: str) -> str:
+    return os.path.join(youtube_channel_dir(channel_id), "manifest.jsonl")
+
+
+def youtube_transcripts_dir(channel_id: str) -> str:
+    return os.path.join(youtube_channel_dir(channel_id), "transcripts")
+
 
 # --- Social / creator sleeve (Felix + shared sources): paper book, optional live mirror ---
 SOCIAL_SLEEVE_ENABLED = os.getenv("SOCIAL_SLEEVE_ENABLED", "false").lower() in (
@@ -355,8 +408,8 @@ WISDOM_MONTHLY_ENABLED = os.getenv("WISDOM_MONTHLY_ENABLED", "true").lower() in 
     "true",
     "yes",
 )
-WISDOM_JOURNAL_FILE = "wisdom_journal.csv"
-WISDOM_SCORECARD_FILE = "wisdom_scorecard.json"
+WISDOM_JOURNAL_FILE = os.getenv("WISDOM_JOURNAL_FILE", "wisdom_journal.csv")
+WISDOM_SCORECARD_FILE = os.getenv("WISDOM_SCORECARD_FILE", "wisdom_scorecard.json")
 WISDOM_EVAL_HISTORY_FILE = "wisdom_evaluations.jsonl"
 WISDOM_EVAL_STATE_FILE = "wisdom_eval_state.json"
 WISDOM_MONTHLY_HISTORY_FILE = "wisdom_monthly_history.jsonl"
@@ -419,6 +472,16 @@ if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
 REFERENCE_EQUITY = float(os.getenv("REFERENCE_EQUITY", "100000"))
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.02"))
 MAX_NOTIONAL_PER_ORDER = float(os.getenv("MAX_NOTIONAL_PER_ORDER", "10000"))
+# Small live account safety (< threshold equity): conservative sizing + higher VTI core
+SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
+    os.getenv("SMALL_ACCOUNT_EQUITY_THRESHOLD", "500")
+)
+SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
+SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
+SMALL_ACCOUNT_VTI_CORE_PCT = float(os.getenv("SMALL_ACCOUNT_VTI_CORE_PCT", "0.90"))
+
+_account_equity: float | None = None
+_small_account_mode = False
 # Min order at REFERENCE_EQUITY; effective_min_notional() scales with live equity (floor $1 Alpaca).
 MIN_NOTIONAL = float(os.getenv("MIN_NOTIONAL", "10"))
 ALPACA_MIN_NOTIONAL = float(os.getenv("ALPACA_MIN_NOTIONAL", "1"))
@@ -471,6 +534,21 @@ MACRO_EVENT_SIZING_SCALE = float(os.getenv("MACRO_EVENT_SIZING_SCALE", "0.7"))
 CRYPTO_TICKERS = frozenset(
     t for t in UNIVERSE if t.endswith("-USD")
 )
+
+
+def reload_from_env(env_file: str | None = None) -> None:
+    """Reload credentials flags after portal switches per-user .env."""
+    global PAPER_TRADING, ALLOW_LIVE_TRADING
+    if env_file and os.path.isfile(env_file):
+        load_dotenv(env_file, override=True)
+    else:
+        load_dotenv(find_dotenv(), override=True)
+    PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
+    ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def get_alpaca_credentials():
@@ -535,6 +613,33 @@ def get_smtp_config():
     }
 
 
+def is_small_account(equity: float | None = None) -> bool:
+    """True when equity is below SMALL_ACCOUNT_EQUITY_THRESHOLD ($500 default)."""
+    if equity is not None:
+        return float(equity) < SMALL_ACCOUNT_EQUITY_THRESHOLD
+    return _small_account_mode
+
+
+def configure_account_profile(equity: float) -> dict:
+    """Apply runtime sizing/VTI profile from live Alpaca equity (call each cycle)."""
+    global _account_equity, _small_account_mode
+    _account_equity = float(equity)
+    _small_account_mode = _account_equity < SMALL_ACCOUNT_EQUITY_THRESHOLD
+    return {
+        "equity": _account_equity,
+        "small_account": _small_account_mode,
+        "risk_per_trade": effective_risk_per_trade(),
+        "max_notional_per_order": effective_max_notional_per_order(),
+        "vti_core_pct": vti_core_allocation_pct(),
+    }
+
+
+def effective_risk_per_trade(equity: float | None = None) -> float:
+    if is_small_account(equity):
+        return SMALL_ACCOUNT_RISK_PER_TRADE
+    return RISK_PER_TRADE
+
+
 def effective_min_notional(equity: float | None = None) -> float:
     """Scale min order with account: $10 at REFERENCE_EQUITY, down to ALPACA_MIN_NOTIONAL."""
     if equity is None or equity <= 0:
@@ -546,12 +651,17 @@ def effective_min_notional(equity: float | None = None) -> float:
 
 def effective_max_notional_per_order(equity: float | None = None) -> float:
     """Scale per-order cap with account; never above 25% of equity."""
-    if equity is None or equity <= 0:
+    eq = float(equity) if equity is not None else _account_equity
+    if is_small_account(eq):
+        floor = effective_min_notional(eq)
+        pct_cap = round(eq * 0.25, 2) if eq and eq > 0 else SMALL_ACCOUNT_MAX_NOTIONAL
+        return max(floor, min(SMALL_ACCOUNT_MAX_NOTIONAL, pct_cap))
+    if eq is None or eq <= 0:
         return MAX_NOTIONAL_PER_ORDER
     ref = REFERENCE_EQUITY if REFERENCE_EQUITY > 0 else 100_000.0
-    scaled = MAX_NOTIONAL_PER_ORDER * (float(equity) / ref)
-    pct_cap = round(float(equity) * 0.25, 2)
-    floor = effective_min_notional(equity)
+    scaled = MAX_NOTIONAL_PER_ORDER * (eq / ref)
+    pct_cap = round(eq * 0.25, 2)
+    floor = effective_min_notional(eq)
     return max(floor, min(round(scaled, 2), pct_cap))
 
 
@@ -676,6 +786,12 @@ def print_recommended_stack_flags() -> None:
     )
     print(f"  derived_bear_pause:     {DERIVED_BEAR_PAUSE_ENABLED}")
     alloc = fund_allocation_pct()
+    if is_small_account():
+        print(
+            f"  small_account:        ON (<${SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}) | "
+            f"risk {effective_risk_per_trade():.0%} | "
+            f"max order ${effective_max_notional_per_order():,.0f}"
+        )
     if vti_core_enabled():
         print(
             f"  vti_core:             {alloc['vti_core']:.0%} {VTI_CORE_SYMBOL} passive | "
@@ -723,7 +839,12 @@ def effective_vti_rebalance_drift_pct() -> float:
 def vti_core_allocation_pct() -> float:
     if not VTI_CORE_ENABLED:
         return 0.0
-    pct = PAPER_VTI_CORE_PCT if paper_aggressive_context() else VTI_CORE_PCT
+    if paper_aggressive_context():
+        pct = PAPER_VTI_CORE_PCT
+    elif is_small_account():
+        pct = SMALL_ACCOUNT_VTI_CORE_PCT
+    else:
+        pct = VTI_CORE_PCT
     return round(min(0.95, pct), 6) if pct > 0 else 0.0
 
 
