@@ -21,7 +21,7 @@ import streamlit as st
 
 import config
 from modules.portal_auth import authenticate, init_db, register_user
-from modules.portal_bot import bot_running, start_bot, stop_bot
+from modules.portal_bot import bot_running, read_bot_log_tail, start_bot, stop_bot
 from modules.portal_paths import (
     has_alpaca_config,
     user_env_path,
@@ -239,6 +239,16 @@ def _bot_page(username: str) -> None:
             else:
                 st.warning(msg)
             st.rerun()
+
+    log_tail = read_bot_log_tail(username)
+    if log_tail:
+        st.subheader("Bot log")
+        st.code(log_tail, language="text")
+        if not running and "ModuleNotFoundError" in log_tail:
+            st.error(
+                "The bot crashed on startup (missing Python module). "
+                "Run `git pull` in the project folder, then try **Start bot** again."
+            )
 
     st.divider()
     st.markdown(

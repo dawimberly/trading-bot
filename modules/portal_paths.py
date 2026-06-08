@@ -32,6 +32,10 @@ def user_pid_path(username: str) -> Path:
     return user_dir(username) / "bot.pid"
 
 
+def user_bot_log_path(username: str) -> Path:
+    return user_dir(username) / "bot.log"
+
+
 def has_alpaca_config(username: str) -> bool:
     path = user_env_path(username)
     if not path.is_file():
