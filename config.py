@@ -479,9 +479,13 @@ SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
 SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
 SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
 SMALL_ACCOUNT_VTI_CORE_PCT = float(os.getenv("SMALL_ACCOUNT_VTI_CORE_PCT", "0.90"))
+SMALL_ACCOUNT_BACKTEST_EQUITY = float(
+    os.getenv("SMALL_ACCOUNT_BACKTEST_EQUITY", "100")
+)
 
 _account_equity: float | None = None
 _small_account_mode = False
+_backtest_small_account_ctx = False
 # Min order at REFERENCE_EQUITY; effective_min_notional() scales with live equity (floor $1 Alpaca).
 MIN_NOTIONAL = float(os.getenv("MIN_NOTIONAL", "10"))
 ALPACA_MIN_NOTIONAL = float(os.getenv("ALPACA_MIN_NOTIONAL", "1"))
@@ -491,6 +495,11 @@ ADAPTIVE_CHUNK_ENABLED = os.getenv("ADAPTIVE_CHUNK_ENABLED", "false").lower() in
     "yes",
 )
 COFIRE_BUDGET_ENABLED = os.getenv("COFIRE_BUDGET_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DYNAMIC_SLEEVE_CAPS_ENABLED = os.getenv("DYNAMIC_SLEEVE_CAPS_ENABLED", "false").lower() in (
     "1",
     "true",
     "yes",
@@ -613,8 +622,29 @@ def get_smtp_config():
     }
 
 
+def set_backtest_small_account_context(active: bool) -> None:
+    """Lock live small-account sizing rules for backtester.py --small-account."""
+    global _backtest_small_account_ctx, _small_account_mode, _account_equity
+    _backtest_small_account_ctx = bool(active)
+    if active:
+        _small_account_mode = True
+        _account_equity = SMALL_ACCOUNT_BACKTEST_EQUITY
+    elif _account_equity is not None:
+        _small_account_mode = (
+            float(_account_equity) < SMALL_ACCOUNT_EQUITY_THRESHOLD
+        )
+    else:
+        _small_account_mode = False
+
+
+def backtest_small_account_context() -> bool:
+    return _backtest_small_account_ctx
+
+
 def is_small_account(equity: float | None = None) -> bool:
     """True when equity is below SMALL_ACCOUNT_EQUITY_THRESHOLD ($500 default)."""
+    if _backtest_small_account_ctx:
+        return True
     if equity is not None:
         return float(equity) < SMALL_ACCOUNT_EQUITY_THRESHOLD
     return _small_account_mode
@@ -767,12 +797,18 @@ def print_dynamic_wisdom_config() -> None:
     print(f"  WISDOM_GAP_THRESHOLD (legacy):    {WISDOM_GAP_THRESHOLD}")
 
 
-def print_recommended_stack_flags() -> None:
-    """Log active current_dynamic live stack flags (preflight / backtest startup)."""
-    gp = "yield-gate-only" if (
-        game_plan_active() and GAME_PLAN_YIELD_GATE_ONLY
-    ) else ("full" if game_plan_active() else "off")
-    print("--- current_dynamic live stack ---")
+def _game_plan_label() -> str:
+    if game_plan_active() and GAME_PLAN_YIELD_GATE_ONLY:
+        return "yield-gate-only"
+    if game_plan_active():
+        return "full"
+    return "off"
+
+
+def print_live_stack_flags() -> None:
+    """Log Profile A: current_dynamic live stack (preflight / live run_all / backtest default)."""
+    gp = _game_plan_label()
+    print("--- current_dynamic live stack (Profile A) ---")
     print(f"  game_plan:              {gp}")
     print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
     print(f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} (corr max {NYSE_SPY_CORR_MAX})")
@@ -785,6 +821,7 @@ def print_recommended_stack_flags() -> None:
         f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
     )
     print(f"  derived_bear_pause:     {DERIVED_BEAR_PAUSE_ENABLED}")
+    print(f"  wisdom_mode:            {WISDOM_MODE}")
     alloc = fund_allocation_pct()
     if is_small_account():
         print(
@@ -806,6 +843,131 @@ def print_recommended_stack_flags() -> None:
             f"  social_sleeve:      {SOCIAL_SLEEVE_CAP_PCT:.0%} paper "
             f"| live mirror {SOCIAL_MIRROR_TO_LIVE_PCT:.0%} of social cap"
         )
+
+
+def print_paper_research_stack_flags() -> None:
+    """Log Profile B: paper_aggressive / paper chase research stack."""
+    gp = _game_plan_label()
+    was_ctx = paper_aggressive_context()
+    set_paper_aggressive_context(True)
+    try:
+        alloc = fund_allocation_pct()
+        print("--- paper_aggressive research stack (Profile B) ---")
+        if paper_chase_mode_enabled():
+            print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
+        print(f"  game_plan:              {gp}")
+        print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
+        print(
+            f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} "
+            f"(optional; A/B hurt recent return)"
+        )
+        print(
+            f"  nyse_beta_scaling:      {NYSE_BETA_SCALING_ENABLED} "
+            f"(recommended ON for research grids)"
+        )
+        print(f"  spy_exit_on_ma_break:   {SPY_EXIT_ON_MA_BREAK} (optional)")
+        print(f"  adaptive_chunk:         {ADAPTIVE_CHUNK_ENABLED}")
+        print(f"  cofire_budget:          {COFIRE_BUDGET_ENABLED}")
+        print(
+            f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
+            f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
+        )
+        print(f"  derived_bear_pause:     {DERIVED_BEAR_PAUSE_ENABLED}")
+        print(f"  wisdom_mode:            {WISDOM_MODE}")
+        print(
+            f"  vti_core:             {alloc['vti_core']:.0%} {VTI_CORE_SYMBOL} | "
+            f"active boost {PAPER_ACTIVE_SLEEVE_BOOST:.2f}x"
+        )
+        print(f"  crypto_vol_only:      {effective_crypto_vol_only()}")
+        print(f"  wisdom_sizing_floor:  {PAPER_WISDOM_SIZING_FLOOR}")
+        print(
+            f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
+            f"NYSE {alloc['nyse']:.0%} | metal {alloc['metal']:.0%} | cash {alloc['cash_buffer']:.0%}"
+        )
+        social_cap = effective_social_sleeve_cap_pct()
+        if SOCIAL_SLEEVE_ENABLED:
+            print(
+                f"  social_sleeve:      {social_cap:.0%} paper "
+                f"| live mirror {SOCIAL_MIRROR_TO_LIVE_PCT:.0%} of social cap"
+            )
+        elif paper_chase_mode_enabled():
+            print("  social_sleeve:      off (set SOCIAL_SLEEVE_ENABLED or PAPER_CHASE_EXTRA)")
+    finally:
+        set_paper_aggressive_context(was_ctx)
+
+
+def print_recommended_stack_flags(*, profile: str | None = None) -> None:
+    """Print active deployment profile flags (preflight / run_all / backtest startup).
+
+    profile: ``live`` | ``paper`` | None (auto: paper when PAPER_CHASE_MODE or paper ctx).
+    """
+    if profile == "live":
+        print_live_stack_flags()
+    elif profile == "paper" or (
+        profile is None
+        and (paper_chase_mode_enabled() or paper_aggressive_context())
+    ):
+        print_paper_research_stack_flags()
+    else:
+        print_live_stack_flags()
+
+
+def paper_chase_mode_enabled() -> bool:
+    """Paper Sharpe-chase loop (run_paper_bot / portal paper users)."""
+    return os.getenv("PAPER_CHASE_MODE", "").lower() in ("1", "true", "yes")
+
+
+def apply_paper_chase_runtime_tuning() -> list[str]:
+    """
+    Turn on under-used stack layers for paper Sharpe chase only.
+    Live ~$100 profile is unchanged. Bot CPU/WiFi stay light (mostly sleeping).
+    Set PAPER_CHASE_EXTRA=false to skip.
+    """
+    global ADAPTIVE_CHUNK_ENABLED, COFIRE_BUDGET_ENABLED, SOCIAL_SLEEVE_ENABLED
+    global FELIX_SYNC_ENABLED, FELIX_SENTIMENT_ENABLED, NYSE_BETA_SCALING_ENABLED
+    global REFRESH_INTERVAL, CRYPTO_ONLY_CYCLE_INTERVAL_SEC, CYCLE_INTERVAL_SEC
+
+    if not paper_chase_mode_enabled():
+        return []
+    if os.getenv("PAPER_CHASE_EXTRA", "true").lower() not in ("1", "true", "yes"):
+        return []
+
+    turned_on: list[str] = []
+
+    def _enable(name: str, flag: str, value: bool = True) -> None:
+        nonlocal turned_on
+        globals()[flag] = value
+        turned_on.append(name)
+
+    _enable("adaptive_chunk", "ADAPTIVE_CHUNK_ENABLED")
+    _enable("cofire_budget", "COFIRE_BUDGET_ENABLED")
+    _enable("social_sleeve", "SOCIAL_SLEEVE_ENABLED")
+    _enable("felix_sync", "FELIX_SYNC_ENABLED")
+    _enable("felix_sentiment", "FELIX_SENTIMENT_ENABLED")
+    _enable("nyse_beta_scaling", "NYSE_BETA_SCALING_ENABLED")
+
+    # Slightly faster cycles/data — still far below PC or WiFi limits.
+    if int(os.getenv("PAPER_CHASE_CYCLE_SEC", "45")) < CYCLE_INTERVAL_SEC:
+        CYCLE_INTERVAL_SEC = int(os.getenv("PAPER_CHASE_CYCLE_SEC", "45"))
+        turned_on.append(f"cycle_{CYCLE_INTERVAL_SEC}s")
+    if int(os.getenv("PAPER_CHASE_CRYPTO_CYCLE_SEC", "180")) < CRYPTO_ONLY_CYCLE_INTERVAL_SEC:
+        CRYPTO_ONLY_CYCLE_INTERVAL_SEC = int(os.getenv("PAPER_CHASE_CRYPTO_CYCLE_SEC", "180"))
+        turned_on.append(f"crypto_cycle_{CRYPTO_ONLY_CYCLE_INTERVAL_SEC}s")
+    refresh = int(os.getenv("PAPER_CHASE_REFRESH_SEC", "600"))
+    if refresh < REFRESH_INTERVAL:
+        REFRESH_INTERVAL = refresh
+        turned_on.append(f"refresh_{REFRESH_INTERVAL}s")
+
+    return turned_on
+
+
+def init_paper_chase_if_enabled() -> list[str]:
+    """Enable aggressive paper profile when PAPER_CHASE_MODE is set."""
+    extras: list[str] = []
+    if paper_chase_mode_enabled() and PAPER_AGGRESSIVE_ENABLED:
+        set_paper_aggressive_context(True)
+        extras = apply_paper_chase_runtime_tuning()
+    return extras
 
 
 def set_paper_aggressive_context(active: bool) -> None:

@@ -1,6 +1,117 @@
 # PythonTrading
 
-Personal systematic fund on Alpaca: three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), a **yield-gate-only** macro overlay (blocks hostile-rate SPY entries), optional **VTI passive core**, shared risk controls, and SQLite market data from yfinance. Supports **paper research** (~$98k book) and a **small live account** (~$100) with automatic conservative sizing.
+**Personal systematic fund** on Alpaca. Currently running **live on a small ~$100 account** (adding ~$200 soon → ~$300).
+
+The bot automatically applies **small-account safety** when equity &lt; $500:
+
+- **90% VTI core** (passive index anchor)
+- **~10% active sleeves** (SPY, NYSE momentum, vol-gated crypto)
+- **1% risk per trade** (~$1–$3 orders)
+- **$10 max per order**
+
+**Recommended live stack** (already default — no extra flags required):
+
+- `WISDOM_MODE=dynamic`
+- Yield-gate-only game plan (`GAME_PLAN_YIELD_GATE_ONLY=true`)
+- 90% VTI core on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
+- Overlap filter, adaptive chunk, co-fire, SPY MA exit — **off by default** (opt-in via `.env`)
+
+Paper Sharpe chase (20% VTI, aggressive active sleeves) runs on a **separate** paper book — see [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase).
+
+---
+
+## Two deployment profiles
+
+The repo supports **two distinct stacks**. Live defaults stay conservative; paper research opts into aggressive layers via existing hooks (`PAPER_CHASE_MODE`, `configure_paper_chase()`). Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+
+### Profile A: Live small account (`current_dynamic`)
+
+**Use for:** live ~$100 account, default `run_all.py`, `preflight.py` when not in paper chase.
+
+| Layer | Setting |
+|-------|---------|
+| **VTI core** | **90%** when equity &lt; $500; **80%** when ≥ $500 |
+| **Active sleeves** | ~10% (small) / ~20% (large) of equity |
+| **Risk / orders** | 1% / **$10 max** (small) or 2% / scaled (large) |
+| **Game plan** | Yield-gate-only |
+| **WISDOM_MODE** | `dynamic` |
+| **NYSE overlap / beta scaling** | **off** (opt-in via `.env`) |
+| **Adaptive chunk / co-fire** | **off** (opt-in) |
+| **SPY MA exit** | **off** (opt-in) |
+| **Halt** | 10% DD; resume 8%; liquidate on breach |
+
+Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
+
+### Profile B: Paper research (`paper_aggressive`)
+
+**Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
+
+| Layer | Setting |
+|-------|---------|
+| **VTI core** | **20%** (`PAPER_VTI_CORE_PCT`) |
+| **Active sleeves** | Full 45/20/20 base caps × **1.40 boost** (~79% deployed) |
+| **Game plan** | Yield-gate-only (same gate logic) |
+| **NYSE beta scaling** | **on** when `PAPER_CHASE_EXTRA=true` (recommended for research grids) |
+| **NYSE overlap filter** | off (optional; A/B hurt recent return) |
+| **Adaptive chunk / co-fire** | **on** when paper chase extras enabled |
+| **SPY MA exit** | off unless opt-in |
+| **Crypto vol gate** | **off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| **Social / Felix** | on when paper chase extras enabled |
+
+Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Preflight prints Profile B via `config.print_paper_research_stack_flags()`.
+
+---
+
+## Quick Start – Live $100 Account
+
+1. **Install** (once):
+
+```powershell
+cd PythonTrading
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+2. **Connect live Alpaca keys** (pick one):
+
+   - **Desktop (recommended):** `streamlit run portal.py` → **Register** → **Settings** → paste live keys, **Paper trading OFF**, **Allow live ON**. Then use **`launch.bat`** and sign in (same account as the portal).
+   - **CLI only:** copy `.env.example` → `.env` and set:
+
+```env
+APCA_API_KEY_ID=your_live_key
+APCA_API_SECRET_KEY=your_live_secret
+PAPER_TRADING=false
+ALLOW_LIVE_TRADING=yes
+```
+
+Never commit `.env` — it is gitignored.
+
+3. **Preflight & market data:**
+
+```powershell
+python fetch_data.py
+python scripts/account/preflight.py
+```
+
+Preflight checks live mode, Alpaca connection, alerts, and prints small-account sizing (1% risk, 90% VTI, $10 cap).
+
+4. **Start monitor + bot:**
+
+```powershell
+.\launch.bat
+# or: python dashboard_app.py --launch-bot
+```
+
+Sign in with your portal user. The dashboard shows equity, regime, VTI core, and active sleeves. **Stop Bot** before restarting to avoid duplicate processes.
+
+5. **Optional — paper Sharpe chase in parallel:** [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase) (`launch_both.bat`). Backtest paper settings before changing live caps.
+
+At equity **≥ $500**, small-account rules relax automatically (80% VTI, 2% risk per trade).
+
+---
+
+Three strategy sleeves (SPY trend, vol-gated crypto pairs, NYSE momentum), a **yield-gate-only** macro overlay, VTI passive core, shared risk controls, and SQLite market data from yfinance. Also supports **paper research** (~$98k book) and the [friend portal](#friends-download-from-github-and-run-locally).
 
 ## Architecture
 
@@ -49,13 +160,13 @@ Live and paper research use **different allocation profiles** — see [VTI core]
 | **Cash buffer** | 15% | — | Structural headroom for next buys |
 | **Metal** | 0% (default) | GLD/SLV/CPER | Only when full game plan is on (not yield-gate-only) |
 
-On a $100k account with the **recommended** stack, SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** (capped at $10k per order). **Adaptive chunk** and **co-fire budget** are off by default (opt-in).
+On a $100k account with **Profile A** (live default), SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** on large accounts (capped at $10k per order). **Adaptive chunk** and **co-fire budget** are off unless you opt in via `.env`.
 
 On a **~$100 live account** (equity &lt; $500), `config.configure_account_profile()` auto-applies **1% risk**, **$10 max per order**, and **90% VTI core** — active sleeves scale to the remaining ~10%.
 
 Effective caps come from `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`. With **yield-gate-only** (default), long sleeves use **full** base caps — no 0.9 scale and no metal sleeve.
 
-When **VTI core** is enabled (live default), active sleeves are scaled to the **remaining equity slice** after the passive VTI allocation — e.g. 80% VTI + 20% active → SPY cap ≈ 9% of total equity (45% × 20%).
+When **VTI core** is enabled, active sleeves scale to the **remaining equity slice** after the passive VTI allocation — e.g. 90% VTI + 10% active (small live) → SPY cap ≈ 4.5% of total equity (45% × 10%); 80% VTI + 20% active (large live) → SPY cap ≈ 9%.
 
 Tune base caps in `config.py`:
 
@@ -84,26 +195,29 @@ The **~15% cash** is **not** a standalone strategy sleeve. It is **structural he
 
 Preflight and `bot_heartbeat.json` report `effective_cash_buffer_pct()` alongside sleeve exposure.
 
-## Current Recommended Configuration (current_dynamic live stack)
+## Recommended configuration by profile
 
-Sharpe phase backtests (`scripts/analysis/sharpe_phase_compare.py`) selected **current_dynamic** as the live baseline: dynamic wisdom + yield-gate-only + halt resume/liquidate, with NYSE overlap, beta scaling, SPY MA exit, and adaptive/cofire **off by default** (opt-in via `.env`). Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+Sharpe phase backtests selected **current_dynamic** as the **live** baseline. Paper research uses **paper_aggressive** with optional chase extras. Details: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+
+### Profile A — live (`current_dynamic`)
 
 | Layer | Setting |
 |-------|---------|
-| **Game plan** | Yield-gate-only — `GAME_PLAN_YIELD_GATE_ONLY=true` (metal + stress cash off) |
-| **Sleeves** | 45% SPY / 20% crypto / 20% NYSE / 15% cash |
+| **Game plan** | Yield-gate-only — `GAME_PLAN_YIELD_GATE_ONLY=true` |
+| **Sleeves (base)** | 45% SPY / 20% crypto / 20% NYSE / 15% cash (scaled by VTI core) |
 | **SPY** | MA200 entry; `SPY_EXIT_ON_MA_BREAK=false` (opt-in) |
-| **NYSE** | Overlap filter off by default; beta scaling off by default |
+| **NYSE** | Overlap filter off; beta scaling off (opt-in) |
 | **Crypto** | Vol-gated pairs only; min correlation 0.5 |
-| **Sizing** | Adaptive chunk + co-fire off by default (opt-in) |
+| **Sizing** | Adaptive chunk + co-fire off (opt-in) |
 | **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
 | **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
 | **Wisdom** | `WISDOM_MODE=dynamic`, `SENTIMENT_SOURCE=price` |
+| **Small account** | equity &lt; $500 → 90% VTI, 1% risk, $10 max order |
 
-Preflight prints the active stack via `config.print_recommended_stack_flags()`:
+Preflight prints Profile A via `config.print_recommended_stack_flags()` (dispatches to `print_live_stack_flags()`):
 
 ```
---- current_dynamic live stack ---
+--- current_dynamic live stack (Profile A) ---
   game_plan:              yield-gate-only
   yield_gate:             True
   nyse_overlap_filter:    False (corr max 0.8)
@@ -113,6 +227,33 @@ Preflight prints the active stack via `config.print_recommended_stack_flags()`:
   cofire_budget:          False
   halt_resume_dd:         8% | liquidate_on_breach: True
   derived_bear_pause:     False
+  wisdom_mode:            dynamic
+  small_account:        ON (<$500) | risk 1% | max order $10
+  vti_core:             90% VTI passive | active 10%
+  sleeves: SPY 5% | crypto 2% | NYSE 2% | metal 0% | cash 1%
+```
+
+(Sleeve percentages above are effective on a ~$100 account with 90% VTI core.)
+
+### Profile B — paper research (`paper_aggressive`)
+
+| Layer | Setting |
+|-------|---------|
+| **VTI core** | 20% passive; ~79% active (`PAPER_ACTIVE_SLEEVE_BOOST=1.40`) |
+| **Game plan** | Yield-gate-only (same as live) |
+| **NYSE beta scaling** | on when `PAPER_CHASE_EXTRA=true` |
+| **Adaptive chunk / co-fire** | on when paper chase extras enabled |
+| **Crypto** | All vol regimes (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| **Social / Felix** | on when paper chase extras enabled |
+
+```
+--- paper_aggressive research stack (Profile B) ---
+  paper_chase_mode:       ON (PAPER_CHASE_MODE)
+  nyse_beta_scaling:      True (recommended ON for research grids)
+  adaptive_chunk:         True
+  cofire_budget:          True
+  vti_core:             20% VTI | active boost 1.40x
+  crypto_vol_only:      False
   sleeves: SPY 45% | crypto 20% | NYSE 20% | metal 0% | cash 15%
 ```
 
@@ -153,16 +294,16 @@ Full legacy blend: set `GAME_PLAN_YIELD_GATE_ONLY=false` and keep metal/stress e
 
 Preflight prints macro signals (`stress`, `yield_gate`, `bond_stress`) when game plan is active.
 
-## VTI passive core (live)
+## VTI passive core (Profile A live)
 
-Backtests showed **80/20 VTI + active bot** beat active-only on Sharpe (+28% vs +16% over 365d in a recent window). Live default:
+Backtests showed **80/20 VTI + active bot** beat active-only on Sharpe (+28% vs +16% over 365d in a recent window). Live applies **90% VTI** automatically when equity &lt; $500.
 
-| Layer | Setting |
-|-------|---------|
-| **VTI core** | `VTI_CORE_ENABLED=true`, `VTI_CORE_PCT=0.80` |
-| **Rebalance** | `modules/vti_core.py` — buys/sells VTI when drift exceeds `VTI_CORE_REBALANCE_DRIFT_PCT` (2%) |
-| **Active sleeves** | Remaining ~20% of equity across SPY / crypto / NYSE (scaled caps) |
-| **Protection** | VTI is excluded from halt liquidation, stop-loss, and NYSE momentum picks |
+| Layer | Setting (equity ≥ $500) | Small account (&lt; $500) |
+|-------|-------------------------|---------------------------|
+| **VTI core** | `VTI_CORE_PCT=0.80` | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) |
+| **Rebalance** | `modules/vti_core.py` — drift threshold 2% | same |
+| **Active sleeves** | ~20% of equity | ~10% of equity |
+| **Protection** | VTI excluded from halt liquidation, stop-loss, and NYSE momentum picks |
 
 ```env
 VTI_CORE_ENABLED=true
@@ -186,7 +327,7 @@ Creator-macro sleeve driven by **YouTube transcripts** (Felix & Friends + **Andr
 | `SOCIAL_SLEEVE_ENABLED` | `false` (opt-in) | Turn on Felix + social rotation |
 | `SOCIAL_SLEEVE_CAP_PCT` | `0.10` | Paper social book cap (% of that account) |
 | `SOCIAL_MIRROR_TO_LIVE_PCT` | `0.15` | Live reserve = social cap × this (e.g. 1.5% of live equity) |
-| `FELIX_SENTIMENT_ENABLED` | `true` | Score latest synced transcript |
+| `FELIX_SENTIMENT_ENABLED` | `false` (opt-in; auto-on with paper chase) | Score latest synced transcript |
 | `SPACEX_IPO_AUTO_BUY` | `false` on live | IPO auto-buy disabled |
 
 Targets: **GLD** (bearish macro), **XLE** (bullish energy), **SPY** (neutral). Live mirror skips SPY when the main fund already runs the SPY sleeve.
@@ -200,17 +341,26 @@ python scripts/maintenance/sync_felix_transcripts.py --channel andrei_jikh --max
 
 Registered channels: `felix_and_friends`, `andrei_jikh` (`UCGy7SkBjcIAgTiwkXEtPnYg`). Weights: `SOCIAL_FELIX_CHANNEL_WEIGHT` / `SOCIAL_ANDREI_JIKH_WEIGHT` (default 50/50).
 
-## Paper aggressive research profile
+## Paper aggressive research profile (Sharpe chase)
 
-The **paper research book** (`PAPER_APCA_*`) can run a profit-seeking profile **without changing live caps**. Enabled when `PAPER_AGGRESSIVE=true` and you use `run_paper_piece.py` (or the social paper cycle).
+The **paper book** can run a profit-seeking profile **without changing live ~$100 caps**.
 
-| Setting | Live (~$100) | Paper aggressive |
-|---------|--------------|------------------|
-| VTI core | 80% | **20%** (`PAPER_VTI_CORE_PCT`) |
-| Active sleeves | ~17% total | **~79%** (`PAPER_ACTIVE_SLEEVE_BOOST=1.40`) |
-| Social cap | 10% | **20%** (`PAPER_SOCIAL_SLEEVE_CAP_PCT`) |
-| Crypto vol gate | High vol only | **Off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| Wisdom sizing floor | defensive cuts | **1.0** (no shrink) |
+| How to run | Command |
+|------------|---------|
+| **24/7 loop** (recommended) | `python run_paper_bot.py` or portal **Start bot** with **paper** keys |
+| **One-shot pieces** | `python scripts/research/run_paper_piece.py --piece all-active --apply` |
+
+`PAPER_CHASE_MODE=1` enables the aggressive profile inside `run_all.py` (portal sets this automatically when your saved keys are paper).
+
+**Hardware / WiFi:** the bot is idle **most of the time** (45–60s sleep between cycles; price refresh every 10–15m). You are **not** maxing out a modern PC or home broadband. Paper chase auto-enables extra layers (`adaptive_chunk`, `cofire_budget`, `social_sleeve`, Felix sync, faster refresh) — still light load.
+
+| Setting | Live (~$100, equity &lt; $500) | Live (≥ $500) | Paper aggressive |
+|---------|-------------------------------|---------------|------------------|
+| VTI core | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) | **80%** (`VTI_CORE_PCT`) | **20%** (`PAPER_VTI_CORE_PCT`) |
+| Active sleeves | ~10% total | ~20% total | **~79%** (`PAPER_ACTIVE_SLEEVE_BOOST=1.40`) |
+| Social cap | 10% | 10% | **20%** (`PAPER_SOCIAL_SLEEVE_CAP_PCT`) |
+| Crypto vol gate | High vol only | High vol only | **Off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| Wisdom sizing floor | defensive cuts | defensive cuts | **1.0** (no shrink) |
 
 ```powershell
 # Inspect profile (dry-run)
@@ -232,22 +382,74 @@ python backtester.py --days 365 --paper-aggressive
 
 Recent 365d A/B (2025-04 → 2026-06): live-like 80/20 **+28.2%** Sharpe 1.43; paper aggressive 20/80 **+16.5%** Sharpe 0.85; active-only +15.1%. Paper aggressive wins on active deployment but lags when VTI has a strong year.
 
-## Quick start
+## Quick start (paper / CLI)
+
+For **live ~$100**, use [Quick Start – Live $100 Account](#quick-start--live-100-account) above.
+
+**Paper evaluation** (default `PAPER_TRADING=true`):
 
 ```powershell
-cd PythonTrading
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
 copy .env.example .env
-# Edit .env only — never commit .env (gitignored). .env.example has no real passwords.
-# Not the same as .venv/ (Python packages folder).
-# Edit .env with your APCA_* paper keys
+# Edit .env with Alpaca paper APCA_* keys
 python fetch_data.py
+python scripts/account/preflight.py
 python run_all.py
 ```
 
-**Small live account (~$100):** after preflight (below), double-click **`launch.bat`** or run `python dashboard_app.py --launch-bot` to start the **desktop monitor + bot** together. See [Desktop monitor](#desktop-monitor-customtkinter).
+**Desktop monitor:** [Desktop monitor](#desktop-monitor-customtkinter) — sign in, then `launch.bat` or `python dashboard_app.py --launch-bot`.
+
+### Dual fund bots (live + paper Sharpe chase)
+
+Two **separate** `run_all.py` processes — one command:
+
+```powershell
+.\launch_both.bat
+# or: python launch_bots.py
+```
+
+**One-time setup**
+
+**Option A — two portal users** (`streamlit run portal.py`):
+
+1. **you-live** → live Alpaca keys, **Paper trading OFF**, Allow live ON (conservative 90% VTI when equity &lt; $500).
+2. **you-paper** → paper Alpaca keys, **Paper trading ON** (Sharpe chase: 20% VTI, extra layers).
+3. Copy `data/portal/fund_pair.json.example` → `data/portal/fund_pair.json`:
+
+```json
+{ "live_user": "you-live", "paper_user": "you-paper" }
+```
+
+**Option B — live portal user + paper keys in project `.env`** (common owner setup):
+
+1. **you-live** in the portal with live keys (paper OFF, allow live ON).
+2. Keep **paper** `APCA_*` keys in the project root `.env` with `PAPER_TRADING=true`.
+3. Set `"paper_user": "@root"` in `fund_pair.json` (see example file). Paper bot logs go to `data/fund/paper/` — separate from live.
+
+Or save the pair in one step:
+
+```powershell
+python launch_bots.py --live-user you-live --paper-user you-paper --init-pair
+python launch_bots.py --live-user you-live --paper-user @root --init-pair
+```
+
+Override without editing JSON: `FUND_LIVE_USER` and `FUND_PAPER_USER` in `.env`.
+
+**Where data lives**
+
+| Shared (one copy) | Per book (do not mix) |
+|-------------------|------------------------|
+| `market_data.db` | Portal user: `data/portal/users/<username>/` — heartbeat, journal, bot.log, `.env` |
+| `fetch_data.py` once | `@root` paper slot: `data/fund/paper/` — heartbeat, journal, bot.log (keys still in project `.env`) |
+| | `@root` live slot (if used): `data/fund/live/` |
+
+Log in to the desktop monitor as **you-live** or **you-paper** to see that book’s heartbeat. `python launch_bots.py --status` / `--stop` manages both.
+
+**Backtest paper chase before changing live** (after paper bot has run or anytime):
+
+```powershell
+python backtester.py --days 365 --paper-aggressive
+python backtester.py --days 365 --compare-paper-aggressive
+```
 
 Always run commands from the **project root** so relative paths (`market_data.db`, logs) resolve correctly.
 
@@ -278,9 +480,7 @@ python run_all.py
 
 ### Before going live (real money)
 
-Use **live** Alpaca keys in `.env` (`APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`), set `PAPER_TRADING=false` and `ALLOW_LIVE_TRADING=yes`. Keep paper research keys in `PAPER_APCA_*` if you run the social sleeve on paper.
-
-**Recommended live defaults** (already the code defaults — no extra flags required):
+See [Quick Start – Live $100 Account](#quick-start--live-100-account) for the main flow. Keep paper research keys in `PAPER_APCA_*` if you run the social sleeve on a separate paper book.
 
 | Setting | Default | Notes |
 |---------|---------|-------|
@@ -293,9 +493,7 @@ Use **live** Alpaca keys in `.env` (`APCA_API_KEY_ID` / `APCA_API_SECRET_KEY`), 
 | `COFIRE_BUDGET_ENABLED` | `false` | Opt-in |
 | `SPY_EXIT_ON_MA_BREAK` | `false` | Opt-in |
 
-**Small account safety** (equity &lt; $500, e.g. ~$100 live): automatically applies `RISK_PER_TRADE=1%`, `MAX_NOTIONAL_PER_ORDER=$10`, and `VTI_CORE_PCT=90%`.
-
-Run this checklist **in order** before starting `run_all.py`:
+**Extra checklist** before first live cycle:
 
 ```powershell
 # 1. Full preflight (includes Live Trading Checklist when PAPER_TRADING=false)
@@ -352,6 +550,7 @@ Preflight checks paper mode, Alpaca connection, market data, and game plan macro
 - **Cost-basis aware**: scales buys when a sleeve is underwater on avg entry; blocks discretionary sells below cost (stops still fire)
 - **Macro event guard**: reduces sizing before NFP/CPI/FOMC/PPI/GDP releases (hardcoded calendar in `modules/macro_calendar.py`)
 - Requires **0.5+ correlation** on crypto pairs
+- **Scan schedule** (`modules/scan_schedule.py`): overnight crypto-only when US equity is closed; equity sleeves at session open
 - Writes **`paper_journal.csv`** and **`bot_heartbeat.json`** each cycle
 
 ### Regime and risk
@@ -369,11 +568,13 @@ Primary monitor for a small live account — dark theme, auto-refresh, calm layo
 
 ### One-click launch (recommended)
 
-Double-click **`launch.bat`** in the project root. It activates `.venv`, starts the dashboard (no console window), and runs the trading bot:
+Double-click **`launch.bat`** in the project root. It activates `.venv`, opens the **sign-in** screen (no console window), then starts the bot for the logged-in portal user:
 
 ```text
 launch.bat  →  pythonw dashboard_app.py --launch-bot
 ```
+
+**Sign in** with the same username/password as the web portal (`portal.py`). Use **Register** on first run, then **Account → Edit Alpaca keys…** to paste API keys (or connect keys in the portal **Settings** tab). **Remember username** is stored in `data/portal/desktop_prefs.json`.
 
 **Desktop shortcut (Windows):**
 
@@ -384,7 +585,7 @@ launch.bat  →  pythonw dashboard_app.py --launch-bot
 5. **Change Icon…** → Browse to `assets\dashboard.ico` (generate first: `python scripts/generate_dashboard_icon.py`).
 6. Rename the shortcut to e.g. **PythonTrading Live**.
 
-Ensure `.env` exists in the project folder before going live. Errors are appended to `logs\dashboard_launch.log`.
+Portal users store keys under `data/portal/users/<username>/.env`. A project-root `.env` is still used for CLI (`run_all.py`, `@root` paper slot). Errors are appended to `logs\dashboard_launch.log`.
 
 **Troubleshooting:**
 
@@ -405,20 +606,28 @@ python dashboard_app.py --launch-bot   # also start run_all.py
 
 Tabs: **Overview**, **Positions**, **Trades**, **Wisdom**, **Charts** (VTI + SPY by default). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, equity sparkline, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Stop Bot** ends `run_all.py` (does not liquidate positions). Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
 
-Auto-refresh every **60 seconds**. On first launch without `.env`, a setup wizard prompts for Alpaca keys (Telegram optional). Data sources: `bot_heartbeat.json`, Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
+Auto-refresh every **60 seconds**. Data sources: per-user `bot_heartbeat.json` (portal path or `data/fund/<slot>/`), Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
 
 ### Build a Windows .exe (optional)
 
 For a standalone monitor executable (bot still uses `.venv` Python via `--launch-bot`):
 
 ```powershell
+.\build_dashboard.bat
+```
+
+Or manually:
+
+```powershell
 .\.venv\Scripts\Activate.ps1
 pip install pyinstaller pillow
 python scripts/generate_dashboard_icon.py
-python -m PyInstaller dashboard.spec
+python -m PyInstaller dashboard.spec --noconfirm
 ```
 
 Use **`python -m PyInstaller`** (not bare `pyinstaller`) so you don't need PyInstaller on PATH. Install into **`.venv`**, not global Python.
+
+**Before rebuilding:** quit **PythonTradingMonitor.exe** (and the system tray icon if minimized there). If the app is open, PyInstaller cannot delete `dist\PythonTradingMonitor` (locked `users.db`).
 
 Output: `dist\PythonTradingMonitor\PythonTradingMonitor.exe`
 
@@ -484,7 +693,7 @@ streamlit run portal.py
 | Step | What happens |
 |------|----------------|
 | Login | Local account in `data/portal/users.db` |
-| Alpaca page | Their API keys, paper or live |
+| Alpaca / Settings | Connect or update API keys (paper or live) |
 | Bot page | Start/stop `run_all.py` with their keys |
 | Dashboard | Their heartbeat, positions, regime |
 
@@ -576,7 +785,7 @@ Directional backtests remain useful for strategy design; the performance review 
 
 ## Backtesting
 
-Uses the same recommended flags as live (`config.print_recommended_stack_flags()` on startup).
+Uses **Profile A** flags by default; `--paper-aggressive` uses Profile B (`config.print_recommended_stack_flags(profile=...)` on startup).
 
 ```powershell
 # Integrated fund (recommended stack; prints sleeve flags)
@@ -708,8 +917,11 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `PAPER_APCA_API_KEY_ID` | No | Separate Alpaca paper book for research |
 | `PAPER_APCA_API_SECRET_KEY` | No | Same |
 | `PAPER_AGGRESSIVE` | No | Paper research profit profile (default `true` in `.env.example`) |
+| `PAPER_CHASE_MODE` | No | Sharpe chase profile in `run_all.py` (portal/paper bot set automatically) |
 | `PAPER_VTI_CORE_PCT` | No | Paper VTI target (default `0.20`) |
 | `PAPER_ACTIVE_SLEEVE_BOOST` | No | Active sleeve multiplier on paper (default `1.40`) |
+| `FUND_LIVE_USER` | No | Override `fund_pair.json` live portal username |
+| `FUND_PAPER_USER` | No | Override paper username or `@root` for project `.env` paper keys |
 | `SOCIAL_SLEEVE_ENABLED` | No | Felix / social macro sleeve |
 | `SOCIAL_MIRROR_TO_LIVE_PCT` | No | Fraction of social cap mirrored to live account |
 | `FELIX_SENTIMENT_ENABLED` | No | Blend Felix transcript mood into social score |
@@ -736,11 +948,18 @@ PythonTrading/
 ├── friend_setup.bat        # Friends: clone → install → open portal (Windows)
 ├── friend_setup.sh         # Friends: same on Mac/Linux
 ├── portal.py               # Friends: login + Alpaca keys + bot (browser)
-├── launch.bat              # One-click: dashboard + bot (pythonw, no console)
+├── launch.bat              # One-click: sign in + dashboard + bot (pythonw)
+├── launch_both.bat         # Start live + paper bots together
+├── launch_bots.py          # Dual-bot launcher (--status, --stop, --init-pair)
+├── run_paper_bot.py        # 24/7 paper Sharpe chase (root .env, isolated logs)
+├── build_dashboard.bat     # Rebuild Windows monitor .exe
 ├── dashboard_app.py        # Desktop monitor (CustomTkinter) — owner UI
 ├── dashboard.py            # Streamlit monitor (backup)
 ├── dashboard.spec          # PyInstaller config for Windows .exe
 ├── assets/dashboard.ico    # Shortcut / exe icon
+├── data/
+│   ├── portal/             # users.db, fund_pair.json, users/<name>/
+│   └── fund/               # @root bot slots (e.g. paper/ heartbeat, journal)
 ├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
 ├── run_spy.py              # Optional standalone SPY loop
 ├── fetch_data.py           # yfinance → SQLite (5m live, daily backtest)
@@ -765,6 +984,11 @@ PythonTrading/
 │   ├── deployment_sizing.py    # Adaptive chunk + co-fire budget
 │   ├── wisdom_evaluator.py     # Daily scorecard, live vs sim modes
 │   ├── data_refresh.py         # Session-aware data refresh
+│   ├── scan_schedule.py        # Overnight crypto-only vs US equity session
+│   ├── fund_config.py          # fund_pair.json + @root slot validation
+│   ├── portal_auth.py          # Portal/desktop login (SQLite)
+│   ├── portal_bot.py           # Start/stop bot per portal user or @root slot
+│   ├── portal_paths.py         # Per-user data paths
 │   ├── market_context.py       # Regime / volatility / sentiment
 │   ├── alerts.py
 │   └── ...
@@ -840,7 +1064,8 @@ The bot is lightweight (Python + API calls + SQLite). A **$5–12/mo Linux VPS**
 - **Single virtualenv:** Use `.venv` only. Reinstall with `pip install -r requirements.txt` after pulling changes.
 - **`write_bot.py`:** Regenerates `fetch_data.py` only. Does **not** overwrite `run_all.py`.
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
-- **Desktop launch:** `launch.bat` → `pythonw dashboard_app.py --launch-bot`. Shortcut **Start in** must be the project root (where `.env` lives).
+- **Desktop launch:** `launch.bat` → sign in → `pythonw dashboard_app.py --launch-bot`. Shortcut **Start in** must be the project root.
+- **Dual bots:** `launch_bots.py` / `launch_both.bat`; pair live + paper in `data/portal/fund_pair.json` (paper can be `@root`).
 - **Small account:** equity &lt; $500 triggers 1% risk, $10 max order, 90% VTI — see `config.configure_account_profile()`.
 - **Strategy sharing:** `run_all.py`, `backtester.py`, and `backtest_spy.py` share `modules/pipeline_strategies.py`.
 - **Alpaca fees:** US stocks/ETFs are commission-free. Crypto market orders use `ALPACA_CRYPTO_TAKER_FEE_PCT` (default 0.25% per leg); live sizing and `backtester.py` reserve that fee on crypto buys only (`ALPACA_CRYPTO_FEE_AWARE=true`).

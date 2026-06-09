@@ -5,6 +5,8 @@ Live bot still uses 5m data via fetch_data.py without --daily.
 
 Run:  python backtester.py
        python backtester.py --days 180
+       python backtester.py --days 365 --small-account
+       python backtester.py --days 365 --small-account --compare-vti-core
        python fetch_data.py --daily --days 365
 """
 
@@ -76,6 +78,18 @@ class BacktestExecutor:
             if cap_scale is not None
             else self._active_fraction
         )
+
+    def _get_account(self):
+        """Alpaca-compatible shim for pipeline_strategies (live uses real account)."""
+        equity = self.portfolio.equity(self.prices)
+
+        class _Acct:
+            pass
+
+        acct = _Acct()
+        acct.equity = equity
+        acct.cash = self.portfolio.cash
+        return acct
 
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
@@ -172,9 +186,19 @@ class BacktestExecutor:
     def compute_notional(self):
         equity = self.portfolio.equity(self.prices)
         cash = self.portfolio.cash
-        raw = round(equity * config.RISK_PER_TRADE, 2)
-        capped = min(raw, config.MAX_NOTIONAL_PER_ORDER, round(cash * 0.95, 2))
-        return self._apply_wisdom_multiplier(max(config.MIN_NOTIONAL, capped))
+        if config.backtest_small_account_context():
+            risk = config.effective_risk_per_trade(equity)
+            max_order = config.effective_max_notional_per_order(equity)
+            min_n = config.effective_min_notional(equity)
+        else:
+            risk = config.RISK_PER_TRADE
+            max_order = config.MAX_NOTIONAL_PER_ORDER
+            min_n = config.MIN_NOTIONAL
+        raw = round(equity * risk, 2)
+        capped = min(raw, max_order, round(cash * 0.95, 2))
+        if capped < min_n:
+            return None
+        return self._apply_wisdom_multiplier(capped)
 
     def compute_crypto_notional(self):
         return self._compute_capped_notional(
@@ -254,15 +278,21 @@ class BacktestPortfolio:
 
     def trade(self, symbol, side, price, tx_cost=TX_COST, notional=None):
         if notional is None:
+            equity = self.equity({symbol: price})
+            if config.backtest_small_account_context():
+                risk = config.effective_risk_per_trade(equity)
+                max_order = config.effective_max_notional_per_order(equity)
+                min_n = config.effective_min_notional(equity)
+            else:
+                risk = config.RISK_PER_TRADE
+                max_order = config.MAX_NOTIONAL_PER_ORDER
+                min_n = config.MIN_NOTIONAL
             notional = round(
-                min(
-                    self.cash * config.RISK_PER_TRADE,
-                    config.MAX_NOTIONAL_PER_ORDER,
-                    self.cash * 0.95,
-                ),
+                min(equity * risk, max_order, self.cash * 0.95),
                 2,
             )
-            notional = max(config.MIN_NOTIONAL, notional)
+            if notional < min_n:
+                return None
         if side == "buy":
             if notional < 1 or self.cash < notional:
                 return None
@@ -371,6 +401,10 @@ def _backtest_cap_scale(vti_core_pct: float, *, paper_aggressive: bool) -> float
     return round(config.long_fund_scale() * max(0.0, 1.0 - vti_core_pct), 6)
 
 
+def _small_account_start_equity() -> float:
+    return float(config.SMALL_ACCOUNT_BACKTEST_EQUITY)
+
+
 def run_backtest(
     data,
     *,
@@ -381,14 +415,17 @@ def run_backtest(
     track_metrics=False,
     vti_core_pct: float = 0.0,
     paper_aggressive: bool = False,
+    small_account: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
     if paper_aggressive:
         vti_core_pct = config.PAPER_VTI_CORE_PCT
 
     saved_paper_ctx = config.paper_aggressive_context()
+    saved_small_ctx = config.backtest_small_account_context()
     saved_social = config.SOCIAL_SLEEVE_ENABLED
     config.set_paper_aggressive_context(paper_aggressive)
+    config.set_backtest_small_account_context(small_account)
     if paper_aggressive:
         config.SOCIAL_SLEEVE_ENABLED = True
 
@@ -399,7 +436,8 @@ def run_backtest(
     sim_days = (end_date - start_date).days
     cap_scale = _backtest_cap_scale(vti_core_pct, paper_aggressive=paper_aggressive)
 
-    portfolio = BacktestPortfolio()
+    initial_capital = _small_account_start_equity() if small_account else 10000.0
+    portfolio = BacktestPortfolio(initial_capital=initial_capital)
     pair_cooldown = {}
     risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
     equity_curve = []
@@ -407,10 +445,14 @@ def run_backtest(
     total_crypto = 0
     total_equity = 0
     total_spy = 0
+    total_spy_entries = 0
+    total_spy_exits = 0
     total_orders = 0
     pause_days = 0
     halt_liquidations = 0
     exposure_samples = []
+    spy_exposure_samples = []
+    nyse_exposure_samples = []
     crypto_exposure_samples = []
     cofire_days = 0
     prev_crypto_value = 0.0
@@ -431,7 +473,7 @@ def run_backtest(
             monthly_web = load_monthly_web_sentiment()
         except Exception:
             monthly_web = None
-        social_portfolio = BacktestPortfolio(initial_capital=portfolio.initial_capital)
+        social_portfolio = BacktestPortfolio(initial_capital=initial_capital)
 
     spy_cap_pct = round(config.SPY_SLEEVE_CAP_PCT * cap_scale, 6)
     macro_daily = None
@@ -455,6 +497,8 @@ def run_backtest(
         window = data.iloc[: i + 1]
         prices = window.iloc[-1]
         eq = portfolio.equity(prices)
+        if small_account:
+            config.configure_account_profile(eq)
         equity_curve.append(eq)
 
         prev_halted = risk_manager.halted
@@ -548,8 +592,8 @@ def run_backtest(
             cooldown_bars=cooldown_bars,
             volatility=vol,
         )
-        total_spy += run_spy_exits(window, executor, regime)
-        total_spy += run_spy_strategy(
+        spy_exit_n = run_spy_exits(window, executor, regime)
+        spy_entry_n = run_spy_strategy(
             window,
             executor,
             regime,
@@ -558,6 +602,9 @@ def run_backtest(
             cooldown_bars=cooldown_bars,
             yield_gated=yield_gated,
         )
+        total_spy_exits += spy_exit_n
+        total_spy_entries += spy_entry_n
+        total_spy += spy_exit_n + spy_entry_n
         total_equity += run_equity_strategy(
             window,
             executor,
@@ -580,6 +627,9 @@ def run_backtest(
         if track_metrics:
             invested = eq - portfolio.cash
             exposure_samples.append(invested / eq if eq > 0 else 0.0)
+            if eq > 0:
+                spy_exposure_samples.append(executor.spy_sleeve_value() / eq)
+                nyse_exposure_samples.append(executor.nyse_sleeve_value() / eq)
             crypto_val = executor.crypto_sleeve_value()
             crypto_exposure_samples.append(crypto_val / eq if eq > 0 else 0.0)
             crypto_pnl_contribution += crypto_val - prev_crypto_value
@@ -651,7 +701,10 @@ def run_backtest(
         "halt_liquidations": halt_liquidations,
         "vti_core_pct": vti_core_pct,
         "paper_aggressive": paper_aggressive,
+        "small_account": small_account,
         "cap_scale": cap_scale,
+        "equity_index": [data.index[i].isoformat() for i in range(MIN_HISTORY, len(data))],
+        "equity_values": [round(v, 2) for v in equity_curve],
     }
     if social_portfolio is not None and social_curve:
         social_init = social_portfolio.initial_capital
@@ -666,8 +719,22 @@ def run_backtest(
         }
     if track_metrics:
         init = portfolio.initial_capital
+        curve_s = pd.Series(equity_curve)
+        ret_s = curve_s.pct_change().dropna()
+        peak_s = curve_s.cummax()
+        in_dd = curve_s.iloc[1:] < peak_s.iloc[1:]
+        dd_ret = ret_s[in_dd.values] if in_dd.any() else pd.Series(dtype=float)
         result.update(
             {
+                "spy_entry_signals": total_spy_entries,
+                "spy_exit_signals": total_spy_exits,
+                "dd_days_pct": round(100 * in_dd.sum() / len(in_dd), 1) if len(in_dd) else 0,
+                "dd_avg_daily_return_bps": round(dd_ret.mean() * 10000, 2)
+                if len(dd_ret) > 0
+                else 0.0,
+                "dd_cumulative_return_pct": round(((1 + dd_ret).prod() - 1) * 100, 2)
+                if len(dd_ret) > 0
+                else 0.0,
                 "avg_exposure_pct": round(
                     100 * (sum(exposure_samples) / len(exposure_samples))
                     if exposure_samples
@@ -681,6 +748,20 @@ def run_backtest(
                     else 0.0,
                     1,
                 ),
+                "avg_spy_exposure_pct": round(
+                    100
+                    * (sum(spy_exposure_samples) / len(spy_exposure_samples))
+                    if spy_exposure_samples
+                    else 0.0,
+                    1,
+                ),
+                "avg_nyse_exposure_pct": round(
+                    100
+                    * (sum(nyse_exposure_samples) / len(nyse_exposure_samples))
+                    if nyse_exposure_samples
+                    else 0.0,
+                    1,
+                ),
                 "cofire_pct": round(
                     100 * cofire_days / trade_days if trade_days else 0.0, 1
                 ),
@@ -690,6 +771,7 @@ def run_backtest(
             }
         )
     config.set_paper_aggressive_context(saved_paper_ctx)
+    config.set_backtest_small_account_context(saved_small_ctx)
     config.SOCIAL_SLEEVE_ENABLED = saved_social
     return result
 
@@ -747,7 +829,13 @@ def run_paper_aggressive_compare(days=None, refresh=False, use_max=False) -> Non
     print("-" * 78)
 
 
-def run_vti_core_compare(days=None, refresh=False, use_max=False) -> None:
+def run_vti_core_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+    *,
+    small_account: bool = False,
+) -> None:
     """Run baseline vs 70/30 and 80/20 VTI core + active bot."""
     if use_max:
         data = _ensure_daily_data(0, refresh=refresh, use_max=True)
@@ -759,12 +847,28 @@ def run_vti_core_compare(days=None, refresh=False, use_max=False) -> None:
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
-    configs = [
-        ("Active only (current)", 0.0),
-        ("70% VTI core / 30% active", 0.70),
-        ("80% VTI core / 20% active", 0.80),
-    ]
-    print("--- VTI CORE A/B (same window, parallel social sleeve off) ---")
+    if small_account:
+        configs = [
+            (
+                f"Small-account live ({config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} VTI)",
+                config.SMALL_ACCOUNT_VTI_CORE_PCT,
+            ),
+            ("80% VTI core / 20% active", 0.80),
+            ("Active only (no VTI)", 0.0),
+        ]
+        title = (
+            f"--- SMALL-ACCOUNT VTI A/B (${_small_account_start_equity():,.0f} start, "
+            f"risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%}, "
+            f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:,.0f}/order) ---"
+        )
+    else:
+        configs = [
+            ("Active only (current)", 0.0),
+            ("70% VTI core / 30% active", 0.70),
+            ("80% VTI core / 20% active", 0.80),
+        ]
+        title = "--- VTI CORE A/B (same window, parallel social sleeve off) ---"
+    print(title)
     print(
         f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
@@ -778,7 +882,11 @@ def run_vti_core_compare(days=None, refresh=False, use_max=False) -> None:
     config.SOCIAL_SLEEVE_ENABLED = False
     try:
         for label, core in configs:
-            result = run_backtest(data, vti_core_pct=core)
+            result = run_backtest(
+                data,
+                vti_core_pct=core,
+                small_account=small_account,
+            )
             print(
                 f"{label:<32} "
                 f"{result['total_return_pct']:>+7.2f}% "
@@ -797,13 +905,23 @@ def run_performance_test(
     use_max=False,
     vti_core_pct: float = 0.0,
     paper_aggressive: bool = False,
+    small_account: bool = False,
 ):
     if use_max:
         print("--- STARTING FUND BACKTEST (max available daily history) ---")
     else:
         days = days or config.BACKTEST_DAYS
         print(f"--- STARTING FUND BACKTEST ({days} days) ---")
-    if paper_aggressive:
+    if small_account:
+        print(
+            f"--- SMALL-ACCOUNT MODE: ${config.SMALL_ACCOUNT_BACKTEST_EQUITY:,.0f} start | "
+            f"{config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
+            f"risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
+            f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:,.0f}/order ---"
+        )
+        if vti_core_pct <= 0:
+            vti_core_pct = config.SMALL_ACCOUNT_VTI_CORE_PCT
+    elif paper_aggressive:
         print(
             f"--- PAPER AGGRESSIVE: {config.PAPER_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
             f"{1 - config.PAPER_VTI_CORE_PCT:.0%} active (boost "
@@ -846,14 +964,18 @@ def run_performance_test(
     )
     print(f"Simulation window: {start_date.date()} to {end_date.date()} ({sim_days} calendar days)")
     print(f"Cooldown: {cooldown_bars} bar(s) (~{COOLDOWN_SECONDS // 60} min live logic)")
-    config.print_recommended_stack_flags()
 
     saved_paper_ctx = config.paper_aggressive_context()
+    saved_small_ctx = config.backtest_small_account_context()
     config.set_paper_aggressive_context(paper_aggressive)
+    config.set_backtest_small_account_context(small_account)
     try:
+        stack_profile = "paper" if paper_aggressive else "live"
+        config.print_recommended_stack_flags(profile=stack_profile)
         alloc = config.fund_allocation_pct()
     finally:
         config.set_paper_aggressive_context(saved_paper_ctx)
+        config.set_backtest_small_account_context(saved_small_ctx)
 
     result = run_backtest(
         data,
@@ -861,6 +983,7 @@ def run_performance_test(
         verbose=True,
         vti_core_pct=vti_core_pct,
         paper_aggressive=paper_aggressive,
+        small_account=small_account,
     )
     curve_end = result["final_equity"]
     total_ret = result["total_return_pct"]
@@ -951,22 +1074,39 @@ if __name__ == "__main__":
         help="Paper research profile: 20%% VTI, boosted sleeves, social 20%%, crypto all vol",
     )
     parser.add_argument(
+        "--small-account",
+        action="store_true",
+        help=(
+            "Live small-account profile: $100 start, 90%% VTI, 1%% risk, "
+            "$10 max order, scaled min notional"
+        ),
+    )
+    parser.add_argument(
         "--compare-paper-aggressive",
         action="store_true",
         help="Compare live 80/20 vs paper aggressive vs active-only (table)",
     )
     args = parser.parse_args()
     if args.compare_vti_core:
-        run_vti_core_compare(days=args.days, refresh=args.refresh, use_max=args.max)
+        run_vti_core_compare(
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            small_account=args.small_account,
+        )
     elif args.compare_paper_aggressive:
         run_paper_aggressive_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     else:
+        vti_core = max(0.0, min(1.0, args.vti_core))
+        if args.small_account and vti_core <= 0:
+            vti_core = config.SMALL_ACCOUNT_VTI_CORE_PCT
         run_performance_test(
             days=args.days,
             refresh=args.refresh,
             use_max=args.max,
-            vti_core_pct=max(0.0, min(1.0, args.vti_core)),
+            vti_core_pct=vti_core,
             paper_aggressive=args.paper_aggressive,
+            small_account=args.small_account,
         )

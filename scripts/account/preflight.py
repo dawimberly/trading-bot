@@ -4,16 +4,92 @@ Run: python scripts/account/preflight.py
 """
 
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import config
+from modules import alerts
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.macro_signals import ensure_macro_daily, evaluate, load_daily_matrix
 from modules.wisdom_sentiment import LIVE_MODES, DEPRECATED_MODES, MODES
 from fetch_data import fetch_and_store
+
+DB_PATH = Path(__file__).resolve().parents[2] / "market_data.db"
+
+
+def _data_refresh_ok(data) -> tuple[bool, str]:
+    if data.empty:
+        return False, "market_data.db has no price rows — run fetch_data.py"
+    if not DB_PATH.exists():
+        return False, "market_data.db missing — run fetch_data.py"
+    mtime_h = (time.time() - DB_PATH.stat().st_mtime) / 3600
+    if mtime_h > 24:
+        return False, f"DB file {mtime_h:.1f}h old — run fetch_data.py"
+    last = data.index[-1]
+    try:
+        if hasattr(last, "to_pydatetime"):
+            last_dt = last.to_pydatetime()
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            age_h = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
+            if age_h > 48:
+                return False, f"last bar ~{age_h:.0f}h old — run fetch_data.py"
+            return True, f"price data through {last} ({mtime_h:.1f}h since refresh)"
+    except Exception:
+        pass
+    return True, f"DB refreshed {mtime_h:.1f}h ago ({len(data)} rows)"
+
+
+def _live_trading_checklist(acct, data) -> bool:
+    print("\n=== Live Trading Checklist ===")
+    ok = True
+    if config.ALLOW_LIVE_TRADING:
+        print("[OK] ALLOW_LIVE_TRADING=yes")
+    else:
+        print("[FAIL] ALLOW_LIVE_TRADING must be yes for live trading")
+        ok = False
+
+    equity = float(acct.equity)
+    config.configure_account_profile(equity)
+    if equity > 50:
+        print(f"[OK] Equity ${equity:,.2f} (> $50 minimum)")
+    else:
+        print(f"[FAIL] Equity ${equity:,.2f} — need > $50 before going live")
+        ok = False
+
+    if alerts.alerts_configured():
+        print("[OK] Alerts configured (Telegram and/or email)")
+    else:
+        print("[FAIL] Alerts not configured — set TELEGRAM_* or SMTP_* in .env")
+        ok = False
+
+    fresh, msg = _data_refresh_ok(data)
+    if fresh:
+        print(f"[OK] Recent data refresh: {msg}")
+    else:
+        print(f"[FAIL] {msg}")
+        ok = False
+
+    if config.is_small_account(equity):
+        print(
+            f"[OK] Small account safety mode (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
+            f"risk {config.effective_risk_per_trade():.0%} | "
+            f"max order ${config.effective_max_notional_per_order():.2f} | "
+            f"VTI {config.vti_core_allocation_pct():.0%}"
+        )
+
+    if config.WISDOM_MODE != "dynamic":
+        print(f"[WARN] WISDOM_MODE={config.WISDOM_MODE} (recommended: dynamic)")
+    if not config.GAME_PLAN_YIELD_GATE_ONLY:
+        print("[WARN] GAME_PLAN_YIELD_GATE_ONLY=false (recommended: true)")
+    if not config.VTI_CORE_ENABLED:
+        print("[WARN] VTI_CORE_ENABLED=false (recommended: true for live)")
+
+    return ok
 
 
 def run():
@@ -48,11 +124,14 @@ def run():
             f"[OK] Alpaca connected ({mode}) | "
             f"equity=${float(acct.equity):,.2f} cash=${float(acct.cash):,.2f}"
         )
-        if live and float(acct.equity) < 500:
+        eq = float(acct.equity)
+        config.configure_account_profile(eq)
+        if live and config.is_small_account(eq):
             print(
-                f"[INFO] Small account (${float(acct.equity):,.2f}) — "
-                f"order min ${config.effective_min_notional(float(acct.equity)):.2f}, "
-                f"2% chunk ${float(acct.equity) * config.RISK_PER_TRADE:.2f}"
+                f"[INFO] Small account safety (${eq:,.2f}) — "
+                f"risk {config.effective_risk_per_trade():.0%} | "
+                f"max order ${config.effective_max_notional_per_order():.2f} | "
+                f"VTI {config.vti_core_allocation_pct():.0%}"
             )
     except Exception as e:
         hint = ""
@@ -130,8 +209,15 @@ def run():
     else:
         print("\n[INFO] game_plan off — baseline fund only")
 
+    chase_extras = config.init_paper_chase_if_enabled()
+    if chase_extras:
+        print(f"\n[INFO] Paper chase extras: {', '.join(chase_extras)}")
+
     print()
-    config.print_recommended_stack_flags()
+    if config.paper_chase_mode_enabled():
+        config.print_recommended_stack_flags(profile="paper")
+    else:
+        config.print_recommended_stack_flags(profile="live")
 
     print("\n--- Settings ---")
     wisdom_mode = config.WISDOM_MODE.strip().lower()
@@ -144,20 +230,27 @@ def run():
             print("  [WARN] mode is deprecated — maps to dynamic at runtime")
         elif wisdom_mode == "dynamic" and not config.AUTO_DYNAMIC_ENABLED:
             print("  [WARN] AUTO_DYNAMIC_ENABLED=false — dynamic runs price-only")
-    print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
     try:
         live_eq = float(acct.equity)
+        config.configure_account_profile(live_eq)
+        print(f"  Risk per trade:     {config.effective_risk_per_trade():.0%}")
         print(
             f"  Order sizing:       min ${config.effective_min_notional(live_eq):.2f} "
             f"| max ${config.effective_max_notional_per_order(live_eq):.2f} "
             f"(ref ${config.REFERENCE_EQUITY:,.0f})"
         )
+        if config.is_small_account(live_eq):
+            print(
+                f"  Small account:      VTI {config.vti_core_allocation_pct():.0%} | "
+                f"threshold <${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}"
+            )
         print(
             f"  At $100 account:   min ${config.effective_min_notional(100):.2f} "
-            f"| 2% chunk ${100 * config.RISK_PER_TRADE:.2f}"
+            f"| chunk ${100 * config.effective_risk_per_trade(100):.2f} "
+            f"| max ${config.effective_max_notional_per_order(100):.2f}"
         )
     except Exception:
-        pass
+        print(f"  Risk per trade:     {config.RISK_PER_TRADE:.0%}")
     print(f"  Stop loss:          {config.STOP_LOSS_PCT:.0%}")
     print(f"  Max drawdown halt:  {config.MAX_DRAWDOWN_PCT:.0%}")
     print(f"  Kraken max names:   {config.KRAKEN_MAX_POSITIONS} (cleanup only)")
@@ -171,9 +264,14 @@ def run():
         print("  Kraken autopilot:   off or dry-run")
     print(f"  Journal:            {config.PAPER_JOURNAL_CSV}")
 
+    if live and acct is not None:
+        if not _live_trading_checklist(acct, data):
+            ok = False
+
     if ok:
         if live:
             print("\n=== READY (LIVE): python run_all.py ===")
+            print("    (10-second abort window on first startup when live)")
         else:
             print("\n=== READY: python run_all.py ===")
     else:
