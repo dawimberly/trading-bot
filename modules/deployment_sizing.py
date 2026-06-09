@@ -90,7 +90,7 @@ def nyse_beta_scale(beta: float) -> float:
 
 def per_trade_chunk(equity: float, room: float) -> float:
     """Base 2% chunk; larger when sleeve has headroom (>5× per_trade)."""
-    per_trade = round(equity * config.RISK_PER_TRADE, 2)
+    per_trade = round(equity * config.effective_risk_per_trade(equity), 2)
     if (
         config.ADAPTIVE_CHUNK_ENABLED
         and room > 5 * per_trade

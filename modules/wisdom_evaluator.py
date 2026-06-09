@@ -17,6 +17,190 @@ from modules.wayback_sentiment import load_monthly_web_sentiment
 from modules.wisdom_journal import load_journal
 from modules.wisdom_sentiment import MODES
 
+# Paper→live switch heuristics (wisdom_journal.csv + paper_journal.csv).
+JOURNAL_EQUITY_JUMP_PCT = float(
+    os.getenv("WISDOM_JOURNAL_EQUITY_JUMP_PCT", "0.50")
+)
+JOURNAL_EQUITY_JUMP_RATIO = float(
+    os.getenv("WISDOM_JOURNAL_EQUITY_JUMP_RATIO", "50")
+)
+JOURNAL_PRE_SWITCH_MIN_EQUITY = float(
+    os.getenv("WISDOM_JOURNAL_PRE_SWITCH_MIN", "1000")
+)
+JOURNAL_MIN_EQUITY_LIVE = float(os.getenv("WISDOM_JOURNAL_MIN_EQUITY_LIVE", "50"))
+
+
+def resolve_live_only(live_only: bool | None = None) -> bool:
+    """True when evaluating the real live book (flag or PAPER_TRADING=false)."""
+    if live_only is not None:
+        return bool(live_only)
+    return not config.PAPER_TRADING
+
+
+def default_book_type(*, live_only: bool | None = None) -> str:
+    """Infer book segment from runtime config."""
+    return "paper" if not resolve_live_only(live_only) else "live"
+
+
+def default_min_equity(book_type: str | None = None) -> float | None:
+    """Live books ignore sub-min_equity rows; paper has no floor."""
+    book = book_type or default_book_type()
+    return JOURNAL_MIN_EQUITY_LIVE if book == "live" else None
+
+
+def _live_equity_cap() -> float:
+    return float(getattr(config, "SMALL_ACCOUNT_EQUITY_THRESHOLD", 500.0))
+
+
+def detect_account_switch_index(df: pd.DataFrame) -> int | None:
+    """Return iloc of the first row in the live segment (after paper→live switch)."""
+    if len(df) < 2 or "equity" not in df.columns:
+        return None
+    eq = df["equity"].astype(float)
+    live_cap = _live_equity_cap()
+    for i in range(1, len(eq)):
+        prev, cur = float(eq.iloc[i - 1]), float(eq.iloc[i])
+        if prev >= JOURNAL_PRE_SWITCH_MIN_EQUITY and cur < live_cap:
+            return i
+        if prev > 0 and cur > 0 and prev / cur >= JOURNAL_EQUITY_JUMP_RATIO:
+            return i
+        if prev > 0 and (prev - cur) / prev > JOURNAL_EQUITY_JUMP_PCT:
+            return i
+    return None
+
+
+def filter_journal(
+    df: pd.DataFrame,
+    *,
+    book_type: str | None = None,
+    min_equity: float | None = None,
+    live_only: bool | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """Keep one book's rows; split on paper→live account switch."""
+    if live_only is not None and live_only:
+        book_type = "live"
+    book_type = (book_type or default_book_type(live_only=live_only)).strip().lower()
+    if book_type not in ("live", "paper"):
+        raise ValueError(f"book_type must be 'live' or 'paper', got {book_type!r}")
+
+    if min_equity is None:
+        min_equity = default_min_equity(book_type)
+
+    meta: dict = {
+        "book_type": book_type,
+        "live_only": resolve_live_only(live_only),
+        "min_equity": min_equity,
+        "jump_threshold_pct": round(JOURNAL_EQUITY_JUMP_PCT * 100, 1),
+        "jump_ratio": JOURNAL_EQUITY_JUMP_RATIO,
+        "pre_switch_min_equity": JOURNAL_PRE_SWITCH_MIN_EQUITY,
+        "live_equity_cap": _live_equity_cap(),
+        "split_detected": False,
+    }
+
+    if df.empty:
+        return df.copy(), meta
+
+    split_idx = detect_account_switch_index(df)
+    live_cap = _live_equity_cap()
+
+    if book_type == "live":
+        if split_idx is not None:
+            seg = df.iloc[split_idx:].copy()
+            meta["split_detected"] = True
+            meta["split_reason"] = _split_reason(
+                float(df["equity"].iloc[split_idx - 1]),
+                float(df["equity"].iloc[split_idx]),
+            )
+            meta["split_at"] = str(df["timestamp"].iloc[split_idx])
+            meta["pre_split_equity"] = round(float(df["equity"].iloc[split_idx - 1]), 2)
+            meta["post_split_equity"] = round(float(df["equity"].iloc[split_idx]), 2)
+        else:
+            seg = df.loc[df["equity"].astype(float) < live_cap].copy()
+            meta["fallback"] = f"equity_below_{live_cap}"
+        if min_equity is not None:
+            seg = seg.loc[seg["equity"].astype(float) >= min_equity]
+    else:
+        if split_idx is not None:
+            seg = df.iloc[:split_idx].copy()
+            meta["split_detected"] = True
+            meta["split_reason"] = _split_reason(
+                float(df["equity"].iloc[split_idx - 1]),
+                float(df["equity"].iloc[split_idx]),
+            )
+            meta["split_at"] = str(df["timestamp"].iloc[split_idx])
+            meta["pre_split_equity"] = round(float(df["equity"].iloc[split_idx - 1]), 2)
+            meta["post_split_equity"] = round(float(df["equity"].iloc[split_idx]), 2)
+        else:
+            large = df.loc[df["equity"].astype(float) >= live_cap]
+            seg = large.copy() if not large.empty else df.copy()
+            if large.empty:
+                meta["fallback"] = "no_split_all_rows"
+
+    meta["rows_before"] = int(len(df))
+    meta["rows_after"] = int(len(seg))
+    return seg, meta
+
+
+def _split_reason(prev: float, cur: float) -> str:
+    live_cap = _live_equity_cap()
+    if prev >= JOURNAL_PRE_SWITCH_MIN_EQUITY and cur < live_cap:
+        return f"pre_switch_ge_{JOURNAL_PRE_SWITCH_MIN_EQUITY:.0f}_to_lt_{live_cap:.0f}"
+    if prev > 0 and cur > 0 and prev / cur >= JOURNAL_EQUITY_JUMP_RATIO:
+        return f"ratio_drop_{prev / cur:.1f}x"
+    if prev > 0 and (prev - cur) / prev > JOURNAL_EQUITY_JUMP_PCT:
+        return f"pct_drop_{(prev - cur) / prev * 100:.1f}%"
+    return "unknown"
+
+
+def filter_paper_journal(
+    df: pd.DataFrame,
+    *,
+    live_only: bool | None = None,
+    min_equity: float | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    """Filter paper_journal.csv to the same book segment as wisdom_journal."""
+    book_type = default_book_type(live_only=live_only)
+    return filter_journal(
+        df,
+        book_type=book_type,
+        min_equity=min_equity,
+        live_only=live_only,
+    )
+
+
+def use_small_account_sim(*, live_only: bool | None = None, start_equity: float | None = None) -> bool:
+    """Match live $100 book: 90% VTI, 1% risk, $10 max order."""
+    if not resolve_live_only(live_only):
+        return False
+    eq = start_equity if start_equity is not None else config.SMALL_ACCOUNT_BACKTEST_EQUITY
+    return float(eq) < _live_equity_cap()
+
+
+def _prepare_live_journal(
+    window_days: int,
+    *,
+    book_type: str | None = None,
+    min_equity: float | None = None,
+    live_only: bool | None = None,
+) -> tuple[pd.DataFrame, dict] | None:
+    raw = load_journal()
+    if raw.empty:
+        return None
+    filtered, segment = filter_journal(
+        raw,
+        book_type=book_type,
+        min_equity=min_equity,
+        live_only=live_only,
+    )
+    if filtered.empty:
+        return None
+    cutoff = datetime.now() - timedelta(days=window_days)
+    windowed = filtered.loc[filtered["timestamp"] >= cutoff].copy()
+    if windowed.empty:
+        return None
+    segment["window_days"] = window_days
+    return windowed, segment
+
 
 def _scorecard_path() -> str:
     return getattr(config, "WISDOM_SCORECARD_FILE", "wisdom_scorecard.json")
@@ -73,14 +257,22 @@ def _daily_equity_from_journal(df: pd.DataFrame) -> pd.Series:
     return df.groupby(df["timestamp"].dt.date)["equity"].last().astype(float)
 
 
-def live_metrics(window_days: int) -> dict | None:
-    df = load_journal()
-    if df.empty:
+def live_metrics(
+    window_days: int,
+    *,
+    book_type: str | None = None,
+    min_equity: float | None = None,
+    live_only: bool | None = None,
+) -> dict | None:
+    prepared = _prepare_live_journal(
+        window_days,
+        book_type=book_type,
+        min_equity=min_equity,
+        live_only=live_only,
+    )
+    if prepared is None:
         return None
-    cutoff = datetime.now() - timedelta(days=window_days)
-    df = df.loc[df["timestamp"] >= cutoff].copy()
-    if df.empty:
-        return None
+    df, segment = prepared
 
     daily = _daily_equity_from_journal(df)
     active_mode = df["active_mode"].iloc[-1]
@@ -102,6 +294,7 @@ def live_metrics(window_days: int) -> dict | None:
             "to_date": str(daily.index.max()),
             "start_equity": round(float(daily.iloc[0]), 2),
             "end_equity": round(float(daily.iloc[-1]), 2),
+            "journal_segment": segment,
         }
     )
     return metrics
@@ -137,10 +330,55 @@ def _prepare_daily_backtest_data(
     return data, period_start, period_end
 
 
+def _run_mode_backtest(
+    data: pd.DataFrame,
+    mode: str,
+    *,
+    small_account_sim: bool,
+) -> dict:
+    if small_account_sim:
+        from backtester import run_backtest
+
+        result = run_backtest(
+            data,
+            wisdom_mode=mode,
+            small_account=True,
+            verbose=False,
+            vti_core_pct=config.SMALL_ACCOUNT_VTI_CORE_PCT,
+        )
+        return {
+            "equity_index": result.get("equity_index", []),
+            "equity_values": result.get("equity_values", []),
+            "orders": result.get("total_orders", 0),
+            "paused_days": result.get("pause_days", 0),
+            "game_plan": config.GAME_PLAN_ENABLED,
+            "yield_gate_days": 0,
+            "cash_trims": 0,
+            "metal_trades": 0,
+            "small_account_sim": True,
+            "start": data.index[0].date(),
+            "end": data.index[-1].date(),
+        }
+
+    monthly_web = load_monthly_web_sentiment()
+    row = run_fund_backtest(
+        data,
+        monthly_web,
+        mode,
+        gap_threshold=config.WISDOM_GAP_THRESHOLD,
+    )
+    row["small_account_sim"] = False
+    return row
+
+
 def simulate_modes(
     window_days: int,
     period_start: date | None = None,
     period_end: date | None = None,
+    *,
+    live_only: bool | None = None,
+    small_account_sim: bool | None = None,
+    live_start_equity: float | None = None,
 ) -> dict[str, dict]:
     if period_end is None:
         period_end = date.today()
@@ -152,16 +390,16 @@ def simulate_modes(
         return {}
     data, period_start, period_end = prep
 
-    monthly_web = load_monthly_web_sentiment()
+    if small_account_sim is None:
+        small_account_sim = use_small_account_sim(
+            live_only=live_only,
+            start_equity=live_start_equity,
+        )
+
     results = {}
     for mode in MODES:
         try:
-            row = run_fund_backtest(
-                data,
-                monthly_web,
-                mode,
-                gap_threshold=config.WISDOM_GAP_THRESHOLD,
-            )
+            row = _run_mode_backtest(data, mode, small_account_sim=small_account_sim)
             aligned = _period_metrics_from_backtest_row(row, period_start, period_end)
             if "return_pct" in aligned:
                 results[mode] = aligned
@@ -170,19 +408,38 @@ def simulate_modes(
                     results[mode]["yield_gate_days"] = row.get("yield_gate_days", 0)
                     results[mode]["cash_trims"] = row.get("cash_trims", 0)
                     results[mode]["metal_trades"] = row.get("metal_trades", 0)
+                if row.get("small_account_sim"):
+                    results[mode]["small_account_sim"] = True
+                    results[mode]["sim_start_equity"] = config.SMALL_ACCOUNT_BACKTEST_EQUITY
+                    results[mode]["sim_vti_core_pct"] = config.SMALL_ACCOUNT_VTI_CORE_PCT
             else:
                 results[mode] = {
                     "error": aligned.get("error", "alignment failed"),
-                    "backtest_from": str(row["start"]),
-                    "backtest_to": str(row["end"]),
+                    "backtest_from": str(row.get("start", "")),
+                    "backtest_to": str(row.get("end", "")),
                 }
         except Exception as exc:
             results[mode] = {"error": str(exc)}
     return results
 
 
-def live_metrics_for_month(year: int, month: int) -> dict | None:
-    df = load_journal()
+def live_metrics_for_month(
+    year: int,
+    month: int,
+    *,
+    book_type: str | None = None,
+    min_equity: float | None = None,
+    live_only: bool | None = None,
+) -> dict | None:
+    raw = load_journal()
+    if raw.empty:
+        return None
+    df, segment = filter_journal(
+        raw,
+        book_type=book_type,
+        min_equity=min_equity,
+        live_only=live_only,
+    )
     if df.empty:
         return None
     start, end = _month_bounds(year, month)
@@ -211,6 +468,7 @@ def live_metrics_for_month(year: int, month: int) -> dict | None:
             "to_date": str(end),
             "start_equity": round(float(daily.iloc[0]), 2),
             "end_equity": round(float(daily.iloc[-1]), 2),
+            "journal_segment": segment,
         }
     )
     return metrics
@@ -254,23 +512,26 @@ def _period_metrics_from_backtest_row(row: dict, period_start: date, period_end:
     return metrics
 
 
-def simulate_modes_for_month(year: int, month: int) -> dict[str, dict]:
+def simulate_modes_for_month(
+    year: int,
+    month: int,
+    *,
+    live_only: bool | None = None,
+    small_account_sim: bool | None = None,
+) -> dict[str, dict]:
     period_start, period_end = _month_bounds(year, month)
     prep = _prepare_daily_backtest_data(period_start, period_end)
     if prep is None:
         return {}
     data, period_start, period_end = prep
 
-    monthly_web = load_monthly_web_sentiment()
+    if small_account_sim is None:
+        small_account_sim = use_small_account_sim(live_only=live_only)
+
     results = {}
     for mode in MODES:
         try:
-            row = run_fund_backtest(
-                data,
-                monthly_web,
-                mode,
-                gap_threshold=config.WISDOM_GAP_THRESHOLD,
-            )
+            row = _run_mode_backtest(data, mode, small_account_sim=small_account_sim)
             results[mode] = _period_metrics_from_backtest_row(row, period_start, period_end)
         except Exception as exc:
             results[mode] = {"error": str(exc)}
@@ -297,8 +558,17 @@ def run_monthly_rollup(year: int, month: int, force: bool = False) -> dict | Non
     if not force and state.get("last_monthly_rollup") == month_key:
         return None
 
-    live = live_metrics_for_month(year, month)
-    simulated = simulate_modes_for_month(year, month)
+    live_only = resolve_live_only()
+    book_type = default_book_type(live_only=live_only)
+    min_equity = default_min_equity(book_type)
+    live = live_metrics_for_month(
+        year,
+        month,
+        book_type=book_type,
+        min_equity=min_equity,
+        live_only=live_only,
+    )
+    simulated = simulate_modes_for_month(year, month, live_only=live_only)
     valid = {k: v for k, v in simulated.items() if "return_pct" in v}
     best_sim = max(valid.items(), key=lambda x: x[1]["return_pct"])[0] if valid else None
 
@@ -380,7 +650,11 @@ def _recommendation(live: dict | None, simulated: dict[str, dict]) -> str:
     )
 
 
-def run_evaluation(force: bool = False) -> dict | None:
+def run_evaluation(
+    force: bool = False,
+    *,
+    live_only: bool | None = None,
+) -> dict | None:
     if not config.WISDOM_EVAL_ENABLED:
         return None
 
@@ -389,18 +663,35 @@ def run_evaluation(force: bool = False) -> dict | None:
     if not force and state.get("last_eval_date") == today:
         return None
 
+    live_only = resolve_live_only(live_only)
     window = config.WISDOM_EVAL_DAYS
-    live = live_metrics(window)
+    book_type = default_book_type(live_only=live_only)
+    min_equity = default_min_equity(book_type)
+    live = live_metrics(
+        window,
+        book_type=book_type,
+        min_equity=min_equity,
+        live_only=live_only,
+    )
     period_start = period_end = None
+    live_start_equity = None
     if live:
         period_start = date.fromisoformat(str(live["from_date"]))
         period_end = date.fromisoformat(str(live["to_date"]))
-    simulated = simulate_modes(window, period_start=period_start, period_end=period_end)
+        live_start_equity = live.get("start_equity")
+    simulated = simulate_modes(
+        window,
+        period_start=period_start,
+        period_end=period_end,
+        live_only=live_only,
+        live_start_equity=live_start_equity,
+    )
     best_sim = None
     valid = {k: v for k, v in simulated.items() if "return_pct" in v}
     if valid:
         best_sim = max(valid.items(), key=lambda x: x[1]["return_pct"])[0]
 
+    journal_segment = (live or {}).get("journal_segment")
     scorecard = {
         "evaluated_at": datetime.now().isoformat(timespec="seconds"),
         "window_days": window,
@@ -410,7 +701,16 @@ def run_evaluation(force: bool = False) -> dict | None:
             "web_cache_hours": config.WEB_SENTIMENT_CACHE_HOURS,
             "game_plan_enabled": config.GAME_PLAN_ENABLED,
             "live_equity_basis": "daily_last",
+            "paper_trading": config.PAPER_TRADING,
+            "live_only": live_only,
+            "book_type": book_type,
+            "min_equity": min_equity,
+            "small_account_sim": use_small_account_sim(
+                live_only=live_only,
+                start_equity=live_start_equity,
+            ),
         },
+        "journal_segment": journal_segment,
         "live": live,
         "simulated_modes": simulated,
         "best_sim_mode": best_sim,

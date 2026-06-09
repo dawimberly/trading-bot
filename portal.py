@@ -24,6 +24,7 @@ from modules.portal_auth import authenticate, init_db, register_user
 from modules.portal_bot import bot_running, read_bot_log_tail, start_bot, stop_bot
 from modules.portal_paths import (
     has_alpaca_config,
+    read_user_env_prefs,
     user_env_path,
     user_heartbeat_path,
     user_journal_path,
@@ -251,25 +252,74 @@ def _bot_page(username: str) -> None:
             )
 
     st.divider()
-    st.markdown(
-        """
-        **What the bot does**
-        - Runs `run_all.py` with **your** Alpaca keys and isolated logs
-        - VTI core + SPY / crypto / NYSE sleeves (recommended stack)
-        - 10% max drawdown halt; small accounts auto-use 1% risk
+    prefs = read_user_env_prefs(username)
+    if prefs.get("paper"):
+        st.info(
+            "**Paper Sharpe chase** — Start bot runs the aggressive paper profile "
+            "(20% VTI, boosted SPY/crypto/NYSE, wisdom floor 1.0). "
+            "Live ~$100 stays conservative; this mode is for your paper book only."
+        )
+        st.markdown(
+            """
+            **Paper chase stack**
+            - `PAPER_CHASE_MODE` on automatically
+            - Same 24/7 loop as `run_paper_bot.py`
+            - Target: highest backtest Sharpe (aspirational 3.0; sims peak ~1.0–1.8)
+            """
+        )
+    else:
+        st.markdown(
+            """
+            **What the bot does**
+            - Runs `run_all.py` with **your** Alpaca keys and isolated logs
+            - VTI core + SPY / crypto / NYSE sleeves (recommended stack)
+            - 10% max drawdown halt; small accounts auto-use 1% risk
 
-        **Before live:** run `python scripts/account/preflight.py` with your keys in the portal.
-        """
-    )
+            **Before live:** run `python scripts/account/preflight.py` with your keys in the portal.
+            """
+        )
 
 
 def _settings_page(username: str) -> None:
+    _activate_user(username)
     st.title("Settings")
-    if st.button("Update Alpaca keys"):
-        user_env_path(username).unlink(missing_ok=True)
-        st.rerun()
-    if user_env_path(username).is_file():
-        st.caption(f"Config file: `{user_env_path(username)}`")
+    prefs = read_user_env_prefs(username)
+    mode = "Paper" if prefs["paper"] else "Live"
+    if not prefs["paper"]:
+        st.warning("Live keys are saved. Use paper keys + **Paper trading** for testing.")
+    st.caption(f"Current mode: **{mode}** · Config: `{user_env_path(username)}`")
+    st.subheader("Edit Alpaca keys")
+    with st.form("edit_alpaca"):
+        key = st.text_input("API Key ID", type="password")
+        secret = st.text_input("API Secret", type="password")
+        paper = st.checkbox("Paper trading", value=prefs["paper"])
+        allow_live = st.checkbox(
+            "Allow live trading (ALLOW_LIVE_TRADING=yes)",
+            value=prefs["allow_live"],
+        )
+        st.caption("Telegram alerts (optional — leave blank to clear)")
+        tg_token = st.text_input("Telegram bot token", type="password")
+        tg_chat = st.text_input("Telegram chat ID")
+        if st.form_submit_button("Save keys", type="primary"):
+            if not key or not secret:
+                st.error("API Key ID and Secret are required.")
+            elif not paper and not allow_live:
+                st.error("Enable paper trading or allow live trading.")
+            else:
+                write_user_env(
+                    username,
+                    api_key=key,
+                    api_secret=secret,
+                    paper=paper,
+                    allow_live=allow_live,
+                    telegram_token=tg_token,
+                    telegram_chat=tg_chat,
+                )
+                if bot_running(username):
+                    stop_bot(username)
+                    st.info("Stopped bot — start it again from **Bot** to use new keys.")
+                st.success("Alpaca credentials updated.")
+                st.rerun()
     journal = user_journal_path(username)
     if journal.is_file():
         try:

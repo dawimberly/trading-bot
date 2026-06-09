@@ -65,8 +65,9 @@ def probe_kraken_capabilities(*, force: bool = False) -> dict:
         result["crypto_error"] = str(exc)[:200]
 
     try:
+        # VOO has no xStock pair; SPYxUSD is the standard probe pair.
         trade.create_order(
-            pair="VOOxUSD",
+            pair="SPYxUSD",
             side="buy",
             ordertype="market",
             volume="0.01",

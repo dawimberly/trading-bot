@@ -9,14 +9,16 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PORTAL_DATA = PROJECT_ROOT / "data" / "portal"
-DB_PATH = PORTAL_DATA / "users.db"
+from modules.portal_paths import PORTAL_ROOT
+
+
+def db_path() -> Path:
+    return PORTAL_ROOT / "users.db"
 
 
 def _connect() -> sqlite3.Connection:
-    PORTAL_DATA.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    PORTAL_ROOT.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path())
     conn.row_factory = sqlite3.Row
     return conn
 

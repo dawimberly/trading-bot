@@ -13,9 +13,14 @@ backtesting
 # Kraken — scripts/exchange/
 python-kraken-sdk
 
-# Dashboard — dashboard.py
+# Dashboard — dashboard.py (Streamlit backup) + dashboard_app.py (desktop)
 streamlit
 plotly
+customtkinter
+matplotlib
+pillow
+pystray
+# Optional: pip install pyinstaller  — build with dashboard.spec
 
 # Felix transcript sync (optional — scripts/maintenance/sync_felix_transcripts.py)
 # yt-dlp

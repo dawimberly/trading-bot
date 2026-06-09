@@ -1,4 +1,4 @@
-"""Felix & Friends YouTube transcripts: sync, store, optional wisdom blend."""
+"""YouTube creator transcripts (Felix, Andrei Jikh, …): sync, store, wisdom/social blend."""
 
 from __future__ import annotations
 
@@ -13,21 +13,22 @@ import config
 from modules.sentiment_keywords import score_text_sentiment
 
 ROOT = Path(__file__).resolve().parents[1]
-SYNC_STATE_FILE = "sentiment/sources/youtube/felix_and_friends/sync_state.json"
 
 
-def _manifest_path() -> Path:
+def _manifest_path(channel_id: str | None = None) -> Path:
+    if channel_id:
+        return ROOT / config.youtube_manifest_file(channel_id)
     return ROOT / config.FELIX_MANIFEST_FILE
 
 
-def _transcripts_dir() -> Path:
-    path = ROOT / config.FELIX_TRANSCRIPTS_DIR
+def _transcripts_dir(channel_id: str) -> Path:
+    path = ROOT / config.youtube_transcripts_dir(channel_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def _sync_state_path() -> Path:
-    path = ROOT / SYNC_STATE_FILE
+def _sync_state_path(channel_id: str) -> Path:
+    path = ROOT / config.youtube_channel_dir(channel_id) / "sync_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -44,8 +45,8 @@ def _parse_published(raw) -> datetime | None:
         return None
 
 
-def load_manifest() -> list[dict]:
-    path = _manifest_path()
+def load_manifest(channel_id: str | None = None) -> list[dict]:
+    path = _manifest_path(channel_id)
     if not path.is_file():
         return []
     rows: list[dict] = []
@@ -53,7 +54,21 @@ def load_manifest() -> list[dict]:
         for line in f:
             line = line.strip()
             if line:
-                rows.append(json.loads(line))
+                row = json.loads(line)
+                if channel_id and "channel_id" not in row:
+                    row["channel_id"] = channel_id
+                rows.append(row)
+    return rows
+
+
+def load_all_manifests() -> list[dict]:
+    rows: list[dict] = []
+    for spec in config.youtube_channel_specs():
+        for row in load_manifest(spec["id"]):
+            tagged = dict(row)
+            tagged.setdefault("channel_id", spec["id"])
+            tagged.setdefault("channel_name", spec["name"])
+            rows.append(tagged)
     return rows
 
 
@@ -89,44 +104,31 @@ def _row_as_of(rows: list[dict], ts) -> dict | None:
     return eligible[0][1]
 
 
-def felix_sentiment_as_of(ts, max_age_days: int | None = None) -> dict | None:
-    """Felix mood available at a historical bar (no lookahead past ts)."""
-    if not config.FELIX_SENTIMENT_ENABLED:
-        return None
-    rows = load_manifest()
-    row = _row_as_of(rows, ts)
-    if not row:
-        return None
-    window = (
-        max_age_days
-        if max_age_days is not None
-        else config.FELIX_SENTIMENT_MAX_AGE_DAYS
-    )
-    if window > 0:
-        bar = pd.Timestamp(ts)
-        if bar.tz is not None:
-            bar = bar.tz_convert(None)
-        pub_dt = _parse_published(row.get("published"))
-        if pub_dt is None and row.get("synced_at"):
-            try:
-                pub_dt = datetime.fromisoformat(
-                    str(row["synced_at"]).replace("Z", "+00:00")
-                )
-            except ValueError:
-                pub_dt = None
-        if pub_dt:
-            pub_naive = pub_dt.replace(tzinfo=None) if pub_dt.tzinfo else pub_dt
-            age_days = (bar.to_pydatetime() - pub_naive).days
-            if age_days > window:
-                return None
-    return row
+def _within_age(row: dict, *, max_age_days: int, ref: datetime) -> bool:
+    if max_age_days <= 0:
+        return True
+    pub_dt = _parse_published(row.get("published"))
+    if pub_dt is None and row.get("synced_at"):
+        try:
+            pub_dt = datetime.fromisoformat(
+                str(row["synced_at"]).replace("Z", "+00:00")
+            )
+        except ValueError:
+            pub_dt = None
+    if not pub_dt:
+        return True
+    pub_naive = pub_dt.replace(tzinfo=None) if pub_dt.tzinfo else pub_dt
+    ref_naive = ref.replace(tzinfo=None) if ref.tzinfo else ref
+    return (ref_naive - pub_naive).days <= max_age_days
 
 
-def latest_felix_sentiment(max_age_days: int | None = None) -> dict | None:
-    """Newest manifest entry within max_age_days (default config)."""
-    if not config.FELIX_SENTIMENT_ENABLED:
-        return None
-    rows = load_manifest()
+def _latest_for_channel(
+    channel_id: str,
+    max_age_days: int | None = None,
+    *,
+    ref: datetime | None = None,
+) -> dict | None:
+    rows = load_manifest(channel_id)
     if not rows:
         return None
     rows.sort(key=lambda r: r.get("published") or "", reverse=True)
@@ -136,18 +138,105 @@ def latest_felix_sentiment(max_age_days: int | None = None) -> dict | None:
         if max_age_days is not None
         else config.FELIX_SENTIMENT_MAX_AGE_DAYS
     )
-    pub_dt = _parse_published(latest.get("published"))
-    if pub_dt and window > 0:
-        now = datetime.now(pub_dt.tzinfo) if pub_dt.tzinfo else datetime.now()
-        pub_naive = pub_dt.replace(tzinfo=None) if pub_dt.tzinfo else pub_dt
-        age_days = (now.replace(tzinfo=None) - pub_naive).days
-        if age_days > window:
-            return None
+    ref_dt = ref or datetime.now()
+    if not _within_age(latest, max_age_days=window, ref=ref_dt):
+        return None
+    latest = dict(latest)
+    latest.setdefault("channel_id", channel_id)
     return latest
 
 
+def _blend_channel_rows(
+    rows: list[dict],
+    specs: list[dict],
+) -> dict | None:
+    if not rows:
+        return None
+    by_id = {s["id"]: s for s in specs}
+    parts: list[tuple[float, float, dict]] = []
+    for row in rows:
+        cid = row.get("channel_id")
+        spec = by_id.get(cid)
+        if spec is None or row.get("sentiment") is None:
+            continue
+        parts.append((float(row["sentiment"]), float(spec["weight"]), row))
+    if not parts:
+        return None
+    wsum = sum(w for _, w, _ in parts) or 1.0
+    score = round(sum(s * w for s, w, _ in parts) / wsum, 4)
+    newest = max(
+        parts,
+        key=lambda p: p[2].get("published") or p[2].get("synced_at") or "",
+    )[2]
+    return {
+        "sentiment": score,
+        "video_id": newest.get("video_id"),
+        "title": newest.get("title"),
+        "published": newest.get("published"),
+        "channel_id": newest.get("channel_id"),
+        "channel_name": newest.get("channel_name"),
+        "channels": [
+            {
+                "channel_id": r.get("channel_id"),
+                "channel_name": r.get("channel_name") or by_id.get(r.get("channel_id"), {}).get("name"),
+                "video_id": r.get("video_id"),
+                "title": r.get("title"),
+                "sentiment": r.get("sentiment"),
+                "weight": by_id.get(r.get("channel_id"), {}).get("weight"),
+            }
+            for _, _, r in parts
+        ],
+    }
+
+
+def felix_sentiment_as_of(ts, max_age_days: int | None = None) -> dict | None:
+    """Creator mood available at a historical bar (no lookahead past ts)."""
+    if not config.FELIX_SENTIMENT_ENABLED:
+        return None
+    specs = config.youtube_channel_specs()
+    if not specs:
+        return None
+    window = (
+        max_age_days
+        if max_age_days is not None
+        else config.FELIX_SENTIMENT_MAX_AGE_DAYS
+    )
+    bar = pd.Timestamp(ts)
+    if bar.tz is not None:
+        bar = bar.tz_convert(None)
+    ref = bar.to_pydatetime()
+    per_channel: list[dict] = []
+    for spec in specs:
+        row = _row_as_of(load_manifest(spec["id"]), ts)
+        if not row:
+            continue
+        if not _within_age(row, max_age_days=window, ref=ref):
+            continue
+        tagged = dict(row)
+        tagged["channel_id"] = spec["id"]
+        tagged["channel_name"] = spec["name"]
+        per_channel.append(tagged)
+    return _blend_channel_rows(per_channel, specs)
+
+
+def latest_felix_sentiment(max_age_days: int | None = None) -> dict | None:
+    """Weighted blend of newest transcript per registered YouTube channel."""
+    if not config.FELIX_SENTIMENT_ENABLED:
+        return None
+    specs = config.youtube_channel_specs()
+    if not specs:
+        return None
+    per_channel: list[dict] = []
+    for spec in specs:
+        row = _latest_for_channel(spec["id"], max_age_days)
+        if row:
+            row["channel_name"] = spec["name"]
+            per_channel.append(row)
+    return _blend_channel_rows(per_channel, specs)
+
+
 def apply_felix_web_blend(headline_web: float | None) -> tuple[float | None, dict | None]:
-    """Blend headline web mood with latest Felix transcript keyword sentiment."""
+    """Blend headline web mood with latest creator transcript keyword sentiment."""
     if not config.FELIX_SENTIMENT_ENABLED:
         return headline_web, None
     felix = latest_felix_sentiment()
@@ -162,6 +251,9 @@ def apply_felix_web_blend(headline_web: float | None) -> tuple[float | None, dic
         "published": felix.get("published"),
         "sentiment": felix_score,
         "blend_weight": w,
+        "channel_id": felix.get("channel_id"),
+        "channel_name": felix.get("channel_name"),
+        "channels": felix.get("channels"),
     }
     if headline_web is None:
         meta["blended_web"] = felix_score
@@ -226,7 +318,6 @@ def _list_videos(channel_url: str, max_videos: int) -> list[dict]:
 
 
 def _fetch_upload_date(video_id: str) -> str | None:
-    """YYYYMMDD from yt-dlp metadata (flat playlist omits dates)."""
     import sys
 
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -260,16 +351,40 @@ def _fetch_transcript(video_id: str) -> str | None:
         return None
 
 
-def sync_felix_transcripts(
+def _resolve_channel_spec(
+    *,
+    channel_id: str | None = None,
+    channel_url: str | None = None,
+) -> dict | None:
+    specs = config.youtube_channel_specs()
+    if channel_id:
+        for spec in specs:
+            if spec["id"] == channel_id:
+                return spec
+        return None
+    if channel_url:
+        for spec in specs:
+            if spec["url"].rstrip("/") == channel_url.rstrip("/"):
+                return spec
+        return {"id": "custom", "name": "Custom", "url": channel_url, "weight": 1.0}
+    return None
+
+
+def sync_channel_transcripts(
+    channel_id: str,
     *,
     max_videos: int | None = None,
     channel_url: str | None = None,
 ) -> dict:
-    """Pull new channel videos + captions into sentiment/sources/."""
+    """Pull new videos + captions for one registered channel."""
+    spec = _resolve_channel_spec(channel_id=channel_id, channel_url=channel_url)
+    if not spec:
+        return {"ok": False, "error": f"unknown channel: {channel_id}"}
+    cid = spec["id"]
     max_n = max_videos if max_videos is not None else config.FELIX_SYNC_MAX_VIDEOS
-    channel = channel_url or config.FELIX_YOUTUBE_CHANNEL_URL
-    transcripts_dir = _transcripts_dir()
-    manifest_path = _manifest_path()
+    channel = channel_url or spec["url"]
+    transcripts_dir = _transcripts_dir(cid)
+    manifest_path = _manifest_path(cid)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
 
     known = _existing_ids(manifest_path)
@@ -301,6 +416,8 @@ def sync_felix_transcripts(
                 published = _fetch_upload_date(vid)
             row = {
                 "video_id": vid,
+                "channel_id": cid,
+                "channel_name": spec.get("name"),
                 "title": entry.get("title", ""),
                 "published": published,
                 "synced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -314,12 +431,14 @@ def sync_felix_transcripts(
 
     result = {
         "ok": True,
+        "channel_id": cid,
+        "channel_name": spec.get("name"),
         "added": added,
         "skipped": skipped,
         "manifest": str(manifest_path.relative_to(ROOT)),
         "errors": errors,
     }
-    with open(_sync_state_path(), "w", encoding="utf-8") as f:
+    with open(_sync_state_path(cid), "w", encoding="utf-8") as f:
         json.dump(
             {
                 "last_sync_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -331,51 +450,108 @@ def sync_felix_transcripts(
     return result
 
 
-def backfill_manifest_published_dates() -> dict:
+def sync_felix_transcripts(
+    *,
+    max_videos: int | None = None,
+    channel_url: str | None = None,
+    channel_id: str | None = None,
+) -> dict:
+    """Pull new channel videos + captions into sentiment/sources/."""
+    if channel_id or channel_url:
+        spec = _resolve_channel_spec(channel_id=channel_id, channel_url=channel_url)
+        if spec and spec["id"] != "custom":
+            return sync_channel_transcripts(
+                spec["id"], max_videos=max_videos, channel_url=channel_url
+            )
+        if channel_url:
+            return sync_channel_transcripts(
+                "felix_and_friends",
+                max_videos=max_videos,
+                channel_url=channel_url,
+            )
+
+    specs = config.youtube_channel_specs()
+    if not specs:
+        return {"ok": False, "error": "no youtube channels configured"}
+    results = [
+        sync_channel_transcripts(spec["id"], max_videos=max_videos)
+        for spec in specs
+    ]
+    return {
+        "ok": all(r.get("ok") for r in results),
+        "added": sum(r.get("added", 0) for r in results),
+        "skipped": sum(r.get("skipped", 0) for r in results),
+        "channels": results,
+    }
+
+
+def backfill_manifest_published_dates(channel_id: str | None = None) -> dict:
     """Fill missing published (YYYYMMDD) on existing manifest rows."""
-    manifest_path = _manifest_path()
-    if not manifest_path.is_file():
-        return {"ok": False, "error": "manifest missing"}
-    rows: list[dict] = []
+    targets = (
+        [channel_id]
+        if channel_id
+        else [s["id"] for s in config.youtube_channel_specs()]
+    )
+    total = 0
     updated = 0
-    with open(manifest_path, encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                rows.append(json.loads(line))
-    for row in rows:
-        if row.get("published"):
+    for cid in targets:
+        manifest_path = _manifest_path(cid)
+        if not manifest_path.is_file():
             continue
-        vid = row.get("video_id")
-        if not vid:
-            continue
-        pub = _fetch_upload_date(vid)
-        if pub:
-            row["published"] = pub
-            updated += 1
-    with open(manifest_path, "w", encoding="utf-8") as f:
+        rows: list[dict] = []
+        with open(manifest_path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    rows.append(json.loads(line))
         for row in rows:
-            f.write(json.dumps(row) + "\n")
-    return {"ok": True, "total": len(rows), "updated": updated}
+            if row.get("published"):
+                continue
+            vid = row.get("video_id")
+            if not vid:
+                continue
+            pub = _fetch_upload_date(vid)
+            if pub:
+                row["published"] = pub
+                updated += 1
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            for row in rows:
+                f.write(json.dumps(row) + "\n")
+        total += len(rows)
+    return {"ok": True, "total": total, "updated": updated}
 
 
 def maybe_sync_felix_transcripts(force: bool = False) -> dict | None:
     """Run channel sync when FELIX_SYNC_ENABLED and interval elapsed."""
     if not config.FELIX_SYNC_ENABLED:
         return None
-    state_path = _sync_state_path()
-    if not force and state_path.is_file():
-        try:
-            state = json.loads(state_path.read_text(encoding="utf-8"))
-            last = state.get("last_sync_at")
-            if last:
+    specs = config.youtube_channel_specs()
+    if not specs:
+        return None
+    if not force:
+        due = False
+        for spec in specs:
+            state_path = _sync_state_path(spec["id"])
+            if not state_path.is_file():
+                due = True
+                break
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+                last = state.get("last_sync_at")
+                if not last:
+                    due = True
+                    break
                 last_dt = datetime.fromisoformat(last.replace("Z", "+00:00"))
                 age_h = (
                     datetime.now(timezone.utc) - last_dt.astimezone(timezone.utc)
                 ).total_seconds() / 3600
-                if age_h < config.FELIX_SYNC_INTERVAL_HOURS:
-                    return None
-        except (json.JSONDecodeError, OSError, ValueError):
-            pass
+                if age_h >= config.FELIX_SYNC_INTERVAL_HOURS:
+                    due = True
+                    break
+            except (json.JSONDecodeError, OSError, ValueError):
+                due = True
+                break
+        if not due:
+            return None
     try:
         return sync_felix_transcripts()
     except FileNotFoundError:

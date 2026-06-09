@@ -19,17 +19,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import config
 from modules.alpaca_executor import get_trading_client
+from modules.wisdom_evaluator import filter_paper_journal, resolve_live_only
 
 
 def _sim_notional(equity: float, cash: float | None = None) -> float:
     """Backtest-style per-trade notional (min risk cap, max order, cash headroom)."""
     base = cash if cash is not None else equity
-    raw = min(
-        equity * config.RISK_PER_TRADE,
-        config.MAX_NOTIONAL_PER_ORDER,
-        base * 0.95,
-    )
-    return round(max(config.MIN_NOTIONAL, raw), 2)
+    risk = config.effective_risk_per_trade(equity)
+    max_order = config.effective_max_notional_per_order(equity)
+    min_n = config.effective_min_notional(equity)
+    raw = min(equity * risk, max_order, base * 0.95)
+    return round(max(min_n, raw), 2)
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -72,12 +72,21 @@ def _fetch_filled_orders(client, start: datetime, end: datetime) -> list:
 def _load_journal_signals(
     period_start: date,
     period_end: date,
+    *,
+    live_only: bool | None = None,
+    min_equity: float | None = None,
 ) -> pd.DataFrame:
     path = Path(config.PAPER_JOURNAL_CSV)
     if not path.exists():
         return pd.DataFrame()
     df = pd.read_csv(path)
     df["ts"] = pd.to_datetime(df["timestamp"])
+    live_only = resolve_live_only(live_only)
+    df, _segment = filter_paper_journal(
+        df,
+        live_only=live_only,
+        min_equity=min_equity,
+    )
     mask = (df["ts"].dt.date >= period_start) & (df["ts"].dt.date <= period_end)
     events = df.loc[mask & df["event"].isin(["signal", "exit"])].copy()
     events["symbol_norm"] = events["symbol"].astype(str).map(_normalize_symbol)
@@ -207,6 +216,8 @@ def build_reconciliation_report(
     period_start: date | None = None,
     period_end: date | None = None,
     match_minutes: int = 30,
+    live_only: bool | None = None,
+    min_equity: float | None = None,
 ) -> dict:
     window_days = window_days or config.WISDOM_EVAL_DAYS
     if period_end is None:
@@ -214,11 +225,18 @@ def build_reconciliation_report(
     if period_start is None:
         period_start = period_end - timedelta(days=window_days)
 
-    signals = _load_journal_signals(period_start, period_end)
+    live_only = resolve_live_only(live_only)
+    signals = _load_journal_signals(
+        period_start,
+        period_end,
+        live_only=live_only,
+        min_equity=min_equity,
+    )
     trade_signals = signals.loc[signals["event"] == "signal"] if not signals.empty else signals
 
     report: dict = {
         "window": {"from": str(period_start), "to": str(period_end)},
+        "live_only": live_only,
         "signal_count": int(len(trade_signals)),
         "exit_events": int((signals["event"] == "exit").sum()) if not signals.empty else 0,
         "matched_trades": 0,

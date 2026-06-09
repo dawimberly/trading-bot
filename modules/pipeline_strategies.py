@@ -332,8 +332,17 @@ def _spy_market_up_signal(data, symbol, ma_window):
 
 
 def _holds_symbol(executor, symbol):
+    target = config.normalize_symbol(symbol)
+    if hasattr(executor, "portfolio"):
+        for sym, qty in executor.portfolio.positions.items():
+            if config.normalize_symbol(sym) == target and float(qty) > 0:
+                return True
+        return False
     try:
-        return any(p.symbol == symbol for p in executor.client.get_all_positions())
+        return any(
+            config.normalize_symbol(p.symbol) == target
+            for p in executor.client.get_all_positions()
+        )
     except Exception:
         return False
 

@@ -47,6 +47,18 @@ class AlpacaExecutor:
     def set_wisdom_sizing_multiplier(self, multiplier: float = 1.0) -> None:
         self._wisdom_sizing_multiplier = float(multiplier)
 
+    def set_dynamic_sleeve_caps(self, caps: dict[str, float] | None) -> None:
+        """Per-cycle cap overrides from get_dynamic_sleeve_caps (vol scaling)."""
+        self._dynamic_sleeve_caps = dict(caps) if caps else None
+
+    def _sleeve_cap_pct(self, key: str, base_pct: float) -> float:
+        caps = getattr(self, "_dynamic_sleeve_caps", None)
+        if caps and key in caps:
+            return caps[key]
+        if key == "vti_core":
+            return config.vti_core_allocation_pct()
+        return config.effective_sleeve_cap(base_pct)
+
     def _account_equity(self) -> float:
         return float(self._get_account().equity)
 
@@ -260,13 +272,13 @@ class AlpacaExecutor:
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
-        raw = round(equity * config.RISK_PER_TRADE, 2)
+        raw = round(equity * config.effective_risk_per_trade(equity), 2)
         capped = min(raw, self._max_notional(), round(cash * 0.95, 2))
         return self._apply_sizing_multiplier(max(self._min_notional(), capped))
 
     def compute_crypto_notional(self):
         raw = self._compute_capped_notional(
-            config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
+            self._sleeve_cap_pct("crypto", config.CRYPTO_SLEEVE_CAP_PCT),
             self.crypto_sleeve_value(),
             "crypto",
         )
@@ -276,7 +288,7 @@ class AlpacaExecutor:
 
     def compute_nyse_notional(self):
         return self._compute_capped_notional(
-            config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
+            self._sleeve_cap_pct("nyse", config.NYSE_SLEEVE_CAP_PCT),
             self.nyse_sleeve_value(),
             "nyse",
         )
@@ -286,7 +298,7 @@ class AlpacaExecutor:
 
     def compute_spy_notional(self):
         base = self._compute_capped_notional(
-            config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            self._sleeve_cap_pct("spy", config.SPY_SLEEVE_CAP_PCT),
             self.spy_sleeve_value(),
             "spy",
         )
@@ -306,17 +318,17 @@ class AlpacaExecutor:
         snap = {
             "equity": equity,
             "spy_value": spy_v,
-            "spy_cap": equity * config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            "spy_cap": equity * self._sleeve_cap_pct("spy", config.SPY_SLEEVE_CAP_PCT),
             "crypto_value": crypto_v,
-            "crypto_cap": equity * config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
+            "crypto_cap": equity * self._sleeve_cap_pct("crypto", config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse_value": nyse_v,
-            "nyse_cap": equity * config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
+            "nyse_cap": equity * self._sleeve_cap_pct("nyse", config.NYSE_SLEEVE_CAP_PCT),
         }
         if config.vti_core_enabled():
             from modules.vti_core import vti_core_value
 
             snap["vti_core_value"] = vti_core_value(self)
-            snap["vti_core_cap"] = equity * config.vti_core_allocation_pct()
+            snap["vti_core_cap"] = equity * self._sleeve_cap_pct("vti_core", 0.0)
         if config.metal_sleeve_enabled():
             snap["metal_value"] = metal_v
             snap["metal_cap"] = equity * config.METAL_SLEEVE_CAP_PCT

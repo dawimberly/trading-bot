@@ -105,6 +105,8 @@ def position_below_cost(executor, symbol: str) -> bool:
     pos = executor._find_position(symbol)
     if pos is None:
         return False
+    if isinstance(pos, tuple):
+        return False
     entry = float(pos.avg_entry_price or 0)
     current = float(pos.current_price or 0)
     if entry <= 0 or current <= 0:

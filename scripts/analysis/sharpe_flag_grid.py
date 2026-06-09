@@ -77,9 +77,10 @@ def _v(name: str, label: str, **overrides) -> Variant:
 
 
 VARIANTS = [
-    _v("baseline", "current_dynamic (all opts off)"),
+    _v("baseline", "80/20 VTI — all opts off (live today)"),
     _v("plus_overlap", "+NYSE overlap only", NYSE_OVERLAP_FILTER_ENABLED=True),
     _v("plus_spy_exit", "+SPY MA exit only", SPY_EXIT_ON_MA_BREAK=True),
+    _v("plus_adaptive", "+adaptive chunk only", ADAPTIVE_CHUNK_ENABLED=True),
     _v(
         "plus_adaptive_cofire",
         "+adaptive chunk + co-fire only",
@@ -87,6 +88,32 @@ VARIANTS = [
         COFIRE_BUDGET_ENABLED=True,
     ),
     _v("plus_beta", "+NYSE beta scaling only", NYSE_BETA_SCALING_ENABLED=True),
+    _v(
+        "rec_step1",
+        "recommended step 1: +overlap",
+        NYSE_OVERLAP_FILTER_ENABLED=True,
+    ),
+    _v(
+        "rec_step2",
+        "recommended step 2: +overlap +adaptive",
+        NYSE_OVERLAP_FILTER_ENABLED=True,
+        ADAPTIVE_CHUNK_ENABLED=True,
+    ),
+    _v(
+        "rec_step3",
+        "recommended step 3: +overlap +adaptive +cofire",
+        NYSE_OVERLAP_FILTER_ENABLED=True,
+        ADAPTIVE_CHUNK_ENABLED=True,
+        COFIRE_BUDGET_ENABLED=True,
+    ),
+    _v(
+        "rec_full",
+        "recommended full: +overlap +adaptive +cofire +SPY exit",
+        NYSE_OVERLAP_FILTER_ENABLED=True,
+        ADAPTIVE_CHUNK_ENABLED=True,
+        COFIRE_BUDGET_ENABLED=True,
+        SPY_EXIT_ON_MA_BREAK=True,
+    ),
     _v(
         "combo_overlap_spy",
         "+overlap + SPY MA exit",
@@ -101,6 +128,8 @@ VARIANTS = [
         COFIRE_BUDGET_ENABLED=True,
     ),
 ]
+
+VTI_CORE_PCT = 0.80
 
 
 @contextlib.contextmanager
@@ -134,6 +163,7 @@ def run_variant(data, variant: Variant, window: str, monthly_web) -> dict:
             wisdom_mode="dynamic",
             monthly_web=monthly_web,
             track_metrics=True,
+            vti_core_pct=VTI_CORE_PCT,
         )
     row["variant"] = variant.name
     row["variant_label"] = variant.label
@@ -146,7 +176,9 @@ def write_report(all_rows: list[dict]) -> None:
     baseline = {r["window"]: r["sharpe"] for r in all_rows if r["variant"] == "baseline"}
 
     lines = [
-        "# Sharpe Flag Grid (current_dynamic + one-at-a-time)",
+        f"# Sharpe Flag Grid (80/20 VTI + current_dynamic)",
+        "",
+        f"VTI core: {VTI_CORE_PCT:.0%} passive | active sleeves: {1 - VTI_CORE_PCT:.0%}",
         "",
         f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         "",
@@ -181,7 +213,7 @@ def write_report(all_rows: list[dict]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sharpe flag grid on current_dynamic")
-    parser.add_argument("--days", type=int, nargs="+", default=[500, 1000])
+    parser.add_argument("--days", type=int, nargs="+", default=[365, 500])
     parser.add_argument("--refresh", action="store_true")
     args = parser.parse_args()
 

@@ -5,6 +5,7 @@ Preflight: python scripts/account/preflight.py
 """
 
 import datetime
+import os
 import time
 import traceback
 
@@ -32,7 +33,11 @@ from modules.spacex_ipo_listing_monitor import (
     get_spacex_ipo_listing_status,
 )
 from modules.felix_sentiment import maybe_sync_felix_transcripts
-from modules.social_sleeve import run_social_sleeve_cycle, social_paper_available
+from modules.social_sleeve import (
+    get_social_alpaca_credentials,
+    run_social_sleeve_cycle,
+    social_paper_available,
+)
 from modules.vti_core import rebalance_vti_core, vti_core_value
 from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
 from modules.kraken_autopilot import format_autopilot_line, run_kraken_autopilot
@@ -53,6 +58,18 @@ from modules.scan_schedule import (
 )
 
 pair_cooldown = {}
+
+
+def _make_executor() -> AlpacaExecutor:
+    """Paper chase can use isolated PAPER_APCA_* research book when configured."""
+    if (
+        config.paper_chase_mode_enabled()
+        and os.getenv("PAPER_CHASE_USE_RESEARCH_KEYS", "").lower() in ("1", "true", "yes")
+    ):
+        creds = get_social_alpaca_credentials()
+        if creds:
+            return AlpacaExecutor(paper=True, credentials_fn=lambda: creds)
+    return AlpacaExecutor()
 refresh_scheduler = RefreshScheduler()
 risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
 portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
@@ -60,6 +77,7 @@ _startup_reconciled = False
 _startup_rebalanced = False
 _macro_daily_bootstrapped = False
 _last_cycle_schedule = None
+_live_startup_confirmed = False
 
 
 def _gap_wide(gap) -> bool:
@@ -204,6 +222,8 @@ def _write_heartbeat(
     scan_schedule=None,
     social_sleeve=None,
     vti_core=None,
+    sleeve_caps=None,
+    dynamic_vol_score=None,
 ):
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
@@ -213,7 +233,8 @@ def _write_heartbeat(
         "crypto_trades_last_cycle": crypto_trades,
         "equity_trades_last_cycle": equity_trades,
         "spy_trades_last_cycle": spy_trades,
-        "sleeve_caps": {
+        "sleeve_caps": sleeve_caps
+        or {
             "vti_core": config.vti_core_allocation_pct(),
             "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
@@ -226,6 +247,8 @@ def _write_heartbeat(
         "halted": halted,
         "paper": config.PAPER_TRADING,
     }
+    if dynamic_vol_score is not None:
+        payload["dynamic_vol_score"] = round(float(dynamic_vol_score), 6)
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
@@ -303,7 +326,7 @@ def _write_heartbeat(
 def main():
     global _last_equity, _last_cycle_schedule
     now_ts = datetime.datetime.now()
-    executor = AlpacaExecutor()
+    executor = _make_executor()
     schedule = equity_scan_state(executor.client, now_ts)
     _last_cycle_schedule = schedule
     market_open = refresh_scheduler.sync(
@@ -317,6 +340,7 @@ def main():
     account = executor._get_account()
     equity = float(account.equity)
     cash = float(account.cash)
+    config.configure_account_profile(equity)
     _last_equity = equity
 
     prev_halted = risk_manager.halted
@@ -382,7 +406,7 @@ def main():
         elif felix_sync.get("error"):
             print(f"--- Felix transcript sync skipped: {felix_sync['error']} ---")
 
-    wisdom = resolve_wisdom_regime(data)
+    wisdom = config.apply_paper_wisdom_floor(resolve_wisdom_regime(data))
     regime = wisdom["regime"]
     vol = wisdom["volatility"]
     if wisdom.get("felix_video_id"):
@@ -409,6 +433,23 @@ def main():
 
     if hasattr(executor, "set_wisdom_sizing_multiplier"):
         executor.set_wisdom_sizing_multiplier(wisdom.get("sizing_multiplier", 1.0))
+
+    from modules.market_context import cross_asset_vol_score
+
+    vol_score = cross_asset_vol_score(data)
+    sleeve_cap_pcts = None
+    if config.DYNAMIC_SLEEVE_CAPS_ENABLED:
+        from modules.fund_config import get_dynamic_sleeve_caps
+
+        sleeve_cap_pcts = get_dynamic_sleeve_caps(vol_score, equity)
+        executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
+        if vol_score > float(os.getenv("DYNAMIC_SLEEVE_VOL_ELEVATED", "0.018")):
+            print(
+                f"--- Dynamic sleeve caps: vol={vol_score:.4f} "
+                f"cash={sleeve_cap_pcts.get('cash_buffer', 0):.1%} ---"
+            )
+    elif hasattr(executor, "set_dynamic_sleeve_caps"):
+        executor.set_dynamic_sleeve_caps(None)
     if schedule.get("crypto_only"):
         gp_signals = {"ok": True, "stress": False, "yield_gate": False}
     else:
@@ -787,6 +828,8 @@ def main():
         scan_schedule=schedule,
         social_sleeve=social_result,
         vti_core=vti_result,
+        sleeve_caps=sleeve_cap_pcts,
+        dynamic_vol_score=vol_score if config.DYNAMIC_SLEEVE_CAPS_ENABLED else None,
     )
 
     wisdom_journal.log_cycle(
@@ -848,6 +891,14 @@ def _print_startup_banner():
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
     print(f"--- Alpaca mode: {mode} (signals / paper execution) ---")
+    if config.paper_aggressive_context():
+        print(
+            f"--- Paper SHARPE CHASE: {config.PAPER_VTI_CORE_PCT:.0%} VTI | "
+            f"active boost x{config.PAPER_ACTIVE_SLEEVE_BOOST} | "
+            f"wisdom floor x{config.PAPER_WISDOM_SIZING_FLOOR} | "
+            f"crypto vol-only={config.effective_crypto_vol_only()} | "
+            f"cycle {config.CYCLE_INTERVAL_SEC}s | refresh {config.REFRESH_INTERVAL}s ---"
+        )
     _print_kraken_banner()
     alloc = config.fund_allocation_pct()
     if config.vti_core_enabled():
@@ -878,10 +929,16 @@ def _print_startup_banner():
                 f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'} ---"
             )
     config.print_recommended_stack_flags()
+    risk_pct = config.effective_risk_per_trade()
     print(
         f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
-        f"{config.RISK_PER_TRADE:.0%}/trade within sleeve ---"
+        f"{risk_pct:.0%}/trade within sleeve ---"
     )
+    if config.is_small_account():
+        print(
+            f"--- Small account safety: max ${config.effective_max_notional_per_order():,.2f}/order | "
+            f"VTI {config.vti_core_allocation_pct():.0%} core ---"
+        )
     print(
         f"--- Order sizing: scales with equity (ref ${config.REFERENCE_EQUITY:,.0f} -> "
         f"min ${config.MIN_NOTIONAL:.0f}; $100 account -> min "
@@ -975,13 +1032,53 @@ def _print_startup_banner():
         print("--- Alerts: enabled (Telegram and/or email) ---")
     else:
         print("--- Alerts: off (set TELEGRAM_* or SMTP_* in .env) ---")
-    if not config.PAPER_TRADING:
-        print("!!! WARNING: Live trading enabled !!!")
+    if not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING:
+        print("!!! WARNING: Live trading enabled (ALLOW_LIVE_TRADING=yes) !!!")
+
+
+def _confirm_live_trading_startup(equity: float) -> None:
+    """One-time loud warning and 10s abort window before the live main loop."""
+    global _live_startup_confirmed
+    if config.PAPER_TRADING or _live_startup_confirmed or not config.ALLOW_LIVE_TRADING:
+        return
+    profile = config.configure_account_profile(equity)
+    print("")
+    print("=" * 60)
+    print(
+        f"=== LIVE TRADING ENABLED ON REAL MONEY ACCOUNT === "
+        f"Equity: ${equity:,.2f}"
+    )
+    print("=" * 60)
+    if profile.get("small_account"):
+        print(
+            f"--- Small account safety (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
+            f"{profile['risk_per_trade']:.0%} risk | "
+            f"max ${profile['max_notional_per_order']:,.2f}/order | "
+            f"VTI {profile['vti_core_pct']:.0%} ---"
+        )
+    print("--- Press Ctrl+C within 10 seconds to abort ---")
+    for remaining in range(10, 0, -1):
+        print(f"Starting live trading loop in {remaining}s...")
+        time.sleep(1)
+    _live_startup_confirmed = True
+    print("--- Live loop starting ---\n")
 
 
 if __name__ == "__main__":
     install_safe_stdout()
+    chase_extras = config.init_paper_chase_if_enabled()
+    if chase_extras:
+        print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
+    startup_equity = None
+    try:
+        _startup_executor = _make_executor()
+        startup_equity = float(_startup_executor._get_account().equity)
+        config.configure_account_profile(startup_equity)
+    except Exception as exc:
+        print(f"[WARN] Could not load account for sizing profile: {exc}")
     _print_startup_banner()
+    if startup_equity is not None:
+        _confirm_live_trading_startup(startup_equity)
     trade_journal.log_event("startup", notes="run_all.py started")
     while True:
         try:

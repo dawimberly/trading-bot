@@ -3,10 +3,17 @@
 import config
 
 
+def cross_asset_vol_score(data) -> float:
+    """Mean cross-asset 5m return stdev (same signal as get_volatility)."""
+    if data is None or data.empty or len(data) < 2:
+        return 0.0
+    vol = data.pct_change().dropna().std().mean()
+    return float(vol) if vol == vol else 0.0  # NaN guard
+
+
 def get_volatility(data):
     """Classify cross-asset volatility as High or Low."""
-    vol = data.pct_change().dropna().std().mean()
-    return "High" if vol > 0.02 else "Low"
+    return "High" if cross_asset_vol_score(data) > 0.02 else "Low"
 
 
 def get_price_sentiment(data):
