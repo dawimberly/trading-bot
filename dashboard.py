@@ -22,6 +22,7 @@ REFRESH_SECONDS = 60
 CHART_DAYS = 30
 CHART_HEIGHT_COMPACT = 260
 CHART_HEIGHT_FULL = 420
+CRYPTO_VOL_HEARTBEAT_FILE = "crypto_vol_heartbeat.json"
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 LIVE_WARNING_HTML = """
@@ -555,6 +556,40 @@ def _build_candlestick_figure(
     return fig
 
 
+def render_crypto_vol_panel() -> None:
+    """Small panel for the isolated crypto vol paper sleeve."""
+    hb = _load_json(_resolve_path(CRYPTO_VOL_HEARTBEAT_FILE))
+    with st.expander("Crypto vol sleeve (isolated paper)", expanded=bool(hb and hb.get("active_positions"))):
+        if hb is None:
+            st.caption(f"No heartbeat at `{CRYPTO_VOL_HEARTBEAT_FILE}` — enable via CRYPTO_VOL_SLEEVE_ENABLED.")
+            return
+        if hb.get("blocked"):
+            st.warning(f"Paper-only guard: {hb['blocked']}")
+        elif hb.get("error"):
+            st.warning(hb["error"])
+
+        positions = hb.get("active_positions") or []
+        cooldown = hb.get("cooldown_coins") or []
+        last_sig = hb.get("last_signal_time")
+        today_pnl = float(hb.get("today_pnl") or 0)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Active positions", len(positions))
+        c2.metric("Last signal", str(last_sig or "—")[-19:] if last_sig else "—")
+        c3.metric("Cooldown coins", len(cooldown))
+        c4.metric("Today PnL", f"${today_pnl:+,.2f}")
+
+        if positions:
+            st.dataframe(pd.DataFrame(positions), use_container_width=True, hide_index=True)
+        if cooldown:
+            st.caption(f"Cooldown: {', '.join(cooldown)}")
+        filters = hb.get("filters") or {}
+        if filters.get("spy_gate"):
+            st.caption(f"SPY gate active — entries blocked ({filters.get('spy_reason', '')})")
+        elif filters.get("hour_ok") is False:
+            st.caption("Outside UTC entry hours (13–16, 18–22)")
+
+
 def render_bot_status(
     heartbeat: dict | None,
     *,
@@ -956,6 +991,7 @@ def main() -> None:
 
     st.divider()
     render_bot_status(heartbeat, compact=small_account, chart_height=chart_height)
+    render_crypto_vol_panel()
     st.divider()
     render_positions(positions_df, pos_err)
     st.divider()

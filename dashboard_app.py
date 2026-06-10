@@ -81,6 +81,7 @@ from modules.portal_auth import authenticate, init_db, register_user  # noqa: E4
 from modules.portal_bot import bot_running, read_bot_log_tail, start_bot, stop_bot  # noqa: E402
 
 REFRESH_SECONDS = 60
+CRYPTO_VOL_HEARTBEAT_FILE = "crypto_vol_heartbeat.json"
 TRADES_LIMIT = 50
 TRADE_EVENTS = frozenset({"signal", "exit", "fill"})
 EQUITY_EVENTS = frozenset({"cycle", "startup"})
@@ -831,7 +832,7 @@ def _selectable_book_ids() -> set[str]:
 
 
 class BookMenu(ctk.CTkToplevel):
-    """Hamburger menu — account actions (switch via header dropdown)."""
+    """Hamburger menu — switch books and account actions."""
 
     def __init__(
         self,
@@ -839,12 +840,14 @@ class BookMenu(ctk.CTkToplevel):
         username: str,
         current_book: str,
         *,
+        on_switch_book,
         on_edit_keys,
         on_logout,
     ) -> None:
         super().__init__(master)
+        self._on_switch_book = on_switch_book
         self.title("Menu")
-        self.geometry("300x220")
+        self.geometry("300x280")
         self.resizable(False, False)
         self.configure(fg_color=COLORS["card"])
         self.transient(master)
@@ -857,17 +860,27 @@ class BookMenu(ctk.CTkToplevel):
         ).pack(anchor="w", padx=16, pady=(14, 4))
         ctk.CTkLabel(
             self,
-            text=f"Signed in as {username} · {book_label(current_book)}",
+            text=f"Signed in as {username}",
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=11),
             wraplength=260,
-        ).pack(anchor="w", padx=16, pady=(0, 12))
+        ).pack(anchor="w", padx=16, pady=(0, 10))
+
         ctk.CTkLabel(
             self,
-            text="Switch platform with the dropdown in the title bar.",
-            text_color=COLORS["muted"],
-            font=ctk.CTkFont(size=11),
-            wraplength=260,
+            text="Trading account",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        ).pack(anchor="w", padx=16, pady=(0, 4))
+        self._book_var = ctk.StringVar(value=dropdown_label_for_book(current_book))
+        ctk.CTkOptionMenu(
+            self,
+            variable=self._book_var,
+            values=_book_dropdown_values(),
+            command=self._on_book_selected,
+            width=260,
+            fg_color="#1e3a5f",
+            button_color="#334155",
+            button_hover_color="#475569",
         ).pack(anchor="w", padx=16, pady=(0, 12))
 
         ctk.CTkButton(
@@ -884,6 +897,11 @@ class BookMenu(ctk.CTkToplevel):
             hover_color="#991b1b",
             command=lambda: self._action(on_logout),
         ).pack(fill="x", padx=16, pady=(4, 16))
+
+    def _on_book_selected(self, menu_label: str) -> None:
+        self.grab_release()
+        self.destroy()
+        self._on_switch_book(menu_label)
 
     def _action(self, callback) -> None:
         self.grab_release()
@@ -1075,8 +1093,8 @@ class TradingDashboardApp(ctk.CTk):
         save_last_book_id(self._book_id)
         self._apply_user_paths(username, self._book_id)
         self.title(f"PythonTrading — {book_label(self._book_id)}")
-        self.geometry("960x640")
-        self.minsize(860, 560)
+        self.geometry("900x640")
+        self.minsize(900, 560)
         self.configure(fg_color=COLORS["bg"])
 
         self._refresh_job: str | None = None
@@ -1094,45 +1112,14 @@ class TradingDashboardApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Header
+        # Header — left/right sub-frames so pack order cannot clip dropdown or toolbar.
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=12, pady=(10, 0))
-        ctk.CTkButton(
-            header,
-            text="☰",
-            width=36,
-            height=32,
-            font=ctk.CTkFont(size=18),
-            fg_color="#334155",
-            hover_color="#475569",
-            command=self._open_book_menu,
-        ).pack(side="left", padx=(0, 8))
-        ctk.CTkLabel(
-            header,
-            text="PythonTrading",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(side="left")
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
-        self._book_menu = ctk.CTkOptionMenu(
-            header,
-            variable=self._book_var,
-            values=_book_dropdown_values(),
-            command=self._on_header_book_selected,
-            width=168,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="#1e3a5f",
-            button_color="#334155",
-            button_hover_color="#475569",
-        )
-        self._book_menu.pack(side="left", padx=(10, 0))
-        ctk.CTkLabel(
-            header,
-            text=username,
-            font=ctk.CTkFont(size=12),
-            text_color=COLORS["muted"],
-        ).pack(side="left", padx=(8, 0))
-        toolbar = ctk.CTkFrame(header, fg_color="transparent")
-        toolbar.pack(side="right", padx=(8, 0))
+
+        header_right = ctk.CTkFrame(header, fg_color="transparent")
+        header_right.pack(side="right", anchor="ne")
+        toolbar = header_right
         ctk.CTkButton(
             toolbar,
             text="Refresh",
@@ -1162,6 +1149,42 @@ class TradingDashboardApp(ctk.CTk):
             toolbar, text="Bot: —", font=ctk.CTkFont(size=12), text_color=COLORS["muted"]
         )
         self._bot_badge.pack(side="left")
+
+        header_left = ctk.CTkFrame(header, fg_color="transparent")
+        header_left.pack(side="left", fill="x", expand=True, anchor="nw")
+        ctk.CTkButton(
+            header_left,
+            text="☰",
+            width=36,
+            height=32,
+            font=ctk.CTkFont(size=18),
+            fg_color="#334155",
+            hover_color="#475569",
+            command=self._open_book_menu,
+        ).pack(side="left", padx=(0, 8))
+        self._book_menu = ctk.CTkOptionMenu(
+            header_left,
+            variable=self._book_var,
+            values=_book_dropdown_values(),
+            command=self._on_header_book_selected,
+            width=168,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#1e3a5f",
+            button_color="#334155",
+            button_hover_color="#475569",
+        )
+        self._book_menu.pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(
+            header_left,
+            text="PythonTrading",
+            font=ctk.CTkFont(size=20, weight="bold"),
+        ).pack(side="left")
+        ctk.CTkLabel(
+            header_left,
+            text=username,
+            font=ctk.CTkFont(size=12),
+            text_color=COLORS["muted"],
+        ).pack(side="left", padx=(8, 0))
 
         top_stack = ctk.CTkFrame(self, fg_color="transparent")
         top_stack.pack(fill="x", padx=12, pady=4)
@@ -1307,6 +1330,7 @@ class TradingDashboardApp(ctk.CTk):
             self,
             self._username,
             self._book_id,
+            on_switch_book=self._on_header_book_selected,
             on_edit_keys=self._on_edit_keys,
             on_logout=self._on_logout_click,
         )
@@ -1378,6 +1402,26 @@ class TradingDashboardApp(ctk.CTk):
             self._tab_overview, text="—", justify="left", anchor="w", text_color=COLORS["muted"]
         )
         self._wisdom_line.pack(fill="x", padx=12)
+
+        ctk.CTkLabel(
+            self._tab_overview,
+            text="Crypto vol sleeve",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 2))
+        self._crypto_vol_panel = ctk.CTkFrame(
+            self._tab_overview, fg_color=COLORS["card"], corner_radius=8
+        )
+        self._crypto_vol_panel.pack(fill="x", padx=12, pady=(0, 4))
+        self._crypto_vol_body = ctk.CTkLabel(
+            self._crypto_vol_panel,
+            text="—",
+            justify="left",
+            anchor="w",
+            text_color=COLORS["muted"],
+            wraplength=780,
+        )
+        self._crypto_vol_body.pack(fill="x", padx=10, pady=8)
 
     def _build_wisdom_tab(self) -> None:
         cards = ctk.CTkFrame(self._tab_wisdom, fg_color="transparent")
@@ -1571,6 +1615,7 @@ class TradingDashboardApp(ctk.CTk):
         )
 
         self._fill_overview(heartbeat, equity, acct_err)
+        self._fill_crypto_vol_panel()
         self._fill_positions(positions_df, pos_err, upl)
         self._fill_trades(journal_df)
         self._fill_wisdom(scorecard, scorecard_src, heartbeat)
@@ -1584,6 +1629,38 @@ class TradingDashboardApp(ctk.CTk):
         mode = "LIVE" if not config.PAPER_TRADING else "Paper"
         ts = datetime.now().strftime("%H:%M:%S")
         self._status_label.configure(text=f"{mode} · {ts} · every {REFRESH_SECONDS}s")
+
+    def _fill_crypto_vol_panel(self) -> None:
+        hb = _load_json(_resolve_path(CRYPTO_VOL_HEARTBEAT_FILE))
+        if hb is None:
+            self._crypto_vol_body.configure(
+                text="No heartbeat — set CRYPTO_VOL_SLEEVE_ENABLED=true in run_paper_bot."
+            )
+            return
+        positions = hb.get("active_positions") or []
+        cooldown = hb.get("cooldown_coins") or []
+        last_sig = hb.get("last_signal_time")
+        today_pnl = float(hb.get("today_pnl") or 0)
+        pos_labels = ", ".join(p.get("symbol", "?") for p in positions) or "none"
+        cd_labels = ", ".join(cooldown) or "none"
+        sig_ts = str(last_sig or "—")[-19:] if last_sig else "—"
+        extra = ""
+        filters = hb.get("filters") or {}
+        if filters.get("spy_gate"):
+            extra = f" | SPY gate ({filters.get('spy_reason', '')})"
+        elif filters.get("hour_ok") is False:
+            extra = " | outside UTC entry hours"
+        if hb.get("blocked"):
+            extra = f" | blocked: {hb['blocked']}"
+        pnl_color = COLORS["green"] if today_pnl >= 0 else COLORS["red"]
+        self._crypto_vol_body.configure(
+            text=(
+                f"Positions ({len(positions)}): {pos_labels} | "
+                f"Last signal: {sig_ts} | Cooldown: {cd_labels} | "
+                f"Today PnL: ${today_pnl:+,.2f}{extra}"
+            ),
+            text_color=pnl_color if positions or today_pnl else COLORS["muted"],
+        )
 
     def _fill_overview(
         self, heartbeat: dict | None, equity: float, acct_err: str | None

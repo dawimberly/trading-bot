@@ -1,0 +1,24 @@
+---
+description: How to clean up code when the user asks to "clean up" or gives cleanup instructions
+alwaysApply: true
+---
+
+# Code cleanup standards
+
+When the user asks to **clean up** or gives custom cleanup instructions, prioritize in this order:
+
+1. **Remove dead code** — unused imports, unreachable branches, commented-out blocks, orphaned helpers, stale constants
+2. **Consistent naming** — match existing project conventions (modules, functions, env vars, files); rename only where inconsistency hurts readability
+3. **Smaller functions** — split large functions by single responsibility; keep diffs focused (no drive-by refactors)
+4. **Concise comments** — add only where logic is non-obvious (business rules, timing, guards, external API quirks); do not narrate obvious code
+
+## Do not
+
+- Rename or reformat unrelated files
+- Add tests or abstractions unless requested
+- Expand scope beyond the cleanup target
+- Replace working code with "cleaner" patterns that change behavior
+
+## Default stance
+
+Minimal, behavior-preserving diffs. If a cleanup would change runtime behavior, call it out before doing it.
