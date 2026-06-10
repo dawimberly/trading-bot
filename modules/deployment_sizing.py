@@ -92,7 +92,7 @@ def per_trade_chunk(equity: float, room: float) -> float:
     """Base 2% chunk; larger when sleeve has headroom (>5× per_trade)."""
     per_trade = round(equity * config.effective_risk_per_trade(equity), 2)
     if (
-        config.ADAPTIVE_CHUNK_ENABLED
+        config.effective_adaptive_chunk_enabled()
         and room > 5 * per_trade
     ):
         return round(equity * config.ADAPTIVE_CHUNK_MAX_PCT, 2)
@@ -139,7 +139,7 @@ def compute_cofire_allocations(
         for k, v in sleeve_rooms.items()
         if v >= min_n
     }
-    if not config.COFIRE_BUDGET_ENABLED or len(active) < 2:
+    if not config.effective_cofire_budget_enabled() or len(active) < 2:
         return {}
 
     pool = round(equity * config.COFIRE_BUDGET_PCT, 2)

@@ -21,11 +21,12 @@ from fetch_data import fetch_daily_history
 from modules import deployment_sizing
 from modules.data_loader import load_close_matrix
 from modules.market_context import (
+    cross_asset_vol_score,
     get_market_regime,
     get_price_sentiment,
     get_volatility,
 )
-from modules.macro_signals import load_daily_matrix, yield_gate_blocks
+from modules.macro_signals import load_daily_matrix, macro_stress, yield_gate_blocks
 from modules.pipeline_strategies import (
     COOLDOWN_SECONDS,
     resolve_cycle_deploy,
@@ -94,6 +95,7 @@ class BacktestExecutor:
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
         self._sizing_data = None
+        self._paper_feature_flags = config.get_paper_feature_flags()
 
     def set_sizing_context(self, data=None):
         self._sizing_data = data
@@ -113,7 +115,13 @@ class BacktestExecutor:
         return scaled
 
     def set_cofire_allocations(self, allocations):
+        if not config.effective_cofire_budget_enabled():
+            self._cofire_notionals = {}
+            return
         self._cofire_notionals = dict(allocations or {})
+
+    def paper_feature_flags(self) -> dict[str, bool]:
+        return dict(getattr(self, "_paper_feature_flags", None) or config.get_paper_feature_flags())
 
     @staticmethod
     def _position_market_value(qty, price):
@@ -377,6 +385,8 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
     if not refresh:
         data = load_close_matrix(interval="1d")
         if len(data) >= need_rows:
+            if len(data) > need_rows:
+                data = data.iloc[-need_rows:]
             return data
 
     fetch_days = _calendar_days_to_fetch(sim_days)
@@ -386,6 +396,8 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
     )
     fetch_daily_history(fetch_days)
     data = load_close_matrix(interval="1d")
+    if len(data) > need_rows:
+        data = data.iloc[-need_rows:]
     if len(data) < MIN_HISTORY:
         print(
             f"--- Still short ({len(data)} rows); downloading max daily history ---"
@@ -395,10 +407,51 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
     return data
 
 
+def _paper_cap_scale_for_vti(vti_core_pct: float) -> float:
+    """Paper aggressive sleeve scale for a given VTI core fraction."""
+    active_fraction = max(0.0, 1.0 - vti_core_pct)
+    lf = config.long_fund_scale()
+    long_sum = (
+        config.SPY_SLEEVE_CAP_PCT
+        + config.CRYPTO_SLEEVE_CAP_PCT
+        + config.NYSE_SLEEVE_CAP_PCT
+    )
+    if long_sum <= 0:
+        return 0.0
+    base_scale = round(lf * active_fraction, 6)
+    base_deploy = round(base_scale * long_sum, 6)
+    max_active = base_scale
+    target_deploy = round(
+        min(max_active, base_deploy * config.PAPER_ACTIVE_SLEEVE_BOOST), 6
+    )
+    return round(target_deploy / long_sum, 6)
+
+
 def _backtest_cap_scale(vti_core_pct: float, *, paper_aggressive: bool) -> float:
     if paper_aggressive:
-        return config.active_sleeve_scale()
+        return _paper_cap_scale_for_vti(vti_core_pct)
     return round(config.long_fund_scale() * max(0.0, 1.0 - vti_core_pct), 6)
+
+
+def _resolve_backtest_vti_pct(
+    equity: float,
+    *,
+    vol_score: float | None,
+    volatility: str,
+    macro_stress_flag: bool,
+    paper_aggressive: bool,
+    fixed_vti_core_pct: float,
+) -> float:
+    if not paper_aggressive:
+        return fixed_vti_core_pct
+    if not config.PAPER_DYNAMIC_VTI_ENABLED:
+        return config.PAPER_VTI_CORE_PCT
+    return config.get_vti_core_pct(
+        equity,
+        vol_score=vol_score,
+        macro_stress=macro_stress_flag,
+        volatility=volatility,
+    )
 
 
 def _small_account_start_equity() -> float:
@@ -416,25 +469,50 @@ def run_backtest(
     vti_core_pct: float = 0.0,
     paper_aggressive: bool = False,
     small_account: bool = False,
+    paper_dynamic_vti: bool | None = None,
+    paper_sleeve_features: bool | None = None,
+    paper_social_enhanced: bool | None = None,
+    paper_macro_regime: bool | None = None,
+    track_active_exposure: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
-    if paper_aggressive:
-        vti_core_pct = config.PAPER_VTI_CORE_PCT
-
     saved_paper_ctx = config.paper_aggressive_context()
     saved_small_ctx = config.backtest_small_account_context()
     saved_social = config.SOCIAL_SLEEVE_ENABLED
+    saved_dynamic_vti = config.PAPER_DYNAMIC_VTI_ENABLED
+    saved_paper_sleeve_flags = config.snapshot_paper_sleeve_flags()
+    saved_macro_overrides = config.SOCIAL_MACRO_OVERRIDES_ENABLED
+    saved_macro_boost = config.PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    saved_paper_macro = config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     config.set_paper_aggressive_context(paper_aggressive)
     config.set_backtest_small_account_context(small_account)
-    if paper_aggressive:
-        config.SOCIAL_SLEEVE_ENABLED = True
+    if paper_dynamic_vti is not None:
+        config.PAPER_DYNAMIC_VTI_ENABLED = bool(paper_dynamic_vti)
+    if paper_aggressive and paper_sleeve_features is not None:
+        config.apply_paper_sleeve_flags(
+            {
+                "nyse_overlap": paper_sleeve_features,
+                "adaptive_chunk": paper_sleeve_features,
+                "cofire_budget": paper_sleeve_features,
+                "spy_exit_on_ma_break": paper_sleeve_features,
+            }
+        )
+    if paper_social_enhanced is not None:
+        config.SOCIAL_MACRO_OVERRIDES_ENABLED = bool(paper_social_enhanced)
+        config.PAPER_SOCIAL_MACRO_BOOST_ENABLED = bool(paper_social_enhanced)
+    if paper_macro_regime is not None:
+        config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = bool(paper_macro_regime)
+
+    fixed_vti_core_pct = vti_core_pct
+    if paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED:
+        fixed_vti_core_pct = config.PAPER_VTI_CORE_PCT
 
     start_date = data.index[MIN_HISTORY]
     end_date = data.index[-1]
     cooldown_bars = DAILY_COOLDOWN_BARS
     sharpe_scale = np.sqrt(252)
     sim_days = (end_date - start_date).days
-    cap_scale = _backtest_cap_scale(vti_core_pct, paper_aggressive=paper_aggressive)
+    cap_scale = _backtest_cap_scale(fixed_vti_core_pct, paper_aggressive=paper_aggressive)
 
     initial_capital = _small_account_start_equity() if small_account else 10000.0
     portfolio = BacktestPortfolio(initial_capital=initial_capital)
@@ -451,6 +529,8 @@ def run_backtest(
     pause_days = 0
     halt_liquidations = 0
     exposure_samples = []
+    vti_core_samples = []
+    active_exposure_samples = []
     spy_exposure_samples = []
     nyse_exposure_samples = []
     crypto_exposure_samples = []
@@ -459,10 +539,22 @@ def run_backtest(
     crypto_pnl_contribution = 0.0
     trade_days = 0
     total_social = 0
+    gld_target_days = 0
+    social_sim_days = 0
     social_portfolio = None
     social_curve = []
+    macro_portfolio = None
+    macro_curve = []
+    regime_shift_days = 0
+    macro_gld_days = 0
+    macro_energy_days = 0
+    macro_sim_days = 0
     monthly_web = None
-    if config.SOCIAL_SLEEVE_ENABLED:
+    if config.effective_macro_regime_adaptor_enabled():
+        from modules.macro_regime_adaptor import run_macro_regime_backtest_day
+
+        macro_portfolio = BacktestPortfolio(initial_capital=initial_capital)
+    elif config.effective_social_sleeve_enabled():
         from modules.social_sleeve_backtest import (
             run_social_backtest_day,
             social_score_for_backtest,
@@ -477,7 +569,12 @@ def run_backtest(
 
     spy_cap_pct = round(config.SPY_SLEEVE_CAP_PCT * cap_scale, 6)
     macro_daily = None
-    if config.game_plan_active() and config.YIELD_GATE_ENABLED:
+    need_macro_daily = (
+        config.game_plan_active()
+        or (paper_aggressive and config.PAPER_DYNAMIC_VTI_ENABLED)
+        or config.effective_macro_regime_adaptor_enabled()
+    )
+    if need_macro_daily:
         try:
             macro_daily = load_daily_matrix(days=max(450, len(data) + 50))
         except Exception:
@@ -548,11 +645,49 @@ def run_backtest(
         regime_counts[regime] = regime_counts.get(regime, 0) + 1
 
         yield_gated = False
+        macro_stress_flag = False
         if macro_daily is not None and not macro_daily.empty:
             bar_date = data.index[i]
             macro_window = macro_daily.loc[:bar_date]
             if len(macro_window) >= 50:
                 yield_gated = yield_gate_blocks(macro_window)
+                macro_stress_flag = macro_stress(macro_window, regime)
+
+        vol_score = cross_asset_vol_score(window)
+        vti_core_pct = _resolve_backtest_vti_pct(
+            eq,
+            vol_score=vol_score,
+            volatility=vol,
+            macro_stress_flag=macro_stress_flag,
+            paper_aggressive=paper_aggressive,
+            fixed_vti_core_pct=fixed_vti_core_pct,
+        )
+        cap_scale = _backtest_cap_scale(vti_core_pct, paper_aggressive=paper_aggressive)
+        macro_regime = None
+        if config.effective_macro_regime_adaptor_enabled():
+            from modules.macro_regime_adaptor import (
+                apply_yield_gate_boost,
+                evaluate_macro_regime,
+            )
+
+            macro_window = None
+            if macro_daily is not None and not macro_daily.empty:
+                macro_window = macro_daily.loc[: data.index[i]]
+            macro_regime = evaluate_macro_regime(
+                window, daily_macro=macro_window, ts=data.index[i]
+            )
+            if macro_regime.get("active"):
+                regime_shift_days += 1
+                yield_gated = apply_yield_gate_boost(yield_gated, macro_regime)
+                regime_scale = min(
+                    macro_regime.get("spy_scale", 1.0),
+                    macro_regime.get("nyse_scale", 1.0),
+                )
+                cap_scale = round(cap_scale * regime_scale, 6)
+        spy_cap_pct = round(config.SPY_SLEEVE_CAP_PCT * cap_scale, 6)
+        if track_active_exposure or paper_aggressive:
+            vti_core_samples.append(vti_core_pct)
+            active_exposure_samples.append(max(0.0, 1.0 - vti_core_pct))
 
         if vti_core_pct > 0:
             _rebalance_vti_core(portfolio, prices, vti_core_pct)
@@ -580,9 +715,8 @@ def run_backtest(
             market_open=True,
             yield_gated=yield_gated,
         )
-        if track_metrics and getattr(executor, "_cofire_notionals", None):
-            if len(executor._cofire_notionals) >= 1:
-                cofire_days += 1
+        if getattr(executor, "_cofire_notionals", None) and len(executor._cofire_notionals) >= 2:
+            cofire_days += 1
         total_crypto += run_crypto_strategy(
             window,
             executor,
@@ -614,12 +748,27 @@ def run_backtest(
             cooldown_bars=cooldown_bars,
             yield_gated=yield_gated,
         )
-        if social_portfolio is not None:
+        if macro_portfolio is not None and macro_regime is not None:
+            macro_actions, macro_meta = run_macro_regime_backtest_day(
+                macro_portfolio, prices, macro_regime, market_open=True
+            )
+            total_social += len(macro_actions)
+            macro_sim_days += 1
+            tgt = macro_meta.get("target")
+            if tgt == "GLD":
+                macro_gld_days += 1
+            elif tgt in ("XOM", "XLE"):
+                macro_energy_days += 1
+            macro_curve.append(macro_portfolio.equity(prices))
+        elif social_portfolio is not None:
             agg = social_score_for_backtest(data.index[i], window, monthly_web)
-            social_actions = run_social_backtest_day(
+            social_actions, social_meta = run_social_backtest_day(
                 social_portfolio, prices, agg, market_open=True
             )
             total_social += len(social_actions)
+            social_sim_days += 1
+            if social_meta.get("target") == "GLD":
+                gld_target_days += 1
             social_curve.append(social_portfolio.equity(prices))
         total_orders += len(executor.orders)
         trade_days += 1
@@ -699,14 +848,44 @@ def run_backtest(
         "resume_events": risk_manager.resume_events,
         "pause_days": pause_days,
         "halt_liquidations": halt_liquidations,
-        "vti_core_pct": vti_core_pct,
+        "vti_core_pct": round(float(np.mean(vti_core_samples)), 4)
+        if vti_core_samples
+        else fixed_vti_core_pct,
+        "avg_active_exposure_pct": round(float(np.mean(active_exposure_samples)) * 100, 2)
+        if active_exposure_samples
+        else round((1.0 - fixed_vti_core_pct) * 100, 2),
         "paper_aggressive": paper_aggressive,
+        "paper_dynamic_vti": config.PAPER_DYNAMIC_VTI_ENABLED if paper_aggressive else False,
+        "paper_sleeve_features": config.get_paper_feature_flags() if paper_aggressive else {},
+        "cofire_pct": round(100 * cofire_days / trade_days, 1) if trade_days else 0.0,
+        "cofire_days": cofire_days,
         "small_account": small_account,
         "cap_scale": cap_scale,
         "equity_index": [data.index[i].isoformat() for i in range(MIN_HISTORY, len(data))],
         "equity_values": [round(v, 2) for v in equity_curve],
     }
-    if social_portfolio is not None and social_curve:
+    if macro_portfolio is not None and macro_curve:
+        macro_init = macro_portfolio.initial_capital
+        macro_final = round(macro_curve[-1], 2)
+        result["macro_regime_sleeve"] = {
+            "enabled": True,
+            "initial_capital": macro_init,
+            "final_equity": macro_final,
+            "return_pct": round((macro_final / macro_init - 1) * 100, 2),
+            "trades": total_social,
+            "regime_shift_pct": round(
+                100 * regime_shift_days / macro_sim_days, 1
+            )
+            if macro_sim_days
+            else 0.0,
+            "gld_target_pct": round(100 * macro_gld_days / macro_sim_days, 1)
+            if macro_sim_days
+            else 0.0,
+            "energy_target_pct": round(100 * macro_energy_days / macro_sim_days, 1)
+            if macro_sim_days
+            else 0.0,
+        }
+    elif social_portfolio is not None and social_curve:
         social_init = social_portfolio.initial_capital
         social_final = round(social_curve[-1], 2)
         result["social_sleeve"] = {
@@ -716,6 +895,12 @@ def run_backtest(
             "final_equity": social_final,
             "return_pct": round((social_final / social_init - 1) * 100, 2),
             "trades": total_social,
+            "gld_target_pct": round(
+                100 * gld_target_days / social_sim_days, 1
+            )
+            if social_sim_days
+            else 0.0,
+            "gld_target_days": gld_target_days,
         }
     if track_metrics:
         init = portfolio.initial_capital
@@ -762,9 +947,6 @@ def run_backtest(
                     else 0.0,
                     1,
                 ),
-                "cofire_pct": round(
-                    100 * cofire_days / trade_days if trade_days else 0.0, 1
-                ),
                 "crypto_contribution_pct": round(
                     100 * crypto_pnl_contribution / init if init else 0.0, 2
                 ),
@@ -773,7 +955,245 @@ def run_backtest(
     config.set_paper_aggressive_context(saved_paper_ctx)
     config.set_backtest_small_account_context(saved_small_ctx)
     config.SOCIAL_SLEEVE_ENABLED = saved_social
+    config.PAPER_DYNAMIC_VTI_ENABLED = saved_dynamic_vti
+    config.apply_paper_sleeve_flags(saved_paper_sleeve_flags)
+    config.SOCIAL_MACRO_OVERRIDES_ENABLED = saved_macro_overrides
+    config.PAPER_SOCIAL_MACRO_BOOST_ENABLED = saved_macro_boost
+    config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = saved_paper_macro
     return result
+
+
+def run_macro_regime_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without Macro Regime Adaptor."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "Paper (no macro adaptor)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+                "paper_macro_regime": False,
+            },
+        ),
+        (
+            "Paper (+ Macro Regime Adaptor)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+                "paper_macro_regime": True,
+            },
+        ),
+    ]
+    print("--- MACRO REGIME ADAPTOR A/B (Felix/Social off, dynamic VTI + sleeve flags) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'AvgAct':>7} {'Regime':>7} {'Macro':>8}"
+    )
+    print("-" * 82)
+
+    for label, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        macro = result.get("macro_regime_sleeve") or {}
+        macro_ret = f"{macro.get('return_pct', 0):+.1f}%" if macro else "—"
+        regime_pct = macro.get("regime_shift_pct", 0.0) if macro else 0.0
+        print(
+            f"{label:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result['avg_active_exposure_pct']:>6.1f}% "
+            f"{regime_pct:>6.1f}% "
+            f"{macro_ret:>8}"
+        )
+    print("-" * 82)
+
+
+def run_felix_social_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive social sleeve: legacy vs enhanced Felix macro detection."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "Paper social (legacy)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+                "paper_social_enhanced": False,
+            },
+        ),
+        (
+            "Paper social (enhanced Felix)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+                "paper_social_enhanced": True,
+            },
+        ),
+    ]
+    print("--- FELIX / SOCIAL SLEEVE A/B (paper aggressive, dynamic VTI + sleeve flags) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<30} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'AvgAct':>7} {'GLD%':>6} {'Social':>8}"
+    )
+    print("-" * 82)
+
+    for label, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        social = result.get("social_sleeve") or {}
+        social_ret = f"{social.get('return_pct', 0):+.1f}%" if social else "—"
+        gld_pct = social.get("gld_target_pct", 0.0)
+        print(
+            f"{label:<30} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result['avg_active_exposure_pct']:>6.1f}% "
+            f"{gld_pct:>5.1f}% "
+            f"{social_ret:>8}"
+        )
+    print("-" * 82)
+
+
+def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without advanced sleeve flags."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "Paper (no sleeve flags)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": False,
+                "paper_dynamic_vti": True,
+            },
+        ),
+        (
+            "Paper (+overlap/chunk/cofire/exit)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+            },
+        ),
+    ]
+    print("--- PAPER SLEEVE FEATURES A/B (dynamic VTI on both arms) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'AvgAct':>7} {'CoFire':>7}"
+    )
+    print("-" * 76)
+
+    for label, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        print(
+            f"{label:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result['avg_active_exposure_pct']:>6.1f}% "
+            f"{result['cofire_pct']:>6.1f}%"
+        )
+    print("-" * 76)
+
+
+def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare fixed 20% VTI vs dynamic 40-75% VTI on paper aggressive profile."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            f"Fixed {config.PAPER_VTI_CORE_PCT:.0%} VTI (paper)",
+            {"paper_aggressive": True, "paper_dynamic_vti": False},
+        ),
+        (
+            "Dynamic VTI 40-75% (paper)",
+            {"paper_aggressive": True, "paper_dynamic_vti": True},
+        ),
+    ]
+    print("--- PAPER DYNAMIC VTI A/B (social/macro off, sleeve flags on) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"Paper boost: {config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x | "
+        f"social {config.PAPER_SOCIAL_SLEEVE_CAP_PCT:.0%} | "
+        f"PAPER_DYNAMIC_VTI default={config.PAPER_DYNAMIC_VTI_ENABLED}"
+    )
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'AvgAct':>7} {'VTIavg':>7}"
+    )
+    print("-" * 72)
+
+    for label, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, **kwargs)
+        print(
+            f"{label:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result['avg_active_exposure_pct']:>6.1f}% "
+            f"{result['vti_core_pct'] * 100:>6.1f}%"
+        )
+    print("-" * 72)
 
 
 def run_paper_aggressive_compare(days=None, refresh=False, use_max=False) -> None:
@@ -796,7 +1216,7 @@ def run_paper_aggressive_compare(days=None, refresh=False, use_max=False) -> Non
         ),
         ("Active only (no VTI)", {"vti_core_pct": 0.0, "paper_aggressive": False}),
     ]
-    print("--- PAPER AGGRESSIVE A/B (Felix social sleeve on for paper profile) ---")
+    print("--- PAPER AGGRESSIVE A/B (paper profile, social/macro off) ---")
     print(
         f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
@@ -922,11 +1342,18 @@ def run_performance_test(
         if vti_core_pct <= 0:
             vti_core_pct = config.SMALL_ACCOUNT_VTI_CORE_PCT
     elif paper_aggressive:
-        print(
-            f"--- PAPER AGGRESSIVE: {config.PAPER_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
-            f"{1 - config.PAPER_VTI_CORE_PCT:.0%} active (boost "
-            f"{config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x) ---"
-        )
+        if config.PAPER_DYNAMIC_VTI_ENABLED:
+            print(
+                f"--- PAPER AGGRESSIVE: dynamic {VTI_CORE_SYMBOL} "
+                f"({config.DYNAMIC_VTI_PAPER_FLOOR:.0%}-75% by vol/stress) | "
+                f"boost {config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x ---"
+            )
+        else:
+            print(
+                f"--- PAPER AGGRESSIVE: {config.PAPER_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
+                f"{1 - config.PAPER_VTI_CORE_PCT:.0%} active (boost "
+                f"{config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x) ---"
+            )
     elif vti_core_pct > 0:
         print(
             f"--- VTI core: {vti_core_pct:.0%} passive {VTI_CORE_SYMBOL} | "
@@ -1086,6 +1513,26 @@ if __name__ == "__main__":
         action="store_true",
         help="Compare live 80/20 vs paper aggressive vs active-only (table)",
     )
+    parser.add_argument(
+        "--compare-dynamic-vti",
+        action="store_true",
+        help="Compare fixed 20%% VTI vs dynamic 40-75%% VTI (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-paper-sleeve-features",
+        action="store_true",
+        help="Compare paper aggressive with vs without advanced sleeve flags",
+    )
+    parser.add_argument(
+        "--compare-felix-social",
+        action="store_true",
+        help="Compare legacy vs enhanced Felix/social macro sleeve (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-macro-regime",
+        action="store_true",
+        help="Compare paper aggressive with vs without Macro Regime Adaptor",
+    )
     args = parser.parse_args()
     if args.compare_vti_core:
         run_vti_core_compare(
@@ -1096,6 +1543,22 @@ if __name__ == "__main__":
         )
     elif args.compare_paper_aggressive:
         run_paper_aggressive_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_dynamic_vti:
+        run_dynamic_vti_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_paper_sleeve_features:
+        run_paper_sleeve_features_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_felix_social:
+        run_felix_social_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_macro_regime:
+        run_macro_regime_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     else:
@@ -1110,3 +1573,5 @@ if __name__ == "__main__":
             paper_aggressive=args.paper_aggressive,
             small_account=args.small_account,
         )
+        if args.paper_aggressive:
+            print(f"Paper sleeve flags: {config.get_paper_feature_flags()}")

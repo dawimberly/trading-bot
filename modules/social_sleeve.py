@@ -64,10 +64,12 @@ def aggregate_social_score(
 
     wsum = sum(weights) or 1.0
     score = round(sum(p * w for p, w in zip(parts, weights)) / wsum, 4)
+    macro_hits = int((felix or {}).get("macro_bearish_hits") or 0)
     return {
         "score": score,
         "felix": felix,
         "headline_web": headline,
+        "macro_bearish_hits": macro_hits,
         "sources": len(parts),
     }
 
@@ -91,6 +93,46 @@ def target_symbol_for_score(
     if score >= config.SOCIAL_BULL_SPY_THRESHOLD:
         return None if live_mirror else "SPY"
     return None
+
+
+def resolve_social_target(
+    agg: dict,
+    *,
+    live_mirror: bool = False,
+    log: bool = True,
+) -> tuple[str | None, str]:
+    """
+    Paper social target with macro overrides.
+    Strong bearish score + unwind keywords → GLD; strong bullish → SPY (not on live mirror).
+    """
+    score = agg.get("score")
+    macro_hits = int(agg.get("macro_bearish_hits") or 0)
+
+    if (
+        config.SOCIAL_MACRO_OVERRIDES_ENABLED
+        and config.paper_aggressive_context()
+        and score is not None
+        and float(score) < config.SOCIAL_MACRO_BEAR_OVERRIDE_SCORE
+        and macro_hits > 0
+    ):
+        if log:
+            print("--- Felix bearish macro detected -> GLD target ---")
+        return "GLD", "macro_bear_override"
+
+    if (
+        config.SOCIAL_MACRO_OVERRIDES_ENABLED
+        and config.paper_aggressive_context()
+        and score is not None
+        and float(score) >= config.SOCIAL_MACRO_BULL_OVERRIDE_SCORE
+    ):
+        if live_mirror:
+            return None, "macro_bull_live_mirror_skip"
+        if log:
+            print("--- Felix bullish macro detected -> SPY target ---")
+        return "SPY", "macro_bull_override"
+
+    target = target_symbol_for_score(score, live_mirror=live_mirror)
+    return target, "threshold"
 
 
 def _social_positions(executor) -> list:
@@ -255,17 +297,20 @@ def run_social_sleeve_cycle(
     Paper social sleeve (full cap) + optional live mirror (fraction of cap).
     Does not buy IPOs; rotates GLD / XLE / SPY / cash from shared social mood.
     """
-    if not config.SOCIAL_SLEEVE_ENABLED:
+    if not config.effective_social_sleeve_enabled():
         return {"enabled": False}
 
     agg = aggregate_social_score(wisdom)
-    target = target_symbol_for_score(agg.get("score"))
-    mirror_target = target_symbol_for_score(agg.get("score"), live_mirror=True)
+    target, target_reason = resolve_social_target(agg)
+    mirror_target, mirror_reason = resolve_social_target(agg, live_mirror=True)
     result = {
         "enabled": True,
         "score": agg.get("score"),
+        "macro_bearish_hits": agg.get("macro_bearish_hits"),
         "target": target,
+        "target_reason": target_reason,
         "mirror_target": mirror_target,
+        "mirror_reason": mirror_reason,
         "cap_pct": config.effective_social_sleeve_cap_pct(),
         "paper_aggressive": config.paper_aggressive_context(),
         "felix_video_id": (agg.get("felix") or {}).get("video_id"),

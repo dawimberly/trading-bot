@@ -37,6 +37,7 @@ class AlpacaExecutor:
         self._cofire_notionals = {}
         self._sizing_data = None
         self._sleeve_pnl = None
+        self._paper_feature_flags = config.get_paper_feature_flags()
 
     def set_sizing_context(self, data=None):
         self._sizing_data = data
@@ -84,7 +85,13 @@ class AlpacaExecutor:
         return scaled
 
     def set_cofire_allocations(self, allocations):
+        if not config.effective_cofire_budget_enabled():
+            self._cofire_notionals = {}
+            return
         self._cofire_notionals = dict(allocations or {})
+
+    def paper_feature_flags(self) -> dict[str, bool]:
+        return dict(getattr(self, "_paper_feature_flags", None) or config.get_paper_feature_flags())
 
     def _invalidate_cache(self):
         self._account = None

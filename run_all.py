@@ -225,6 +225,10 @@ def _write_heartbeat(
     sleeve_caps=None,
     dynamic_vol_score=None,
 ):
+    macro_stress = bool(
+        wisdom
+        and (wisdom.get("dynamic_stress") or wisdom.get("governor_stress"))
+    )
     payload = {
         "timestamp": datetime.datetime.now().isoformat(),
         "regime": regime,
@@ -235,7 +239,13 @@ def _write_heartbeat(
         "spy_trades_last_cycle": spy_trades,
         "sleeve_caps": sleeve_caps
         or {
-            "vti_core": config.vti_core_allocation_pct(),
+            "vti_core": config.get_vti_core_pct(
+                equity,
+                vol_score=dynamic_vol_score,
+                macro_stress=macro_stress,
+            )
+            if config.paper_aggressive_context()
+            else config.vti_core_allocation_pct(equity=equity),
             "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
@@ -434,8 +444,9 @@ def main():
     if hasattr(executor, "set_wisdom_sizing_multiplier"):
         executor.set_wisdom_sizing_multiplier(wisdom.get("sizing_multiplier", 1.0))
 
-    from modules.market_context import cross_asset_vol_score
+    from modules.market_context import cross_asset_vol_score, get_volatility
 
+    vol_label = get_volatility(data)
     vol_score = cross_asset_vol_score(data)
     sleeve_cap_pcts = None
     if config.DYNAMIC_SLEEVE_CAPS_ENABLED:
@@ -450,11 +461,39 @@ def main():
             )
     elif hasattr(executor, "set_dynamic_sleeve_caps"):
         executor.set_dynamic_sleeve_caps(None)
+
+    macro_regime_result = None
+    if config.effective_macro_regime_adaptor_enabled():
+        from modules.macro_regime_adaptor import (
+            apply_yield_gate_boost,
+            evaluate_macro_regime,
+            log_regime_messages,
+            merge_regime_sleeve_caps,
+        )
+        from modules.macro_signals import load_daily_matrix
+
+        try:
+            macro_daily = load_daily_matrix(days=120)
+        except Exception:
+            macro_daily = None
+        macro_regime = evaluate_macro_regime(
+            data, daily_macro=macro_daily, wisdom=wisdom
+        )
+        macro_regime_result = macro_regime
+        if macro_regime.get("active"):
+            log_regime_messages(macro_regime)
+            base_caps = sleeve_cap_pcts or config.fund_allocation_pct()
+            merged = merge_regime_sleeve_caps(base_caps, macro_regime)
+            executor.set_dynamic_sleeve_caps(merged)
+            sleeve_cap_pcts = merged
+
     if schedule.get("crypto_only"):
         gp_signals = {"ok": True, "stress": False, "yield_gate": False}
     else:
         gp_signals = _game_plan_signals(regime)
     yield_gated = bool(gp_signals.get("yield_gate"))
+    if macro_regime_result:
+        yield_gated = apply_yield_gate_boost(yield_gated, macro_regime_result)
     _maybe_rebalance_startup(
         executor, data, regime, vol, equity_scans, yield_gated=yield_gated
     )
@@ -580,13 +619,29 @@ def main():
 
     vti_result = None
     if config.vti_core_enabled() and market_open:
-        vti_result = rebalance_vti_core(executor, market_open=market_open)
+        macro_stress_flag = bool(
+            wisdom.get("dynamic_stress")
+            or wisdom.get("governor_stress")
+            or gp_signals.get("stress")
+        )
+        vti_result = rebalance_vti_core(
+            executor,
+            market_open=market_open,
+            vol_score=vol_score,
+            macro_stress=macro_stress_flag,
+            volatility=vol_label,
+        )
+        if config.paper_aggressive_context() and vti_result.get("enabled"):
+            print(
+                f"--- Dynamic VTI: {vti_result.get('target_pct', 0):.0%} target "
+                f"(vol={vol_label}/{vol_score:.4f}, stress={macro_stress_flag}) ---"
+            )
         if vti_result.get("action"):
             print(
                 f"--- VTI core: {vti_result['action']} {vti_result.get('notional', 0):,.2f} "
                 f"-> {vti_result.get('current_value', 0):,.2f} / "
                 f"{vti_result.get('target_value', 0):,.2f} "
-                f"({config.VTI_CORE_PCT:.0%} target) ---"
+                f"({vti_result.get('target_pct', config.VTI_CORE_PCT):.0%} target) ---"
             )
         elif vti_result.get("enabled") and not vti_result.get("skipped"):
             print(
@@ -595,7 +650,7 @@ def main():
             )
 
     social_result = None
-    if config.SOCIAL_SLEEVE_ENABLED and market_open:
+    if config.effective_social_sleeve_enabled() and market_open:
         social_result = run_social_sleeve_cycle(wisdom, executor, market_open=market_open)
         if social_result.get("enabled"):
             tgt = social_result.get("target") or "cash"
@@ -829,7 +884,9 @@ def main():
         social_sleeve=social_result,
         vti_core=vti_result,
         sleeve_caps=sleeve_cap_pcts,
-        dynamic_vol_score=vol_score if config.DYNAMIC_SLEEVE_CAPS_ENABLED else None,
+        dynamic_vol_score=vol_score
+        if config.DYNAMIC_SLEEVE_CAPS_ENABLED or config.paper_aggressive_context()
+        else None,
     )
 
     wisdom_journal.log_cycle(
@@ -893,7 +950,7 @@ def _print_startup_banner():
     print(f"--- Alpaca mode: {mode} (signals / paper execution) ---")
     if config.paper_aggressive_context():
         print(
-            f"--- Paper SHARPE CHASE: {config.PAPER_VTI_CORE_PCT:.0%} VTI | "
+            "--- Paper SHARPE CHASE: dynamic VTI 40-75% (calm/stress) | "
             f"active boost x{config.PAPER_ACTIVE_SLEEVE_BOOST} | "
             f"wisdom floor x{config.PAPER_WISDOM_SIZING_FLOOR} | "
             f"crypto vol-only={config.effective_crypto_vol_only()} | "

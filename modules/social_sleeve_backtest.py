@@ -10,7 +10,7 @@ from modules.felix_sentiment import felix_sentiment_as_of
 from modules.social_sleeve import (
     SOCIAL_SYMBOLS,
     aggregate_social_score,
-    target_symbol_for_score,
+    resolve_social_target,
 )
 from modules.wayback_sentiment import web_sentiment_for_date
 
@@ -89,17 +89,24 @@ def run_social_backtest_day(
     agg: dict,
     *,
     market_open: bool = True,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """
     Rebalance paper social sleeve (GLD / XLE / SPY / cash) on one daily bar.
     Uses zero equity commission; separate portfolio from main fund.
     """
     actions: list[dict] = []
-    if not config.SOCIAL_SLEEVE_ENABLED or not market_open:
-        return actions
+    meta = {"target": None, "reason": "disabled", "score": agg.get("score")}
+    if not config.effective_social_sleeve_enabled() or not market_open:
+        return actions, meta
 
-    score = agg.get("score")
-    target = _resolve_target(target_symbol_for_score(score), prices)
+    target_raw, reason = resolve_social_target(agg, log=False)
+    target = _resolve_target(target_raw, prices)
+    meta = {
+        "target": target,
+        "reason": reason,
+        "score": agg.get("score"),
+        "macro_bearish_hits": agg.get("macro_bearish_hits"),
+    }
     equity = portfolio.equity(prices)
     cap = round(equity * config.effective_social_sleeve_cap_pct(), 2)
     min_n = config.effective_min_notional(equity)
@@ -118,19 +125,19 @@ def run_social_backtest_day(
                     actions.append({"action": "sell", "symbol": sym, "notional": sell_n})
 
     if not target:
-        return actions
+        return actions, meta
 
     current = _social_value(portfolio, prices)
     room = round(cap - current, 2)
     if room < min_n:
-        return actions
+        return actions, meta
 
     buy_n = round(min(room, cap), 2)
     if buy_n < min_n:
-        return actions
+        return actions, meta
 
     price = float(prices[target])
     order = portfolio.trade(target, "buy", price, tx_cost=0.0, notional=buy_n)
     if order:
         actions.append({"action": "buy", "symbol": target, "notional": buy_n})
-    return actions
+    return actions, meta

@@ -206,6 +206,11 @@ def run_crypto_strategy(
     return trades
 
 
+def _nyse_equity_columns(data):
+    """NYSE momentum sleeve symbols (static columns or dynamic screener)."""
+    return config.nyse_momentum_universe(data.columns)
+
+
 def _equity_momentum_candidates(data, equity_cols):
     rows = []
     for symbol in equity_cols:
@@ -311,7 +316,7 @@ def _equity_momentum_ranked(
     if _spy_sleeve_active(data, yield_gated=yield_gated, regime=regime):
         if config.NYSE_SECTOR_TECH_CAP > 0:
             ranked = _apply_sector_tech_cap(ranked)
-        if config.NYSE_OVERLAP_FILTER_ENABLED:
+        if config.effective_nyse_overlap_filter_enabled():
             ranked = _filter_nyse_anti_overlap(data, ranked)
     return ranked
 
@@ -398,14 +403,7 @@ def _nyse_buy_intent(
 ):
     if regime_entries_paused(regime, data):
         return False
-    equity_cols = [
-        c
-        for c in data.columns
-        if not config.is_crypto(c)
-        and c != config.SPY_BOT_SYMBOL
-        and c != config.VTI_CORE_SYMBOL
-        and not config.is_metal_symbol(c)
-    ]
+    equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
         data, equity_cols, yield_gated=yield_gated, regime=regime
     )
@@ -469,7 +467,7 @@ def resolve_cycle_deploy(
     if hasattr(executor, "set_sizing_context"):
         executor.set_sizing_context(data)
 
-    if not config.COFIRE_BUDGET_ENABLED:
+    if not config.effective_cofire_budget_enabled():
         return
 
     rooms = {}
@@ -546,7 +544,7 @@ def run_spy_exits(
     log_fn=None,
 ):
     """Sell full SPY position when price closes below the moving average."""
-    if not config.SPY_EXIT_ON_MA_BREAK:
+    if not config.effective_spy_exit_on_ma_break():
         return 0
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
@@ -652,14 +650,7 @@ def run_equity_strategy(
     """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
     if regime_entries_paused(regime, data):
         return 0
-    equity_cols = [
-        c
-        for c in data.columns
-        if not config.is_crypto(c)
-        and c != config.SPY_BOT_SYMBOL
-        and c != config.VTI_CORE_SYMBOL
-        and not config.is_metal_symbol(c)
-    ]
+    equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
         data, equity_cols, yield_gated=yield_gated, regime=regime
     )
@@ -748,14 +739,7 @@ def nyse_mirror_intent(
     """Top MA50 momentum equity intent for Kraken mirror."""
     if regime_entries_paused(regime, data):
         return None
-    equity_cols = [
-        c
-        for c in data.columns
-        if not config.is_crypto(c)
-        and c != config.SPY_BOT_SYMBOL
-        and c != config.VTI_CORE_SYMBOL
-        and not config.is_metal_symbol(c)
-    ]
+    equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
         data, equity_cols, yield_gated=yield_gated, regime=regime
     )

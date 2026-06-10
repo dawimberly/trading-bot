@@ -12,8 +12,53 @@ from modules.portal_paths import PORTAL_ROOT, PROJECT_ROOT, has_alpaca_config, r
 _SCALED_CAP_KEYS = ("spy", "crypto", "nyse", "vti_core")
 _VOL_HIGH = float(os.getenv("DYNAMIC_SLEEVE_VOL_HIGH", "0.025"))
 _VOL_ELEVATED = float(os.getenv("DYNAMIC_SLEEVE_VOL_ELEVATED", "0.018"))
+_VOL_CALM = float(os.getenv("DYNAMIC_VTI_VOL_CALM", "0.015"))
 _SCALE_HIGH = float(os.getenv("DYNAMIC_SLEEVE_SCALE_HIGH", "0.75"))
 _SCALE_ELEVATED = float(os.getenv("DYNAMIC_SLEEVE_SCALE_ELEVATED", "0.90"))
+_VTI_STRESS = float(os.getenv("DYNAMIC_VTI_STRESS_PCT", "0.75"))
+_VTI_DEFAULT_AGGRESSIVE = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
+_VTI_CALM = float(os.getenv("DYNAMIC_VTI_CALM_PCT", "0.50"))
+_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.40"))
+
+
+def _resolve_vol_score(
+    vol_score: float | None,
+    volatility: str | None,
+) -> float | None:
+    """Map get_volatility() label to a numeric score when vol_score omitted."""
+    if vol_score is not None:
+        return vol_score
+    if volatility == "High":
+        return 0.02
+    if volatility == "Low":
+        return 0.01
+    return None
+
+
+def get_vti_core_pct(
+    equity: float,
+    vol_score: float | None = None,
+    macro_stress: bool = False,
+    volatility: str | None = None,
+) -> float:
+    """Dynamic VTI percentage. Paper aggressive gets more flexibility."""
+    if equity < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
+        return config.SMALL_ACCOUNT_VTI_CORE_PCT
+
+    if config.paper_aggressive_context():
+        if not config.PAPER_DYNAMIC_VTI_ENABLED:
+            return config.PAPER_VTI_CORE_PCT
+
+        score = _resolve_vol_score(vol_score, volatility)
+        if macro_stress or (score is not None and score > _VOL_HIGH):
+            pct = _VTI_STRESS
+        elif score is not None and score < _VOL_CALM:
+            pct = _VTI_CALM
+        else:
+            pct = _VTI_DEFAULT_AGGRESSIVE
+        return max(pct, _VTI_PAPER_FLOOR)
+
+    return config.VTI_CORE_PCT
 
 
 def get_dynamic_sleeve_caps(vol_score: float, equity: float) -> dict[str, float]:

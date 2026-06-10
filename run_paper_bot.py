@@ -1,7 +1,7 @@
 """24/7 paper Sharpe-chase bot — aggressive profile, isolated from live ~$100.
 
 Uses run_all.py with PAPER_CHASE_MODE:
-  - 20% VTI / 80% active (PAPER_VTI_CORE_PCT)
+  - Dynamic VTI 50-75% / 25-50% active (vol + macro stress)
   - Full active sleeve deployment (PAPER_ACTIVE_SLEEVE_BOOST)
   - Wisdom sizing floor 1.0 (no defensive shrink on paper)
   - Optional wider crypto (PAPER_CRYPTO_VOL_ONLY=false)

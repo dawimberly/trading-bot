@@ -13,10 +13,12 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 - `WISDOM_MODE=dynamic`
 - Yield-gate-only game plan (`GAME_PLAN_YIELD_GATE_ONLY=true`)
-- 90% VTI core on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
-- Overlap filter, adaptive chunk, co-fire, SPY MA exit — **off by default** (opt-in via `.env`)
+- **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
+- Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
 
-Paper Sharpe chase (20% VTI, aggressive active sleeves) runs on a **separate** paper book — see [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase).
+**Paper research** (`paper_aggressive`): dynamic VTI (40–75%), overlap filter + adaptive chunk + co-fire **on**, macro adaptor + social + SPY MA exit **off**. See [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase).
+
+**At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
 ---
 
@@ -48,15 +50,16 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
 | Layer | Setting |
 |-------|---------|
-| **VTI core** | **20%** (`PAPER_VTI_CORE_PCT`) |
+| **VTI core** | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`) or 20% static fallback |
 | **Active sleeves** | Full 45/20/20 base caps × **1.40 boost** (~79% deployed) |
 | **Game plan** | Yield-gate-only (same gate logic) |
-| **NYSE beta scaling** | **on** when `PAPER_CHASE_EXTRA=true` (recommended for research grids) |
-| **NYSE overlap filter** | off (optional; A/B hurt recent return) |
-| **Adaptive chunk / co-fire** | **on** when paper chase extras enabled |
-| **SPY MA exit** | off unless opt-in |
+| **NYSE overlap filter** | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
+| **NYSE beta scaling** | **on** when `PAPER_CHASE_EXTRA=true` |
+| **Adaptive chunk / co-fire** | **on** (`PAPER_ADAPTIVE_CHUNK_ENABLED`, `PAPER_COFIRE_BUDGET_ENABLED`) |
+| **SPY MA exit** | **off** (`PAPER_SPY_EXIT_ON_MA_BREAK=false`) |
+| **Macro regime adaptor** | **off** (`PAPER_MACRO_REGIME_ADAPTOR_ENABLED=false`) |
 | **Crypto vol gate** | **off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| **Social / Felix** | on when paper chase extras enabled |
+| **Social / Felix sleeve** | **off** (`PAPER_SOCIAL_SLEEVE_ENABLED=false`; Felix sync optional via chase extras) |
 
 Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Preflight prints Profile B via `config.print_paper_research_stack_flags()`.
 
@@ -105,7 +108,13 @@ Preflight checks live mode, Alpaca connection, alerts, and prints small-account 
 
 Sign in with your portal user. The dashboard shows equity, regime, VTI core, and active sleeves. **Stop Bot** before restarting to avoid duplicate processes.
 
-5. **Optional — paper Sharpe chase in parallel:** [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase) (`launch_both.bat`). Backtest paper settings before changing live caps.
+5. **Check status anytime:**
+
+```powershell
+python status.py
+```
+
+6. **Optional — paper Sharpe chase in parallel:** [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase) (`launch_both.bat`). Backtest paper settings before changing live caps.
 
 At equity **≥ $500**, small-account rules relax automatically (80% VTI, 2% risk per trade).
 
@@ -239,20 +248,27 @@ Preflight prints Profile A via `config.print_recommended_stack_flags()` (dispatc
 
 | Layer | Setting |
 |-------|---------|
-| **VTI core** | 20% passive; ~79% active (`PAPER_ACTIVE_SLEEVE_BOOST=1.40`) |
+| **VTI core** | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`); static 20% fallback |
 | **Game plan** | Yield-gate-only (same as live) |
+| **NYSE overlap filter** | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
 | **NYSE beta scaling** | on when `PAPER_CHASE_EXTRA=true` |
-| **Adaptive chunk / co-fire** | on when paper chase extras enabled |
+| **Adaptive chunk / co-fire** | **on** (paper defaults) |
+| **SPY MA exit** | **off** |
+| **Macro regime adaptor** | **off** |
 | **Crypto** | All vol regimes (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| **Social / Felix** | on when paper chase extras enabled |
+| **Social / Felix sleeve** | **off** (opt-in via `.env`) |
 
 ```
 --- paper_aggressive research stack (Profile B) ---
   paper_chase_mode:       ON (PAPER_CHASE_MODE)
+  nyse_overlap_filter:    True
   nyse_beta_scaling:      True (recommended ON for research grids)
   adaptive_chunk:         True
   cofire_budget:          True
-  vti_core:             20% VTI | active boost 1.40x
+  spy_exit_on_ma_break:   False
+  macro_regime_adaptor:   False
+  social_sleeve:          off
+  vti_core:             dynamic 40-75% VTI | active boost 1.40x
   crypto_vol_only:      False
   sleeves: SPY 45% | crypto 20% | NYSE 20% | metal 0% | cash 15%
 ```
@@ -318,9 +334,9 @@ python backtester.py --days 365 --compare-vti-core
 python backtester.py --days 365 --vti-core 0.8
 ```
 
-## Social / Felix sleeve
+## Social / Felix sleeve (legacy — off by default)
 
-Creator-macro sleeve driven by **YouTube transcripts** (Felix & Friends + **Andrei Jikh**) blended with headline web sentiment. Runs on the **paper research book** (`PAPER_APCA_*`); optional **live mirror** on the main account.
+Creator-macro sleeve driven by **YouTube transcripts** (Felix & Friends + **Andrei Jikh**) blended with headline web sentiment. **Disabled by default** on both live and paper; code kept for future opt-in. When enabled, runs on the **paper research book** (`PAPER_APCA_*`); optional **live mirror** on the main account.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
@@ -352,13 +368,13 @@ The **paper book** can run a profit-seeking profile **without changing live ~$10
 
 `PAPER_CHASE_MODE=1` enables the aggressive profile inside `run_all.py` (portal sets this automatically when your saved keys are paper).
 
-**Hardware / WiFi:** the bot is idle **most of the time** (45–60s sleep between cycles; price refresh every 10–15m). You are **not** maxing out a modern PC or home broadband. Paper chase auto-enables extra layers (`adaptive_chunk`, `cofire_budget`, `social_sleeve`, Felix sync, faster refresh) — still light load.
+**Hardware / WiFi:** the bot is idle **most of the time** (45–60s sleep between cycles; price refresh every 10–15m). You are **not** maxing out a modern PC or home broadband. Paper chase auto-enables overlap/chunk/co-fire, Felix sync (sentiment only), NYSE beta scaling, and faster refresh — **not** social sleeve or macro adaptor. Still light load.
 
 | Setting | Live (~$100, equity &lt; $500) | Live (≥ $500) | Paper aggressive |
 |---------|-------------------------------|---------------|------------------|
-| VTI core | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) | **80%** (`VTI_CORE_PCT`) | **20%** (`PAPER_VTI_CORE_PCT`) |
-| Active sleeves | ~10% total | ~20% total | **~79%** (`PAPER_ACTIVE_SLEEVE_BOOST=1.40`) |
-| Social cap | 10% | 10% | **20%** (`PAPER_SOCIAL_SLEEVE_CAP_PCT`) |
+| VTI core | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) | **80%** (`VTI_CORE_PCT`) | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`) |
+| Active sleeves | ~10% total | ~20% total | **~31% avg** with dynamic VTI; 1.40× boost on base caps |
+| Social / macro | **off** | **off** | **off** (opt-in via `.env`) |
 | Crypto vol gate | High vol only | High vol only | **Off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
 | Wisdom sizing floor | defensive cuts | defensive cuts | **1.0** (no shrink) |
 
@@ -480,7 +496,7 @@ python run_all.py
 
 ### Before going live (real money)
 
-See [Quick Start – Live $100 Account](#quick-start--live-100-account) for the main flow. Keep paper research keys in `PAPER_APCA_*` if you run the social sleeve on a separate paper book.
+See [Quick Start – Live $100 Account](#quick-start--live-100-account) for the main flow. Use `PAPER_APCA_*` for the separate paper research book (`run_paper_bot.py`).
 
 | Setting | Default | Notes |
 |---------|---------|-------|
@@ -492,6 +508,8 @@ See [Quick Start – Live $100 Account](#quick-start--live-100-account) for the 
 | `ADAPTIVE_CHUNK_ENABLED` | `false` | Opt-in |
 | `COFIRE_BUDGET_ENABLED` | `false` | Opt-in |
 | `SPY_EXIT_ON_MA_BREAK` | `false` | Opt-in |
+| `SOCIAL_SLEEVE_ENABLED` | `false` | Felix/social off on live |
+| `MACRO_REGIME_ADAPTOR_ENABLED` | `false` | Macro adaptor off on live |
 
 **Extra checklist** before first live cycle:
 
@@ -797,9 +815,10 @@ python backtester.py --max --no-halt    # validate crypto sleeve path
 python backtester.py --days 365 --compare-vti-core
 python backtester.py --days 365 --vti-core 0.8
 
-# Paper aggressive research profile (20% VTI, boosted sleeves, Felix social)
-python backtester.py --days 365 --compare-paper-aggressive
+# Paper aggressive (dynamic VTI, overlap/chunk/co-fire; social/macro off)
 python backtester.py --days 365 --paper-aggressive
+python backtester.py --days 365 --compare-dynamic-vti
+python backtester.py --days 365 --compare-paper-sleeve-features
 
 # Game plan A/B grid (yield_gate_only vs full blend)
 python scripts/analysis/game_plan_ab_test.py
@@ -961,6 +980,7 @@ PythonTrading/
 │   ├── portal/             # users.db, fund_pair.json, users/<name>/
 │   └── fund/               # @root bot slots (e.g. paper/ heartbeat, journal)
 ├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
+├── status.py               # One-line live + paper equity, regime, flags
 ├── run_spy.py              # Optional standalone SPY loop
 ├── fetch_data.py           # yfinance → SQLite (5m live, daily backtest)
 ├── config.py               # Universe, sleeves, game plan, credentials, paths
@@ -973,7 +993,8 @@ PythonTrading/
 ├── modules/
 │   ├── pipeline_strategies.py  # SPY, crypto, NYSE strategies
 │   ├── vti_core.py             # Passive VTI rebalance (live + paper)
-│   ├── social_sleeve.py        # Felix / social macro (paper + live mirror)
+│   ├── macro_regime_adaptor.py # Oil/gold/VIX/geo regime (paper opt-in)
+│   ├── social_sleeve.py        # Felix / social macro (legacy, off by default)
 │   ├── social_sleeve_backtest.py  # Parallel social book in backtester
 │   ├── felix_sentiment.py      # Transcript sync + scoring
 │   ├── cost_basis.py           # Avg-entry sizing guard
@@ -1006,6 +1027,7 @@ PythonTrading/
 ## Utility scripts
 
 ```powershell
+python status.py                             # Live + paper equity, regime, flags
 python scripts/generate_dashboard_icon.py    # assets/dashboard.ico for shortcuts
 python scripts/account/preflight.py          # Pre-flight before paper month
 python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval

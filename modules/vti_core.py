@@ -12,7 +12,14 @@ def vti_core_value(executor) -> float:
     return executor._position_market_value(pos)
 
 
-def rebalance_vti_core(executor, *, market_open: bool) -> dict:
+def rebalance_vti_core(
+    executor,
+    *,
+    market_open: bool,
+    vol_score: float | None = None,
+    macro_stress: bool = False,
+    volatility: str | None = None,
+) -> dict:
     """
     Hold VTI at VTI_CORE_PCT of equity. Rebalance when drift exceeds band.
     Protected from halt trims and stop-loss (see game_plan / position_exits).
@@ -27,7 +34,12 @@ def rebalance_vti_core(executor, *, market_open: bool) -> dict:
     if equity <= 0:
         return {"enabled": True, "skipped": True, "reason": "no equity"}
 
-    core_pct = config.vti_core_allocation_pct()
+    core_pct = config.vti_core_allocation_pct(
+        equity=equity,
+        vol_score=vol_score,
+        macro_stress=macro_stress,
+        volatility=volatility,
+    )
     target = round(equity * core_pct, 2)
     current = round(vti_core_value(executor), 2)
     min_n = config.effective_min_notional(equity)

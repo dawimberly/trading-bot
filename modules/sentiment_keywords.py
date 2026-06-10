@@ -26,6 +26,22 @@ BEARISH = (
     "slump",
     "tumble",
 )
+# Macro unwind / crash language (weighted heavier in creator transcripts)
+MACRO_BEARISH_UNWIND = (
+    "unwind",
+    "crash",
+    "collapse",
+    "correction",
+    "meltdown",
+    "blow off top",
+    "blow-off top",
+    "overvalued",
+    "bubble",
+    "recession",
+    "bear market",
+    "hard landing",
+)
+_CREATOR_CHANNEL_HINTS = ("felix", "andrei", "jikh")
 
 # SpaceX IPO ↔ crypto narrative (S-1 disclosed ~18,712 BTC treasury)
 SPACEX_IPO_TOPICS = (
@@ -84,14 +100,43 @@ SPCX_PERP_TOPICS = (
 )
 
 
-def score_text_sentiment(text: str) -> float:
+def macro_bearish_keyword_hits(text: str) -> int:
+    """Count distinct macro unwind/crash terms present in text."""
+    low = text.lower()
+    return sum(1 for w in MACRO_BEARISH_UNWIND if w in low)
+
+
+def is_creator_channel(name: str | None) -> bool:
+    low = (name or "").lower()
+    return any(h in low for h in _CREATOR_CHANNEL_HINTS)
+
+
+def score_text_sentiment(text: str, *, macro_weight: float = 2.0) -> float:
     text = text.lower()
     bull = sum(text.count(w) for w in BULLISH)
     bear = sum(text.count(w) for w in BEARISH)
+    macro = sum(text.count(w) for w in MACRO_BEARISH_UNWIND) * macro_weight
+    bear += macro
     total = bull + bear
     if total == 0:
         return 0.0
     return round((bull - bear) / total, 4)
+
+
+def score_creator_transcript_sentiment(
+    text: str,
+    *,
+    channel_name: str | None = None,
+    creator_boost: bool | None = None,
+) -> tuple[float, int]:
+    """Score transcript with macro unwind terms; extra bearish pull for Felix/Andrei."""
+    boost = is_creator_channel(channel_name) if creator_boost is None else creator_boost
+    hits = macro_bearish_keyword_hits(text)
+    base = score_text_sentiment(text, macro_weight=2.5 if boost else 2.0)
+    if boost and hits > 0:
+        adjusted = max(-1.0, round(base - min(0.35, 0.07 * hits), 4))
+        return adjusted, hits
+    return base, hits
 
 
 def count_topic_mentions(text: str, keywords: tuple[str, ...]) -> int:

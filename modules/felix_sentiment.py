@@ -10,7 +10,12 @@ from pathlib import Path
 import pandas as pd
 
 import config
-from modules.sentiment_keywords import score_text_sentiment
+from modules.sentiment_keywords import (
+    is_creator_channel,
+    macro_bearish_keyword_hits,
+    score_creator_transcript_sentiment,
+    score_text_sentiment,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,8 +77,40 @@ def load_all_manifests() -> list[dict]:
     return rows
 
 
-def score_transcript_text(text: str) -> float:
-    return score_text_sentiment(text)
+def score_transcript_text(text: str, *, channel_name: str | None = None) -> float:
+    score, _ = score_creator_transcript_sentiment(
+        text, channel_name=channel_name, creator_boost=is_creator_channel(channel_name)
+    )
+    return score
+
+
+def enrich_manifest_row(row: dict) -> dict:
+    """Re-score from transcript/title; attach macro_bearish_hits for social sleeve."""
+    out = dict(row)
+    text = ""
+    tf = row.get("transcript_file")
+    if tf:
+        path = ROOT / str(tf)
+        if path.is_file():
+            text = path.read_text(encoding="utf-8", errors="ignore")
+    if not text:
+        text = str(row.get("title") or "")
+    channel = row.get("channel_name") or row.get("channel_id")
+    use_boost = config.paper_aggressive_context() and config.PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    if text.strip():
+        if use_boost:
+            score, hits = score_creator_transcript_sentiment(
+                text,
+                channel_name=str(channel) if channel else None,
+            )
+        else:
+            score = score_text_sentiment(text, macro_weight=1.0)
+            hits = macro_bearish_keyword_hits(text)
+        out["sentiment"] = score
+        out["macro_bearish_hits"] = hits
+    else:
+        out["macro_bearish_hits"] = macro_bearish_keyword_hits(str(row.get("title") or ""))
+    return out
 
 
 def _row_as_of(rows: list[dict], ts) -> dict | None:
@@ -168,8 +205,10 @@ def _blend_channel_rows(
         parts,
         key=lambda p: p[2].get("published") or p[2].get("synced_at") or "",
     )[2]
+    macro_hits = max(int(r.get("macro_bearish_hits") or 0) for _, _, r in parts)
     return {
         "sentiment": score,
+        "macro_bearish_hits": macro_hits,
         "video_id": newest.get("video_id"),
         "title": newest.get("title"),
         "published": newest.get("published"),
@@ -213,6 +252,7 @@ def felix_sentiment_as_of(ts, max_age_days: int | None = None) -> dict | None:
         if not _within_age(row, max_age_days=window, ref=ref):
             continue
         tagged = dict(row)
+        tagged = enrich_manifest_row(tagged)
         tagged["channel_id"] = spec["id"]
         tagged["channel_name"] = spec["name"]
         per_channel.append(tagged)
@@ -230,6 +270,7 @@ def latest_felix_sentiment(max_age_days: int | None = None) -> dict | None:
     for spec in specs:
         row = _latest_for_channel(spec["id"], max_age_days)
         if row:
+            row = enrich_manifest_row(row)
             row["channel_name"] = spec["name"]
             per_channel.append(row)
     return _blend_channel_rows(per_channel, specs)
@@ -410,7 +451,12 @@ def sync_channel_transcripts(
                 continue
             out_file = transcripts_dir / f"{vid}.txt"
             out_file.write_text(text, encoding="utf-8")
-            sentiment = round(score_transcript_text(text), 4)
+            sentiment = round(
+                score_transcript_text(text, channel_name=spec.get("name")), 4
+            )
+            _, macro_hits = score_creator_transcript_sentiment(
+                text, channel_name=spec.get("name")
+            )
             published = entry.get("upload_date") or entry.get("release_date")
             if not published:
                 published = _fetch_upload_date(vid)
@@ -422,6 +468,7 @@ def sync_channel_transcripts(
                 "published": published,
                 "synced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "sentiment": sentiment,
+                "macro_bearish_hits": macro_hits,
                 "transcript_file": str(out_file.relative_to(ROOT)).replace("\\", "/"),
                 "chars": len(text),
             }

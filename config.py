@@ -1,6 +1,8 @@
 """Central configuration: credentials, universe, paths, and strategy constants."""
 
+import json
 import os
+import warnings
 from dotenv import load_dotenv, find_dotenv
 
 _env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
@@ -25,6 +27,14 @@ UNIVERSE = [
     "JPM", "BAC", "GS",
     "JNJ", "UNH", "PFE",
 ]
+
+# --- Dynamic NYSE screener (scripts/analysis/universe_screener.py) ---
+USE_DYNAMIC_UNIVERSE = os.getenv("USE_DYNAMIC_UNIVERSE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+SCREENER_UNIVERSE_PATH = os.getenv("SCREENER_UNIVERSE_PATH", "data/screener_universe.json")
 
 # --- Paths ---
 DB_PATH = "market_data.db"
@@ -71,6 +81,31 @@ PAPER_CRYPTO_VOL_ONLY = os.getenv("PAPER_CRYPTO_VOL_ONLY", "false").lower() in (
     "yes",
 )
 PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
+PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.40"))
+# Advanced sleeve features — paper aggressive only (live Profile A stays off)
+PAPER_NYSE_OVERLAP_FILTER_ENABLED = os.getenv(
+    "PAPER_NYSE_OVERLAP_FILTER_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+PAPER_ADAPTIVE_CHUNK_ENABLED = os.getenv("PAPER_ADAPTIVE_CHUNK_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_COFIRE_BUDGET_ENABLED = os.getenv("PAPER_COFIRE_BUDGET_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_SPY_EXIT_ON_MA_BREAK = os.getenv("PAPER_SPY_EXIT_ON_MA_BREAK", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
 _paper_aggressive_ctx = False
 
@@ -287,6 +322,40 @@ SOCIAL_HEADLINE_WEIGHT = float(os.getenv("SOCIAL_HEADLINE_WEIGHT", "0.35"))
 SOCIAL_BEAR_GLD_THRESHOLD = float(os.getenv("SOCIAL_BEAR_GLD_THRESHOLD", "-0.12"))
 SOCIAL_BEAR_ENERGY_THRESHOLD = float(os.getenv("SOCIAL_BEAR_ENERGY_THRESHOLD", "-0.04"))
 SOCIAL_BULL_SPY_THRESHOLD = float(os.getenv("SOCIAL_BULL_SPY_THRESHOLD", "0.08"))
+SOCIAL_MACRO_BEAR_OVERRIDE_SCORE = float(
+    os.getenv("SOCIAL_MACRO_BEAR_OVERRIDE_SCORE", "-0.4")
+)
+SOCIAL_MACRO_BULL_OVERRIDE_SCORE = float(
+    os.getenv("SOCIAL_MACRO_BULL_OVERRIDE_SCORE", "0.5")
+)
+PAPER_SOCIAL_SLEEVE_ENABLED = os.getenv("PAPER_SOCIAL_SLEEVE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# --- Macro Regime Adaptor (replaces Felix/Social on paper aggressive) ---
+MACRO_REGIME_ADAPTOR_ENABLED = os.getenv("MACRO_REGIME_ADAPTOR_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_MACRO_REGIME_ADAPTOR_ENABLED = os.getenv(
+    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+MACRO_OIL_SURGE_PCT = float(os.getenv("MACRO_OIL_SURGE_PCT", "0.08"))
+MACRO_GLD_SURGE_PCT = float(os.getenv("MACRO_GLD_SURGE_PCT", "0.03"))
+MACRO_VIX_SPIKE_PCT = float(os.getenv("MACRO_VIX_SPIKE_PCT", "0.10"))
+MACRO_ENERGY_CAP_PCT = float(os.getenv("MACRO_ENERGY_CAP_PCT", "0.10"))
+MACRO_SAFE_HAVEN_CAP_PCT = float(os.getenv("MACRO_SAFE_HAVEN_CAP_PCT", "0.12"))
+MACRO_ENERGY_SLEEVE_BOOST = float(os.getenv("MACRO_ENERGY_SLEEVE_BOOST", "0.08"))
+SOCIAL_MACRO_OVERRIDES_ENABLED = os.getenv("SOCIAL_MACRO_OVERRIDES_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_SOCIAL_MACRO_BOOST_ENABLED = os.getenv(
+    "PAPER_SOCIAL_MACRO_BOOST_ENABLED", "true"
+).lower() in ("1", "true", "yes")
 
 # --- SpaceX IPO ↔ crypto monitor (headline watch; S-1 BTC treasury narrative) ---
 SPACEX_IPO_MONITOR_ENABLED = os.getenv("SPACEX_IPO_MONITOR_ENABLED", "true").lower() in (
@@ -660,7 +729,7 @@ def configure_account_profile(equity: float) -> dict:
         "small_account": _small_account_mode,
         "risk_per_trade": effective_risk_per_trade(),
         "max_notional_per_order": effective_max_notional_per_order(),
-        "vti_core_pct": vti_core_allocation_pct(),
+        "vti_core_pct": vti_core_allocation_pct(equity=_account_equity),
     }
 
 
@@ -714,6 +783,65 @@ def crypto_universe():
 
 def equity_universe():
     return [t for t in UNIVERSE if not is_crypto(t) and t not in METAL_SYMBOLS]
+
+
+_screener_fallback_warned = False
+
+
+def load_screener_universe_tickers() -> list[str] | None:
+    """Load ranked tickers from screener JSON; None if missing or invalid."""
+    path = SCREENER_UNIVERSE_PATH
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+        tickers = payload.get("tickers") or []
+        return [str(t).strip().upper() for t in tickers if str(t).strip()]
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        return None
+
+
+def _nyse_eligible_symbol(symbol: str) -> bool:
+    return (
+        not is_crypto(symbol)
+        and symbol != SPY_BOT_SYMBOL
+        and symbol != VTI_CORE_SYMBOL
+        and not is_metal_symbol(symbol)
+    )
+
+
+def nyse_momentum_universe(data_columns) -> list[str]:
+    """NYSE sleeve candidates: dynamic screener list or static data columns."""
+    global _screener_fallback_warned
+    cols = list(data_columns)
+    static = [c for c in cols if _nyse_eligible_symbol(c)]
+    if not USE_DYNAMIC_UNIVERSE:
+        return static
+
+    screener = load_screener_universe_tickers()
+    if not screener:
+        if not _screener_fallback_warned:
+            warnings.warn(
+                f"USE_DYNAMIC_UNIVERSE enabled but {SCREENER_UNIVERSE_PATH} "
+                "missing or invalid — using static universe",
+                stacklevel=2,
+            )
+            _screener_fallback_warned = True
+        return static
+
+    screener_set = frozenset(screener)
+    dynamic = [c for c in cols if c in screener_set and _nyse_eligible_symbol(c)]
+    if not dynamic:
+        if not _screener_fallback_warned:
+            warnings.warn(
+                f"USE_DYNAMIC_UNIVERSE: no screener tickers in price data — "
+                "using static universe",
+                stacklevel=2,
+            )
+            _screener_fallback_warned = True
+        return static
+    return dynamic
 
 
 def is_metal_symbol(symbol: str) -> bool:
@@ -857,17 +985,20 @@ def print_paper_research_stack_flags() -> None:
             print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
         print(f"  game_plan:              {gp}")
         print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
+        flags = get_paper_feature_flags()
         print(
-            f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} "
-            f"(optional; A/B hurt recent return)"
+            f"  nyse_overlap_filter:    {flags.get('nyse_overlap', NYSE_OVERLAP_FILTER_ENABLED)} "
+            f"(paper flags: {bool(flags)})"
         )
         print(
             f"  nyse_beta_scaling:      {NYSE_BETA_SCALING_ENABLED} "
             f"(recommended ON for research grids)"
         )
-        print(f"  spy_exit_on_ma_break:   {SPY_EXIT_ON_MA_BREAK} (optional)")
-        print(f"  adaptive_chunk:         {ADAPTIVE_CHUNK_ENABLED}")
-        print(f"  cofire_budget:          {COFIRE_BUDGET_ENABLED}")
+        print(
+            f"  spy_exit_on_ma_break:   {flags.get('spy_exit_on_ma_break', SPY_EXIT_ON_MA_BREAK)}"
+        )
+        print(f"  adaptive_chunk:         {flags.get('adaptive_chunk', ADAPTIVE_CHUNK_ENABLED)}")
+        print(f"  cofire_budget:          {flags.get('cofire_budget', COFIRE_BUDGET_ENABLED)}")
         print(
             f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
             f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
@@ -923,7 +1054,7 @@ def apply_paper_chase_runtime_tuning() -> list[str]:
     Live ~$100 profile is unchanged. Bot CPU/WiFi stay light (mostly sleeping).
     Set PAPER_CHASE_EXTRA=false to skip.
     """
-    global ADAPTIVE_CHUNK_ENABLED, COFIRE_BUDGET_ENABLED, SOCIAL_SLEEVE_ENABLED
+    global SOCIAL_SLEEVE_ENABLED
     global FELIX_SYNC_ENABLED, FELIX_SENTIMENT_ENABLED, NYSE_BETA_SCALING_ENABLED
     global REFRESH_INTERVAL, CRYPTO_ONLY_CYCLE_INTERVAL_SEC, CYCLE_INTERVAL_SEC
 
@@ -939,9 +1070,8 @@ def apply_paper_chase_runtime_tuning() -> list[str]:
         globals()[flag] = value
         turned_on.append(name)
 
-    _enable("adaptive_chunk", "ADAPTIVE_CHUNK_ENABLED")
-    _enable("cofire_budget", "COFIRE_BUDGET_ENABLED")
-    _enable("social_sleeve", "SOCIAL_SLEEVE_ENABLED")
+    # adaptive_chunk / cofire / overlap / spy_exit: paper via effective_*() helpers
+    # Felix sync on for sentiment; social + macro adaptor off by default (opt-in via .env)
     _enable("felix_sync", "FELIX_SYNC_ENABLED")
     _enable("felix_sentiment", "FELIX_SENTIMENT_ENABLED")
     _enable("nyse_beta_scaling", "NYSE_BETA_SCALING_ENABLED")
@@ -980,10 +1110,93 @@ def paper_aggressive_context() -> bool:
     return PAPER_AGGRESSIVE_ENABLED and _paper_aggressive_ctx
 
 
+def get_paper_feature_flags() -> dict[str, bool]:
+    """Advanced sleeve toggles for paper aggressive / chase; live returns {}."""
+    if not (
+        paper_aggressive_context()
+        or (PAPER_AGGRESSIVE_ENABLED and paper_chase_mode_enabled())
+    ):
+        return {}
+    return {
+        "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+        "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
+        "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
+        "spy_exit_on_ma_break": PAPER_SPY_EXIT_ON_MA_BREAK,
+    }
+
+
+def snapshot_paper_sleeve_flags() -> dict[str, bool]:
+    """Save PAPER_* sleeve env flags for backtest restore."""
+    return {
+        "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+        "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
+        "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
+        "spy_exit_on_ma_break": PAPER_SPY_EXIT_ON_MA_BREAK,
+    }
+
+
+def apply_paper_sleeve_flags(flags: dict[str, bool]) -> None:
+    """Set PAPER_* sleeve flags (used by backtester A/B)."""
+    global PAPER_NYSE_OVERLAP_FILTER_ENABLED
+    global PAPER_ADAPTIVE_CHUNK_ENABLED
+    global PAPER_COFIRE_BUDGET_ENABLED
+    global PAPER_SPY_EXIT_ON_MA_BREAK
+    if "nyse_overlap" in flags:
+        PAPER_NYSE_OVERLAP_FILTER_ENABLED = bool(flags["nyse_overlap"])
+    if "adaptive_chunk" in flags:
+        PAPER_ADAPTIVE_CHUNK_ENABLED = bool(flags["adaptive_chunk"])
+    if "cofire_budget" in flags:
+        PAPER_COFIRE_BUDGET_ENABLED = bool(flags["cofire_budget"])
+    if "spy_exit_on_ma_break" in flags:
+        PAPER_SPY_EXIT_ON_MA_BREAK = bool(flags["spy_exit_on_ma_break"])
+
+
+def effective_nyse_overlap_filter_enabled() -> bool:
+    flags = get_paper_feature_flags()
+    if flags:
+        return flags["nyse_overlap"]
+    return NYSE_OVERLAP_FILTER_ENABLED
+
+
+def effective_adaptive_chunk_enabled() -> bool:
+    flags = get_paper_feature_flags()
+    if flags:
+        return flags["adaptive_chunk"]
+    return ADAPTIVE_CHUNK_ENABLED
+
+
+def effective_cofire_budget_enabled() -> bool:
+    flags = get_paper_feature_flags()
+    if flags:
+        return flags["cofire_budget"]
+    return COFIRE_BUDGET_ENABLED
+
+
+def effective_spy_exit_on_ma_break() -> bool:
+    flags = get_paper_feature_flags()
+    if flags:
+        return flags["spy_exit_on_ma_break"]
+    return SPY_EXIT_ON_MA_BREAK
+
+
 def effective_crypto_vol_only() -> bool:
     if paper_aggressive_context():
         return PAPER_CRYPTO_VOL_ONLY
     return CRYPTO_VOL_ONLY
+
+
+def effective_social_sleeve_enabled() -> bool:
+    """Felix/Social sleeve — off by default; opt-in via env (legacy)."""
+    if paper_aggressive_context():
+        return PAPER_SOCIAL_SLEEVE_ENABLED
+    return SOCIAL_SLEEVE_ENABLED
+
+
+def effective_macro_regime_adaptor_enabled() -> bool:
+    """Macro Regime Adaptor — off by default; opt-in via PAPER_MACRO_REGIME_ADAPTOR_ENABLED."""
+    if paper_aggressive_context():
+        return PAPER_MACRO_REGIME_ADAPTOR_ENABLED
+    return MACRO_REGIME_ADAPTOR_ENABLED
 
 
 def effective_social_sleeve_cap_pct() -> float:
@@ -998,12 +1211,45 @@ def effective_vti_rebalance_drift_pct() -> float:
     return VTI_CORE_REBALANCE_DRIFT_PCT
 
 
-def vti_core_allocation_pct() -> float:
+def get_vti_core_pct(
+    equity: float,
+    vol_score: float | None = None,
+    macro_stress: bool = False,
+    volatility: str | None = None,
+) -> float:
+    """Dynamic VTI target (paper aggressive) or static live/small-account pct."""
+    from modules.fund_config import get_vti_core_pct as _get_vti_core_pct
+
+    return _get_vti_core_pct(
+        equity,
+        vol_score=vol_score,
+        macro_stress=macro_stress,
+        volatility=volatility,
+    )
+
+
+def vti_core_allocation_pct(
+    equity: float | None = None,
+    vol_score: float | None = None,
+    macro_stress: bool = False,
+    volatility: str | None = None,
+) -> float:
     if not VTI_CORE_ENABLED:
         return 0.0
     if paper_aggressive_context():
-        pct = PAPER_VTI_CORE_PCT
-    elif is_small_account():
+        eq = equity if equity is not None and equity > 0 else (_account_equity or 0.0)
+        if eq > 0:
+            pct = get_vti_core_pct(
+                eq,
+                vol_score=vol_score,
+                macro_stress=macro_stress,
+                volatility=volatility,
+            )
+        elif PAPER_DYNAMIC_VTI_ENABLED:
+            pct = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
+        else:
+            pct = PAPER_VTI_CORE_PCT
+    elif is_small_account(equity):
         pct = SMALL_ACCOUNT_VTI_CORE_PCT
     else:
         pct = VTI_CORE_PCT
