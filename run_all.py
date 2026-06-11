@@ -260,6 +260,7 @@ def _write_heartbeat(
     vti_core=None,
     sleeve_caps=None,
     dynamic_vol_score=None,
+    thinking_engine=None,
 ):
     macro_stress = bool(
         wisdom
@@ -295,6 +296,15 @@ def _write_heartbeat(
     }
     if dynamic_vol_score is not None:
         payload["dynamic_vol_score"] = round(float(dynamic_vol_score), 6)
+    if thinking_engine:
+        payload["thinking_engine"] = {
+            "model": thinking_engine.get("model"),
+            "confidence": thinking_engine.get("confidence"),
+            "suggested_tilt": thinking_engine.get("suggested_tilt"),
+            "applied_deltas": thinking_engine.get("applied_deltas"),
+            "apply_log": thinking_engine.get("apply_log"),
+            "reasoning_preview": (thinking_engine.get("reasoning") or "")[:400],
+        }
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
@@ -629,6 +639,32 @@ def main():
             alerts.maybe_spacex_ipo_alert(spacex_snapshot)
         except Exception as exc:
             print(f"SpaceX IPO alert error (non-fatal): {exc}")
+
+    thinking_result = None
+    if config.effective_thinking_engine_enabled():
+        from modules.thinking_engine import (
+            log_thinking_result,
+            maybe_apply_thinking_caps,
+            maybe_run_thinking,
+        )
+
+        thinking_result = maybe_run_thinking(
+            data,
+            regime,
+            vol,
+            wisdom,
+            top_headline=(spacex_heartbeat or {}).get("top_headline"),
+        )
+        if thinking_result and not thinking_result.get("apply_log"):
+            log_thinking_result(thinking_result)
+        base_caps = sleeve_cap_pcts or config.fund_allocation_pct()
+        sleeve_cap_pcts, thinking_result = maybe_apply_thinking_caps(
+            base_caps,
+            thinking_result,
+            equity=equity,
+        )
+        if sleeve_cap_pcts:
+            executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
 
     listing_snapshot = None
     if not schedule.get("crypto_only"):
@@ -971,6 +1007,7 @@ def main():
         dynamic_vol_score=vol_score
         if config.DYNAMIC_SLEEVE_CAPS_ENABLED or config.paper_aggressive_context()
         else None,
+        thinking_engine=thinking_result,
     )
 
     wisdom_journal.log_cycle(

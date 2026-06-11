@@ -138,6 +138,27 @@ PAPER_PAIR_MIN_CORRELATION = float(os.getenv("PAPER_PAIR_MIN_CORRELATION", "0.75
 PAPER_PAIR_Z_THRESHOLD = float(os.getenv("PAPER_PAIR_Z_THRESHOLD", "2.5"))
 PAPER_PAIR_Z_EXIT = float(os.getenv("PAPER_PAIR_Z_EXIT", "0.5"))
 STAT_ARB_LOOKBACK = int(os.getenv("STAT_ARB_LOOKBACK", "60"))
+# Optimized stat arb — paper/backtest only (default off; live unchanged)
+PAPER_STAT_ARB_OPTIMIZED = os.getenv("PAPER_STAT_ARB_OPTIMIZED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+STAT_ARB_MAX_HOLD_BARS = int(os.getenv("STAT_ARB_MAX_HOLD_BARS", "35"))
+STAT_ARB_PROFIT_Z_DELTA = float(os.getenv("STAT_ARB_PROFIT_Z_DELTA", "1.5"))
+STAT_ARB_CORR_HALF_LIFE = float(os.getenv("STAT_ARB_CORR_HALF_LIFE", "25"))
+# Local LLM thinking engine (Ollama) — paper only; run scripts/setup_ollama.py first
+PAPER_THINKING_ENGINE_ENABLED = os.getenv("PAPER_THINKING_ENGINE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_TIMEOUT_SEC = int(os.getenv("OLLAMA_TIMEOUT_SEC", "600"))
+THINKING_ENGINE_STATE_FILE = os.getenv("THINKING_ENGINE_STATE_FILE", "thinking_engine_state.json")
+THINKING_ENGINE_OUTPUT_FILE = os.getenv("THINKING_ENGINE_OUTPUT_FILE", "thinking_engine_last.json")
+THINKING_MAX_SLEEVE_DELTA = float(os.getenv("THINKING_MAX_SLEEVE_DELTA", "0.15"))
 # Options income sleeve (covered calls) — paper aggressive only; live stays off
 OPTIONS_SLEEVE_ENABLED = os.getenv("OPTIONS_SLEEVE_ENABLED", "false").lower() in (
     "1",
@@ -623,6 +644,7 @@ SMALL_ACCOUNT_BACKTEST_EQUITY = float(
 _account_equity: float | None = None
 _small_account_mode = False
 _backtest_small_account_ctx = False
+_backtest_paper_sleeves_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
     "regime": "",
@@ -781,6 +803,16 @@ def set_backtest_small_account_context(active: bool) -> None:
 
 def backtest_small_account_context() -> bool:
     return _backtest_small_account_ctx
+
+
+def set_backtest_paper_sleeves_context(active: bool) -> None:
+    """True while run_backtest() runs paper aggressive sleeves (not live)."""
+    global _backtest_paper_sleeves_ctx
+    _backtest_paper_sleeves_ctx = bool(active)
+
+
+def backtest_paper_sleeves_context() -> bool:
+    return _backtest_paper_sleeves_ctx
 
 
 def is_small_account(equity: float | None = None) -> bool:
@@ -1254,12 +1286,15 @@ def apply_paper_chase_runtime_tuning() -> list[str]:
 
 def paper_only_sleeves_active() -> bool:
     """Paper aggressive / chase sleeves — never on live money accounts."""
-    if not PAPER_TRADING:
-        return False
-    return bool(
+    active_stack = bool(
         paper_aggressive_context()
         or (PAPER_AGGRESSIVE_ENABLED and paper_chase_mode_enabled())
     )
+    if not active_stack:
+        return False
+    if PAPER_TRADING:
+        return True
+    return _backtest_paper_sleeves_ctx
 
 
 def init_paper_chase_if_enabled() -> list[str]:
@@ -1347,6 +1382,20 @@ def effective_cofire_budget_enabled() -> bool:
 def effective_stat_arb_enabled() -> bool:
     """Cointegration + z-score stat arb — paper aggressive only."""
     return bool(paper_only_sleeves_active() and PAPER_STAT_ARB_ENABLED)
+
+
+def effective_stat_arb_optimized() -> bool:
+    """Enhanced stat arb (Kalman/decay/dynamic Z) — disabled; see stat_arb_optimized.py."""
+    return False
+
+
+def effective_thinking_engine_enabled() -> bool:
+    """Local Ollama PM reasoning — paper aggressive only, never live."""
+    if not paper_only_sleeves_active() or not PAPER_THINKING_ENGINE_ENABLED:
+        return False
+    if PAPER_TRADING:
+        return True
+    return bool(backtest_paper_sleeves_context())
 
 
 def effective_market_neutral_pairs_enabled() -> bool:

@@ -2,7 +2,7 @@
 
 **First working release** — runs the same **Best Paper Bot** stack as the laptop paper bot, isolated under `cloud_bot/` for 24/7 VPS deployment.
 
-Full vision: [`../README_CLOUD.md`](../README_CLOUD.md)
+**Deployment:** [`README_CLOUD.md`](README_CLOUD.md) | Overview: [`../README_CLOUD.md`](../README_CLOUD.md)
 
 ## Stack (matches final paper backtest)
 

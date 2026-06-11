@@ -33,9 +33,10 @@ BEST_PAPER_ENV: dict[str, str] = {
     "ALLOW_LIVE_TRADING": "false",
 }
 
-# Backtest kwargs — advanced sleeve flags come from apply_to_config_module.
+# Backtest kwargs — identical to backtester.FINAL_PAPER_BOT_KWARGS (import at runtime).
 CLOUD_BACKTEST_KWARGS: dict[str, Any] = {
     "paper_aggressive": True,
+    "paper_sleeve_features": True,
     "paper_dynamic_vti": True,
     "paper_dynamic_risk": True,
     "paper_stat_arb": True,
@@ -43,6 +44,16 @@ CLOUD_BACKTEST_KWARGS: dict[str, Any] = {
     "paper_options_sleeve": True,
     "paper_macro_regime": True,
 }
+
+
+def final_paper_backtest_kwargs() -> dict[str, Any]:
+    """Return kwargs aligned with main repo FINAL_PAPER_BOT_KWARGS."""
+    try:
+        from backtester import FINAL_PAPER_BOT_KWARGS
+
+        return dict(FINAL_PAPER_BOT_KWARGS)
+    except ImportError:
+        return dict(CLOUD_BACKTEST_KWARGS)
 
 
 def apply_best_paper_profile(

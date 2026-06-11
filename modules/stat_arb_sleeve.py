@@ -86,8 +86,9 @@ def _save_book(executor) -> None:
         _persist_book(book)
 
 
-def _is_alpaca_executor(executor) -> bool:
-    return hasattr(executor, "client") and hasattr(executor, "_get_account")
+def _is_alpaca_live_executor(executor) -> bool:
+    """True only for live AlpacaExecutor (has API client), not BacktestExecutor."""
+    return hasattr(executor, "client")
 
 
 def reconcile_stat_arb_book(executor) -> dict:
@@ -133,13 +134,12 @@ def reconcile_stat_arb_book(executor) -> dict:
 
 
 def _alpaca_crypto_short_blocked(executor, short_sym: str) -> bool:
-    """Alpaca spot crypto cannot open short legs for stat-arb hedges."""
+    """Alpaca spot crypto cannot open short legs for stat-arb hedges (live only)."""
+    if not _is_alpaca_live_executor(executor):
+        return False
     if not config.is_crypto(short_sym):
         return False
-    _, _, is_crypto = executor.get_order_params(short_sym)
-    if not is_crypto:
-        return False
-    pos = executor._find_position(short_sym) if hasattr(executor, "_find_position") else None
+    pos = executor._find_position(short_sym)
     return pos is None
 
 
@@ -464,7 +464,7 @@ def equity_stat_arb_intents(
 
 def _skip_crypto_stat_arb_entries(executor) -> bool:
     """Alpaca cannot open crypto shorts — entries via Kraken mirror only."""
-    return _is_alpaca_executor(executor)
+    return _is_alpaca_live_executor(executor)
 
 
 def run_crypto_stat_arb(

@@ -88,6 +88,17 @@ class BacktestExecutor:
         self._regime_spy_scale = float(spy_scale)
         self._regime_nyse_scale = float(nyse_scale)
 
+    def set_thinking_sleeve_scales(
+        self,
+        *,
+        spy_scale: float = 1.0,
+        nyse_scale: float = 1.0,
+        crypto_scale: float = 1.0,
+    ) -> None:
+        self._thinking_spy_scale = float(spy_scale)
+        self._thinking_nyse_scale = float(nyse_scale)
+        self._thinking_crypto_scale = float(crypto_scale)
+
     def _get_account(self):
         """Alpaca-compatible shim for pipeline_strategies (live uses real account)."""
         equity = self.portfolio.equity(self.prices)
@@ -207,8 +218,12 @@ class BacktestExecutor:
         scale = self._cap_scale
         if sleeve == "spy":
             scale *= getattr(self, "_regime_spy_scale", 1.0)
+            scale *= getattr(self, "_thinking_spy_scale", 1.0)
         elif sleeve == "nyse":
             scale *= getattr(self, "_regime_nyse_scale", 1.0)
+            scale *= getattr(self, "_thinking_nyse_scale", 1.0)
+        elif sleeve == "crypto":
+            scale *= getattr(self, "_thinking_crypto_scale", 1.0)
         return round(sleeve_cap_pct * scale, 6)
 
     def _compute_capped_notional_raw(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
@@ -602,6 +617,8 @@ def run_backtest(
     paper_dynamic_risk: bool | None = None,
     paper_market_neutral_pairs: bool | None = None,
     paper_stat_arb: bool | None = None,
+    paper_stat_arb_optimized: bool | None = None,
+    paper_thinking: bool | None = None,
     paper_vol_trading: bool | None = None,
     paper_vol_live_parity: bool = False,
     track_active_exposure: bool = False,
@@ -619,8 +636,12 @@ def run_backtest(
     saved_paper_dynamic_risk = config.PAPER_DYNAMIC_RISK_ENABLED
     saved_paper_market_neutral_pairs = config.PAPER_MARKET_NEUTRAL_PAIRS
     saved_paper_stat_arb = config.PAPER_STAT_ARB_ENABLED
+    saved_paper_stat_arb_opt = config.PAPER_STAT_ARB_OPTIMIZED
+    saved_paper_thinking = config.PAPER_THINKING_ENGINE_ENABLED
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
+    saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     config.set_paper_aggressive_context(paper_aggressive)
+    config.set_backtest_paper_sleeves_context(paper_aggressive)
     config.set_backtest_small_account_context(small_account)
     if paper_dynamic_vti is not None:
         config.PAPER_DYNAMIC_VTI_ENABLED = bool(paper_dynamic_vti)
@@ -646,6 +667,10 @@ def run_backtest(
         config.PAPER_MARKET_NEUTRAL_PAIRS = bool(paper_market_neutral_pairs)
     if paper_stat_arb is not None:
         config.PAPER_STAT_ARB_ENABLED = bool(paper_stat_arb)
+    if paper_stat_arb_optimized is not None:
+        config.PAPER_STAT_ARB_OPTIMIZED = bool(paper_stat_arb_optimized)
+    if paper_thinking is not None:
+        config.PAPER_THINKING_ENGINE_ENABLED = bool(paper_thinking)
     if paper_vol_trading is not None:
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
     if paper_aggressive and (
@@ -765,6 +790,11 @@ def run_backtest(
         "hours_to_90pct": None,
         "reached_90pct": False,
     }
+    thinking_cache = {
+        "regime": None,
+        "scales": {"spy_scale": 1.0, "nyse_scale": 1.0, "crypto_scale": 1.0},
+        "vti_pct": None,
+    }
 
     for i in range(MIN_HISTORY, len(data)):
         window = data.iloc[: i + 1]
@@ -856,6 +886,42 @@ def run_backtest(
             paper_aggressive=paper_aggressive,
             fixed_vti_core_pct=fixed_vti_core_pct,
         )
+        thinking_scales = dict(thinking_cache["scales"])
+        if config.effective_thinking_engine_enabled() and paper_aggressive:
+            from modules.thinking_engine import (
+                apply_thinking_tilt_to_caps,
+                build_backtest_thinking_result,
+                executor_scales_from_caps,
+            )
+
+            refresh = thinking_cache["regime"] != regime
+            if refresh:
+                thinking = build_backtest_thinking_result(window, regime, vol)
+                base_caps = dict(config.fund_allocation_pct())
+                base_caps["vti_core"] = vti_core_pct
+                merged, _, _ = apply_thinking_tilt_to_caps(
+                    base_caps,
+                    thinking["suggested_tilt"],
+                    confidence=thinking["confidence"],
+                    market_summary=thinking["market_summary"],
+                    equity=eq,
+                )
+                thinking_cache["regime"] = regime
+                thinking_cache["vti_pct"] = merged["vti_core"]
+                thinking_cache["scales"] = {
+                    "spy_scale": executor_scales_from_caps(base_caps, merged).get(
+                        "spy", 1.0
+                    ),
+                    "nyse_scale": executor_scales_from_caps(base_caps, merged).get(
+                        "nyse", 1.0
+                    ),
+                    "crypto_scale": executor_scales_from_caps(base_caps, merged).get(
+                        "crypto", 1.0
+                    ),
+                }
+            if thinking_cache["vti_pct"] is not None:
+                vti_core_pct = float(thinking_cache["vti_pct"])
+            thinking_scales = dict(thinking_cache["scales"])
         cap_scale = _backtest_cap_scale(vti_core_pct, paper_aggressive=paper_aggressive)
         macro_regime = None
         if config.effective_macro_regime_adaptor_enabled():
@@ -896,6 +962,7 @@ def run_backtest(
                 spy_scale=macro_regime.get("spy_scale", 1.0),
                 nyse_scale=macro_regime.get("nyse_scale", 1.0),
             )
+        executor.set_thinking_sleeve_scales(**thinking_scales)
         executor.set_sizing_context(window)
         executor.set_wisdom_sizing_multiplier(sizing_mult)
         resolve_cycle_deploy(
@@ -1246,6 +1313,7 @@ def run_backtest(
             }
         )
     config.set_paper_aggressive_context(saved_paper_ctx)
+    config.set_backtest_paper_sleeves_context(saved_backtest_paper_sleeves)
     config.set_backtest_small_account_context(saved_small_ctx)
     config.SOCIAL_SLEEVE_ENABLED = saved_social
     config.PAPER_DYNAMIC_VTI_ENABLED = saved_dynamic_vti
@@ -1257,6 +1325,8 @@ def run_backtest(
     config.PAPER_DYNAMIC_RISK_ENABLED = saved_paper_dynamic_risk
     config.PAPER_MARKET_NEUTRAL_PAIRS = saved_paper_market_neutral_pairs
     config.PAPER_STAT_ARB_ENABLED = saved_paper_stat_arb
+    config.PAPER_STAT_ARB_OPTIMIZED = saved_paper_stat_arb_opt
+    config.PAPER_THINKING_ENGINE_ENABLED = saved_paper_thinking
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     return result
 
@@ -1528,6 +1598,229 @@ def run_stat_arb_compare(days=None, refresh=False, use_max=False) -> None:
             f"Sharpe {baseline['sharpe']:.2f}, "
             f"MaxDD {baseline['max_drawdown_pct']:.2f}%"
         )
+
+
+def run_stat_arb_optimized_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare current stat arb vs optimized stat arb (paper aggressive stack)."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_vol_trading": True,
+        "paper_options_sleeve": True,
+        "paper_macro_regime": True,
+        "paper_stat_arb": True,
+    }
+    configs = [
+        (
+            "Stat Arb (current)",
+            {**base_kwargs, "paper_stat_arb_optimized": False},
+        ),
+        (
+            "Stat Arb (optimized)",
+            {**base_kwargs, "paper_stat_arb_optimized": True},
+        ),
+    ]
+    print(
+        "--- STAT ARB OPTIMIZED A/B (Kalman/decay/dynamic Z/profit+time exit) ---"
+    )
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<26} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Pairs':>6} {'Corr':>6}"
+    )
+    print("-" * 78)
+
+    current = None
+    optimized = None
+    for label_cfg, kwargs in configs:
+        result = run_backtest(
+            data, track_active_exposure=True, track_metrics=True, **kwargs
+        )
+        if kwargs.get("paper_stat_arb_optimized"):
+            optimized = result
+        else:
+            current = result
+        pairs = result.get("pairs_traded", 0)
+        corr = result.get("pair_pnl_correlation")
+        corr_s = f"{corr:.2f}" if corr is not None else "—"
+        print(
+            f"{label_cfg:<26} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{pairs:>6} "
+            f"{corr_s:>6}"
+        )
+    print("-" * 78)
+    if current and optimized:
+        d_ret = optimized["total_return_pct"] - current["total_return_pct"]
+        d_sh = optimized["sharpe"] - current["sharpe"]
+        d_dd = optimized["max_drawdown_pct"] - current["max_drawdown_pct"]
+        d_pairs = optimized.get("pairs_traded", 0) - current.get("pairs_traded", 0)
+        c0 = current.get("pair_pnl_correlation")
+        c1 = optimized.get("pair_pnl_correlation")
+        d_corr = (c1 - c0) if c0 is not None and c1 is not None else None
+        print(
+            f"Optimized vs current: return {d_ret:+.2f}pp | Sharpe {d_sh:+.2f} | "
+            f"MaxDD {d_dd:+.2f}pp | pairs {d_pairs:+d}"
+            + (f" | corr {d_corr:+.2f}" if d_corr is not None else "")
+        )
+
+
+def run_thinking_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without thinking-engine sleeve tilts."""
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_vol_trading": True,
+        "paper_options_sleeve": True,
+        "paper_macro_regime": True,
+        "paper_stat_arb": True,
+    }
+    configs = [
+        ("Paper (no thinking tilt)", {**base_kwargs, "paper_thinking": False}),
+        ("Paper (+ thinking tilt)", {**base_kwargs, "paper_thinking": True}),
+    ]
+    print(
+        "--- THINKING ENGINE A/B (heuristic tilt on regime change; +/-15% cap/sleeve; paper aggressive) ---"
+    )
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
+    print("-" * 58)
+
+    baseline = None
+    with_thinking = None
+    for label_cfg, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        if kwargs.get("paper_thinking"):
+            with_thinking = result
+        else:
+            baseline = result
+        print(
+            f"{label_cfg:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}%"
+        )
+    print("-" * 58)
+    if baseline and with_thinking:
+        print(
+            f"Thinking vs baseline: return "
+            f"{with_thinking['total_return_pct'] - baseline['total_return_pct']:+.2f}pp | "
+            f"Sharpe {with_thinking['sharpe'] - baseline['sharpe']:+.2f} | "
+            f"MaxDD {with_thinking['max_drawdown_pct'] - baseline['max_drawdown_pct']:+.2f}pp"
+        )
+
+    from modules.thinking_engine import (
+        apply_thinking_tilt_to_caps,
+        build_backtest_thinking_result,
+    )
+    from modules.wisdom_sentiment import resolve_wisdom_regime
+
+    window = data.iloc[-60:]
+    wisdom = resolve_wisdom_regime(window)
+    sample = build_backtest_thinking_result(
+        window, wisdom["regime"], wisdom["volatility"]
+    )
+    base_caps = config.fund_allocation_pct()
+    _, deltas, sample_log = apply_thinking_tilt_to_caps(
+        base_caps,
+        sample["suggested_tilt"],
+        confidence=sample["confidence"],
+        market_summary=sample["market_summary"],
+    )
+    print("\nSample reasoning (most recent bar, heuristic backtest proxy):")
+    print(f"  {sample['reasoning']}")
+    print(f"  Apply: {sample_log}")
+    if deltas:
+        shown = {k: round(v, 4) for k, v in deltas.items() if abs(v) > 0.001}
+        print(f"  Deltas: {shown}")
+
+    # If Ollama is available, attempt to fetch 2-3 real LLM reasoning examples
+    try:
+        from modules.thinking_engine import ollama_available, get_market_reasoning
+
+        if ollama_available():
+            print("\nAttempting to fetch up to 3 real LLM reasoning examples (may require local Ollama)...")
+            # sample the last 3 non-overlapping windows (recent bars)
+            examples = []
+            for offset in (2, 5, 10):
+                window = data.iloc[-(offset + 1) : -offset]
+                if window.empty:
+                    continue
+                # reuse wisdom/regime resolution from above
+                from modules.wisdom_sentiment import resolve_wisdom_regime
+
+                w = resolve_wisdom_regime(window)
+                try:
+                    ex = get_market_reasoning(
+                        {
+                            "spy_trend": w.get("spy_trend", "n/a"),
+                            "vix": w.get("vix", "n/a"),
+                            "oil_change": w.get("oil_change", 0.0),
+                            "gold_change": w.get("gold_change", 0.0),
+                            "macro_sentiment": w.get("macro_sentiment", "n/a"),
+                            "top_headline": w.get("top_headline", "n/a"),
+                            "regime": w.get("regime"),
+                        }
+                    )
+                except Exception as exc:
+                    print(f"  LLM call failed: {exc}")
+                    break
+                examples.append(ex)
+                if len(examples) >= 3:
+                    break
+            for i, ex in enumerate(examples, 1):
+                print(f"\nLLM Example {i}: conf {ex.get('confidence'):.2f}")
+                print(f"  Narrative: {ex.get('narrative')}")
+                sample = (ex.get('reasoning') or '').splitlines()[:6]
+                for ln in sample:
+                    if ln.strip():
+                        print(f"    {ln}")
+                print(f"  Suggested tilt: {ex.get('suggested_tilt')}")
+    except Exception:
+        pass
 
 
 FINAL_PAPER_BOT_KWARGS = {
@@ -2490,9 +2783,19 @@ if __name__ == "__main__":
         help="Compare paper aggressive with vs without VIX vol overlay sleeve",
     )
     parser.add_argument(
+        "--compare-thinking",
+        action="store_true",
+        help="Compare paper aggressive with vs without thinking-engine sleeve tilts",
+    )
+    parser.add_argument(
         "--compare-stat-arb",
         action="store_true",
         help="Compare paper aggressive with vs without statistical arbitrage sleeve",
+    )
+    parser.add_argument(
+        "--compare-stat-arb-optimized",
+        action="store_true",
+        help="Compare current vs optimized statistical arbitrage sleeve",
     )
     parser.add_argument(
         "--compare-final",
@@ -2556,6 +2859,14 @@ if __name__ == "__main__":
         )
     elif args.compare_stat_arb:
         run_stat_arb_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_stat_arb_optimized:
+        run_stat_arb_optimized_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_thinking:
+        run_thinking_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_final:

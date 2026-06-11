@@ -18,6 +18,8 @@ market_data.db
 trading_history.jsonl
 portfolio_state.json
 stat_arb_open_book.json
+thinking_engine_state.json
+thinking_engine_last.json
 bot_heartbeat.log
 bot_logs.log
 bot_heartbeat.json

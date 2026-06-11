@@ -26,11 +26,30 @@ def _python_executable(repo_root: Path) -> str:
     return sys.executable
 
 
-def run_forever(settings: CloudSettings, logger: Logger) -> int:
+def _graceful_stop(proc: subprocess.Popen | None, logger: Logger, *, timeout: int = 15) -> None:
+    if proc is None or proc.poll() is not None:
+        return
+    logger.info("terminating run_all.py pid=%s", proc.pid)
+    proc.terminate()
+    try:
+        proc.wait(timeout=timeout)
+        logger.info("run_all.py exited cleanly")
+    except subprocess.TimeoutExpired:
+        logger.warning("run_all.py did not exit in %ss; killing", timeout)
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def run_forever(
+    settings: CloudSettings,
+    logger: Logger,
+    *,
+    runtime_env: dict[str, str] | None = None,
+) -> int:
     """Spawn run_all.py subprocess with cloud env; restart on exit."""
     if settings.dry_run:
         logger.warning("CLOUD_BOT_DRY_RUN=true — trading loop not started")
-        print("DRY RUN: set CLOUD_BOT_DRY_RUN=false to start run_all.py")
+        print("DRY RUN: set CLOUD_BOT_DRY_RUN=false or use --run without --dry-run")
         return 0
 
     if not settings.run_all_script.is_file():
@@ -40,23 +59,16 @@ def run_forever(settings: CloudSettings, logger: Logger) -> int:
     settings.pid_file.parent.mkdir(parents=True, exist_ok=True)
     settings.log_dir.mkdir(parents=True, exist_ok=True)
 
-    env = apply_best_paper_profile(
+    env = dict(runtime_env) if runtime_env else apply_best_paper_profile(
         overrides={
             "HEARTBEAT_FILE": str(settings.heartbeat_file),
             "PAPER_JOURNAL_CSV": str(settings.journal_csv),
+            "STAT_ARB_BOOK_FILE": str(settings.data_dir / "stat_arb_open_book.json"),
             "PYTHONUNBUFFERED": "1",
         }
     )
     for key, val in env.items():
         os.environ[key] = val
-
-    logger.info(
-        "cloud bot environment | profile=%s | heartbeat=%s | journal=%s | dry_run=%s",
-        settings.profile,
-        settings.heartbeat_file,
-        settings.journal_csv,
-        settings.dry_run,
-    )
 
     with settings.pid_file.open("w", encoding="utf-8") as pid_handle:
         pid_handle.write(str(os.getpid()))
@@ -64,24 +76,15 @@ def run_forever(settings: CloudSettings, logger: Logger) -> int:
     shutdown_requested = False
     proc: subprocess.Popen | None = None
 
-    def _handle_signal(signum, frame):
+    def _handle_signal(signum, _frame):
         nonlocal shutdown_requested
         shutdown_requested = True
         logger.info("received signal=%s, stopping loop", signum)
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
+        _graceful_stop(proc, logger)
 
     signal.signal(signal.SIGINT, _handle_signal)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _handle_signal)
-
-    logger.info(
-        "cloud bot environment | profile=%s | heartbeat=%s | journal=%s | dry_run=%s",
-        settings.profile,
-        settings.heartbeat_file,
-        settings.journal_csv,
-        settings.dry_run,
-    )
 
     python = _python_executable(settings.repo_root)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
@@ -135,13 +138,9 @@ def run_forever(settings: CloudSettings, logger: Logger) -> int:
                 break
             time.sleep(delay)
         except KeyboardInterrupt:
-            logger.info("shutdown requested")
-            if proc is not None and proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+            logger.info("keyboard interrupt")
+            shutdown_requested = True
+            _graceful_stop(proc, logger)
             break
         except Exception as exc:
             consecutive_failures += 1

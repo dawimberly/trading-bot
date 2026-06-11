@@ -1,6 +1,6 @@
 [Unit]
 Description=PythonTrading Cloud Bot (best paper profile)
-Documentation=file:///opt/PythonTrading/cloud_bot/deploy/README.md
+Documentation=file:///opt/PythonTrading/cloud_bot/README_CLOUD.md
 After=network-online.target
 Wants=network-online.target
 
