@@ -17,6 +17,7 @@ market_data.db
 *.log
 trading_history.jsonl
 portfolio_state.json
+stat_arb_open_book.json
 bot_heartbeat.log
 bot_logs.log
 bot_heartbeat.json
@@ -24,7 +25,18 @@ alert_state.json
 paper_journal.csv
 fund_*.csv
 wisdom_journal.csv
+wisdom_eval_state.json
+wisdom_evaluations.jsonl
+wisdom_monthly_history.jsonl
+wisdom_scorecard.json
+wisdom_monthly_*.json
+kraken_autopilot_state.json
+kraken_capabilities.json
 spacex_ipo_listing.json
+spacex_ipo_listing_history.jsonl
+spacex_ipo_monitor.json
+spacex_ipo_monitor_history.jsonl
+volatility_sleeve_state.json
 trading_history.jsonl.bak.*
 sentiment/live/*.json
 web_sentiment_live.json
@@ -36,3 +48,4 @@ sentiment/social_sleeve_journal.csv
 # IDE
 .idea/
 .vscode/
+.cursor/mcp.json

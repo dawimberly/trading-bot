@@ -1,0 +1,9 @@
+adaptive_chunk,benchmark_return_pct,cofire_budget,crypto_signals,end_date,final_equity,max_drawdown_pct,nyse_signals,sharpe,sim_days,spy_cycles_to_90pct,spy_hours_to_90pct,spy_reached_90pct,spy_signals,spy_total_buys,spy_trades_to_90pct,start_date,total_orders,total_return_pct,variant,window
+False,43.63,False,13,2026-05-22,11529.75,-24.93,16,0.45,728,18,18.0,True,21,21,19,2024-05-24,50,15.3,baseline,500d
+True,43.63,False,9,2026-05-22,11629.02,-25.57,11,0.46,728,7,7.0,True,12,12,8,2024-05-24,32,16.29,adaptive_only,500d
+False,43.63,True,13,2026-05-22,11602.88,-25.02,17,0.46,728,8,8.0,True,12,12,9,2024-05-24,42,16.03,cofire_only,500d
+True,43.63,True,9,2026-05-22,11549.42,-25.61,17,0.45,728,8,8.0,True,12,12,9,2024-05-24,38,15.49,both,500d
+False,184.62,False,0,2026-05-22,84132.28,-42.1,17,1.16,2613,18,18.0,True,26,26,19,2019-03-27,43,741.32,baseline,2000d
+True,184.62,False,0,2026-05-22,98648.33,-43.0,19,1.18,2613,7,7.0,True,12,12,8,2019-03-27,31,886.48,adaptive_only,2000d
+False,184.62,True,0,2026-05-22,86138.36,-42.2,17,1.16,2613,8,8.0,True,13,13,9,2019-03-27,30,761.38,cofire_only,2000d
+True,184.62,True,0,2026-05-22,86138.36,-42.2,17,1.16,2613,8,8.0,True,13,13,9,2019-03-27,30,761.38,both,2000d

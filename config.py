@@ -66,6 +66,10 @@ VTI_CORE_SYMBOL = os.getenv("VTI_CORE_SYMBOL", "VTI").strip().upper()
 VTI_CORE_REBALANCE_DRIFT_PCT = float(os.getenv("VTI_CORE_REBALANCE_DRIFT_PCT", "0.02"))
 
 # Paper research book (PAPER_APCA_*) — aggressive profit mode; live ~$100 stays conservative
+# --- Best Paper Bot (Profile B) — locked defaults for beat-mutual-funds goal ---
+# All ON when PAPER_AGGRESSIVE=true unless overridden in .env:
+#   dynamic VTI | dynamic risk | stat arb | vol overlay | options | macro regime
+#   overlap | adaptive chunk | co-fire | social OFF | spy exit OFF
 PAPER_AGGRESSIVE_ENABLED = os.getenv("PAPER_AGGRESSIVE", "true").lower() in (
     "1",
     "true",
@@ -86,6 +90,14 @@ PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
     "true",
     "yes",
 )
+PAPER_DYNAMIC_RISK_ENABLED = os.getenv("PAPER_DYNAMIC_RISK_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
+PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
+PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.01"))
 DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.40"))
 # Advanced sleeve features — paper aggressive only (live Profile A stays off)
 PAPER_NYSE_OVERLAP_FILTER_ENABLED = os.getenv(
@@ -106,6 +118,60 @@ PAPER_SPY_EXIT_ON_MA_BREAK = os.getenv("PAPER_SPY_EXIT_ON_MA_BREAK", "false").lo
     "true",
     "yes",
 )
+# Market-neutral pair trades — paper aggressive only; live conservative stays off
+PAPER_MARKET_NEUTRAL_PAIRS = os.getenv("PAPER_MARKET_NEUTRAL_PAIRS", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_EQUITY_PAIRS = os.getenv("PAPER_EQUITY_PAIRS", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_STAT_ARB_ENABLED = os.getenv("PAPER_STAT_ARB_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_PAIR_MIN_CORRELATION = float(os.getenv("PAPER_PAIR_MIN_CORRELATION", "0.75"))
+PAPER_PAIR_Z_THRESHOLD = float(os.getenv("PAPER_PAIR_Z_THRESHOLD", "2.5"))
+PAPER_PAIR_Z_EXIT = float(os.getenv("PAPER_PAIR_Z_EXIT", "0.5"))
+STAT_ARB_LOOKBACK = int(os.getenv("STAT_ARB_LOOKBACK", "60"))
+# Options income sleeve (covered calls) — paper aggressive only; live stays off
+OPTIONS_SLEEVE_ENABLED = os.getenv("OPTIONS_SLEEVE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_OPTIONS_SLEEVE_ENABLED = os.getenv("PAPER_OPTIONS_SLEEVE_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+OPTIONS_SLEEVE_CAP_PCT = float(os.getenv("OPTIONS_SLEEVE_CAP_PCT", "0.12"))
+OPTIONS_OTM_PCT = float(os.getenv("OPTIONS_OTM_PCT", "0.075"))
+OPTIONS_OTM_PCT_MIN = 0.05
+OPTIONS_OTM_PCT_MAX = 0.10
+OPTIONS_VIX_CALM_MAX = float(os.getenv("OPTIONS_VIX_CALM_MAX", "22"))
+OPTIONS_MONTHLY_BARS = int(os.getenv("OPTIONS_MONTHLY_BARS", "21"))
+OPTIONS_VTI_ALLOC_PCT = float(os.getenv("OPTIONS_VTI_ALLOC_PCT", "0.70"))
+# Volatility trading overlay — paper aggressive only; live stays off
+PAPER_VOL_TRADING_ENABLED = os.getenv("PAPER_VOL_TRADING_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+VOL_SLEEVE_CAP_PCT = float(os.getenv("VOL_SLEEVE_CAP_PCT", "0.08"))
+VOL_SLEEVE_CAP_MIN_PCT = float(os.getenv("VOL_SLEEVE_CAP_MIN_PCT", "0.05"))
+VOL_SLEEVE_CAP_MAX_PCT = float(os.getenv("VOL_SLEEVE_CAP_MAX_PCT", "0.10"))
+VOL_VIX_HIGH_THRESHOLD = float(os.getenv("VOL_VIX_HIGH_THRESHOLD", "20"))
+VOL_VIX_CALM_THRESHOLD = float(os.getenv("VOL_VIX_CALM_THRESHOLD", "15"))
+VOL_VIX_SPIKE_PCT = float(os.getenv("VOL_VIX_SPIKE_PCT", "0.10"))
+VOL_CONTANGO_VIX_MAX = float(os.getenv("VOL_CONTANGO_VIX_MAX", "22"))
+VOL_MONTHLY_BARS = int(os.getenv("VOL_MONTHLY_BARS", "21"))
+VOL_VXX_BETA = float(os.getenv("VOL_VXX_BETA", "0.85"))
+VOL_CONTANGO_DECAY_DAILY = float(os.getenv("VOL_CONTANGO_DECAY_DAILY", "0.00025"))
 
 _paper_aggressive_ctx = False
 
@@ -340,14 +406,16 @@ MACRO_REGIME_ADAPTOR_ENABLED = os.getenv("MACRO_REGIME_ADAPTOR_ENABLED", "false"
     "yes",
 )
 PAPER_MACRO_REGIME_ADAPTOR_ENABLED = os.getenv(
-    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED", "false"
+    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED", "true"
 ).lower() in ("1", "true", "yes")
 MACRO_OIL_SURGE_PCT = float(os.getenv("MACRO_OIL_SURGE_PCT", "0.08"))
-MACRO_GLD_SURGE_PCT = float(os.getenv("MACRO_GLD_SURGE_PCT", "0.03"))
+MACRO_GLD_SURGE_PCT = float(os.getenv("MACRO_GLD_SURGE_PCT", "0.04"))
+MACRO_VIX_SAFE_HAVEN_MIN = float(os.getenv("MACRO_VIX_SAFE_HAVEN_MIN", "20"))
 MACRO_VIX_SPIKE_PCT = float(os.getenv("MACRO_VIX_SPIKE_PCT", "0.10"))
 MACRO_ENERGY_CAP_PCT = float(os.getenv("MACRO_ENERGY_CAP_PCT", "0.10"))
-MACRO_SAFE_HAVEN_CAP_PCT = float(os.getenv("MACRO_SAFE_HAVEN_CAP_PCT", "0.12"))
+MACRO_SAFE_HAVEN_CAP_PCT = float(os.getenv("MACRO_SAFE_HAVEN_CAP_PCT", "0.10"))
 MACRO_ENERGY_SLEEVE_BOOST = float(os.getenv("MACRO_ENERGY_SLEEVE_BOOST", "0.08"))
+MACRO_SLEEVE_ADJUST_MAX_PCT = float(os.getenv("MACRO_SLEEVE_ADJUST_MAX_PCT", "0.15"))
 SOCIAL_MACRO_OVERRIDES_ENABLED = os.getenv("SOCIAL_MACRO_OVERRIDES_ENABLED", "true").lower() in (
     "1",
     "true",
@@ -555,6 +623,11 @@ SMALL_ACCOUNT_BACKTEST_EQUITY = float(
 _account_equity: float | None = None
 _small_account_mode = False
 _backtest_small_account_ctx = False
+_dynamic_risk_ctx: dict = {
+    "vol_score": 0.02,
+    "regime": "",
+    "macro_stress": False,
+}
 # Min order at REFERENCE_EQUITY; effective_min_notional() scales with live equity (floor $1 Alpaca).
 MIN_NOTIONAL = float(os.getenv("MIN_NOTIONAL", "10"))
 ALPACA_MIN_NOTIONAL = float(os.getenv("ALPACA_MIN_NOTIONAL", "1"))
@@ -719,6 +792,22 @@ def is_small_account(equity: float | None = None) -> bool:
     return _small_account_mode
 
 
+def set_dynamic_risk_context(
+    *,
+    vol_score: float | None = None,
+    regime: str | None = None,
+    macro_stress: bool | None = None,
+) -> None:
+    """Update per-cycle inputs for paper dynamic risk (run_all / backtester)."""
+    global _dynamic_risk_ctx
+    if vol_score is not None:
+        _dynamic_risk_ctx["vol_score"] = float(vol_score)
+    if regime is not None:
+        _dynamic_risk_ctx["regime"] = str(regime)
+    if macro_stress is not None:
+        _dynamic_risk_ctx["macro_stress"] = bool(macro_stress)
+
+
 def configure_account_profile(equity: float) -> dict:
     """Apply runtime sizing/VTI profile from live Alpaca equity (call each cycle)."""
     global _account_equity, _small_account_mode
@@ -727,15 +816,37 @@ def configure_account_profile(equity: float) -> dict:
     return {
         "equity": _account_equity,
         "small_account": _small_account_mode,
-        "risk_per_trade": effective_risk_per_trade(),
+        "risk_per_trade": effective_risk_per_trade(_account_equity),
         "max_notional_per_order": effective_max_notional_per_order(),
         "vti_core_pct": vti_core_allocation_pct(equity=_account_equity),
     }
 
 
-def effective_risk_per_trade(equity: float | None = None) -> float:
-    if is_small_account(equity):
+def effective_risk_per_trade(
+    equity: float | None = None,
+    *,
+    vol_score: float | None = None,
+    regime: str | None = None,
+    macro_stress: bool | None = None,
+) -> float:
+    eq = float(equity) if equity is not None else (_account_equity or REFERENCE_EQUITY)
+    if is_small_account(eq):
         return SMALL_ACCOUNT_RISK_PER_TRADE
+    vs = vol_score if vol_score is not None else _dynamic_risk_ctx.get("vol_score", 0.02)
+    reg = regime if regime is not None else _dynamic_risk_ctx.get("regime", "")
+    stress = (
+        macro_stress
+        if macro_stress is not None
+        else _dynamic_risk_ctx.get("macro_stress", False)
+    )
+    if (
+        PAPER_TRADING
+        and PAPER_DYNAMIC_RISK_ENABLED
+        and (paper_aggressive_context() or paper_chase_mode_enabled())
+    ):
+        from modules.fund_config import get_dynamic_risk_per_trade
+
+        return get_dynamic_risk_per_trade(eq, float(vs), reg, bool(stress))
     return RISK_PER_TRADE
 
 
@@ -973,14 +1084,32 @@ def print_live_stack_flags() -> None:
         )
 
 
+def get_best_paper_bot_stack() -> dict[str, bool]:
+    """Locked Best Paper Bot flags (paper aggressive only)."""
+    return {
+        "dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
+        "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
+        "stat_arb": PAPER_STAT_ARB_ENABLED,
+        "vol_overlay": PAPER_VOL_TRADING_ENABLED,
+        "options_income": PAPER_OPTIONS_SLEEVE_ENABLED,
+        "macro_regime": PAPER_MACRO_REGIME_ADAPTOR_ENABLED,
+        "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+        "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
+        "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
+        "social_sleeve": PAPER_SOCIAL_SLEEVE_ENABLED,
+        "spy_exit": PAPER_SPY_EXIT_ON_MA_BREAK,
+    }
+
+
 def print_paper_research_stack_flags() -> None:
-    """Log Profile B: paper_aggressive / paper chase research stack."""
+    """Log Best Paper Bot / Profile B stack (paper_aggressive)."""
     gp = _game_plan_label()
     was_ctx = paper_aggressive_context()
     set_paper_aggressive_context(True)
     try:
         alloc = fund_allocation_pct()
-        print("--- paper_aggressive research stack (Profile B) ---")
+        stack = get_best_paper_bot_stack()
+        print("--- Best Paper Bot (paper_aggressive / Profile B) ---")
         if paper_chase_mode_enabled():
             print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
         print(f"  game_plan:              {gp}")
@@ -999,6 +1128,38 @@ def print_paper_research_stack_flags() -> None:
         )
         print(f"  adaptive_chunk:         {flags.get('adaptive_chunk', ADAPTIVE_CHUNK_ENABLED)}")
         print(f"  cofire_budget:          {flags.get('cofire_budget', COFIRE_BUDGET_ENABLED)}")
+        print(
+            f"  options_sleeve:       "
+            f"{'on' if effective_options_sleeve_enabled() else 'off'} "
+            f"(cap {OPTIONS_SLEEVE_CAP_PCT:.0%}, calm VIX<{OPTIONS_VIX_CALM_MAX:.0f})"
+        )
+        print(
+            f"  regime_shift:         "
+            f"{'on' if effective_macro_regime_adaptor_enabled() else 'off'} "
+            f"(oil {MACRO_OIL_SURGE_PCT:.0%}, GLD {MACRO_GLD_SURGE_PCT:.0%}, "
+            f"VIX>{MACRO_VIX_SAFE_HAVEN_MIN:.0f})"
+        )
+        print(
+            f"  dynamic_vti:          "
+            f"{'on' if stack['dynamic_vti'] else 'off'} "
+            f"({DYNAMIC_VTI_PAPER_FLOOR:.0%}-75% by vol/stress)"
+        )
+        print(
+            f"  dynamic_risk:         "
+            f"{'on' if stack['dynamic_risk'] else 'off'} "
+            f"({PAPER_RISK_CALM_BULL_PCT:.1%} calm bull / "
+            f"{PAPER_RISK_MODERATE_PCT:.1%} moderate / {PAPER_RISK_STRESS_PCT:.1%} stress)"
+        )
+        print(
+            f"  stat_arb:             "
+            f"{'on' if stack['stat_arb'] and effective_stat_arb_enabled() else 'off'} "
+            f"(corr>{PAPER_PAIR_MIN_CORRELATION}, Z>={PAPER_PAIR_Z_THRESHOLD})"
+        )
+        print(
+            f"  vol_overlay:          "
+            f"{'on' if stack['vol_overlay'] and effective_vol_trading_enabled() else 'off'} "
+            f"(cap {VOL_SLEEVE_CAP_PCT:.0%})"
+        )
         print(
             f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
             f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
@@ -1091,10 +1252,24 @@ def apply_paper_chase_runtime_tuning() -> list[str]:
     return turned_on
 
 
+def paper_only_sleeves_active() -> bool:
+    """Paper aggressive / chase sleeves — never on live money accounts."""
+    if not PAPER_TRADING:
+        return False
+    return bool(
+        paper_aggressive_context()
+        or (PAPER_AGGRESSIVE_ENABLED and paper_chase_mode_enabled())
+    )
+
+
 def init_paper_chase_if_enabled() -> list[str]:
-    """Enable aggressive paper profile when PAPER_CHASE_MODE is set."""
+    """Enable aggressive paper profile when PAPER_CHASE_MODE is set (paper only)."""
     extras: list[str] = []
-    if paper_chase_mode_enabled() and PAPER_AGGRESSIVE_ENABLED:
+    if (
+        PAPER_TRADING
+        and paper_chase_mode_enabled()
+        and PAPER_AGGRESSIVE_ENABLED
+    ):
         set_paper_aggressive_context(True)
         extras = apply_paper_chase_runtime_tuning()
     return extras
@@ -1112,10 +1287,7 @@ def paper_aggressive_context() -> bool:
 
 def get_paper_feature_flags() -> dict[str, bool]:
     """Advanced sleeve toggles for paper aggressive / chase; live returns {}."""
-    if not (
-        paper_aggressive_context()
-        or (PAPER_AGGRESSIVE_ENABLED and paper_chase_mode_enabled())
-    ):
+    if not paper_only_sleeves_active():
         return {}
     return {
         "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
@@ -1172,6 +1344,43 @@ def effective_cofire_budget_enabled() -> bool:
     return COFIRE_BUDGET_ENABLED
 
 
+def effective_stat_arb_enabled() -> bool:
+    """Cointegration + z-score stat arb — paper aggressive only."""
+    return bool(paper_only_sleeves_active() and PAPER_STAT_ARB_ENABLED)
+
+
+def effective_market_neutral_pairs_enabled() -> bool:
+    """Legacy correlation pairs — superseded by stat arb when enabled."""
+    if effective_stat_arb_enabled():
+        return False
+    return bool(paper_only_sleeves_active() and PAPER_MARKET_NEUTRAL_PAIRS)
+
+
+def effective_equity_pairs_enabled() -> bool:
+    """Long strong / short weak NYSE pairs — opt-in on paper aggressive."""
+    if not paper_only_sleeves_active():
+        return False
+    if effective_stat_arb_enabled():
+        return PAPER_EQUITY_PAIRS
+    return effective_market_neutral_pairs_enabled() and PAPER_EQUITY_PAIRS
+
+
+def effective_pair_min_correlation() -> float:
+    if effective_stat_arb_enabled() or effective_market_neutral_pairs_enabled():
+        return PAPER_PAIR_MIN_CORRELATION
+    return CRYPTO_MIN_CORRELATION
+
+
+def effective_pair_z_threshold(default: float = 2.0) -> float:
+    if effective_stat_arb_enabled() or effective_market_neutral_pairs_enabled():
+        return PAPER_PAIR_Z_THRESHOLD
+    return default
+
+
+def effective_pair_z_exit() -> float:
+    return PAPER_PAIR_Z_EXIT
+
+
 def effective_spy_exit_on_ma_break() -> bool:
     flags = get_paper_feature_flags()
     if flags:
@@ -1180,33 +1389,47 @@ def effective_spy_exit_on_ma_break() -> bool:
 
 
 def effective_crypto_vol_only() -> bool:
-    if paper_aggressive_context():
+    if paper_only_sleeves_active():
         return PAPER_CRYPTO_VOL_ONLY
     return CRYPTO_VOL_ONLY
 
 
 def effective_social_sleeve_enabled() -> bool:
     """Felix/Social sleeve — off by default; opt-in via env (legacy)."""
-    if paper_aggressive_context():
+    if paper_only_sleeves_active():
         return PAPER_SOCIAL_SLEEVE_ENABLED
     return SOCIAL_SLEEVE_ENABLED
 
 
 def effective_macro_regime_adaptor_enabled() -> bool:
     """Macro Regime Adaptor — off by default; opt-in via PAPER_MACRO_REGIME_ADAPTOR_ENABLED."""
-    if paper_aggressive_context():
+    if paper_only_sleeves_active():
         return PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     return MACRO_REGIME_ADAPTOR_ENABLED
 
 
+def effective_options_sleeve_enabled() -> bool:
+    """Covered-call income sleeve — paper aggressive only."""
+    if not paper_only_sleeves_active():
+        return False
+    return PAPER_OPTIONS_SLEEVE_ENABLED
+
+
+def effective_vol_trading_enabled() -> bool:
+    """VIX/VXX vol overlay — paper aggressive only."""
+    if not paper_only_sleeves_active():
+        return False
+    return PAPER_VOL_TRADING_ENABLED
+
+
 def effective_social_sleeve_cap_pct() -> float:
-    if paper_aggressive_context():
+    if paper_only_sleeves_active():
         return PAPER_SOCIAL_SLEEVE_CAP_PCT
     return SOCIAL_SLEEVE_CAP_PCT
 
 
 def effective_vti_rebalance_drift_pct() -> float:
-    if paper_aggressive_context():
+    if paper_only_sleeves_active():
         return PAPER_VTI_REBALANCE_DRIFT_PCT
     return VTI_CORE_REBALANCE_DRIFT_PCT
 
@@ -1236,7 +1459,7 @@ def vti_core_allocation_pct(
 ) -> float:
     if not VTI_CORE_ENABLED:
         return 0.0
-    if paper_aggressive_context():
+    if paper_only_sleeves_active():
         eq = equity if equity is not None and equity > 0 else (_account_equity or 0.0)
         if eq > 0:
             pct = get_vti_core_pct(

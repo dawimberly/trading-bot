@@ -52,6 +52,25 @@ class AlpacaExecutor:
         """Per-cycle cap overrides from get_dynamic_sleeve_caps (vol scaling)."""
         self._dynamic_sleeve_caps = dict(caps) if caps else None
 
+    def set_dynamic_risk_context(
+        self,
+        *,
+        vol_score: float,
+        regime: str,
+        macro_stress: bool,
+    ) -> None:
+        """Paper aggressive only: feed vol/regime/stress into dynamic risk per trade."""
+        if not (config.paper_aggressive_context() and config.PAPER_DYNAMIC_RISK_ENABLED):
+            return
+        config.set_dynamic_risk_context(
+            vol_score=vol_score,
+            regime=regime,
+            macro_stress=macro_stress,
+        )
+
+    def _risk_per_trade(self, equity: float) -> float:
+        return config.effective_risk_per_trade(equity)
+
     def _sleeve_cap_pct(self, key: str, base_pct: float) -> float:
         caps = getattr(self, "_dynamic_sleeve_caps", None)
         if caps and key in caps:
@@ -125,31 +144,76 @@ class AlpacaExecutor:
             return 0.0
         return float(getattr(order, "filled_qty", None) or 0)
 
-    def order_filled(self, order, max_wait=2.0):
-        """True when Alpaca reports a non-zero fill (brief poll for market orders)."""
+    @staticmethod
+    def _order_status(order) -> str:
+        return str(getattr(order, "status", "")).lower()
+
+    def order_filled(self, order, max_wait=5.0, *, require_complete: bool = True):
+        """True when Alpaca confirms fill (poll market orders; optional partial OK)."""
+        details = self.order_fill_details(
+            order, max_wait=max_wait, require_complete=require_complete
+        )
+        return details is not None and details.get("filled")
+
+    def order_fill_details(
+        self, order, max_wait=5.0, *, require_complete: bool = True
+    ) -> dict | None:
+        """Return fill metadata: filled, qty, notional, status, partial."""
         if order is None:
-            return False
-        if self._order_filled_qty(order) > 0:
-            return True
+            return None
+
+        def _details(o) -> dict | None:
+            qty = self._order_filled_qty(o)
+            status = self._order_status(o)
+            avg = float(getattr(o, "filled_avg_price", None) or 0)
+            notional = round(qty * avg, 2) if qty > 0 and avg > 0 else 0.0
+            if qty <= 0:
+                return None
+            complete = status == "filled"
+            partial = status == "partially_filled" or (
+                status not in ("filled",) and qty > 0
+            )
+            if require_complete and not complete:
+                return {
+                    "filled": False,
+                    "partial": partial,
+                    "qty": qty,
+                    "notional": notional,
+                    "status": status,
+                }
+            return {
+                "filled": True,
+                "partial": partial and not complete,
+                "qty": qty,
+                "notional": notional,
+                "status": status,
+            }
+
+        first = _details(order)
+        if first and first["filled"]:
+            return first
         if max_wait <= 0:
-            return False
+            return first
+
         oid = order.id
         deadline = time.time() + max_wait
+        latest = first
         while time.time() < deadline:
             time.sleep(0.5)
             try:
                 order = self.client.get_order_by_id(oid)
             except Exception:
-                return False
-            if self._order_filled_qty(order) > 0:
-                return True
-            status = str(getattr(order, "status", "")).lower()
+                return latest
+            latest = _details(order)
+            if latest and latest["filled"]:
+                return latest
+            status = self._order_status(order)
             if any(x in status for x in ("cancel", "reject", "expire", "fail")):
-                return False
+                return latest
         try:
-            return self._order_filled_qty(self.client.get_order_by_id(oid)) > 0
+            return _details(self.client.get_order_by_id(oid)) or latest
         except Exception:
-            return False
+            return latest
 
     def _equity_trading_allowed(self, symbol):
         if config.is_crypto(symbol):
@@ -279,7 +343,7 @@ class AlpacaExecutor:
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
-        raw = round(equity * config.effective_risk_per_trade(equity), 2)
+        raw = round(equity * self._risk_per_trade(equity), 2)
         capped = min(raw, self._max_notional(), round(cash * 0.95, 2))
         return self._apply_sizing_multiplier(max(self._min_notional(), capped))
 
@@ -348,6 +412,15 @@ class AlpacaExecutor:
     def _normalize_pos_symbol(pos):
         return config.normalize_symbol(pos.symbol)
 
+    def register_pair_symbols(self, long_sym: str, short_sym: str) -> None:
+        """Track pair-book symbols for backtest P&L attribution."""
+        symbols = getattr(self, "_pair_symbols", None)
+        if symbols is None:
+            symbols = set()
+            self._pair_symbols = symbols
+        symbols.add(long_sym)
+        symbols.add(short_sym)
+
     def _find_position(self, symbol):
         target = config.normalize_symbol(symbol)
         for pos in self._get_positions():
@@ -355,8 +428,8 @@ class AlpacaExecutor:
                 return pos
         return None
 
-    def execute_reduce_notional(self, symbol, sell_notional):
-        """Sell up to sell_notional; crypto uses qty to avoid insufficient-balance errors."""
+    def execute_reduce_notional(self, symbol, reduce_notional):
+        """Reduce long (sell) or short (buy cover) up to reduce_notional."""
         if not self._equity_trading_allowed(symbol):
             return None
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
@@ -366,34 +439,59 @@ class AlpacaExecutor:
 
         qty = float(pos.qty)
         price = float(pos.current_price or pos.avg_entry_price or 0)
-        if qty <= 0 or price <= 0:
-            return None
-
-        mv = qty * price
-        sell_notional = min(float(sell_notional), mv)
-        if sell_notional < self._min_notional():
+        if qty == 0 or price <= 0:
             return None
 
         self._cancel_open_orders_for(symbol)
+        reduce_notional = float(reduce_notional)
 
-        if is_crypto_sym:
-            sell_qty = min(qty, sell_notional / price)
-            sell_qty = round(sell_qty, 8)
-            if sell_qty <= 0:
+        if qty > 0:
+            mv = qty * price
+            sell_notional = min(reduce_notional, mv)
+            if sell_notional < self._min_notional():
                 return None
-            order = MarketOrderRequest(
-                symbol=formatted_symbol,
-                qty=sell_qty,
-                side=OrderSide.SELL,
-                time_in_force=tif,
-            )
+            if is_crypto_sym:
+                sell_qty = min(qty, sell_notional / price)
+                sell_qty = round(sell_qty, 8)
+                if sell_qty <= 0:
+                    return None
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    qty=sell_qty,
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
+            else:
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    notional=round(sell_notional, 2),
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
         else:
-            order = MarketOrderRequest(
-                symbol=formatted_symbol,
-                notional=round(sell_notional, 2),
-                side=OrderSide.SELL,
-                time_in_force=tif,
-            )
+            abs_qty = abs(qty)
+            mv = abs_qty * price
+            cover_notional = min(reduce_notional, mv)
+            if cover_notional < self._min_notional():
+                return None
+            if is_crypto_sym:
+                buy_qty = min(abs_qty, cover_notional / price)
+                buy_qty = round(buy_qty, 8)
+                if buy_qty <= 0:
+                    return None
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    qty=buy_qty,
+                    side=OrderSide.BUY,
+                    time_in_force=tif,
+                )
+            else:
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    notional=round(cover_notional, 2),
+                    side=OrderSide.BUY,
+                    time_in_force=tif,
+                )
         order = self.client.submit_order(order_data=order)
         self._invalidate_cache()
         return order
@@ -407,23 +505,40 @@ class AlpacaExecutor:
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
         self._cancel_open_orders_for(symbol)
         qty = float(pos.qty)
-        price = float(pos.current_price or 0)
-        if qty <= 0 or price <= 0:
+        price = float(pos.current_price or pos.avg_entry_price or 0)
+        if qty == 0 or price <= 0:
             return None
-        if is_crypto_sym:
-            order = MarketOrderRequest(
-                symbol=formatted_symbol,
-                qty=qty,
-                side=OrderSide.SELL,
-                time_in_force=tif,
-            )
+        if qty > 0:
+            if is_crypto_sym:
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    qty=qty,
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
+            else:
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    notional=round(qty * price, 2),
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
         else:
-            order = MarketOrderRequest(
-                symbol=formatted_symbol,
-                notional=round(qty * price, 2),
-                side=OrderSide.SELL,
-                time_in_force=tif,
-            )
+            abs_qty = abs(qty)
+            if is_crypto_sym:
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    qty=abs_qty,
+                    side=OrderSide.BUY,
+                    time_in_force=tif,
+                )
+            else:
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    notional=round(abs_qty * price, 2),
+                    side=OrderSide.BUY,
+                    time_in_force=tif,
+                )
         order = self.client.submit_order(order_data=order)
         self._invalidate_cache()
         return order
@@ -434,9 +549,16 @@ class AlpacaExecutor:
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
         side_lower = side.lower()
 
-        if not reduce_only:
-            if side_lower == "sell":
-                if self._find_position(symbol) is None:
+        if not reduce_only and side_lower == "sell":
+            if self._find_position(symbol) is None:
+                short_open_ok = (
+                    not is_crypto_sym
+                    and (
+                        config.effective_equity_pairs_enabled()
+                        or config.effective_stat_arb_enabled()
+                    )
+                )
+                if not short_open_ok:
                     return None
 
         self._cancel_open_orders_for(symbol)

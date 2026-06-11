@@ -1,0 +1,7 @@
+---
+pid: 13528
+cwd: "C:\Users\Owner\PythonTrading"
+command: "C:\\Users\\Owner\\PythonTrading\\.venv\\Scripts\\python.exe C:\\Users\\Owner\\PythonTrading\\scripts\\mcp\\run_grok_mcp.py"
+started_at: 2026-06-11T01:44:13.807Z
+running_for_ms: 12794987 
+---

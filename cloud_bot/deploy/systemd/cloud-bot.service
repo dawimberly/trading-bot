@@ -1,0 +1,27 @@
+[Unit]
+Description=PythonTrading Cloud Bot (best paper profile)
+Documentation=file:///opt/PythonTrading/cloud_bot/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/PythonTrading
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/PythonTrading/cloud_bot/.env
+ExecStart=/opt/PythonTrading/.venv/bin/python -m cloud_bot.runtime.main --run
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cloud-bot
+
+# Hardening (adjust per VPS)
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/PythonTrading/cloud_bot/data /opt/PythonTrading/market_data.db
+
+[Install]
+WantedBy=multi-user.target

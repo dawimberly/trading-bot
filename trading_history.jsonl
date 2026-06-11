@@ -1,21 +1,3 @@
-{"event": "ledger_rebuilt", "at": "2026-05-30T02:17:41", "backup": "trading_history.jsonl.bak.20260530_021740"}
-{"pair": "AAPL", "qty": 5.802927605, "price": 314.105246, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "AMD", "qty": 3.521902329, "price": 516.854197, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "CPER", "qty": 51.397126731, "price": 38.98, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "CVX", "qty": 10.547857218, "price": 189.94, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "GLD", "qty": 10.938297614, "price": 412.9564, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "GS", "qty": 1.996020191, "price": 1005.576, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "KTOS", "qty": 63.802251674, "price": 59.935659, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "LMT", "qty": 3.761683561, "price": 532.596633, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "LNG", "qty": 6.372e-06, "price": 237.4, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "META", "qty": 6.185531432, "price": 619.762431, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "MSFT", "qty": 4.146545247, "price": 438.786964, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "NVDA", "qty": 8.588144402, "price": 213.416299, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "PFE", "qty": 70.017234775, "price": 26.11, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "QQQ", "qty": 2.468010457, "price": 738.21, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "RTX", "qty": 11.308244335, "price": 177.168086, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "SLV", "qty": 39.646284376, "price": 68.36, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "SPY", "qty": 29.146628928, "price": 756.56262, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "UNH", "qty": 5.255250997, "price": 381.230126, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "VTI", "qty": 4.928958814, "price": 372.423481, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "XOM", "qty": 8.283e-06, "price": 153.784285, "status": "open", "source": "alpaca_reconcile"}
+{"event": "ledger_rebuilt", "at": "2026-06-09T21:04:55", "backup": "trading_history.jsonl.bak.20260609_210455"}
+{"pair": "GLD", "qty": 0.003743737, "price": 397.998, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "VTI", "qty": 0.245563002, "price": 366.464, "status": "open", "source": "alpaca_reconcile"}

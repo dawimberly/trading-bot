@@ -1,0 +1,74 @@
+---
+description: UX/UI standards for PythonTrading desktop and portal monitors
+globs: dashboard_app.py,dashboard.py,portal.py
+alwaysApply: false
+---
+
+# Trading dashboard UX (PythonTrading)
+
+Stack: **Python 3.11+**, **CustomTkinter** (`dashboard_app.py`), Streamlit backup (`dashboard.py`, `portal.py`). Dark mode default.
+
+## 1. Cognitive load (progressive disclosure)
+
+- **Primary surface:** equity, cash, position status, bot state, active book (Alpaca Live/Paper) — always visible in header + metric row.
+- **Secondary:** regime, wisdom, sleeve exposure → **Overview** tab only.
+- **Tertiary:** trade log, charts, API keys, account switcher → **tabs** or **☰ hamburger menu**; never clutter the default view.
+- **During bot execution:** emphasize **Bot: Running/Stopped** and **LIVE vs Paper** banner; hide charts unless user opens Charts tab.
+- Do not add new always-visible widgets without removing or collapsing something else.
+
+## 2. Visual hierarchy (F-pattern)
+
+Top bar left → right (high attention):
+
+1. ☰ accounts menu
+2. App name
+3. **Active book** badge (Alpaca Live / Paper)
+4. Username (muted)
+
+Below header:
+
+1. **Metric cards** (Equity, Cash %, Invested %, P&L, Market) — top-left, largest numbers
+2. **Primary CTAs** (Start Bot / Stop Bot / Refresh) — footer or header right; **Stop Bot** uses confirmation; live actions use extra friction (confirm + warning copy)
+
+Fitts's Law: primary actions ≥ 88px wide, reachable without crossing the full window.
+
+## 3. Error mitigation & color
+
+Palette (`dashboard_app.py` `COLORS`):
+
+- Background `#141414`, cards `#1e1e1e`, muted text `#9ca3af`
+- **Green** `#22c55e` — positive P&L, bot running (not generic UI)
+- **Amber** `#f59e0b` — stopped/warning, small-account mode (not panic)
+- **Red** `#dc2626` / `#7f1d1d` — **live money banner, destructive actions, errors only** — never for labels, borders, or decoration (avoid alert fatigue)
+- Live vs paper must be instantly distinguishable (banner + title book badge)
+
+High-risk actions require:
+
+- `messagebox.askyesno` with explicit consequence text
+- Live key save → confirm dialog (already implemented)
+- Stop bot → confirm (already implemented)
+
+Color-blind: do not rely on red vs green alone — pair with text ("Running", "LIVE TRADING", "+$").
+
+## 4. Trading mental models
+
+- **Positions:** table columns — Ticker, Qty, Entry, Current, P&L $, P&L % (industry standard)
+- **Trades:** chronological journal, newest first
+- **Order book:** N/A (bot-driven); show **sleeve caps / exposure** instead of fake order UI
+- Button states: every `CTkButton` needs distinct `fg_color` / `hover_color`; disabled = `state="disabled"` + muted color
+- Dark theme only for desktop monitor; no white flashes on refresh
+
+## 5. Multi-account (books)
+
+- One portal login; **☰ menu** switches books (`modules/trading_books.py`)
+- Keys and bot state isolated per book under `data/portal/users/<user>/books/<book_id>/`
+- UI must show **which book** is active before Start Bot
+
+## When adding features
+
+Before merging UI changes, verify:
+
+- [ ] Default view still shows equity + bot state in &lt; 3 seconds of scanning
+- [ ] New config lives in tab, menu, or dialog — not the main canvas
+- [ ] Live/destructive actions have confirmation
+- [ ] Red used only for urgent/risk states

@@ -44,24 +44,43 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Paper research (`paper_aggressive`)
+### Profile B: Best Paper Bot (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
-| Layer | Setting |
-|-------|---------|
-| **VTI core** | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`) or 20% static fallback |
-| **Active sleeves** | Full 45/20/20 base caps × **1.40 boost** (~79% deployed) |
-| **Game plan** | Yield-gate-only (same gate logic) |
-| **NYSE overlap filter** | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
-| **NYSE beta scaling** | **on** when `PAPER_CHASE_EXTRA=true` |
-| **Adaptive chunk / co-fire** | **on** (`PAPER_ADAPTIVE_CHUNK_ENABLED`, `PAPER_COFIRE_BUDGET_ENABLED`) |
-| **SPY MA exit** | **off** (`PAPER_SPY_EXIT_ON_MA_BREAK=false`) |
-| **Macro regime adaptor** | **off** (`PAPER_MACRO_REGIME_ADAPTOR_ENABLED=false`) |
-| **Crypto vol gate** | **off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| **Social / Felix sleeve** | **off** (`PAPER_SOCIAL_SLEEVE_ENABLED=false`; Felix sync optional via chase extras) |
+**Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) while staying lightweight on the laptop.
 
-Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Preflight prints Profile B via `config.print_paper_research_stack_flags()`.
+| Layer | Default | Env flag |
+|-------|---------|----------|
+| **VTI core** | Dynamic **40–75%** | `PAPER_DYNAMIC_VTI=true` |
+| **Risk per trade** | Dynamic **1–3%** | `PAPER_DYNAMIC_RISK_ENABLED=true` |
+| **Stat arb** | Cointegration + both legs | `PAPER_STAT_ARB_ENABLED=true` |
+| **Vol overlay** | VIX regime hedge/income | `PAPER_VOL_TRADING_ENABLED=true` |
+| **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
+| **Macro regime** | Oil/gold/VIX/geo shifts | `PAPER_MACRO_REGIME_ADAPTOR_ENABLED=true` |
+| **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
+| **Overlap / chunk / co-fire** | **on** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
+| **SPY MA exit / social** | **off** | `PAPER_SPY_EXIT_ON_MA_BREAK=false`, `PAPER_SOCIAL_SLEEVE_ENABLED=false` |
+| **Crypto vol gate** | **off** (all vol) | `PAPER_CRYPTO_VOL_ONLY=false` |
+
+Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). `python status.py` and preflight print the stack via `config.print_paper_research_stack_flags()`.
+
+#### Backtest performance (final validation)
+
+Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
+
+| Window | Return | Sharpe | Max DD | vs VTI |
+|--------|--------|--------|--------|--------|
+| 365d | +20.74% | **1.08** | -9.77% | +2.08 pp |
+| 1000d | +41.33% | 0.64 | -27.76% | -8.88 pp |
+| max | +59.81% | 0.66 | -22.01% | -8.21 pp |
+
+Typical active mutual funds land around **0.4–0.7 Sharpe**. Best Paper Bot beats that on **365d** (Sharpe **1.08**, beats VTI) and remains competitive on return over long windows; monitor **1000d drawdown** (~28%) if tightening risk. Re-validate anytime:
+
+```bash
+python backtester.py --paper-aggressive --compare-final --final-all-windows
+python backtester.py --max --paper-aggressive --compare-final
+```
 
 ---
 
@@ -244,29 +263,23 @@ Preflight prints Profile A via `config.print_recommended_stack_flags()` (dispatc
 
 (Sleeve percentages above are effective on a ~$100 account with 90% VTI core.)
 
-### Profile B — paper research (`paper_aggressive`)
+### Profile B — Best Paper Bot (`paper_aggressive`)
 
-| Layer | Setting |
-|-------|---------|
-| **VTI core** | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`); static 20% fallback |
-| **Game plan** | Yield-gate-only (same as live) |
-| **NYSE overlap filter** | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
-| **NYSE beta scaling** | on when `PAPER_CHASE_EXTRA=true` |
-| **Adaptive chunk / co-fire** | **on** (paper defaults) |
-| **SPY MA exit** | **off** |
-| **Macro regime adaptor** | **off** |
-| **Crypto** | All vol regimes (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| **Social / Felix sleeve** | **off** (opt-in via `.env`) |
+Same locked stack as [Profile B above](#profile-b-best-paper-bot-paper_aggressive). See `config.get_best_paper_bot_stack()`.
 
 ```
---- paper_aggressive research stack (Profile B) ---
+--- Best Paper Bot (paper_aggressive / Profile B) ---
   paper_chase_mode:       ON (PAPER_CHASE_MODE)
+  dynamic_vti:            on (40%-75% by vol/stress)
+  dynamic_risk:           on (3% / 2.2% / 1%)
+  stat_arb:               on
+  vol_overlay:            on
+  options_sleeve:         on
+  regime_shift:           on
   nyse_overlap_filter:    True
-  nyse_beta_scaling:      True (recommended ON for research grids)
   adaptive_chunk:         True
   cofire_budget:          True
   spy_exit_on_ma_break:   False
-  macro_regime_adaptor:   False
   social_sleeve:          off
   vti_core:             dynamic 40-75% VTI | active boost 1.40x
   crypto_vol_only:      False

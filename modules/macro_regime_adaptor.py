@@ -1,9 +1,10 @@
-"""Macro Regime Adaptor — oil/gold/VIX/yield/geo signals for paper aggressive profile."""
+"""Regime Shift Detector — oil/gold/VIX/geo/yield signals (paper aggressive only)."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
-from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -11,15 +12,17 @@ import yfinance as yf
 
 import config
 
-OIL_PROXIES = ("XOM", "CVX")
+OIL_SYMBOLS = ("XOM", "USO")
 GLD_SYMBOL = "GLD"
-ENERGY_TARGET = "XOM"
+ENERGY_TARGET = "XLE"
+ENERGY_FALLBACK = "XOM"
 SAFE_HAVEN_TARGET = "GLD"
-MACRO_SLEEVE_SYMBOLS = frozenset({GLD_SYMBOL, ENERGY_TARGET, "XLE"})
+MACRO_SLEEVE_SYMBOLS = frozenset({GLD_SYMBOL, ENERGY_TARGET, ENERGY_FALLBACK})
 
 GEO_KEYWORDS = (
     "iran",
     "israel",
+    "middle east",
     "conflict",
     "war",
     "sanctions",
@@ -31,6 +34,13 @@ GEO_KEYWORDS = (
 )
 
 LOOKBACK_DAYS = 5
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _clamp_scale(scale: float) -> float:
+    lo = 1.0 - config.MACRO_SLEEVE_ADJUST_MAX_PCT
+    hi = 1.0 + config.MACRO_SLEEVE_ADJUST_MAX_PCT
+    return round(max(lo, min(hi, scale)), 4)
 
 
 def _load_daily_close(col: str) -> pd.Series:
@@ -64,6 +74,9 @@ def _fetch_and_store_daily(yf_ticker: str, col: str) -> None:
             df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
         rename = {c: "Close" for c in df.columns if str(c).lower() == "close"}
         df = df.rename(columns=rename)
+        if "Date" not in df.columns:
+            date_col = "index" if "index" in df.columns else df.columns[0]
+            df = df.rename(columns={date_col: "Date"})
         if "Date" not in df.columns or "Close" not in df.columns:
             return
         conn = sqlite3.connect(config.DB_PATH)
@@ -74,8 +87,14 @@ def _fetch_and_store_daily(yf_ticker: str, col: str) -> None:
 
 
 def ensure_macro_regime_daily() -> None:
-    """Ensure VIX/TLT/TNX daily tables exist for regime detection."""
-    needed = (("VIX", "^VIX"), ("TLT", "TLT"), ("TNX", "^TNX"), ("GLD", "GLD"))
+    """Ensure VIX/TLT/TNX/GLD/USO daily tables exist."""
+    needed = (
+        ("VIX", "^VIX"),
+        ("TLT", "TLT"),
+        ("TNX", "^TNX"),
+        ("GLD", "GLD"),
+        ("USO", "USO"),
+    )
     for col, yf_sym in needed:
         if len(_load_daily_close(col)) >= LOOKBACK_DAYS + 5:
             continue
@@ -92,20 +111,28 @@ def _pct_return(series: pd.Series, days: int = LOOKBACK_DAYS) -> float | None:
     return (b / a) - 1.0
 
 
-def _oil_return_from_window(window: pd.DataFrame) -> float | None:
-    rets = []
-    for sym in OIL_PROXIES:
+def _series_as_of(series: pd.Series, ts) -> pd.Series:
+    if series is None or series.empty:
+        return series
+    ts = pd.Timestamp(ts)
+    return series.loc[:ts]
+
+
+def _oil_surge(window: pd.DataFrame) -> tuple[bool, float | None, str | None]:
+    best_ret = None
+    best_sym = None
+    for sym in OIL_SYMBOLS:
         if sym not in window.columns:
             continue
         s = window[sym].dropna()
         if len(s) < LOOKBACK_DAYS + 1:
             continue
         r = _pct_return(s, LOOKBACK_DAYS)
-        if r is not None:
-            rets.append(r)
-    if not rets:
-        return None
-    return float(np.mean(rets))
+        if r is not None and r >= config.MACRO_OIL_SURGE_PCT:
+            if best_ret is None or r > best_ret:
+                best_ret = r
+                best_sym = sym
+    return best_ret is not None, best_ret, best_sym
 
 
 def _gld_return(window: pd.DataFrame, gld_daily: pd.Series | None) -> float | None:
@@ -118,11 +145,11 @@ def _gld_return(window: pd.DataFrame, gld_daily: pd.Series | None) -> float | No
     return None
 
 
-def _vix_spike(vix: pd.Series) -> bool:
-    if vix is None or len(vix) < LOOKBACK_DAYS + 1:
-        return False
-    ret = _pct_return(vix, LOOKBACK_DAYS)
-    return ret is not None and ret >= config.MACRO_VIX_SPIKE_PCT
+def _vix_level(vix: pd.Series) -> float | None:
+    if vix is None or vix.empty:
+        return None
+    val = float(vix.iloc[-1])
+    return val if np.isfinite(val) else None
 
 
 def _tlt_yield_stress(tlt: pd.Series, tnx: pd.Series) -> bool:
@@ -136,14 +163,35 @@ def _tlt_yield_stress(tlt: pd.Series, tnx: pd.Series) -> bool:
     return tlt_weak and tnx_rising
 
 
-def _detect_geo_risk(wisdom: dict | None) -> tuple[bool, str | None]:
-    if not wisdom:
-        return False, None
-    chunks = [
-        str(wisdom.get("felix_video_title") or ""),
-        str(wisdom.get("macro_event_guard") or ""),
-        str(wisdom.get("regime") or ""),
-    ]
+def _load_news_text() -> str:
+    path = ROOT / config.WEB_SENTIMENT_CACHE_FILE
+    if not path.is_file():
+        return ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ""
+    parts = [str(data.get("headline_text") or "")]
+    for src in data.get("sources") or []:
+        if isinstance(src, dict):
+            parts.append(str(src.get("headline_text") or ""))
+    return " ".join(parts).lower()
+
+
+def _detect_geo_risk(wisdom: dict | None, news_text: str | None = None) -> tuple[bool, str | None]:
+    chunks = []
+    if wisdom:
+        chunks.extend(
+            [
+                str(wisdom.get("felix_video_title") or ""),
+                str(wisdom.get("macro_event_guard") or ""),
+                str(wisdom.get("regime") or ""),
+            ]
+        )
+    if news_text:
+        chunks.append(news_text)
+    else:
+        chunks.append(_load_news_text())
     text = " ".join(chunks).lower()
     for kw in GEO_KEYWORDS:
         if kw in text:
@@ -151,44 +199,60 @@ def _detect_geo_risk(wisdom: dict | None) -> tuple[bool, str | None]:
     return False, None
 
 
+def _energy_target(prices) -> str:
+    if ENERGY_TARGET in prices.index:
+        return ENERGY_TARGET
+    return ENERGY_FALLBACK
+
+
 def evaluate_macro_regime(
     window: pd.DataFrame,
     *,
     daily_macro: pd.DataFrame | None = None,
     wisdom: dict | None = None,
+    news_text: str | None = None,
     ts=None,
 ) -> dict:
-    """
-    Detect macro regime shifts from market data (+ optional wisdom geo keywords).
-    Paper aggressive only at integration layer; this function is data-only.
-    """
+    """Detect regime shifts from market data + optional news/wisdom geo keywords."""
+    if not config.paper_aggressive_context() and not config.PAPER_AGGRESSIVE_ENABLED:
+        return {"active": False, "signals": [], "messages": []}
+
     ensure_macro_regime_daily()
     vix = _load_daily_close("VIX")
     tlt = _load_daily_close("TLT")
     tnx = _load_daily_close("TNX")
     gld_daily = _load_daily_close("GLD")
 
+    if ts is not None:
+        vix = _series_as_of(vix, ts)
+        tlt = _series_as_of(tlt, ts)
+        tnx = _series_as_of(tnx, ts)
+        gld_daily = _series_as_of(gld_daily, ts)
+
     if daily_macro is not None and not daily_macro.empty:
-        bar = daily_macro.iloc[-1] if ts is None else daily_macro.loc[:ts].iloc[-1:]
-        if "TLT" in daily_macro.columns:
-            tlt_slice = daily_macro["TLT"].dropna()
+        if ts is not None:
+            macro_slice = daily_macro.loc[:ts]
+        else:
+            macro_slice = daily_macro
+        if "TLT" in macro_slice.columns:
+            tlt_slice = macro_slice["TLT"].dropna()
             if len(tlt_slice) >= 25:
                 tlt = tlt_slice
-        if "TNX" in daily_macro.columns:
-            tnx_slice = daily_macro["TNX"].dropna()
+        if "TNX" in macro_slice.columns:
+            tnx_slice = macro_slice["TNX"].dropna()
             if len(tnx_slice) >= LOOKBACK_DAYS + 1:
                 tnx = tnx_slice
 
-    oil_ret = _oil_return_from_window(window)
+    oil_shock, oil_ret, oil_sym = _oil_surge(window)
     gld_ret = _gld_return(window, gld_daily)
-    oil_shock = oil_ret is not None and oil_ret >= config.MACRO_OIL_SURGE_PCT
-    vix_spike = _vix_spike(vix)
+    vix_val = _vix_level(vix)
     safe_haven = (
         gld_ret is not None
         and gld_ret >= config.MACRO_GLD_SURGE_PCT
-        and vix_spike
+        and vix_val is not None
+        and vix_val >= config.MACRO_VIX_SAFE_HAVEN_MIN
     )
-    geo_risk, geo_kw = _detect_geo_risk(wisdom)
+    geo_risk, geo_kw = _detect_geo_risk(wisdom, news_text=news_text)
     tlt_yield_stress = _tlt_yield_stress(tlt, tnx)
 
     messages: list[str] = []
@@ -196,41 +260,48 @@ def evaluate_macro_regime(
     macro_cap_pct = 0.0
     spy_scale = 1.0
     nyse_scale = 1.0
+    energy_scale = 1.0
     vti_delta = 0.0
     yield_gate_boost = False
 
+    boost = float(config.MACRO_ENERGY_SLEEVE_BOOST)
+    boost = max(0.05, min(0.10, boost))
+
     if oil_shock:
-        messages.append("Oil surge detected -> Energy tilt")
+        messages.append(f"Oil shock detected ({oil_sym} +{oil_ret:.1%}) -> Energy tilt")
         target = ENERGY_TARGET
         macro_cap_pct = max(macro_cap_pct, float(config.MACRO_ENERGY_CAP_PCT))
-        nyse_scale = min(1.15, nyse_scale + float(config.MACRO_ENERGY_SLEEVE_BOOST))
+        energy_scale = _clamp_scale(1.0 + boost)
+        nyse_scale = _clamp_scale(nyse_scale + boost * 0.5)
 
     if geo_risk:
-        label = geo_kw.replace("strait of hormuz", "Hormuz") if geo_kw else "geo"
+        label = (geo_kw or "geo").replace("strait of hormuz", "Hormuz").title()
         if oil_shock:
-            messages.append(f"{label.title()} tensions detected -> Energy tilt")
+            messages.append(f"{label} tensions detected -> Energy tilt")
         else:
-            messages.append(f"{label.title()} tensions detected -> Risk-off tilt")
-            spy_scale *= 0.90
-            nyse_scale *= 0.90
-            vti_delta += 0.05
+            messages.append(f"{label} tensions detected -> Risk-off tilt")
+            spy_scale = _clamp_scale(spy_scale * 0.90)
+            nyse_scale = _clamp_scale(nyse_scale * 0.90)
+            vti_delta = min(0.05, config.MACRO_SLEEVE_ADJUST_MAX_PCT)
             macro_cap_pct = max(macro_cap_pct, float(config.MACRO_SAFE_HAVEN_CAP_PCT))
             if target is None:
                 target = SAFE_HAVEN_TARGET
 
     if safe_haven:
-        messages.append("Safe-haven flow (GLD + VIX) -> GLD allocation")
+        messages.append(
+            f"Safe-haven flow (GLD +{gld_ret:.1%}, VIX {vix_val:.1f}) -> GLD allocation"
+        )
         target = SAFE_HAVEN_TARGET
         macro_cap_pct = max(macro_cap_pct, float(config.MACRO_SAFE_HAVEN_CAP_PCT))
-        spy_scale *= 0.85
-        nyse_scale *= 0.85
-        vti_delta += 0.05
+        spy_scale = _clamp_scale(spy_scale * 0.90)
+        nyse_scale = _clamp_scale(nyse_scale * 0.90)
+        vti_delta = min(vti_delta + 0.05, config.MACRO_SLEEVE_ADJUST_MAX_PCT)
 
     if tlt_yield_stress:
-        messages.append("TLT weakness + rising yields -> Yield gate strengthened")
+        messages.append("Yield shock (TNX rising + TLT weak) -> Yield gate strengthened")
         yield_gate_boost = True
-        spy_scale *= 0.92
-        nyse_scale *= 0.92
+        spy_scale = _clamp_scale(spy_scale * 0.92)
+        nyse_scale = _clamp_scale(nyse_scale * 0.92)
 
     active = bool(messages)
     return {
@@ -238,23 +309,26 @@ def evaluate_macro_regime(
         "signals": messages,
         "messages": messages,
         "oil_shock": oil_shock,
+        "oil_symbol": oil_sym,
         "safe_haven": safe_haven,
         "geo_risk": geo_risk,
         "geo_keyword": geo_kw,
         "tlt_yield_stress": tlt_yield_stress,
         "target": target,
         "macro_cap_pct": round(macro_cap_pct, 4) if active else 0.0,
-        "spy_scale": round(spy_scale, 4),
-        "nyse_scale": round(nyse_scale, 4),
+        "spy_scale": spy_scale,
+        "nyse_scale": nyse_scale,
+        "energy_scale": energy_scale,
         "vti_delta": round(vti_delta, 4),
         "yield_gate_boost": yield_gate_boost,
         "oil_ret_5d": round(oil_ret, 4) if oil_ret is not None else None,
         "gld_ret_5d": round(gld_ret, 4) if gld_ret is not None else None,
+        "vix_level": round(vix_val, 2) if vix_val is not None else None,
     }
 
 
 def merge_regime_sleeve_caps(base_caps: dict[str, float], regime: dict) -> dict[str, float]:
-    """Apply macro regime scaling to dynamic sleeve caps."""
+    """Apply regime scaling to dynamic sleeve caps (±15% max per sleeve)."""
     if not regime.get("active"):
         return dict(base_caps)
     caps = dict(base_caps)
@@ -278,7 +352,7 @@ def apply_yield_gate_boost(yield_gated: bool, regime: dict) -> bool:
 
 def log_regime_messages(regime: dict) -> None:
     for msg in regime.get("messages") or []:
-        print(f"--- Macro Regime: {msg} ---")
+        print(f"--- Regime Shift: {msg} ---")
 
 
 def run_macro_regime_backtest_day(
@@ -288,7 +362,7 @@ def run_macro_regime_backtest_day(
     *,
     market_open: bool = True,
 ) -> tuple[list[dict], dict]:
-    """Parallel macro sleeve book (GLD / XOM energy proxy) for backtests."""
+    """Parallel regime sleeve book (GLD / XLE / XOM) for backtests."""
     meta = {"target": None, "active": False, "cap_pct": 0.0}
     if not config.effective_macro_regime_adaptor_enabled() or not market_open:
         return [], meta
@@ -296,6 +370,8 @@ def run_macro_regime_backtest_day(
         return [], meta
 
     target = regime["target"]
+    if target == ENERGY_TARGET and target not in prices.index:
+        target = ENERGY_FALLBACK
     if target not in prices.index:
         return [], meta
     price = prices.get(target)

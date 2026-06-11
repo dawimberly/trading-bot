@@ -19,6 +19,7 @@ from modules.wisdom_sentiment import resolve_wisdom_regime
 from modules.pipeline_strategies import (
     run_crypto_strategy,
     run_equity_strategy,
+    run_equity_pairs_strategy,
     run_spy_exits,
     run_spy_strategy,
     resolve_cycle_deploy,
@@ -74,6 +75,7 @@ refresh_scheduler = RefreshScheduler()
 risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
 portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
 _startup_reconciled = False
+_main_cycle_count = 0
 _startup_rebalanced = False
 _macro_daily_bootstrapped = False
 _last_cycle_schedule = None
@@ -105,6 +107,14 @@ def _game_plan_signals(regime: str) -> dict:
 def _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=False):
     global _startup_rebalanced
     if _startup_rebalanced or not config.REBALANCE_ON_STARTUP:
+        return
+    if (
+        not config.PAPER_TRADING
+        and config.ALLOW_LIVE_TRADING
+        and _main_cycle_count < 2
+    ):
+        if _main_cycle_count == 1:
+            print("--- Live: startup rebalance deferred until cycle 2 ---")
         return
     _startup_rebalanced = True
     try:
@@ -154,6 +164,18 @@ def _maybe_reconcile_startup(executor):
             print(f"  Over-cap after:  SPY ${after['spy']:,.0f} | crypto ${after['crypto']:,.0f} | NYSE ${after['nyse']:,.0f}")
         if result.get("ledger"):
             print(f"  Ledger rebuilt: {result['ledger']['open_positions']} Alpaca positions")
+        from modules.stat_arb_sleeve import reconcile_stat_arb_book
+
+        stat = reconcile_stat_arb_book(executor)
+        if stat.get("removed"):
+            print(
+                f"  Stat-arb book: kept {len(stat.get('kept', []))}, "
+                f"removed {len(stat['removed'])} stale"
+            )
+        if stat.get("orphans"):
+            print(
+                f"  Stat-arb orphans (not in book): {', '.join(stat['orphans'][:8])}"
+            )
     except Exception as exc:
         print(f"Holdings reconcile error (non-fatal): {exc}")
 
@@ -164,12 +186,26 @@ def log_trade(symbol, side, regime):
         f.write(f"{ts} | {side.upper()} | {symbol} | Regime: {regime}\n")
 
 
-def _crypto_log(symbol, side, regime, pair_key, z, notional=""):
-    cap = config.CRYPTO_SLEEVE_CAP_PCT
-    print(
-        f"!!! CRYPTO SLEEVE: {pair_key} | Z={round(z, 2)} | "
-        f"{side.upper()} ${notional} | cap {cap:.2%} | Regime: {regime}"
-    )
+def _crypto_log(symbol, side, regime, pair_key, z, notional="", pair_msg=None):
+    if pair_msg:
+        print(f"!!! {pair_msg} | ${notional}/leg | Regime: {regime}")
+    else:
+        cap = config.CRYPTO_SLEEVE_CAP_PCT
+        print(
+            f"!!! CRYPTO SLEEVE: {pair_key} | Z={round(z, 2)} | "
+            f"{side.upper()} ${notional} | cap {cap:.2%} | Regime: {regime}"
+        )
+    log_trade(symbol, side, regime)
+    trade_journal.log_signal(symbol, side, regime, pair_key, z, _last_equity, notional)
+
+
+def _equity_pair_log(symbol, side, regime, pair_key, z, notional="", pair_msg=None):
+    if pair_msg:
+        print(f"!!! {pair_msg} | ${notional}/leg | Regime: {regime}")
+    else:
+        print(
+            f"!!! NYSE PAIR: {pair_key} | {side.upper()} ${notional} | Regime: {regime}"
+        )
     log_trade(symbol, side, regime)
     trade_journal.log_signal(symbol, side, regime, pair_key, z, _last_equity, notional)
 
@@ -334,7 +370,8 @@ def _write_heartbeat(
 
 
 def main():
-    global _last_equity, _last_cycle_schedule
+    global _last_equity, _last_cycle_schedule, _main_cycle_count
+    _main_cycle_count += 1
     now_ts = datetime.datetime.now()
     executor = _make_executor()
     schedule = equity_scan_state(executor.client, now_ts)
@@ -494,6 +531,23 @@ def main():
     yield_gated = bool(gp_signals.get("yield_gate"))
     if macro_regime_result:
         yield_gated = apply_yield_gate_boost(yield_gated, macro_regime_result)
+
+    macro_stress_flag = bool(
+        wisdom.get("dynamic_stress")
+        or wisdom.get("governor_stress")
+        or gp_signals.get("stress")
+    )
+    executor.set_dynamic_risk_context(
+        vol_score=vol_score,
+        regime=regime,
+        macro_stress=macro_stress_flag,
+    )
+    if config.paper_aggressive_context() and config.PAPER_DYNAMIC_RISK_ENABLED:
+        dyn_risk = config.effective_risk_per_trade(equity)
+        print(
+            f"--- Dynamic risk: {dyn_risk:.1%} per trade "
+            f"(vol={vol_score:.4f}, stress={macro_stress_flag}) ---"
+        )
     _maybe_rebalance_startup(
         executor, data, regime, vol, equity_scans, yield_gated=yield_gated
     )
@@ -619,11 +673,6 @@ def main():
 
     vti_result = None
     if config.vti_core_enabled() and market_open:
-        macro_stress_flag = bool(
-            wisdom.get("dynamic_stress")
-            or wisdom.get("governor_stress")
-            or gp_signals.get("stress")
-        )
         vti_result = rebalance_vti_core(
             executor,
             market_open=market_open,
@@ -648,6 +697,29 @@ def main():
                 f"--- VTI core: {vti_result.get('current_value', 0):,.2f} / "
                 f"{vti_result.get('target_value', 0):,.2f} ---"
             )
+
+    options_result = None
+    if config.effective_options_sleeve_enabled() and market_open:
+        from modules.options_sleeve import current_vix_level, run_options_sleeve_cycle
+
+        options_result = run_options_sleeve_cycle(
+            executor,
+            volatility=vol_label,
+            vix=current_vix_level(),
+            market_open=market_open,
+        )
+
+    if config.effective_vol_trading_enabled() and market_open:
+        from modules.options_sleeve import current_vix_level
+        from modules.volatility_sleeve import run_volatility_sleeve_cycle
+
+        run_volatility_sleeve_cycle(
+            executor,
+            volatility=vol_label,
+            vol_score=vol_score,
+            vix=current_vix_level(),
+            market_open=market_open,
+        )
 
     social_result = None
     if config.effective_social_sleeve_enabled() and market_open:
@@ -718,16 +790,28 @@ def main():
             portfolio_manager=portfolio_manager,
             yield_gated=yield_gated,
         )
-        nyse_trades = run_equity_strategy(
-            data,
-            executor,
-            regime,
-            now,
-            pair_cooldown,
-            log_fn=_equity_log,
-            portfolio_manager=portfolio_manager,
-            yield_gated=yield_gated,
-        )
+        if config.effective_equity_pairs_enabled():
+            nyse_trades = run_equity_pairs_strategy(
+                data,
+                executor,
+                regime,
+                now,
+                pair_cooldown,
+                log_fn=_equity_pair_log,
+                portfolio_manager=portfolio_manager,
+                yield_gated=yield_gated,
+            )
+        else:
+            nyse_trades = run_equity_strategy(
+                data,
+                executor,
+                regime,
+                now,
+                pair_cooldown,
+                log_fn=_equity_log,
+                portfolio_manager=portfolio_manager,
+                yield_gated=yield_gated,
+            )
         gp_result = run_game_plan_cycle(
             executor,
             regime,

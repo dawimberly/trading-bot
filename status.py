@@ -106,10 +106,17 @@ def _paper_flags() -> str:
         pf = config.get_paper_feature_flags()
         parts = [
             _flag("dyn_vti", config.PAPER_DYNAMIC_VTI_ENABLED),
+            _flag("dyn_risk", config.PAPER_DYNAMIC_RISK_ENABLED),
             _flag("overlap", pf.get("nyse_overlap", False)),
             _flag("chunk", pf.get("adaptive_chunk", False)),
             _flag("cofire", pf.get("cofire_budget", False)),
             _flag("macro", config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED),
+            _flag("options", config.PAPER_OPTIONS_SLEEVE_ENABLED),
+            _flag("stat_arb", config.PAPER_STAT_ARB_ENABLED),
+            _flag("pairs", config.PAPER_MARKET_NEUTRAL_PAIRS),
+            _flag("eq_pairs", config.PAPER_EQUITY_PAIRS),
+            _flag("vol", config.PAPER_VOL_TRADING_ENABLED),
+            "vol_live=log_only",
             _flag("social", config.PAPER_SOCIAL_SLEEVE_ENABLED),
             _flag("spy_exit", pf.get("spy_exit_on_ma_break", False)),
         ]

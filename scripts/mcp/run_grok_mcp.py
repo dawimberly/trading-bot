@@ -33,10 +33,30 @@ def _ensure_grok_api_key() -> None:
         raise SystemExit(1)
 
 
+def _absolute_grok_cli() -> None:
+    root = Path(__file__).resolve().parents[2]
+    default = root / "scripts" / "mcp" / "grok_cli.cmd"
+    raw = os.environ.get("GROK_CLI_PATH", "")
+    path = Path(raw) if raw else default
+    if not path.is_absolute():
+        path = (root / path).resolve()
+    os.environ["GROK_CLI_PATH"] = str(path)
+    grok_exe = Path(os.environ.get("USERPROFILE", "")) / ".grok" / "bin" / "grok.exe"
+    if not grok_exe.is_file() and not path.is_file():
+        print(
+            f"Grok CLI not found. Install: irm https://x.ai/cli/install.ps1 | iex\n"
+            f"Expected: {grok_exe}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def main() -> int:
-    _load_project_env()
+    root = _load_project_env()
     _ensure_grok_api_key()
-    return subprocess.call([sys.executable, "-m", "grok_cli_mcp"], env=os.environ)
+    _absolute_grok_cli()
+    os.chdir(root)
+    return subprocess.call([sys.executable, "-m", "grok_cli_mcp"], env=os.environ, cwd=root)
 
 
 if __name__ == "__main__":

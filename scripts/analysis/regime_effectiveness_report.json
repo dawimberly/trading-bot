@@ -1,0 +1,309 @@
+{
+  "data_window": {
+    "start": "2015-04-05",
+    "end": "2026-06-02",
+    "bars": 4276
+  },
+  "config": {
+    "paused_regimes": [
+      "RHYME_B: Panic_Volatility",
+      "RHYME_E: Steady_Bearish_Decline"
+    ],
+    "crypto_vol_only": true,
+    "max_drawdown_pct": 0.1,
+    "vol_threshold": 0.02,
+    "sentiment_threshold": 0.5
+  },
+  "backtest_scenarios": {
+    "baseline": {
+      "name": "baseline",
+      "final_equity": 138391.0,
+      "total_return_pct": 1283.91,
+      "sharpe": 0.64,
+      "max_drawdown_pct": -65.74,
+      "bench_return_pct": 316.46,
+      "spy_signals": 33,
+      "crypto_signals": 0,
+      "nyse_signals": 33,
+      "total_orders": 66,
+      "halt_date": "2015-08-21",
+      "halt_equity": 9932.78,
+      "regime_counts": {
+        "RHYME_D: Range_Bound_Neutral": 138
+      },
+      "flags": {
+        "paused_regimes": true,
+        "crypto_vol_only": true,
+        "drawdown_halt": true
+      }
+    },
+    "no_pause": {
+      "name": "no_pause",
+      "final_equity": 138391.0,
+      "total_return_pct": 1283.91,
+      "sharpe": 0.64,
+      "max_drawdown_pct": -65.74,
+      "bench_return_pct": 316.46,
+      "spy_signals": 33,
+      "crypto_signals": 0,
+      "nyse_signals": 33,
+      "total_orders": 66,
+      "halt_date": "2015-08-21",
+      "halt_equity": 9932.78,
+      "regime_counts": {
+        "RHYME_D: Range_Bound_Neutral": 138
+      },
+      "flags": {
+        "paused_regimes": false,
+        "crypto_vol_only": true,
+        "drawdown_halt": true
+      }
+    },
+    "no_vol_gate": {
+      "name": "no_vol_gate",
+      "final_equity": 138391.0,
+      "total_return_pct": 1283.91,
+      "sharpe": 0.64,
+      "max_drawdown_pct": -65.74,
+      "bench_return_pct": 316.46,
+      "spy_signals": 33,
+      "crypto_signals": 0,
+      "nyse_signals": 33,
+      "total_orders": 66,
+      "halt_date": "2015-08-21",
+      "halt_equity": 9932.78,
+      "regime_counts": {
+        "RHYME_D: Range_Bound_Neutral": 138
+      },
+      "flags": {
+        "paused_regimes": true,
+        "crypto_vol_only": false,
+        "drawdown_halt": true
+      }
+    },
+    "no_halt": {
+      "name": "no_halt",
+      "final_equity": 138391.0,
+      "total_return_pct": 1283.91,
+      "sharpe": 0.64,
+      "max_drawdown_pct": -65.74,
+      "bench_return_pct": 316.46,
+      "spy_signals": 33,
+      "crypto_signals": 0,
+      "nyse_signals": 33,
+      "total_orders": 66,
+      "halt_date": null,
+      "halt_equity": null,
+      "regime_counts": {
+        "RHYME_D: Range_Bound_Neutral": 4076
+      },
+      "flags": {
+        "paused_regimes": true,
+        "crypto_vol_only": true,
+        "drawdown_halt": false
+      }
+    },
+    "all_off": {
+      "name": "all_off",
+      "final_equity": 138391.0,
+      "total_return_pct": 1283.91,
+      "sharpe": 0.64,
+      "max_drawdown_pct": -65.74,
+      "bench_return_pct": 316.46,
+      "spy_signals": 33,
+      "crypto_signals": 0,
+      "nyse_signals": 33,
+      "total_orders": 66,
+      "halt_date": null,
+      "halt_equity": null,
+      "regime_counts": {
+        "RHYME_D: Range_Bound_Neutral": 4076
+      },
+      "flags": {
+        "paused_regimes": false,
+        "crypto_vol_only": false,
+        "drawdown_halt": false
+      }
+    }
+  },
+  "deltas_vs_baseline": {
+    "no_pause": {
+      "return_delta_pct": 0.0,
+      "sharpe_delta": 0.0,
+      "max_dd_delta_pct": 0.0,
+      "orders_delta": 0
+    },
+    "no_vol_gate": {
+      "return_delta_pct": 0.0,
+      "sharpe_delta": 0.0,
+      "max_dd_delta_pct": 0.0,
+      "orders_delta": 0
+    },
+    "no_halt": {
+      "return_delta_pct": 0.0,
+      "sharpe_delta": 0.0,
+      "max_dd_delta_pct": 0.0,
+      "orders_delta": 0
+    },
+    "all_off": {
+      "return_delta_pct": 0.0,
+      "sharpe_delta": 0.0,
+      "max_dd_delta_pct": 0.0,
+      "orders_delta": 0
+    }
+  },
+  "trigger_frequency": {
+    "trading_days": 4076,
+    "regime_counts": {
+      "RHYME_D: Range_Bound_Neutral": 4076
+    },
+    "vol_counts": {
+      "Low": 1932,
+      "High": 2144
+    },
+    "pause_regime_days": 0,
+    "pause_regime_pct": 0.0,
+    "vol_gate_block_days": 1932,
+    "vol_gate_block_pct": 47.4,
+    "crypto_allowed_days": 2144,
+    "crypto_allowed_pct": 52.6,
+    "crypto_gate_reasons": {
+      "vol_low": 1932,
+      "vol_high": 2144
+    },
+    "spy_above_ma200_days": 3272,
+    "spy_blocked_by_pause": 0,
+    "nyse_momentum_days": 4028,
+    "nyse_blocked_by_pause": 0,
+    "crypto_z_signal_days": 1160,
+    "crypto_z_blocked_by_vol": 0,
+    "crypto_blocked_regime_days": 0,
+    "crypto_blocked_vol_days": 1932
+  },
+  "sentiment_calibration": {
+    "sentiment_min": -0.1986,
+    "sentiment_max": 0.1567,
+    "sentiment_mean": 0.0068,
+    "sentiment_std": 0.0306,
+    "pct_above_0_5": 0.0,
+    "pct_below_neg_0_5": 0.0,
+    "vol_high_pct": 52.6,
+    "live_threshold_note": "\u00b10.5 sentiment on daily never triggers RHYME A/B/C/E",
+    "threshold_sweep": {
+      "0.05": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 3716,
+          "RHYME_E: Steady_Bearish_Decline": 67,
+          "RHYME_C: Steady_Bullish_Growth": 77,
+          "RHYME_A: Euphoric_Volatility": 138,
+          "RHYME_B: Panic_Volatility": 78
+        },
+        "pause_days": 145,
+        "pause_pct": 3.56
+      },
+      "0.1": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4033,
+          "RHYME_C: Steady_Bullish_Growth": 8,
+          "RHYME_E: Steady_Bearish_Decline": 16,
+          "RHYME_A: Euphoric_Volatility": 14,
+          "RHYME_B: Panic_Volatility": 5
+        },
+        "pause_days": 21,
+        "pause_pct": 0.52
+      },
+      "0.15": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4066,
+          "RHYME_E: Steady_Bearish_Decline": 8,
+          "RHYME_A: Euphoric_Volatility": 2
+        },
+        "pause_days": 8,
+        "pause_pct": 0.2
+      },
+      "0.2": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4076
+        },
+        "pause_days": 0,
+        "pause_pct": 0.0
+      },
+      "0.25": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4076
+        },
+        "pause_days": 0,
+        "pause_pct": 0.0
+      },
+      "0.3": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4076
+        },
+        "pause_days": 0,
+        "pause_pct": 0.0
+      },
+      "0.4": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4076
+        },
+        "pause_days": 0,
+        "pause_pct": 0.0
+      },
+      "0.5": {
+        "regime_counts": {
+          "RHYME_D: Range_Bound_Neutral": 4076
+        },
+        "pause_days": 0,
+        "pause_pct": 0.0
+      }
+    }
+  },
+  "counterfactual_skip_value": {
+    "live_pause_days": 0,
+    "derived_bear_days": 27,
+    "derived_panic_days": 5,
+    "vol_low_block_days": 1932,
+    "fwd_when_derived_bear_spy_bull": {
+      "label": "block_spy_entry",
+      "days": 1
+    },
+    "fwd_when_spy_bull_normal": {
+      "label": "allow_spy_entry",
+      "days": 3251,
+      "spy_fwd5_mean_pct": 0.163,
+      "spy_fwd20_mean_pct": 0.613
+    },
+    "fwd_vol_low_crypto_block": {
+      "label": "vol_low",
+      "days": 1932,
+      "spy_fwd5_mean_pct": 0.161,
+      "spy_fwd20_mean_pct": 0.647
+    },
+    "fwd_vol_high_crypto_ok": {
+      "label": "vol_high",
+      "days": 2124,
+      "spy_fwd5_mean_pct": 0.234,
+      "spy_fwd20_mean_pct": 0.923
+    }
+  },
+  "halt_analysis": {
+    "halt_fired": true,
+    "halt_date": "2015-08-21",
+    "halt_equity": 9932.78,
+    "baseline_final_equity": 138391.0,
+    "no_halt_final_equity": 138391.0,
+    "equity_delta_no_halt_vs_baseline": 0.0,
+    "baseline_return_pct": 1283.91,
+    "no_halt_return_pct": 1283.91,
+    "return_delta_pct": 0.0,
+    "post_halt_vti_return_pct": 335.62,
+    "path_distortion_note": "After halt, baseline stops trading; equity flat while no_halt continues. Max DD in baseline is capped near halt threshold; no_halt shows true path."
+  },
+  "limitations": [
+    "Daily bars: RHYME B/E pause never fires at \u00b10.5 sentiment (see calibration).",
+    "Live bot uses 5m bars; vol gate and sentiment differ materially.",
+    "AnalysisExecutor enables crypto notional; stock backtester.py skips crypto buys.",
+    "No wisdom/yield/SpaceX override in backtest variants.",
+    "SPY_EXIT_ON_MA_BREAK=False \u2014 no MA breakdown exits."
+  ]
+}

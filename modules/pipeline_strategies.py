@@ -51,13 +51,89 @@ MAX_EQUITY_TRADES = 1
 COOLDOWN_SECONDS = 3600
 
 
-def _count_if_filled(executor, order, *, max_wait=2.0):
+PAIR_FILL_WAIT = 5.0
+
+
+def _count_if_filled(executor, order, *, max_wait=PAIR_FILL_WAIT):
     """Return 1 only when Alpaca confirms a fill (not a queued accept)."""
     if order is None:
         return 0
     if hasattr(executor, "order_filled"):
         return 1 if executor.order_filled(order, max_wait=max_wait) else 0
     return 1
+
+
+def _order_fill_notional(executor, order, *, max_wait=PAIR_FILL_WAIT) -> float | None:
+    if order is None:
+        return None
+    if hasattr(executor, "order_fill_details"):
+        details = executor.order_fill_details(order, max_wait=max_wait)
+        if details and details.get("filled"):
+            notional = float(details.get("notional") or 0)
+            return notional if notional > 0 else None
+    return None
+
+
+def _leg_has_exposure(executor, symbol) -> bool:
+    if not hasattr(executor, "_find_position"):
+        return False
+    pos = executor._find_position(symbol)
+    if pos is None:
+        return False
+    return abs(float(pos.qty)) > 1e-9
+
+
+def _unwind_pair_leg(executor, symbol, *, max_wait=PAIR_FILL_WAIT) -> None:
+    if not _leg_has_exposure(executor, symbol):
+        return
+    order = executor.execute_full_exit(symbol)
+    if order is not None and hasattr(executor, "order_filled"):
+        executor.order_filled(order, max_wait=max_wait)
+
+
+def execute_atomic_pair_entry(
+    executor,
+    long_sym: str,
+    short_sym: str,
+    leg_n: float,
+    *,
+    max_wait: float = PAIR_FILL_WAIT,
+) -> tuple[bool, float | None, float | None]:
+    """Both legs must fill; unwind any single-leg fill immediately."""
+    long_order = executor.execute_order(long_sym, "buy", notional=leg_n)
+    long_ok = bool(_count_if_filled(executor, long_order, max_wait=max_wait))
+    short_order = executor.execute_order(short_sym, "sell", notional=leg_n)
+    short_ok = bool(_count_if_filled(executor, short_order, max_wait=max_wait))
+    if long_ok and short_ok:
+        long_n = _order_fill_notional(executor, long_order, max_wait=0) or leg_n
+        short_n = _order_fill_notional(executor, short_order, max_wait=0) or leg_n
+        return True, long_n, short_n
+    if long_ok:
+        _unwind_pair_leg(executor, long_sym, max_wait=max_wait)
+    if short_ok:
+        _unwind_pair_leg(executor, short_sym, max_wait=max_wait)
+    return False, None, None
+
+
+def execute_atomic_pair_exit(
+    executor,
+    long_sym: str,
+    short_sym: str,
+    *,
+    max_wait: float = PAIR_FILL_WAIT,
+) -> bool:
+    """Close both legs; return True only when neither has exposure."""
+    if _leg_has_exposure(executor, long_sym):
+        order = executor.execute_full_exit(long_sym)
+        if order is None or not _count_if_filled(executor, order, max_wait=max_wait):
+            return False
+    if _leg_has_exposure(executor, short_sym):
+        order = executor.execute_full_exit(short_sym)
+        if order is None or not _count_if_filled(executor, order, max_wait=max_wait):
+            return False
+    return not _leg_has_exposure(executor, long_sym) and not _leg_has_exposure(
+        executor, short_sym
+    )
 
 
 def _on_cooldown(pair_cooldown, key, now, cooldown_seconds=COOLDOWN_SECONDS, cooldown_bars=None):
@@ -72,6 +148,43 @@ def _on_cooldown(pair_cooldown, key, now, cooldown_seconds=COOLDOWN_SECONDS, coo
 def _crypto_pair_z(data, t1, t2):
     spread = data[t1] - data[t2]
     return (spread.iloc[-1] - spread.mean()) / (spread.std() + 1e-9)
+
+
+def _pair_leg_notional(total_notional, executor, *, sleeve_attempted: bool = False):
+    """Split sleeve notional across two market-neutral legs; scale by dynamic risk."""
+    if total_notional is None:
+        if sleeve_attempted:
+            return None, None
+        if hasattr(executor, "compute_notional"):
+            equity_fn = getattr(executor, "_get_account", None)
+            if equity_fn:
+                equity = float(equity_fn().equity)
+                total_notional = round(
+                    equity * config.effective_risk_per_trade(equity), 2
+                )
+        if total_notional is None:
+            return None, None
+    leg = round(float(total_notional) / 2, 2)
+    min_n = config.MIN_NOTIONAL
+    if hasattr(executor, "_get_account"):
+        try:
+            min_n = config.effective_min_notional(float(executor._get_account().equity))
+        except Exception:
+            pass
+    if leg < min_n:
+        return None, None
+    return leg, leg
+
+
+def _momentum_score(data, symbol):
+    prices = data[symbol].dropna()
+    if len(prices) < 20:
+        return None
+    ma50 = prices.rolling(window=min(50, len(prices))).mean().iloc[-1]
+    current = prices.iloc[-1]
+    if ma50 <= 0:
+        return None
+    return current / ma50 - 1
 
 
 def crypto_trade_intents(
@@ -103,11 +216,15 @@ def crypto_trade_intents(
     if not gate["allowed"]:
         return []
 
+    min_corr = config.effective_pair_min_correlation()
+    z_threshold = config.effective_pair_z_threshold(z_threshold)
+    market_neutral = config.effective_market_neutral_pairs_enabled()
+
     candidates = []
     for i in range(len(crypto_cols)):
         for j in range(i + 1, len(crypto_cols)):
             t1, t2 = crypto_cols[i], crypto_cols[j]
-            if data[t1].corr(data[t2]) < config.CRYPTO_MIN_CORRELATION:
+            if data[t1].corr(data[t2]) < min_corr:
                 continue
             z = _crypto_pair_z(data, t1, t2)
             if abs(z) > z_threshold:
@@ -130,23 +247,195 @@ def crypto_trade_intents(
             cooldown_bars=cooldown_bars,
         ):
             continue
-        side = "sell" if z > 0 else "buy"
-        symbol = t1 if side == "buy" else t1
-        if side == "sell":
+        if market_neutral:
+            long_sym = t2 if z > 0 else t1
+            short_sym = t1 if z > 0 else t2
+            intents.append(
+                {
+                    "market_neutral": True,
+                    "long_symbol": long_sym,
+                    "short_symbol": short_sym,
+                    "pair_key": pair_key,
+                    "z_score": z,
+                    "notional": notional,
+                    "phase": "crypto_pair",
+                }
+            )
+        else:
+            side = "sell" if z > 0 else "buy"
             symbol = t1
-        intents.append(
-            {
-                "symbol": symbol,
-                "side": side,
-                "pair_key": pair_key,
-                "z_score": z,
-                "notional": notional,
-                "phase": "crypto_mirror",
-            }
-        )
+            intents.append(
+                {
+                    "symbol": symbol,
+                    "side": side,
+                    "pair_key": pair_key,
+                    "z_score": z,
+                    "notional": notional,
+                    "phase": "crypto_mirror",
+                }
+            )
         fired.add(t1)
         fired.add(t2)
     return intents
+
+
+def _execute_market_neutral_legs(executor, intent, *, log_fn=None, regime="", portfolio_manager=None):
+    """Buy long leg and sell short leg; both must fill or neither is kept."""
+    long_sym = intent["long_symbol"]
+    short_sym = intent["short_symbol"]
+    z = intent["z_score"]
+    pair_key = intent["pair_key"]
+    leg_n, _ = _pair_leg_notional(
+        intent.get("notional"),
+        executor,
+        sleeve_attempted="notional" in intent,
+    )
+    if leg_n is None:
+        return 0, False
+
+    ok, _, _ = execute_atomic_pair_entry(executor, long_sym, short_sym, leg_n)
+    if not ok:
+        return 0, False
+
+    msg = f"Market-neutral pair: LONG {long_sym} / SHORT {short_sym}, Z={round(z, 1)}"
+    if log_fn:
+        log_fn(long_sym, "buy", regime, pair_key, z, leg_n, pair_msg=msg)
+        log_fn(short_sym, "sell", regime, pair_key, z, leg_n, pair_msg=msg)
+    if hasattr(executor, "register_pair_symbols"):
+        executor.register_pair_symbols(long_sym, short_sym)
+    if portfolio_manager:
+        portfolio_manager.add_position(pair_key, z, 0)
+    return 1, True
+
+
+def equity_pair_trade_intents(
+    data,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    max_trades=1,
+    yield_gated=False,
+    notional=None,
+):
+    """Long strongest / short weakest NYSE name when spread z-score fires (paper only)."""
+    if not config.effective_equity_pairs_enabled():
+        return []
+    if regime_entries_paused(regime, data) or yield_gated:
+        return []
+
+    equity_cols = _nyse_equity_columns(data)
+    if len(equity_cols) < 2:
+        return []
+
+    min_corr = config.effective_pair_min_correlation()
+    z_threshold = config.effective_pair_z_threshold()
+
+    candidates = []
+    for i in range(len(equity_cols)):
+        for j in range(i + 1, len(equity_cols)):
+            t1, t2 = equity_cols[i], equity_cols[j]
+            if data[t1].corr(data[t2]) < min_corr:
+                continue
+            z = _crypto_pair_z(data, t1, t2)
+            if abs(z) <= z_threshold:
+                continue
+            mom1 = _momentum_score(data, t1)
+            mom2 = _momentum_score(data, t2)
+            if mom1 is None or mom2 is None:
+                continue
+            if mom1 >= mom2:
+                long_sym, short_sym = t1, t2
+            else:
+                long_sym, short_sym = t2, t1
+            candidates.append((abs(z), z, long_sym, short_sym))
+
+    candidates.sort(reverse=True)
+    intents = []
+    for _abs_z, z, long_sym, short_sym in candidates:
+        if len(intents) >= max_trades:
+            break
+        pair_key = f"{long_sym}/{short_sym}"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        intents.append(
+            {
+                "market_neutral": True,
+                "long_symbol": long_sym,
+                "short_symbol": short_sym,
+                "pair_key": pair_key,
+                "z_score": z,
+                "notional": notional,
+                "phase": "equity_pair",
+            }
+        )
+    return intents
+
+
+def run_equity_pairs_strategy(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    log_fn=None,
+    portfolio_manager=None,
+    yield_gated=False,
+):
+    """Market-neutral NYSE pair sleeve — paper aggressive + PAPER_EQUITY_PAIRS only."""
+    if config.effective_stat_arb_enabled():
+        from modules.stat_arb_sleeve import run_equity_stat_arb
+
+        return run_equity_stat_arb(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_bars=cooldown_bars,
+            log_fn=log_fn,
+            portfolio_manager=portfolio_manager,
+            yield_gated=yield_gated,
+        )
+
+    notional = None
+    if hasattr(executor, "compute_nyse_notional"):
+        notional = executor.compute_nyse_notional()
+
+    intents = equity_pair_trade_intents(
+        data,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        yield_gated=yield_gated,
+        notional=notional,
+    )
+    trades = 0
+    for intent in intents:
+        n, ok = _execute_market_neutral_legs(
+            executor,
+            intent,
+            log_fn=log_fn,
+            regime=regime,
+            portfolio_manager=portfolio_manager,
+        )
+        if ok:
+            pair_cooldown[intent["pair_key"]] = now
+            trades += n
+    return trades
 
 
 def run_crypto_strategy(
@@ -165,7 +454,24 @@ def run_crypto_strategy(
     volatility=None,
     spacex_snapshot=None,
 ):
-    """Z-score on raw spread; require min correlation; trade strongest |z| pairs first."""
+    """Z-score pairs; paper aggressive uses cointegration stat arb when enabled."""
+    if config.effective_stat_arb_enabled():
+        from modules.stat_arb_sleeve import run_crypto_stat_arb
+
+        return run_crypto_stat_arb(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_bars=cooldown_bars,
+            max_trades=max_trades,
+            log_fn=log_fn,
+            portfolio_manager=portfolio_manager,
+            volatility=volatility,
+            spacex_snapshot=spacex_snapshot,
+        )
+
     notional = None
     if hasattr(executor, "compute_crypto_notional"):
         notional = executor.compute_crypto_notional()
@@ -185,6 +491,19 @@ def run_crypto_strategy(
     )
     trades = 0
     for intent in intents:
+        if intent.get("market_neutral"):
+            n, ok = _execute_market_neutral_legs(
+                executor,
+                intent,
+                log_fn=log_fn,
+                regime=regime,
+                portfolio_manager=portfolio_manager,
+            )
+            if ok:
+                pair_cooldown[intent["pair_key"]] = now
+                trades += n
+            continue
+
         t1 = intent["symbol"]
         side = intent["side"]
         pair_key = intent["pair_key"]
@@ -440,7 +759,10 @@ def _crypto_buy_intent(
         volatility=volatility,
         spacex_snapshot=spacex_snapshot,
     )
-    return any(i.get("side") == "buy" for i in intents)
+    return any(
+        i.get("side") == "buy" or i.get("market_neutral")
+        for i in intents
+    )
 
 
 def resolve_cycle_deploy(
