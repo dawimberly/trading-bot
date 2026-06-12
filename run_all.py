@@ -301,6 +301,9 @@ def _write_heartbeat(
             "suggested_tilt": thinking_engine.get("suggested_tilt"),
             "applied_deltas": thinking_engine.get("applied_deltas"),
             "apply_log": thinking_engine.get("apply_log"),
+            "regime_narrative": thinking_engine.get("regime_narrative"),
+            "narrative": thinking_engine.get("narrative"),
+            "asymmetry": thinking_engine.get("asymmetry"),
             "reasoning_preview": (thinking_engine.get("reasoning") or "")[:400],
         }
     if risk_parity:

@@ -19,6 +19,7 @@ from modules.thinking_engine import (
     get_market_reasoning,
     ollama_available,
     ollama_installed_models,
+    persist_thinking_last,
     thinking_model_chain,
 )
 
@@ -47,6 +48,11 @@ def _pick_windows(data, max_examples: int = 3) -> list[tuple[int, str, str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Test thinking engine with Ollama")
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser.add_argument("--max-examples", type=int, default=2, help="Number of windows to test")
     parser.add_argument(
         "--fast-model",
@@ -87,15 +93,19 @@ def main() -> int:
         print(json.dumps(summary, indent=2))
         print("Calling Ollama...")
         result = get_market_reasoning(summary, fast_model=args.fast_model)
+        persist_thinking_last(result, regime=regime)
         results.append({"as_of": as_of, "regime": regime, **result})
         print(f"MODEL: {result.get('model')} | SOURCE: {result.get('source')} | QUALITY: {result.get('parse_quality')}")
         print(f"NARRATIVE: {result.get('narrative')}")
         if result.get("asymmetry"):
             print(f"ASYMMETRY: {result.get('asymmetry')}")
+        if result.get("tilt_rationale"):
+            print(f"TILT_RATIONALE: {result.get('tilt_rationale')}", flush=True)
         print(f"RISKS: {result.get('risks')}")
         print(f"OPPORTUNITIES: {result.get('opportunities')}")
         print(f"RECOMMENDED_TILT: {json.dumps(result.get('suggested_tilt'))}")
         print(f"CONFIDENCE: {result.get('confidence')}")
+        print(f"REGIME_NARRATIVE: {result.get('regime_narrative')}")
         excerpt = (result.get("justification") or result.get("reasoning", ""))[:320]
         print(f"REASONING: {excerpt}")
 

@@ -22,18 +22,21 @@ BEST_PAPER_ENV: dict[str, str] = {
     "PAPER_STAT_ARB_ENABLED": "true",
     "PAPER_VOL_TRADING_ENABLED": "true",
     "PAPER_OPTIONS_SLEEVE_ENABLED": "true",
-    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED": "true",
+    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED": "false",
+    "PAPER_RISK_PARITY_ENABLED": "false",
+    "PAPER_STAT_ARB_OPTIMIZED": "false",
+    "PAPER_THINKING_ENGINE_ENABLED": "false",
     "PAPER_NYSE_OVERLAP_FILTER_ENABLED": "true",
     "PAPER_ADAPTIVE_CHUNK_ENABLED": "true",
     "PAPER_COFIRE_BUDGET_ENABLED": "true",
-    "PAPER_SPY_EXIT_ON_MA_BREAK": "true",
+    "PAPER_SPY_EXIT_ON_MA_BREAK": "false",
     "PAPER_SOCIAL_SLEEVE_ENABLED": "false",
     "PAPER_MARKET_NEUTRAL_PAIRS": "true",
     "PAPER_EQUITY_PAIRS": "false",
     "ALLOW_LIVE_TRADING": "false",
 }
 
-# Backtest kwargs — identical to backtester.FINAL_PAPER_BOT_KWARGS (import at runtime).
+# Backtest kwargs — aligned with backtester.FINAL_PAPER_BOT_KWARGS (import at runtime).
 CLOUD_BACKTEST_KWARGS: dict[str, Any] = {
     "paper_aggressive": True,
     "paper_sleeve_features": True,
@@ -42,7 +45,7 @@ CLOUD_BACKTEST_KWARGS: dict[str, Any] = {
     "paper_stat_arb": True,
     "paper_vol_trading": True,
     "paper_options_sleeve": True,
-    "paper_macro_regime": True,
+    "paper_macro_regime": False,
 }
 
 
@@ -87,7 +90,10 @@ def apply_to_config_module() -> None:
     config.PAPER_STAT_ARB_ENABLED = True
     config.PAPER_VOL_TRADING_ENABLED = True
     config.PAPER_OPTIONS_SLEEVE_ENABLED = True
-    config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = True
+    config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
+    config.PAPER_RISK_PARITY_ENABLED = False
+    config.PAPER_STAT_ARB_OPTIMIZED = False
+    config.PAPER_THINKING_ENGINE_ENABLED = False
     config.PAPER_MARKET_NEUTRAL_PAIRS = True
     config.PAPER_EQUITY_PAIRS = False
     config.apply_paper_sleeve_flags(
@@ -95,7 +101,7 @@ def apply_to_config_module() -> None:
             "nyse_overlap": True,
             "adaptive_chunk": True,
             "cofire_budget": True,
-            "spy_exit_on_ma_break": True,
+            "spy_exit_on_ma_break": False,
         }
     )
     config.PAPER_SOCIAL_SLEEVE_ENABLED = False

@@ -68,9 +68,9 @@ VTI_CORE_REBALANCE_DRIFT_PCT = float(os.getenv("VTI_CORE_REBALANCE_DRIFT_PCT", "
 
 # Paper research book (PAPER_APCA_*) — aggressive profit mode; live ~$100 stays conservative
 # --- Best Paper Bot (Profile B) — locked defaults for beat-mutual-funds goal ---
-# All ON when PAPER_AGGRESSIVE=true unless overridden in .env:
-#   dynamic VTI | dynamic risk | stat arb | vol overlay | options | macro regime
-#   overlap | adaptive chunk | co-fire | social OFF | spy exit OFF
+# Core ON: dynamic VTI | dynamic risk | stat arb | vol overlay | options | overlap | chunk | co-fire
+# Core OFF: macro regime | social | risk parity | stat arb optimized | equity pairs | spy MA exit
+# Opt-in: thinking engine (Ollama) via PAPER_THINKING_ENGINE_ENABLED=true
 PAPER_AGGRESSIVE_ENABLED = os.getenv("PAPER_AGGRESSIVE", "true").lower() in (
     "1",
     "true",
@@ -164,6 +164,10 @@ THINKING_CACHE_HOURS = int(os.getenv("THINKING_CACHE_HOURS", "24"))
 THINKING_ENGINE_STATE_FILE = os.getenv("THINKING_ENGINE_STATE_FILE", "thinking_engine_state.json")
 THINKING_ENGINE_OUTPUT_FILE = os.getenv("THINKING_ENGINE_OUTPUT_FILE", "thinking_engine_last.json")
 THINKING_MAX_SLEEVE_DELTA = float(os.getenv("THINKING_MAX_SLEEVE_DELTA", "0.15"))
+# Disabled until live confidence calibration improves (see thinking engine accuracy analysis)
+THINKING_CONFIDENCE_AMPLIFY_ENABLED = os.getenv(
+    "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "false"
+).lower() in ("1", "true", "yes")
 # Risk parity / All Weather + pod drawdown limits — paper aggressive only
 PAPER_RISK_PARITY_ENABLED = os.getenv("PAPER_RISK_PARITY_ENABLED", "false").lower() in (
     "1",
@@ -450,7 +454,7 @@ MACRO_REGIME_ADAPTOR_ENABLED = os.getenv("MACRO_REGIME_ADAPTOR_ENABLED", "false"
     "yes",
 )
 PAPER_MACRO_REGIME_ADAPTOR_ENABLED = os.getenv(
-    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED", "true"
+    "PAPER_MACRO_REGIME_ADAPTOR_ENABLED", "false"
 ).lower() in ("1", "true", "yes")
 MACRO_OIL_SURGE_PCT = float(os.getenv("MACRO_OIL_SURGE_PCT", "0.08"))
 MACRO_GLD_SURGE_PCT = float(os.getenv("MACRO_GLD_SURGE_PCT", "0.04"))
@@ -466,7 +470,7 @@ SOCIAL_MACRO_OVERRIDES_ENABLED = os.getenv("SOCIAL_MACRO_OVERRIDES_ENABLED", "tr
     "yes",
 )
 PAPER_SOCIAL_MACRO_BOOST_ENABLED = os.getenv(
-    "PAPER_SOCIAL_MACRO_BOOST_ENABLED", "true"
+    "PAPER_SOCIAL_MACRO_BOOST_ENABLED", "false"
 ).lower() in ("1", "true", "yes")
 
 # --- SpaceX IPO ↔ crypto monitor (headline watch; S-1 BTC treasury narrative) ---
@@ -1255,6 +1259,18 @@ def print_paper_research_stack_flags() -> None:
             f"(cap {VOL_SLEEVE_CAP_PCT:.0%})"
         )
         print(
+            f"  thinking_engine:      "
+            f"{'on' if effective_thinking_engine_enabled() else 'off'} "
+            f"(Ollama, cache {THINKING_CACHE_HOURS}h)"
+        )
+        print(
+            f"  risk_parity:          "
+            f"{'on' if effective_risk_parity_enabled() else 'off'} (deprecated)"
+        )
+        print(
+            f"  stat_arb_optimized:   off (use original stat arb)"
+        )
+        print(
             f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
             f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
         )
@@ -1359,6 +1375,24 @@ def paper_only_sleeves_active() -> bool:
     return _backtest_paper_sleeves_ctx
 
 
+def enforce_best_paper_stack() -> None:
+    """Disable weak/redundant paper sleeves (Profile B locked stack)."""
+    global PAPER_RISK_PARITY_ENABLED
+    global PAPER_MACRO_REGIME_ADAPTOR_ENABLED
+    global PAPER_SOCIAL_SLEEVE_ENABLED
+    global PAPER_EQUITY_PAIRS
+    global PAPER_SPY_EXIT_ON_MA_BREAK
+    global PAPER_STAT_ARB_OPTIMIZED
+    global PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    PAPER_RISK_PARITY_ENABLED = False
+    PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
+    PAPER_SOCIAL_SLEEVE_ENABLED = False
+    PAPER_EQUITY_PAIRS = False
+    PAPER_SPY_EXIT_ON_MA_BREAK = False
+    PAPER_STAT_ARB_OPTIMIZED = False
+    PAPER_SOCIAL_MACRO_BOOST_ENABLED = False
+
+
 def init_paper_chase_if_enabled() -> list[str]:
     """Enable aggressive paper profile when PAPER_CHASE_MODE is set (paper only)."""
     extras: list[str] = []
@@ -1367,6 +1401,7 @@ def init_paper_chase_if_enabled() -> list[str]:
         and paper_chase_mode_enabled()
         and PAPER_AGGRESSIVE_ENABLED
     ):
+        enforce_best_paper_stack()
         set_paper_aggressive_context(True)
         extras = apply_paper_chase_runtime_tuning()
     return extras
@@ -1383,14 +1418,26 @@ def paper_aggressive_context() -> bool:
 
 
 def get_paper_feature_flags() -> dict[str, bool]:
-    """Advanced sleeve toggles for paper aggressive / chase; live returns {}."""
+    """Paper aggressive sleeve toggles; live returns {}."""
     if not paper_only_sleeves_active():
         return {}
     return {
+        "dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
+        "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
+        "stat_arb": effective_stat_arb_enabled(),
+        "vol_overlay": effective_vol_trading_enabled(),
+        "options": effective_options_sleeve_enabled(),
+        "macro_regime": effective_macro_regime_adaptor_enabled(),
+        "thinking_engine": effective_thinking_engine_enabled(),
+        "risk_parity": effective_risk_parity_enabled(),
+        "stat_arb_optimized": False,
+        "social": effective_social_sleeve_enabled(),
         "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
         "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
         "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
         "spy_exit_on_ma_break": PAPER_SPY_EXIT_ON_MA_BREAK,
+        "market_neutral_pairs": effective_market_neutral_pairs_enabled(),
+        "equity_pairs": effective_equity_pairs_enabled(),
     }
 
 

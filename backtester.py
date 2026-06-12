@@ -1775,7 +1775,7 @@ def run_thinking_compare(days=None, refresh=False, use_max=False) -> None:
         "paper_dynamic_risk": True,
         "paper_vol_trading": True,
         "paper_options_sleeve": True,
-        "paper_macro_regime": True,
+        "paper_macro_regime": False,
         "paper_stat_arb": True,
     }
     configs = [
@@ -1783,7 +1783,7 @@ def run_thinking_compare(days=None, refresh=False, use_max=False) -> None:
         ("Paper (+ thinking tilt)", {**base_kwargs, "paper_thinking": True}),
     ]
     print(
-        "--- THINKING ENGINE A/B (heuristic tilt on regime change; +/-15% cap/sleeve; paper aggressive) ---"
+        "--- THINKING ENGINE A/B (force-decision heuristic tilt; gold-momentum gate; paper aggressive) ---"
     )
     print(
         f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
@@ -1979,7 +1979,7 @@ FINAL_PAPER_BOT_KWARGS = {
     "paper_stat_arb": True,
     "paper_vol_trading": True,
     "paper_options_sleeve": True,
-    "paper_macro_regime": True,
+    "paper_macro_regime": False,
 }
 
 LEGACY_PAPER_KWARGS = {
@@ -2194,7 +2194,8 @@ def _write_final_report(windows: list[dict], path: Path) -> None:
         "- Volatility overlay (VIX regime)",
         "- Options income (covered calls)",
         "- Advanced flags: overlap, adaptive chunk, co-fire",
-        "- Macro regime adaptor ON",
+        "- Thinking engine: opt-in (Ollama, default off)",
+        "- Disabled: macro regime, risk parity, stat arb optimized, social, SPY MA exit",
         "",
         "## Comparisons",
         "",

@@ -106,28 +106,33 @@ def _live_flags() -> str:
 
 
 def _paper_flags() -> str:
+    stack = config.get_best_paper_bot_stack()
     config.set_paper_aggressive_context(True)
+    config.set_backtest_paper_sleeves_context(True)
+    config.enforce_best_paper_stack()
     try:
         pf = config.get_paper_feature_flags()
+        chase = config.paper_chase_mode_enabled()
         parts = [
-            _flag("dyn_vti", config.PAPER_DYNAMIC_VTI_ENABLED),
-            _flag("dyn_risk", config.PAPER_DYNAMIC_RISK_ENABLED),
-            _flag("overlap", pf.get("nyse_overlap", False)),
-            _flag("chunk", pf.get("adaptive_chunk", False)),
-            _flag("cofire", pf.get("cofire_budget", False)),
-            _flag("macro", config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED),
-            _flag("options", config.PAPER_OPTIONS_SLEEVE_ENABLED),
-            _flag("stat_arb", config.PAPER_STAT_ARB_ENABLED),
-            _flag("pairs", config.PAPER_MARKET_NEUTRAL_PAIRS),
-            _flag("eq_pairs", config.PAPER_EQUITY_PAIRS),
-            _flag("vol", config.PAPER_VOL_TRADING_ENABLED),
-            "vol_live=log_only",
-            _flag("social", config.PAPER_SOCIAL_SLEEVE_ENABLED),
-            _flag("spy_exit", pf.get("spy_exit_on_ma_break", False)),
+            _flag("chase", chase),
+            _flag("dyn_vti", pf.get("dynamic_vti", stack["dynamic_vti"])),
+            _flag("dyn_risk", pf.get("dynamic_risk", stack["dynamic_risk"])),
+            _flag("stat_arb", pf.get("stat_arb", stack["stat_arb"])),
+            _flag("vol", pf.get("vol_overlay", stack["vol_overlay"])),
+            _flag("options", pf.get("options", stack["options_income"])),
+            _flag("overlap", pf.get("nyse_overlap", stack["nyse_overlap"])),
+            _flag("chunk", pf.get("adaptive_chunk", stack["adaptive_chunk"])),
+            _flag("cofire", pf.get("cofire_budget", stack["cofire_budget"])),
+            _flag("thinking", pf.get("thinking_engine", False)),
+            _flag("macro", pf.get("macro_regime", stack["macro_regime"])),
+            _flag("risk_parity", pf.get("risk_parity", False)),
+            _flag("social", pf.get("social", stack["social_sleeve"])),
+            _flag("spy_exit", pf.get("spy_exit_on_ma_break", stack["spy_exit"])),
         ]
         return " | ".join(parts)
     finally:
         config.set_paper_aggressive_context(False)
+        config.set_backtest_paper_sleeves_context(False)
 
 
 def main() -> None:
@@ -154,7 +159,7 @@ def main() -> None:
         f"Regime {regime}{ts}"
     )
     logger.info(f"Live flags:  {_live_flags()}")
-    logger.info(f"Paper flags: {_paper_flags()}")
+    logger.info(f"Paper (Best Paper Bot): {_paper_flags()}")
 
 
 if __name__ == "__main__":

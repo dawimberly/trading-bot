@@ -2,12 +2,12 @@
 
 Not wired into production. Set PAPER_STAT_ARB_OPTIMIZED=true to experiment via backtester
 --compare-stat-arb-optimized. Default path uses modules/stat_arb_sleeve.py (cointegration + Z).
+effective_stat_arb_optimized() always returns False.
 """
 
-ENABLED = False
-
-
 from __future__ import annotations
+
+ENABLED = False
 
 import numpy as np
 import pandas as pd
