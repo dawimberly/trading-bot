@@ -163,9 +163,29 @@ OLLAMA_TIMEOUT_SEC = int(os.getenv("OLLAMA_TIMEOUT_SEC", "1200"))
 THINKING_CACHE_HOURS = int(os.getenv("THINKING_CACHE_HOURS", "24"))
 THINKING_ENGINE_STATE_FILE = os.getenv("THINKING_ENGINE_STATE_FILE", "thinking_engine_state.json")
 THINKING_ENGINE_OUTPUT_FILE = os.getenv("THINKING_ENGINE_OUTPUT_FILE", "thinking_engine_last.json")
-THINKING_MAX_SLEEVE_DELTA = float(os.getenv("THINKING_MAX_SLEEVE_DELTA", "0.15"))
+THINKING_APPROVAL_FILE = os.getenv("THINKING_APPROVAL_FILE", "thinking_engine_approval.json")
+# Production hard cap — applies to paper and live (never exceed ±6% per sleeve)
+THINKING_PRODUCTION_MAX_SLEEVE_DELTA = float(
+    os.getenv("THINKING_PRODUCTION_MAX_SLEEVE_DELTA", "0.06")
+)
+THINKING_MAX_SLEEVE_DELTA = min(
+    float(os.getenv("THINKING_MAX_SLEEVE_DELTA", "0.06")),
+    THINKING_PRODUCTION_MAX_SLEEVE_DELTA,
+)
 # Tighter cap when simulating thinking on live small-account profile
-LIVE_THINKING_MAX_SLEEVE_DELTA = float(os.getenv("LIVE_THINKING_MAX_SLEEVE_DELTA", "0.08"))
+LIVE_THINKING_MAX_SLEEVE_DELTA = min(
+    float(os.getenv("LIVE_THINKING_MAX_SLEEVE_DELTA", "0.06")),
+    THINKING_PRODUCTION_MAX_SLEEVE_DELTA,
+)
+# Daily loss circuit breaker — blocks thinking tilt apply after intraday drawdown
+THINKING_DAILY_LOSS_LIMIT_LIVE = float(os.getenv("THINKING_DAILY_LOSS_LIMIT_LIVE", "0.02"))
+THINKING_DAILY_LOSS_LIMIT_PAPER = float(os.getenv("THINKING_DAILY_LOSS_LIMIT_PAPER", "0.04"))
+# Live: require explicit approval file before applying tilts (see scripts/approve_thinking_tilt.py)
+THINKING_MANUAL_APPROVAL_LIVE = os.getenv("THINKING_MANUAL_APPROVAL_LIVE", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 # Disabled until live confidence calibration improves (see thinking engine accuracy analysis)
 THINKING_CONFIDENCE_AMPLIFY_ENABLED = os.getenv(
     "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "false"
@@ -1313,6 +1333,13 @@ def print_paper_research_stack_flags() -> None:
             f"  thinking_engine:      "
             f"{'on' if effective_thinking_engine_enabled() else 'off (opt-in: PAPER_THINKING_ENGINE_ENABLED=true)'}"
         )
+        safety = get_thinking_safety_summary()
+        print(
+            f"  thinking_safety:        ±{safety['max_sleeve_delta_pp']:.0f}% cap | "
+            f"daily_loss paper {safety['daily_loss_limit_paper_pct']:.0f}% / "
+            f"live {safety['daily_loss_limit_live_pct']:.0f}% | "
+            f"live_approval={'on' if safety['manual_approval_live'] else 'off'}"
+        )
         print(
             f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
             f"liquidate_on_breach: {HALT_LIQUIDATE_ON_BREACH}"
@@ -1551,6 +1578,39 @@ def effective_thinking_engine_enabled() -> bool:
     if PAPER_TRADING:
         return True
     return bool(backtest_paper_sleeves_context())
+
+
+def effective_thinking_max_sleeve_delta(*, live_sim: bool = False) -> float:
+    """Hard production cap ±6% per sleeve (ignores confidence amplification)."""
+    if live_sim:
+        return min(LIVE_THINKING_MAX_SLEEVE_DELTA, THINKING_PRODUCTION_MAX_SLEEVE_DELTA)
+    return min(THINKING_MAX_SLEEVE_DELTA, THINKING_PRODUCTION_MAX_SLEEVE_DELTA)
+
+
+def thinking_daily_loss_limit_pct() -> float:
+    """Max allowed intraday loss before thinking tilts are blocked."""
+    if PAPER_TRADING or paper_only_sleeves_active():
+        return THINKING_DAILY_LOSS_LIMIT_PAPER
+    return THINKING_DAILY_LOSS_LIMIT_LIVE
+
+
+def thinking_manual_approval_required() -> bool:
+    """Live money requires approval file before tilt apply."""
+    if PAPER_TRADING or paper_only_sleeves_active():
+        return False
+    return THINKING_MANUAL_APPROVAL_LIVE
+
+
+def get_thinking_safety_summary() -> dict[str, str | float | bool]:
+    """Compact safety flags for status.py / docs."""
+    return {
+        "max_sleeve_delta_pp": round(effective_thinking_max_sleeve_delta() * 100, 1),
+        "daily_loss_limit_live_pct": round(THINKING_DAILY_LOSS_LIMIT_LIVE * 100, 1),
+        "daily_loss_limit_paper_pct": round(THINKING_DAILY_LOSS_LIMIT_PAPER * 100, 1),
+        "manual_approval_live": thinking_manual_approval_required(),
+        "confidence_amplify": THINKING_CONFIDENCE_AMPLIFY_ENABLED,
+        "paper_thinking_enabled": PAPER_THINKING_ENGINE_ENABLED,
+    }
 
 
 def effective_risk_parity_enabled() -> bool:

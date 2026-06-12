@@ -40,7 +40,7 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 | **NYSE overlap / beta scaling** | **off** (opt-in via `.env`) |
 | **Adaptive chunk / co-fire** | **off** (opt-in) |
 | **SPY MA exit** | **off** (opt-in) |
-| **Thinking engine** | **off** (paper opt-in only; see Profile B) |
+| **Thinking engine** | **off** (paper opt-in; live requires approval) |
 | **Halt** | 10% DD; resume 8%; liquidate on breach |
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
@@ -90,23 +90,37 @@ python backtester.py --paper-aggressive --compare-final --final-all-windows
 
 Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
 
-#### Thinking engine (Ollama — paper only, opt-in)
+#### Thinking engine (Ollama — paper opt-in, live guarded)
 
-Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default**; enable with `PAPER_THINKING_ENGINE_ENABLED=true` and run `scripts/setup_ollama.py` first.
+Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default** on paper; **never auto-applies on live** without explicit approval.
+
+**Production safety (always on when thinking runs):**
+
+| Guard | Live | Paper |
+|-------|------|-------|
+| Max sleeve tilt | **±6%** per sleeve (`THINKING_PRODUCTION_MAX_SLEEVE_DELTA`) | same |
+| Daily loss circuit breaker | **2%** intraday → block tilts | **4%** |
+| Manual approval | **Required** (`THINKING_MANUAL_APPROVAL_LIVE=true`) | auto (no approval file) |
+| Confidence amplification | **Off** | **Off** |
+| Post-apply validator | Rejects contradictory tilts; falls back to heuristic | same |
+
+Approve a pending live tilt after reviewing `thinking_engine_last.json`:
+
+```bash
+python scripts/approve_thinking_tilt.py --show
+python scripts/approve_thinking_tilt.py
+```
 
 | Command | Purpose |
 |---------|---------|
 | `python scripts/test_thinking_engine.py --max-examples 3` | Live Ollama smoke test |
-| `python backtester.py --days 365 --paper-aggressive --compare-thinking` | Paper stack A/B (heuristic proxy in backtest) |
+| `python backtester.py --days 365 --paper-aggressive --compare-thinking` | Paper stack A/B (heuristic proxy) |
+| `python backtester.py --days 365 --simulate-live-thinking` | Live small-account what-if (±6% cap) |
 | `python scripts/analyze_thinking_engine.py` | Accuracy / tilt scoring |
 
-**Not enabled on live Profile A** (~$100–$300). To estimate live impact:
+Every decision is persisted to `thinking_engine_last.json` (timestamp, full reasoning, validation, `decision_id`).
 
-```bash
-python backtester.py --days 365 --simulate-live-thinking
-```
-
-Simulates **90% VTI, 1% risk, $10 max order** with thinking tilts capped at **±8% per sleeve** (`LIVE_THINKING_MAX_SLEEVE_DELTA`). Uses the same heuristic proxy as paper backtests (not Ollama per bar). Latest 365d: thinking **−0.8 pp return**, **+0.96 pp shallower MaxDD** vs no-thinking small-account sim — live Ollama may be less stable; keep off live until calibration improves.
+**Not recommended on live ~$100–$300** until Ollama calibration improves. Use `--simulate-live-thinking` to estimate impact first.
 
 ---
 

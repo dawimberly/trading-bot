@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import re
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT / config.THINKING_ENGINE_STATE_FILE
 OUTPUT_FILE = ROOT / config.THINKING_ENGINE_OUTPUT_FILE
+APPROVAL_FILE = ROOT / config.THINKING_APPROVAL_FILE
 
 _TILT_KEYS = ("vti", "spy", "energy", "gold", "cash", "crypto", "bonds")
 _CAP_KEYS = ("vti_core", "spy", "crypto", "nyse", "metal", "cash_buffer")
@@ -330,7 +332,7 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
         deltas["cash_buffer"] += 0.03 * conf
         deltas["spy"] -= 0.04 * conf
 
-    max_delta = config.THINKING_MAX_SLEEVE_DELTA
+    max_delta = config.effective_thinking_max_sleeve_delta()
     return {k: round(max(-max_delta, min(max_delta, v)), 6) for k, v in deltas.items()}
 
 
@@ -370,7 +372,7 @@ def compute_cap_deltas(
     max_delta = (
         float(max_sleeve_delta)
         if max_sleeve_delta is not None
-        else config.THINKING_MAX_SLEEVE_DELTA
+        else config.effective_thinking_max_sleeve_delta()
     )
     return {k: round(max(-max_delta, min(max_delta, v)), 6) for k, v in deltas.items()}
 
@@ -454,6 +456,111 @@ def build_regime_narrative(result: dict) -> str:
     return " | ".join(parts)[:280]
 
 
+def _thinking_decision_id(regime: str, tilt: dict[str, float]) -> str:
+    payload = f"{regime}|{json.dumps(tilt, sort_keys=True)}|{datetime.date.today().isoformat()}"
+    return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+
+def _load_previous_tilt_full() -> dict | None:
+    cached = read_json_file(OUTPUT_FILE)
+    if not cached:
+        return None
+    return {
+        "tilt": cached.get("suggested_tilt"),
+        "regime": cached.get("regime"),
+        "timestamp": cached.get("timestamp"),
+        "narrative": cached.get("narrative"),
+    }
+
+
+def _validate_thinking_quality(
+    result: dict[str, Any],
+    market_summary: dict,
+) -> tuple[bool, list[str]]:
+    """Post-process validator — reject contradictory or low-quality tilts."""
+    errors: list[str] = []
+    tilt = dict(result.get("suggested_tilt") or {})
+    narrative = str(result.get("narrative") or "").lower()
+    asymmetry = str(result.get("asymmetry") or "").lower()
+    conf = float(result.get("confidence") or 0.0)
+    gold_chg = float(market_summary.get("gold_change") or 0.0)
+    vix_trend = str(market_summary.get("vix_trend") or "").lower()
+
+    if float(tilt.get("gold", 0.0)) > 0.02 and gold_chg < 0.0:
+        errors.append("gold overweight while GLD 5d negative")
+
+    risk_on = float(tilt.get("vti", 0.0)) + float(tilt.get("spy", 0.0))
+    defensive_narrative = any(
+        k in narrative or k in asymmetry
+        for k in ("stress", "liquidity", "risk-off", "defensive", "cash preservation")
+    )
+    if defensive_narrative and risk_on > 0.72 and float(tilt.get("cash", 0.0)) < 0.12:
+        errors.append("defensive narrative but equity-heavy tilt")
+
+    if "rising" in vix_trend and risk_on > 0.80 and "continuation" not in asymmetry:
+        errors.append("heavy equity tilt into rising VIX without momentum rationale")
+
+    prev = _load_previous_tilt()
+    if prev:
+        for key in _TILT_KEYS:
+            delta = abs(float(tilt.get(key, 0.0)) - float(prev.get(key, 0.0)))
+            if delta > 0.35:
+                errors.append(f"tilt whipsaw on {key} ({delta:.0%} vs prior)")
+
+    if conf < 0.55:
+        errors.append(f"confidence too low ({conf:.2f})")
+
+    if _looks_like_meta_narrative(str(result.get("narrative") or "")):
+        errors.append("meta/process narrative")
+
+    rationale = str(result.get("tilt_rationale") or "")
+    if rationale and result.get("asymmetry"):
+        asym_snip = str(result.get("asymmetry"))[:40].lower()
+        if asym_snip and asym_snip not in rationale.lower() and "asymmetry" not in rationale.lower():
+            errors.append("TILT_RATIONALE not linked to ASYMMETRY")
+
+    return len(errors) == 0, errors
+
+
+def _update_daily_equity_anchor(equity: float | None) -> None:
+    if equity is None or equity <= 0:
+        return
+    today = datetime.date.today().isoformat()
+    state = read_json_file(STATE_FILE)
+    if state.get("daily_equity_date") != today:
+        state["daily_equity_date"] = today
+        state["daily_equity_open"] = round(float(equity), 4)
+        write_json_file(STATE_FILE, state)
+
+
+def thinking_daily_loss_tripped(equity: float | None) -> tuple[bool, str]:
+    """True when intraday loss exceeds configured limit."""
+    if equity is None or equity <= 0:
+        return False, ""
+    _update_daily_equity_anchor(equity)
+    state = read_json_file(STATE_FILE)
+    open_eq = float(state.get("daily_equity_open") or equity)
+    if open_eq <= 0:
+        return False, ""
+    loss_pct = (open_eq - float(equity)) / open_eq
+    limit = config.thinking_daily_loss_limit_pct()
+    if loss_pct >= limit - 1e-9:
+        return True, (
+            f"daily loss circuit breaker ({loss_pct:.2%} >= {limit:.2%} limit)"
+        )
+    return False, ""
+
+
+def is_thinking_tilt_approved(result: dict) -> bool:
+    if not config.thinking_manual_approval_required():
+        return True
+    decision_id = result.get("decision_id")
+    if not decision_id:
+        return False
+    approval = read_json_file(APPROVAL_FILE)
+    return str(approval.get("decision_id")) == str(decision_id)
+
+
 def _amplify_tilt_for_confidence(tilt: dict[str, float], confidence: float) -> dict[str, float]:
     """Sharpen allocation when PM conviction is high (>0.75). Disabled by default."""
     if not config.THINKING_CONFIDENCE_AMPLIFY_ENABLED:
@@ -526,6 +633,21 @@ def _finalize_thinking_result(
     out["suggested_tilt"] = tilt
     out["confidence"] = round(max(0.35, min(1.0, conf)), 2)
     out["regime_narrative"] = build_regime_narrative(out)
+    regime = str(market_summary.get("regime") or "")
+    out["decision_id"] = _thinking_decision_id(regime, tilt)
+    valid, val_errors = _validate_thinking_quality(out, market_summary)
+    out["validation_ok"] = valid
+    out["validation_errors"] = val_errors
+    if not valid:
+        logger.info("Thinking validation failed: %s", "; ".join(val_errors))
+        safe_tilt = derive_heuristic_tilt(market_summary)
+        out["suggested_tilt"] = _clamp_gold_in_tilt(
+            market_summary, safe_tilt, str(out.get("asymmetry") or "")
+        )
+        out["validation_recovered"] = True
+        out["source"] = (out.get("source") or "llm") + "+validator_fallback"
+        out["decision_id"] = _thinking_decision_id(regime, out["suggested_tilt"])
+    persist_thinking_last(out, regime=regime or None)
     return out
 
 
@@ -590,7 +712,11 @@ def apply_thinking_tilt_to_caps(
         suggested_tilt,
         confidence=conf,
         market_summary=market_summary,
-        max_sleeve_delta=max_sleeve_delta,
+        max_sleeve_delta=(
+            max_sleeve_delta
+            if max_sleeve_delta is not None
+            else config.effective_thinking_max_sleeve_delta()
+        ),
     )
 
     merged = dict(base)
@@ -1171,10 +1297,18 @@ def _looks_like_meta_narrative(text: str) -> bool:
 
 def _build_reasoning_user_prompt(market_summary: dict) -> str:
     prev = _load_previous_tilt()
+    prev_full = _load_previous_tilt_full()
     prev_line = "n/a (first run)"
+    prev_context = ""
     if prev:
-        top = sorted(prev.items(), key=lambda kv: kv[1], reverse=True)[:4]
-        prev_line = ", ".join(f"{k} {v:.0%}" for k, v in top)
+        prev_line = ", ".join(
+            f"{k} {v:.0%}" for k, v in sorted(prev.items(), key=lambda kv: kv[1], reverse=True)[:5]
+        )
+    if prev_full and prev_full.get("tilt"):
+        prev_context = (
+            f"Previous decision ({prev_full.get('timestamp', 'unknown')[:19]}): "
+            f"regime={prev_full.get('regime')} | narrative={str(prev_full.get('narrative') or '')[:100]}"
+        )
 
     gold_chg = float(market_summary.get("gold_change") or 0.0)
     gold_note = (
@@ -1194,9 +1328,10 @@ Macro sentiment: {market_summary['macro_sentiment']}
 Top headline: {market_summary['top_headline']}
 Bot exposure: {market_summary.get('bot_exposure_str', 'n/a')}
 Previous day tilt: {prev_line}
-{gold_note}
+{f"{prev_context}\n" if prev_context else ""}{gold_note}
 
-Maintain consistency with previous day tilt unless strong new evidence.
+Maintain consistency with previous day tilt unless strong new evidence (VIX spike, trend break, headline).
+Maximum sleeve change vs baseline is ±{config.effective_thinking_max_sleeve_delta():.0%} per sleeve.
 Reply with ONLY the structured block (NARRATIVE through REASONING). Be decisive. Start with NARRATIVE:"""
 
 
@@ -1517,6 +1652,32 @@ def maybe_apply_thinking_caps(
     """Merge thinking tilt into sleeve caps; returns (caps, thinking_result with apply meta)."""
     if not thinking_result or not config.effective_thinking_engine_enabled():
         return base_caps, thinking_result
+
+    tripped, trip_reason = thinking_daily_loss_tripped(equity)
+    if tripped:
+        thinking_result = dict(thinking_result)
+        thinking_result["apply_log"] = f"Thinking blocked: {trip_reason}"
+        thinking_result["applied_deltas"] = {}
+        thinking_result["adjusted_caps"] = dict(base_caps)
+        thinking_result["safety_blocked"] = "daily_loss_breaker"
+        logger.warning("Thinking engine: %s", trip_reason)
+        return base_caps, thinking_result
+
+    if config.thinking_manual_approval_required() and not is_thinking_tilt_approved(
+        thinking_result
+    ):
+        thinking_result = dict(thinking_result)
+        did = thinking_result.get("decision_id", "?")
+        thinking_result["apply_log"] = (
+            f"Pending manual approval (decision_id={did}); "
+            f"run: python scripts/approve_thinking_tilt.py"
+        )
+        thinking_result["applied_deltas"] = {}
+        thinking_result["adjusted_caps"] = dict(base_caps)
+        thinking_result["safety_blocked"] = "manual_approval"
+        logger.info("Thinking engine: pending manual approval for %s", did)
+        return base_caps, thinking_result
+
     conf = float(thinking_result.get("confidence", 0.0))
     narrative = str(thinking_result.get("narrative") or "").strip()
     asymmetry = str(thinking_result.get("asymmetry") or "").strip()
@@ -1535,6 +1696,18 @@ def maybe_apply_thinking_caps(
         thinking_result["applied_deltas"] = {}
         thinking_result["adjusted_caps"] = dict(base_caps)
         logger.info("Thinking engine: skipped apply (conf %.2f, narrative_ok=%s)", conf, narrative_ok)
+        return base_caps, thinking_result
+
+    if thinking_result.get("validation_ok") is False and not thinking_result.get(
+        "validation_recovered"
+    ):
+        thinking_result = dict(thinking_result)
+        thinking_result["apply_log"] = (
+            "Thinking skipped: failed validation — "
+            + "; ".join(thinking_result.get("validation_errors") or [])
+        )
+        thinking_result["applied_deltas"] = {}
+        thinking_result["adjusted_caps"] = dict(base_caps)
         return base_caps, thinking_result
 
     merged, deltas, log_line = apply_thinking_to_sleeve_caps(

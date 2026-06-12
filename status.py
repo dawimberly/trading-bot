@@ -93,6 +93,7 @@ def _flag(name: str, val: bool) -> str:
 
 
 def _live_flags() -> str:
+    safety = config.get_thinking_safety_summary()
     parts = [
         _flag("dyn_vti", False),
         _flag("overlap", config.NYSE_OVERLAP_FILTER_ENABLED),
@@ -101,8 +102,29 @@ def _live_flags() -> str:
         _flag("macro", config.MACRO_REGIME_ADAPTOR_ENABLED),
         _flag("social", config.SOCIAL_SLEEVE_ENABLED),
         _flag("spy_exit", config.SPY_EXIT_ON_MA_BREAK),
+        _flag("thinking", config.PAPER_THINKING_ENGINE_ENABLED),
     ]
     return " | ".join(parts)
+
+
+def _thinking_safety_line() -> str:
+    s = config.get_thinking_safety_summary()
+    approval = "required" if s["manual_approval_live"] else "off"
+    return (
+        f"tilt_cap=±{s['max_sleeve_delta_pp']:.0f}% | "
+        f"daily_loss_live={s['daily_loss_limit_live_pct']:.0f}% | "
+        f"daily_loss_paper={s['daily_loss_limit_paper_pct']:.0f}% | "
+        f"live_approval={approval} | amplify={'on' if s['confidence_amplify'] else 'off'}"
+    )
+
+
+def _paper_thinking_safety_line() -> str:
+    s = config.get_thinking_safety_summary()
+    return (
+        f"thinking={'on' if s['paper_thinking_enabled'] else 'off (opt-in)'} | "
+        f"tilt_cap=±{s['max_sleeve_delta_pp']:.0f}% | "
+        f"daily_loss={s['daily_loss_limit_paper_pct']:.0f}%"
+    )
 
 
 def _paper_flags() -> tuple[str, str]:
@@ -134,9 +156,11 @@ def main() -> None:
         f"Regime {regime}{ts}"
     )
     logger.info(f"Live flags:  {_live_flags()}")
+    logger.info(f"Thinking safety: {_thinking_safety_line()}")
     paper_on, paper_off = _paper_flags()
     logger.info(f"Paper ON:  {paper_on}")
     logger.info(f"Paper OFF (locked): {paper_off}")
+    logger.info(f"Paper thinking safety: {_paper_thinking_safety_line()}")
 
 
 if __name__ == "__main__":
