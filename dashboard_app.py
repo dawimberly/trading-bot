@@ -14,7 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -787,7 +787,8 @@ class DataTable(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         style = ttk.Style()
         style.theme_use("clam")
-        style_name = "Dash.Treeview.Large" if large else "Dash.Treeview"
+        # ttk only auto-builds Treeview layouts when the style name ends with ".Treeview".
+        style_name = "Dash.Large.Treeview" if large else "Dash.Treeview"
         row_h = 34 if large else 26
         font = ("Segoe UI", 12) if large else ("Segoe UI", 10)
         head_font = ("Segoe UI", 11, "bold") if large else ("Segoe UI", 10, "bold")
@@ -1286,7 +1287,7 @@ class TradingDashboardApp(ctk.CTk):
 
         self._refresh_job: str | None = None
         self._clock_job: str | None = None
-        self._active_tab = "Overview"
+        self._active_tab = "Positions"
         self._charts_dirty = True
         self._last_equity = 0.0
         self._spark_canvas: FigureCanvasTkAgg | None = None
@@ -1489,81 +1490,16 @@ class TradingDashboardApp(ctk.CTk):
         self._spark_frame.pack(fill="both", expand=True, padx=8, pady=(4, 10))
 
         metrics = ctk.CTkFrame(top_stack, fg_color="transparent")
-        metrics.pack(fill="x", pady=(0, 8))
+        metrics.pack(fill="x", pady=(0, 4))
         for i, key in enumerate(("invested", "market")):
             card = MetricCard(metrics, key.title())
             card.grid(row=0, column=i, padx=4, sticky="nsew")
             metrics.grid_columnconfigure(i, weight=1)
             self._metric_cards[key] = card
 
-        # Open positions — prominent top section
-        pos_section = ctk.CTkFrame(
-            top_stack,
-            fg_color=COLORS["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        pos_section.pack(fill="x", pady=(0, 8))
-        pos_head = ctk.CTkFrame(pos_section, fg_color="transparent")
-        pos_head.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkLabel(
-            pos_head,
-            text="Open Positions",
-            font=_ctk_font("heading"),
-            text_color=COLORS["text"],
-        ).pack(side="left")
-        self._pos_total = ctk.CTkLabel(
-            pos_head,
-            text="",
-            font=_ctk_font("body_sm"),
-            text_color=COLORS["muted"],
-        )
-        self._pos_total.pack(side="right")
-        self._top_positions_table = DataTable(
-            pos_section,
-            ["Ticker", "Sleeve", "Qty", "Current", "P&L $", "P&L %"],
-            height=4,
-            large=True,
-        )
-        self._top_positions_table.pack(fill="x", padx=10, pady=(0, 10))
-
-        # Recent trades — compact strip below positions
-        trades_section = ctk.CTkFrame(
-            top_stack,
-            fg_color=COLORS["card"],
-            corner_radius=14,
-            border_width=1,
-            border_color=COLORS["border"],
-        )
-        trades_section.pack(fill="x", pady=(0, 8))
-        trades_head = ctk.CTkFrame(trades_section, fg_color="transparent")
-        trades_head.pack(fill="x", padx=12, pady=(10, 4))
-        ctk.CTkLabel(
-            trades_head,
-            text="Recent Trades",
-            font=_ctk_font("heading"),
-            text_color=COLORS["text"],
-        ).pack(side="left")
-        self._trades_hint = ctk.CTkLabel(
-            trades_head,
-            text="",
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-        )
-        self._trades_hint.pack(side="right")
-        self._top_trades_table = DataTable(
-            trades_section,
-            ["Time", "Ticker", "Side", "Sleeve", "Notional"],
-            height=3,
-            large=True,
-        )
-        self._top_trades_table.pack(fill="x", padx=10, pady=(0, 10))
-
-        # Tabs
+        # Main tabbed content — positions, overview, trades, wisdom, charts
         self._tabs = ctk.CTkTabview(
             self,
-            height=240,
             command=self._on_tab_changed,
             fg_color=COLORS["surface"],
             segmented_button_fg_color=COLORS["surface2"],
@@ -1583,28 +1519,35 @@ class TradingDashboardApp(ctk.CTk):
             )
         except Exception:
             pass
-        self._tab_overview = self._tabs.add("Overview")
-        self._tab_positions = self._tabs.add("Positions")
-        self._tab_trades = self._tabs.add("Trades")
-        self._tab_wisdom = self._tabs.add("Wisdom")
-        self._tab_charts = self._tabs.add("Charts")
 
-        self._build_overview_tab()
+        self._tab_positions = self._tabs.add("Positions")
+        pos_head = ctk.CTkFrame(self._tab_positions, fg_color="transparent")
+        pos_head.pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            pos_head,
+            text="Open Positions",
+            font=_ctk_font("heading"),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._pos_total = ctk.CTkLabel(
+            pos_head,
+            text="",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["muted"],
+        )
+        self._pos_total.pack(side="right")
         self._positions_table = DataTable(
             self._tab_positions,
             ["Ticker", "Sleeve", "Qty", "Entry", "Current", "P&L $", "P&L %"],
-            height=12,
+            height=14,
             large=True,
         )
-        self._positions_table.pack(fill="both", expand=True, padx=10, pady=10)
+        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        self._trades_table = DataTable(
-            self._tab_trades,
-            ["timestamp", "event", "symbol", "side", "notional", "sleeve"],
-            height=12,
-            large=True,
-        )
-        self._trades_table.pack(fill="both", expand=True, padx=10, pady=10)
+        self._tab_overview = self._tabs.add("Overview")
+        self._build_overview_tab()
+
+        self._tab_trades = self._tabs.add("Trades")
         self._trades_tab_hint = ctk.CTkLabel(
             self._tab_trades,
             text="",
@@ -1612,10 +1555,23 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
             anchor="w",
         )
-        self._trades_tab_hint.pack(fill="x", padx=12, pady=(0, 8))
+        self._trades_tab_hint.pack(fill="x", padx=12, pady=(10, 4))
+        self._trades_table = DataTable(
+            self._tab_trades,
+            ["timestamp", "event", "symbol", "side", "notional", "sleeve"],
+            height=14,
+            large=True,
+        )
+        self._trades_table.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
+        self._tab_wisdom = self._tabs.add("Wisdom")
         self._build_wisdom_tab()
+
+        self._tab_charts = self._tabs.add("Charts")
         self._build_charts_tab()
+
+        self._tabs.set("Positions")
+        self._active_tab = "Positions"
 
         # Footer — status line only
         footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -2186,12 +2142,10 @@ class TradingDashboardApp(ctk.CTk):
         total_upl: float,
     ) -> None:
         if pos_err:
-            self._top_positions_table.clear()
             self._positions_table.clear()
             self._pos_total.configure(text=pos_err, text_color=COLORS["red"])
             return
         if positions_df is None or positions_df.empty:
-            self._top_positions_table.clear()
             self._positions_table.clear()
             self._pos_total.configure(
                 text="No open positions — cash until next rebalance.",
@@ -2199,7 +2153,6 @@ class TradingDashboardApp(ctk.CTk):
             )
             return
         rows = self._position_rows(positions_df)
-        self._top_positions_table.set_rows(rows, pnl_col="_pnl")
         self._positions_table.set_rows(rows, pnl_col="_pnl")
         color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
         self._pos_total.configure(
@@ -2209,13 +2162,11 @@ class TradingDashboardApp(ctk.CTk):
 
     def _fill_trades(self, journal_df: pd.DataFrame | None) -> None:
         if journal_df is None or journal_df.empty:
-            self._top_trades_table.clear()
             self._trades_table.clear()
             src = book_journal_path(self._username, self._book_id)
             empty = (
                 f"No trades yet · journal: {src.name}"
             )
-            self._trades_hint.configure(text=empty)
             self._trades_tab_hint.configure(text=empty)
             return
         rows = []
@@ -2233,26 +2184,9 @@ class TradingDashboardApp(ctk.CTk):
 
         self._trades_table.set_rows(rows)
 
-        top_rows = []
-        for item in rows[:5]:
-            ts = str(item.get("timestamp", ""))
-            if len(ts) > 16:
-                ts = ts[5:16]
-            top_rows.append(
-                {
-                    "Time": ts,
-                    "Ticker": item.get("symbol", ""),
-                    "Side": str(item.get("side", "")).upper(),
-                    "Sleeve": item.get("sleeve", ""),
-                    "Notional": item.get("notional", ""),
-                }
-            )
-        self._top_trades_table.set_rows(top_rows)
-
         n_fill = sum(1 for r in rows if r.get("event") == "fill")
         n_sig = sum(1 for r in rows if r.get("event") == "signal")
         summary = f"{len(rows)} rows · {n_sig} signals · {n_fill} fills"
-        self._trades_hint.configure(text=summary)
         self._trades_tab_hint.configure(text=summary)
 
     def _fill_wisdom(
@@ -2544,12 +2478,29 @@ def main() -> None:
             ok, msg = start_bot(username, book_id)
             if not ok:
                 print(msg)
-        app = TradingDashboardApp(
-            username,
-            book_id,
-            on_logout=show_login,
-            auto_start_bot=launch_bot_after_login,
-        )
+        try:
+            app = TradingDashboardApp(
+                username,
+                book_id,
+                on_logout=show_login,
+                auto_start_bot=launch_bot_after_login,
+            )
+        except Exception as exc:
+            import traceback
+
+            log_dir = PROJECT_ROOT / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            crash_log = log_dir / "dashboard_crash.log"
+            crash_log.write_text(
+                f"{datetime.now(timezone.utc).isoformat()}Z\n{traceback.format_exc()}",
+                encoding="utf-8",
+            )
+            messagebox.showerror(
+                "PythonTrading Monitor",
+                f"Could not open dashboard:\n{exc}\n\nSee {crash_log}",
+            )
+            show_login()
+            return
         app.mainloop()
 
     def show_login() -> None:
@@ -2560,4 +2511,20 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        import traceback
+
+        log_dir = PROJECT_ROOT / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        crash_log = log_dir / "dashboard_crash.log"
+        crash_log.write_text(
+            f"{datetime.now(timezone.utc).isoformat()}Z\n{traceback.format_exc()}",
+            encoding="utf-8",
+        )
+        try:
+            messagebox.showerror("PythonTrading Monitor", f"Startup failed:\n{exc}\n\nSee {crash_log}")
+        except Exception:
+            print(exc, file=sys.stderr)
+        raise
