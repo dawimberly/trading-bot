@@ -1014,13 +1014,18 @@ def run_equity_strategy(
             notional = executor.compute_nyse_notional()
             if notional is None:
                 continue
+            min_n = config.effective_min_notional(float(executor._get_account().equity))
             if config.NYSE_BETA_SCALING_ENABLED:
                 _, beta = _spy_vs_equity_metrics(data, symbol)
                 scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
-                min_n = config.effective_min_notional(float(executor._get_account().equity))
                 if scaled < min_n:
                     continue
                 notional = scaled
+            vol_scale = config.dynamic_equity_position_scale(symbol)
+            if vol_scale < 1.0:
+                notional = round(float(notional) * vol_scale, 2)
+                if notional < min_n:
+                    continue
         order = executor.execute_order(symbol, "buy", notional=notional)
         if not _count_if_filled(executor, order):
             continue

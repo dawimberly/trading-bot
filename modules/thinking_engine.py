@@ -54,42 +54,40 @@ _GEO_KEYWORDS = (
     "missile",
 )
 
-_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund manager. You excel at spotting paradigm shifts and situations where upside greatly exceeds downside risk.
+_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM with real capital at risk. Your job is one decisive 3-7 day allocation call — not commentary.
 
-Think like a top PM with real money on the line:
+CORE MANDATE:
+- Be bold when asymmetry is clear. Be defensive when uncertainty dominates.
+- Maintain consistency with yesterday's tilt unless STRONG NEW EVIDENCE appears (VIX spike, trend break, major headline, confirmed safe-haven bid).
+- If you change any sleeve by more than 5% vs yesterday, you MUST cite the new evidence in TILT_RATIONALE.
 
-1. What is the true dominant narrative? (Ignore noise — what is actually driving price action?)
-2. Where is the asymmetry right now? (Where is the crowd wrong or about to be forced to adjust?)
-3. What are the highest-conviction risks and opportunities?
-4. Give a clear, decisive allocation recommendation for the next 3-7 days.
+HARD RULES (non-negotiable):
+1. Do NOT overweight gold when Gold 5d change is negative (liquidity sell, not safe-haven). Default gold to 0% unless asymmetry explicitly argues a contrarian bounce.
+2. When VIX is rising and there is NO strong momentum continuation narrative, bias toward cash — do not run max equity.
+3. When SPY is below MA200 and VIX is elevated, prioritize capital preservation over chasing beta.
+4. RECOMMENDED_TILT weights must sum to ~1.0 across sleeves (vti, spy, energy, gold, cash, crypto, bonds).
+5. TILT_RATIONALE must explicitly justify EVERY sleeve you allocate above 5% with its exact percentage (e.g. "VTI 52% because...", "cash 18% because VIX rising...").
 
-Be bold when conviction is high. Be defensive when uncertainty is elevated.
-When VIX is elevated or trend breaks, prioritize capital preservation.
-When asymmetry is clear, size the edge — do not hide in neutral allocations.
+DECISION FRAMEWORK:
+1. Dominant narrative — what is actually moving markets (ignore noise)?
+2. Asymmetry — where is crowd positioning wrong or forced to adjust?
+3. Risks (max 2) and opportunities (max 2) — highest signal only.
+4. Clear RECOMMENDED_TILT — decisive, not vague 50/50 blends unless truly uncertain.
 
-Be decisive. Avoid vague or balanced tilts unless truly uncertain. If conviction is medium or higher, pick clear winners and losers.
-
-Maintain consistency with the previous day's tilt unless strong new evidence appears
-(VIX spike, trend break, major headline, or confirmed safe-haven bid in gold).
-If you change a sleeve by more than 5% vs yesterday, state the new evidence in TILT_RATIONALE.
-
-Hard rule: do NOT overweight gold when Gold 5d change is negative (liquidity sell, not safe-haven bid).
-If gold 5d change is negative, default to zero or minimal gold allocation unless asymmetry explicitly justifies a contrarian bounce.
-
-Output format (strict — your ENTIRE reply must be ONLY these lines, no preamble):
-NARRATIVE: [One powerful sentence on what is driving markets]
-ASYMMETRY: [Where the edge is — be specific; name winners and losers]
-RISKS: [max 2 bullets]
+Output format (strict — ENTIRE reply ONLY these lines, no preamble, no markdown headers):
+NARRATIVE: [One powerful sentence]
+ASYMMETRY: [Specific edge — name winners and losers]
+RISKS: [max 2 bullets, comma-separated or semicolon-separated]
 OPPORTUNITIES: [max 2 bullets]
-RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX}
-TILT_RATIONALE: [Must explicitly link the identified asymmetry to the specific tilt percentages — e.g. "Because crowd is X, overweight VTI 55% and cut cash to 10%"]
+RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX, "bonds": 0.XX}
+TILT_RATIONALE: [Link asymmetry to EACH >5% sleeve with exact percentages — mandatory]
 CONFIDENCE: 0.XX
-REASONING: [Concise high-signal explanation linking narrative to tilt]
+REASONING: [Concise link from narrative to tilt]
 
 Do not explain your process. Do not repeat the input. Start with NARRATIVE:"""
 
 _STRUCTURED_FIELD_RE = re.compile(
-    r"^(NARRATIVE|ASYMMETRY|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*:\s*(.*)$",
+    r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
     re.I,
 )
 _TILT_PROSE_RE = re.compile(
@@ -404,13 +402,18 @@ def _infer_tilt_rationale(
     tilt: dict[str, float],
     asymmetry: str = "",
 ) -> str:
-    """Fallback one-liner linking asymmetry to top tilt sleeves."""
-    top = sorted(tilt.items(), key=lambda kv: kv[1], reverse=True)[:2]
-    top_s = ", ".join(f"{k} {v:.0%}" for k, v in top) if top else "balanced"
+    """Fallback one-liner linking asymmetry to each material sleeve with percentages."""
+    material = sorted(
+        ((k, v) for k, v in tilt.items() if float(v) >= 0.05),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    parts = [f"{k} {v:.0%}" for k, v in material]
+    alloc = "; ".join(parts) if parts else "balanced"
     if asymmetry:
-        return f"Asymmetry ({asymmetry[:90]}) -> allocate {top_s}"
+        return f"Asymmetry ({asymmetry[:100]}) -> {alloc}"
     narrative = _infer_narrative(summary)
-    return f"{narrative} -> allocate {top_s}"
+    return f"{narrative} -> {alloc}"
 
 
 def _load_previous_tilt() -> dict[str, float] | None:
@@ -431,11 +434,18 @@ def persist_thinking_last(
 ) -> None:
     """Write thinking_engine_last.json on every reasoning run for audit."""
     now = datetime.datetime.now().isoformat()
+    val_score = result.get("validation_score")
+    if val_score is None and "validation_ok" in result:
+        val_score = 100 if result.get("validation_ok") else max(
+            0, 100 - 15 * len(result.get("validation_errors") or [])
+        )
     payload = {
         "timestamp": now,
         "regime": regime or (result.get("market_summary") or {}).get("regime"),
         "manual_review_required": config.thinking_manual_approval_required(),
         "safety": config.get_thinking_safety_summary(),
+        "validation_score": val_score,
+        "parse_quality": result.get("parse_quality"),
         **result,
     }
     write_json_file(OUTPUT_FILE, payload)
@@ -464,6 +474,11 @@ def _thinking_decision_id(regime: str, tilt: dict[str, float]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
 
+def get_pm_system_prompt() -> str:
+    """Return the production PM system prompt (for docs/tests)."""
+    return _PM_SYSTEM_PROMPT
+
+
 def _load_previous_tilt_full() -> dict | None:
     cached = read_json_file(OUTPUT_FILE)
     if not cached:
@@ -473,7 +488,97 @@ def _load_previous_tilt_full() -> dict | None:
         "regime": cached.get("regime"),
         "timestamp": cached.get("timestamp"),
         "narrative": cached.get("narrative"),
+        "tilt_rationale": cached.get("tilt_rationale"),
+        "asymmetry": cached.get("asymmetry"),
     }
+
+
+_STRONG_EVIDENCE_KEYWORDS = (
+    "vix spike",
+    "vol spike",
+    "trend break",
+    "headline",
+    "geopolitical",
+    "war",
+    "sanctions",
+    "safe-haven",
+    "safe haven",
+    "oil shock",
+    "regime shift",
+    "paradigm",
+    "breakdown",
+    "liquidity stress",
+    "new evidence",
+    "shift",
+)
+
+
+def _strong_new_evidence(market_summary: dict, result: dict[str, Any]) -> bool:
+    """True when macro or narrative supports large tilt changes vs prior day."""
+    headline = str(market_summary.get("top_headline") or "").lower()
+    asymmetry = str(result.get("asymmetry") or "").lower()
+    narrative = str(result.get("narrative") or "").lower()
+    combined = f"{headline} {asymmetry} {narrative}"
+    if any(k in combined for k in _STRONG_EVIDENCE_KEYWORDS):
+        return True
+    if any(k in headline for k in _GEO_KEYWORDS):
+        return True
+    vix = market_summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 0.0
+    if vix_f >= config.MACRO_VIX_SAFE_HAVEN_MIN and "rising" in str(
+        market_summary.get("vix_trend") or ""
+    ).lower():
+        return True
+    if "below MA" in str(market_summary.get("spy_trend") or ""):
+        return True
+    if float(market_summary.get("oil_change") or 0.0) >= config.MACRO_OIL_SURGE_PCT * 100 * 0.5:
+        return True
+    if float(market_summary.get("gold_change") or 0.0) >= config.MACRO_GLD_SURGE_PCT * 100:
+        return True
+    return False
+
+
+def _rationale_quality_score(result: dict[str, Any]) -> float:
+    """0-1 score for TILT_RATIONALE completeness and linkage."""
+    rationale = str(result.get("tilt_rationale") or "").strip()
+    if len(rationale) < 25:
+        return 0.0
+    score = 0.35
+    asymmetry = str(result.get("asymmetry") or "").lower()
+    if asymmetry and (asymmetry[:30] in rationale.lower() or "asymmetry" in rationale.lower()):
+        score += 0.2
+    tilt = dict(result.get("suggested_tilt") or {})
+    material = [(k, v) for k, v in tilt.items() if float(v) >= 0.05]
+    if not material:
+        return min(1.0, score)
+    mentioned = 0
+    for key, val in material:
+        pct_int = int(round(val * 100))
+        pct_dec = f"{val * 100:.1f}".rstrip("0").rstrip(".")
+        if (
+            key.lower() in rationale.lower()
+            and (
+                f"{pct_int}%" in rationale
+                or f"{pct_dec}%" in rationale
+                or f"{val:.0%}" in rationale
+                or f"{val:.2f}" in rationale
+            )
+        ):
+            mentioned += 1
+    score += 0.45 * (mentioned / max(1, len(material)))
+    if len(rationale) >= 80:
+        score += 0.05
+    return round(min(1.0, score), 2)
+
+
+def _compute_validation_score(errors: list[str], result: dict[str, Any]) -> int:
+    """0-100 validation score for audit trail."""
+    base = 100 - 12 * len(errors)
+    base = max(0, min(100, base))
+    pq = float(result.get("parse_quality") or 0.0)
+    rq = _rationale_quality_score(result)
+    bonus = int(10 * pq + 10 * rq)
+    return max(0, min(100, base + bonus // 2))
 
 
 def _validate_thinking_quality(
@@ -504,10 +609,16 @@ def _validate_thinking_quality(
         errors.append("heavy equity tilt into rising VIX without momentum rationale")
 
     prev = _load_previous_tilt()
+    swing_limit = max(0.05, config.effective_thinking_max_sleeve_delta())
+    strong_evidence = _strong_new_evidence(market_summary, result)
     if prev:
         for key in _TILT_KEYS:
             delta = abs(float(tilt.get(key, 0.0)) - float(prev.get(key, 0.0)))
-            if delta > 0.35:
+            if delta > swing_limit and not strong_evidence:
+                errors.append(
+                    f"tilt swing on {key} ({delta:.0%} vs prior) without strong new evidence"
+                )
+            elif delta > 0.35:
                 errors.append(f"tilt whipsaw on {key} ({delta:.0%} vs prior)")
 
     if conf < 0.55:
@@ -517,7 +628,10 @@ def _validate_thinking_quality(
         errors.append("meta/process narrative")
 
     rationale = str(result.get("tilt_rationale") or "")
-    if rationale and result.get("asymmetry"):
+    rq = _rationale_quality_score(result)
+    if rq < 0.45:
+        errors.append("TILT_RATIONALE missing per-sleeve percentage justification")
+    elif result.get("asymmetry"):
         asym_snip = str(result.get("asymmetry"))[:40].lower()
         if asym_snip and asym_snip not in rationale.lower() and "asymmetry" not in rationale.lower():
             errors.append("TILT_RATIONALE not linked to ASYMMETRY")
@@ -564,17 +678,22 @@ def is_thinking_tilt_approved(result: dict) -> bool:
     return str(approval.get("decision_id")) == str(decision_id)
 
 
-def _amplify_tilt_for_confidence(tilt: dict[str, float], confidence: float) -> dict[str, float]:
-    """Sharpen allocation when PM conviction is high (>0.75). Disabled by default."""
+def _amplify_tilt_for_confidence(
+    tilt: dict[str, float],
+    confidence: float,
+    *,
+    rationale_quality: float = 0.0,
+) -> dict[str, float]:
+    """Sharpen allocation when PM conviction and rationale quality are high (>=0.80, >=0.65)."""
     if not config.THINKING_CONFIDENCE_AMPLIFY_ENABLED:
         return tilt
     conf = float(confidence)
-    if conf <= 0.75:
+    if conf < 0.80 or float(rationale_quality) < 0.65:
         return tilt
-    strength = min(1.0, (conf - 0.75) / 0.25)
+    strength = min(1.0, (conf - 0.80) / 0.20)
     ranked = sorted(tilt.items(), key=lambda kv: kv[1], reverse=True)
     out = dict(tilt)
-    boost = 0.04 + 0.06 * strength
+    boost = 0.03 + 0.05 * strength
     for key, _weight in ranked[:2]:
         out[key] = out.get(key, 0.0) + boost * 0.55
     cut_keys = ("cash", "vti") if ranked and ranked[0][0] != "vti" else ("cash",)
@@ -619,7 +738,6 @@ def _finalize_thinking_result(
         _normalize_tilt(tilt),
         str(out.get("asymmetry") or ""),
     )
-    tilt = _amplify_tilt_for_confidence(tilt, conf)
     rationale = str(out.get("tilt_rationale") or "").strip()
     if not rationale or len(rationale) < 20:
         out["tilt_rationale"] = _infer_tilt_rationale(
@@ -629,10 +747,17 @@ def _finalize_thinking_result(
         out["tilt_rationale"] = _infer_tilt_rationale(
             market_summary, tilt, str(out.get("asymmetry") or "")
         )
-    elif not any(f"{v:.0%}" in rationale or f"{v:.1%}" in rationale for v in tilt.values() if v > 0.05):
+    elif not any(
+        f"{v:.0%}" in rationale or f"{int(round(v * 100))}%" in rationale
+        for v in tilt.values()
+        if v > 0.05
+    ):
         out["tilt_rationale"] = _infer_tilt_rationale(
             market_summary, tilt, str(out.get("asymmetry") or "")
         )
+    rq = _rationale_quality_score(out)
+    out["rationale_quality"] = rq
+    tilt = _amplify_tilt_for_confidence(tilt, conf, rationale_quality=rq)
     out["suggested_tilt"] = tilt
     out["confidence"] = round(max(0.35, min(1.0, conf)), 2)
     out["regime_narrative"] = build_regime_narrative(out)
@@ -641,6 +766,7 @@ def _finalize_thinking_result(
     valid, val_errors = _validate_thinking_quality(out, market_summary)
     out["validation_ok"] = valid
     out["validation_errors"] = val_errors
+    out["validation_score"] = _compute_validation_score(val_errors, out)
     if not valid:
         logger.info("Thinking validation failed: %s", "; ".join(val_errors))
         safe_tilt = derive_heuristic_tilt(market_summary)
@@ -650,6 +776,7 @@ def _finalize_thinking_result(
         out["validation_recovered"] = True
         out["source"] = (out.get("source") or "llm") + "+validator_fallback"
         out["decision_id"] = _thinking_decision_id(regime, out["suggested_tilt"])
+        out["validation_score"] = _compute_validation_score([], out)
     persist_thinking_last(out, regime=regime or None)
     return out
 
@@ -811,6 +938,7 @@ def build_backtest_thinking_result(
         "model": "heuristic-backtest",
         "source": "force_decision",
         "market_summary": summary,
+        "tilt_rationale": _infer_tilt_rationale(summary, tilt, asymmetry),
     }
     return _finalize_thinking_result(base, summary, force_decision=force_decision)
 
@@ -1249,7 +1377,10 @@ def _parse_structured_reasoning(text: str) -> dict[str, Any]:
         buf = []
 
     for line in text.splitlines():
-        match = _STRUCTURED_FIELD_RE.match(line.strip())
+        stripped = line.strip()
+        stripped = re.sub(r"^\*\*(.+?)\*\*\s*[:=\-]?\s*", r"\1: ", stripped)
+        stripped = re.sub(r"^[-*]\s+", "", stripped)
+        match = _STRUCTURED_FIELD_RE.match(stripped)
         if match:
             flush()
             current_field = match.group(1).upper()
@@ -1285,6 +1416,20 @@ def _best_structured_parse(full_text: str, answer_text: str) -> dict[str, Any]:
     return best
 
 
+def _strip_chain_of_thought(text: str) -> str:
+    """Drop deepseek-r1 preamble; keep structured block when present."""
+    if not text:
+        return text
+    if "---" in text:
+        tail = text.rsplit("---", 1)[-1].strip()
+        if re.search(r"NARRATIVE\s*:", tail, re.I):
+            return tail
+    match = re.search(r"(NARRATIVE\s*[:=\-].*)", text, re.I | re.S)
+    if match and _looks_like_meta_narrative(text[: min(300, len(text))]):
+        return match.group(1).strip()
+    return text
+
+
 def _looks_like_meta_narrative(text: str) -> bool:
     low = text.lower().strip()
     if len(text) > 220:
@@ -1305,12 +1450,15 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
     prev_context = ""
     if prev:
         prev_line = ", ".join(
-            f"{k} {v:.0%}" for k, v in sorted(prev.items(), key=lambda kv: kv[1], reverse=True)[:5]
+            f"{k} {v:.0%}" for k, v in sorted(prev.items(), key=lambda kv: kv[1], reverse=True)[:6]
         )
     if prev_full and prev_full.get("tilt"):
+        prev_rationale = str(prev_full.get("tilt_rationale") or "")[:220]
         prev_context = (
-            f"Previous decision ({prev_full.get('timestamp', 'unknown')[:19]}): "
-            f"regime={prev_full.get('regime')} | narrative={str(prev_full.get('narrative') or '')[:100]}"
+            f"Previous decision ({str(prev_full.get('timestamp', 'unknown'))[:19]}):\n"
+            f"  regime={prev_full.get('regime')} | narrative={str(prev_full.get('narrative') or '')[:120]}\n"
+            f"  tilt={prev_line}\n"
+            f"  prior TILT_RATIONALE: {prev_rationale or 'n/a'}"
         )
 
     gold_chg = float(market_summary.get("gold_change") or 0.0)
@@ -1319,22 +1467,31 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
         if gold_chg < 0
         else f"Gold 5d: {gold_chg}% (safe-haven bid OK only if positive or flat)."
     )
+    vix_trend = str(market_summary.get("vix_trend") or "n/a")
+    vix_note = (
+        "VIX is RISING — bias toward cash unless ASYMMETRY cites strong momentum continuation."
+        if "rising" in vix_trend.lower()
+        else f"VIX trend: {vix_trend}"
+    )
 
     return f"""Current market snapshot:
 
 SPY vs MA200: {market_summary['spy_trend']}
-VIX: {market_summary['vix']} | trend: {market_summary.get('vix_trend', 'n/a')}
+VIX: {market_summary['vix']} | {vix_note}
 Oil 5d: {market_summary['oil_change']}% | Gold 5d: {market_summary['gold_change']}%
 Yield curve / rates: {market_summary.get('yield_curve', 'n/a')}
 Regime: {market_summary.get('regime', 'unknown')}
 Macro sentiment: {market_summary['macro_sentiment']}
 Top headline: {market_summary['top_headline']}
 Bot exposure: {market_summary.get('bot_exposure_str', 'n/a')}
-Previous day tilt: {prev_line}
-{f"{prev_context}\n" if prev_context else ""}{gold_note}
 
-Maintain consistency with previous day tilt unless strong new evidence (VIX spike, trend break, headline).
-Maximum sleeve change vs baseline is ±{config.effective_thinking_max_sleeve_delta():.0%} per sleeve.
+Previous day tilt: {prev_line}
+{prev_context}
+
+{gold_note}
+Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline).
+Maximum sleeve change vs prior day is ±{config.effective_thinking_max_sleeve_delta():.0%} per sleeve without new evidence.
+TILT_RATIONALE must justify every sleeve above 5% with its exact percentage.
 Reply with ONLY the structured block (NARRATIVE through REASONING). Be decisive. Start with NARRATIVE:"""
 
 
@@ -1431,7 +1588,7 @@ def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[s
     quality = _llm_parse_quality(structured, tilt, had_conf_field=had_conf_field)
 
     result = {
-        "reasoning": full_text.strip(),
+        "reasoning": _strip_chain_of_thought(full_text.strip()),
         "narrative": str(narrative).strip(),
         "asymmetry": str(asymmetry).strip() if asymmetry else "",
         "tilt_rationale": str(tilt_rationale).strip() if tilt_rationale else "",
@@ -1525,8 +1682,15 @@ def _parse_fallback_fields(text: str) -> dict[str, Any]:
         (r"ASYMMETRY", "asymmetry"),
         (r"TILT_RATIONALE", "tilt_rationale"),
         (r"CONFIDENCE", "confidence"),
+        (r"REASONING", "reasoning_excerpt"),
     ):
-        m = re.search(rf"{label}\s*:\s*(.+)", text, re.I)
+        m = re.search(
+            rf"(?:#+\s*)?{label}\s*[:=\-]\s*(.+?)(?=(?:#+\s*)?(?:NARRATIVE|ASYMMETRY|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|CONFIDENCE|REASONING)\s*[:=\-]|$)",
+            text,
+            re.I | re.S,
+        )
+        if not m:
+            m = re.search(rf"{label}\s*[:=\-]\s*(.+)", text, re.I)
         if m:
             val = m.group(1).strip().splitlines()[0]
             if key == "confidence":

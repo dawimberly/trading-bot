@@ -31,6 +31,7 @@ UNIVERSE = [
     "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
     "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
     "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "AMZN", "TSLA", "META",
+    "SPCX", "PLTR", "NFLX", "INTC", "MU", "SMCI", "COIN", "CRM", "SHOP",
     "VTI", "QQQ", "SPY", "IWM",
     "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX",
     "XOM", "CVX", "LNG",
@@ -118,11 +119,10 @@ PAPER_DYNAMIC_RISK_ENABLED = os.getenv("PAPER_DYNAMIC_RISK_ENABLED", "true").low
     "true",
     "yes",
 )
-PAPER_DYNAMIC_UNIVERSE_ENABLED = os.getenv("PAPER_DYNAMIC_UNIVERSE", "true").lower() in (
-    "1",
-    "true",
-    "yes",
+_paper_dyn_univ = os.getenv("PAPER_DYNAMIC_UNIVERSE_ENABLED") or os.getenv(
+    "PAPER_DYNAMIC_UNIVERSE", "true"
 )
+PAPER_DYNAMIC_UNIVERSE_ENABLED = _paper_dyn_univ.lower() in ("1", "true", "yes")
 PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
 PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
 PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.01"))
@@ -215,7 +215,7 @@ THINKING_MANUAL_APPROVAL_LIVE = os.getenv("THINKING_MANUAL_APPROVAL_LIVE", "true
 )
 # Disabled until live confidence calibration improves (see thinking engine accuracy analysis)
 THINKING_CONFIDENCE_AMPLIFY_ENABLED = os.getenv(
-    "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "false"
+    "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "true"
 ).lower() in ("1", "true", "yes")
 # Risk parity / All Weather + pod drawdown limits — paper aggressive only
 PAPER_RISK_PARITY_ENABLED = os.getenv("PAPER_RISK_PARITY_ENABLED", "false").lower() in (
@@ -1042,37 +1042,44 @@ def _nyse_eligible_symbol(symbol: str) -> bool:
 
 
 def nyse_momentum_universe(data_columns) -> list[str]:
-    """NYSE sleeve candidates: dynamic screener list or static data columns."""
+    """Equity sleeve candidates: dynamic screener (NYSE+NASDAQ) or static columns."""
     global _screener_fallback_warned
-    cols = list(data_columns)
-    static = [c for c in cols if _nyse_eligible_symbol(c)]
+    from modules.dynamic_universe import equity_sleeve_universe
+
     use_dynamic = USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe()
     if not use_dynamic:
-        return static
+        return [c for c in data_columns if _nyse_eligible_symbol(c)]
 
-    screener = load_screener_universe_tickers()
-    if not screener:
+    dynamic = equity_sleeve_universe(data_columns)
+    static = [c for c in data_columns if _nyse_eligible_symbol(c)]
+    if dynamic == static and use_dynamic and load_screener_universe_tickers():
         if not _screener_fallback_warned:
             warnings.warn(
-                f"USE_DYNAMIC_UNIVERSE enabled but {SCREENER_UNIVERSE_PATH} "
-                "missing or invalid — using static universe",
+                f"Dynamic universe enabled but no screener tickers in price data — "
+                f"fetch daily history for {SCREENER_UNIVERSE_PATH} tickers",
                 stacklevel=2,
             )
             _screener_fallback_warned = True
-        return static
-
-    screener_set = frozenset(screener)
-    dynamic = [c for c in cols if c in screener_set and _nyse_eligible_symbol(c)]
-    if not dynamic:
-        if not _screener_fallback_warned:
-            warnings.warn(
-                f"USE_DYNAMIC_UNIVERSE: no screener tickers in price data — "
-                "using static universe",
-                stacklevel=2,
-            )
-            _screener_fallback_warned = True
-        return static
     return dynamic
+
+
+def backtest_fetch_tickers() -> list[str]:
+    """Tickers to load for daily backtests (static UNIVERSE + screener when dynamic)."""
+    tickers = list(UNIVERSE)
+    if USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe():
+        extra = load_screener_universe_tickers() or []
+        tickers = sorted(set(tickers) | set(extra))
+    return tickers
+
+
+def dynamic_equity_position_scale(symbol: str) -> float:
+    """Paper-only position scale for IPO / high-vol names from screener metadata."""
+    try:
+        from modules.dynamic_universe import position_scale_for_symbol
+
+        return position_scale_for_symbol(symbol)
+    except ImportError:
+        return 1.0
 
 
 def is_metal_symbol(symbol: str) -> bool:
@@ -1549,6 +1556,7 @@ def get_paper_feature_flags() -> dict[str, bool]:
         return {}
     return {
         "dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
+        "dynamic_universe": PAPER_DYNAMIC_UNIVERSE_ENABLED,
         "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
         "stat_arb": effective_stat_arb_enabled(),
         "vol_overlay": effective_vol_trading_enabled(),

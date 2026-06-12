@@ -96,6 +96,9 @@ def main() -> int:
         persist_thinking_last(result, regime=regime)
         results.append({"as_of": as_of, "regime": regime, **result})
         print(f"MODEL: {result.get('model')} | SOURCE: {result.get('source')} | QUALITY: {result.get('parse_quality')}")
+        print(f"VALIDATION: ok={result.get('validation_ok')} score={result.get('validation_score')} rq={result.get('rationale_quality')}")
+        if result.get("validation_errors"):
+            print(f"VALIDATION_ERRORS: {result.get('validation_errors')}")
         print(f"NARRATIVE: {result.get('narrative')}")
         if result.get("asymmetry"):
             print(f"ASYMMETRY: {result.get('asymmetry')}")
