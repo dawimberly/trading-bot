@@ -97,15 +97,18 @@ Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/f
 
 Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default** on paper; **never auto-applies on live** without explicit approval.
 
-**Production safety (always on when thinking runs):**
+**Production safety (always on — entries + thinking):**
 
 | Guard | Live | Paper |
 |-------|------|-------|
-| Max sleeve tilt | **±6%** per sleeve (`THINKING_PRODUCTION_MAX_SLEEVE_DELTA`) | same |
-| Daily loss circuit breaker | **2%** intraday → block tilts | **4%** |
-| Manual approval | **Required** (`THINKING_MANUAL_APPROVAL_LIVE=true`) | auto (no approval file) |
-| Confidence amplification | **Off** | **Off** |
-| Post-apply validator | Rejects contradictory tilts; falls back to heuristic | same |
+| **Daily loss circuit breaker** | **2%** intraday → **no new entries or tilts** for the day | **4%** |
+| **Thinking max tilt** | **±6%** per sleeve (hard cap) | ±6% |
+| **Manual approval (thinking)** | **Required** before any live tilt apply | auto when engine on |
+| **Validator fallback** | heuristic tilt if LLM output fails checks | same |
+
+State files: `trading_safety_state.json` (daily anchor), `thinking_engine_last.json` (audit).
+
+**Live safety (always on when thinking enabled):** ±6% tilt cap · 2% daily loss breaker (all entries) · manual approval required · validator fallback to heuristic.
 
 Approve a pending live tilt after reviewing `thinking_engine_last.json`:
 
@@ -131,13 +134,12 @@ Every decision is persisted to `thinking_engine_last.json` (timestamp, full reas
 |-------|----------------|---------------|
 | Live + paper equity | `python status.py` | Investigate halt / Alpaca disconnect |
 | Regime + stack flags | `python status.py` | Confirm Profile A live, Profile B paper |
+| Daily loss circuit | `trading_safety_state.json` / `status.py` | Tripped → no new trades until next day |
 | Thinking audit | `thinking_engine_last.json` | Review before `scripts/approve_thinking_tilt.py` on live |
 | Risk events | `risk_events.log` | Check halt / resume / liquidations |
 | Paper heartbeat | `paper_chase_heartbeat.json` | Stale timestamp → restart paper bot |
 | Universe age | `status.py` universe line | >7d → `python scripts/analysis/universe_screener.py` |
 | Monthly scorecard | `wisdom_scorecard.json` | Review regime accuracy |
-
-**Live safety (always on when thinking enabled):** ±6% tilt cap · 2% daily loss breaker · manual approval required · validator fallback to heuristic.
 
 ---
 

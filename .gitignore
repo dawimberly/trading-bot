@@ -20,6 +20,7 @@ portfolio_state.json
 stat_arb_open_book.json
 thinking_engine_state.json
 thinking_engine_last.json
+trading_safety_state.json
 scripts/thinking_engine_analysis_output.json
 
 # PyInstaller one-dir output (use build/ or rebuild locally)

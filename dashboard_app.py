@@ -13,6 +13,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -111,17 +112,50 @@ except ImportError:
     TRAY_AVAILABLE = False
 
 COLORS = {
-    "bg": "#141414",
-    "card": "#1e1e1e",
-    "muted": "#94a3b8",
-    "text": "#f1f5f9",
-    "green": "#22c55e",
-    "red": "#ef4444",
-    "amber": "#f59e0b",
+    "bg": "#0a0e17",
+    "surface": "#111827",
+    "surface2": "#1a2332",
+    "card": "#152238",
+    "card_hover": "#1c2d4a",
+    "border": "#243049",
+    "muted": "#8b9cb8",
+    "text": "#e8eef7",
+    "text_dim": "#c5d0e0",
+    "green": "#34d399",
+    "green_dim": "#065f46",
+    "red": "#f87171",
+    "red_dim": "#7f1d1d",
+    "amber": "#fbbf24",
+    "amber_dim": "#78350f",
     "blue": "#60a5fa",
-    "live": "#7f1d1d",
+    "accent": "#2563eb",
+    "accent_hover": "#1d4ed8",
+    "live": "#991b1b",
+    "live_bg": "#450a0a",
     "small": "#b45309",
+    "small_bg": "#451a03",
+    "paper_ok": "#065f46",
+    "paper_ok_bg": "#064e3b",
+    "chart_grid": "#243049",
 }
+
+FONTS = {
+    "hero": ("Segoe UI", 28, "bold"),
+    "hero_sub": ("Segoe UI", 22, "bold"),
+    "title": ("Segoe UI", 20, "bold"),
+    "heading": ("Segoe UI", 14, "bold"),
+    "body": ("Segoe UI", 12),
+    "body_sm": ("Segoe UI", 11),
+    "caption": ("Segoe UI", 10),
+    "metric": ("Segoe UI", 16, "bold"),
+    "metric_sm": ("Segoe UI", 13, "bold"),
+}
+
+
+def _ctk_font(key: str) -> ctk.CTkFont:
+    family, size, *rest = FONTS[key]
+    weight = rest[0] if rest else "normal"
+    return ctk.CTkFont(family=family, size=size, weight=weight)
 
 plt.ioff()
 
@@ -198,15 +232,64 @@ def _needs_setup(username: str, book_id: str) -> bool:
     return False
 
 
-def _fetch_account_summary() -> tuple[float | None, float | None, str | None]:
+def _reset_equity_cache() -> None:
+    """Drop backtest/default equity so Alpaca live balance drives the UI."""
+    config.set_backtest_small_account_context(False)
+    if getattr(config, "_account_equity", None) is not None:
+        config._account_equity = None  # type: ignore[attr-defined]
+    if getattr(config, "_small_account_mode", False):
+        config._small_account_mode = False  # type: ignore[attr-defined]
+
+
+def _fetch_account_summary(*, retries: int = 2) -> tuple[float | None, float | None, str | None]:
+    """Fresh Alpaca account read; retries briefly on transient failures."""
+    last_err: str | None = None
+    for attempt in range(max(1, retries)):
+        try:
+            client = get_trading_client()
+            acct = client.get_account()
+            equity = float(acct.equity)
+            cash = float(acct.cash)
+            if equity > 0:
+                return equity, cash, None
+            last_err = "Account equity is zero"
+        except ValueError as exc:
+            last_err = str(exc)
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)
+        if attempt + 1 < retries:
+            time.sleep(0.35)
+    return None, None, last_err
+
+
+def _resolve_equity_cash(
+    acct_eq: float | None,
+    acct_cash: float | None,
+    acct_err: str | None,
+    heartbeat: dict | None,
+) -> tuple[float, float, str | None]:
+    """Prefer live Alpaca equity; ignore stale heartbeat when API keys are configured."""
+    hb_eq = float((heartbeat or {}).get("equity") or 0)
+    hb_cash = float((heartbeat or {}).get("cash") or 0)
+
+    if acct_eq is not None and acct_eq > 0:
+        cash = acct_cash if acct_cash is not None else hb_cash
+        return acct_eq, cash, acct_err
+
     try:
-        client = get_trading_client()
-        acct = client.get_account()
-        return float(acct.equity), float(acct.cash), None
-    except ValueError as exc:
-        return None, None, str(exc)
-    except Exception as exc:  # noqa: BLE001
-        return None, None, str(exc)
+        config.get_alpaca_credentials()
+        has_keys = True
+    except ValueError:
+        has_keys = False
+
+    if has_keys:
+        # Keys present but API failed — do not show old bot heartbeat (often $100 backtest).
+        return 0.0, hb_cash, acct_err or "Could not fetch live account equity"
+
+    if hb_eq > 0:
+        return hb_eq, hb_cash, acct_err
+
+    return 0.0, hb_cash, acct_err
 
 
 def _fetch_positions() -> tuple[pd.DataFrame | None, str | None]:
@@ -633,9 +716,9 @@ def _light_line_chart(
         ax.tick_params(colors=COLORS["muted"], labelsize=7)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
-        ax.spines["bottom"].set_color("#334155")
-        ax.spines["left"].set_color("#334155")
-    ax.set_title(title, color=COLORS["text"], fontsize=9, pad=4)
+        ax.spines["bottom"].set_color(COLORS["chart_grid"])
+        ax.spines["left"].set_color(COLORS["chart_grid"])
+    ax.set_title(title, color=COLORS["text"], fontsize=10, pad=6, fontweight="bold")
     fig.subplots_adjust(left=0.08, right=0.98, top=0.82, bottom=0.12)
     return fig
 
@@ -644,14 +727,53 @@ def _light_line_chart(
 
 
 class MetricCard(ctk.CTkFrame):
-    def __init__(self, master, title: str, **kwargs):
-        super().__init__(master, corner_radius=10, fg_color=COLORS["card"], **kwargs)
-        self._title = ctk.CTkLabel(
-            self, text=title, font=ctk.CTkFont(size=11), text_color=COLORS["muted"]
+    """Metric tile with optional hero sizing and subtle hover highlight."""
+
+    def __init__(
+        self,
+        master,
+        title: str,
+        *,
+        hero: bool = False,
+        **kwargs,
+    ):
+        super().__init__(
+            master,
+            corner_radius=14,
+            fg_color=COLORS["card"],
+            border_width=1,
+            border_color=COLORS["border"],
+            **kwargs,
         )
-        self._title.pack(anchor="w", padx=10, pady=(8, 0))
-        self._value = ctk.CTkLabel(self, text="—", font=ctk.CTkFont(size=17, weight="bold"))
-        self._value.pack(anchor="w", padx=10, pady=(0, 8))
+        self._hero = hero
+        pad_x = 14 if hero else 10
+        pad_y = 12 if hero else 8
+        self._title = ctk.CTkLabel(
+            self,
+            text=title.upper(),
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._title.pack(anchor="w", padx=pad_x, pady=(pad_y, 2))
+        value_size = 28 if hero else 16
+        self._value = ctk.CTkLabel(
+            self,
+            text="—",
+            font=ctk.CTkFont(family="Segoe UI", size=value_size, weight="bold"),
+            text_color=COLORS["text"],
+        )
+        self._value.pack(anchor="w", padx=pad_x, pady=(0, pad_y))
+        self.bind("<Enter>", self._on_enter)
+        self.bind("<Leave>", self._on_leave)
+        for w in (self._title, self._value):
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+
+    def _on_enter(self, _event=None) -> None:
+        self.configure(fg_color=COLORS["card_hover"], border_color=COLORS["accent"])
+
+    def _on_leave(self, _event=None) -> None:
+        self.configure(fg_color=COLORS["card"], border_color=COLORS["border"])
 
     def set(self, text: str, color: str | None = None) -> None:
         self._value.configure(text=text, text_color=color or COLORS["text"])
@@ -666,20 +788,20 @@ class DataTable(ctk.CTkFrame):
         style.theme_use("clam")
         style.configure(
             "Dash.Treeview",
-            background=COLORS["card"],
+            background=COLORS["surface"],
             foreground=COLORS["text"],
-            fieldbackground=COLORS["card"],
+            fieldbackground=COLORS["surface"],
             borderwidth=0,
-            rowheight=24,
+            rowheight=26,
             font=("Segoe UI", 10),
         )
         style.configure(
             "Dash.Treeview.Heading",
-            background="#2a2a2a",
+            background=COLORS["surface2"],
             foreground=COLORS["muted"],
             font=("Segoe UI", 10, "bold"),
         )
-        style.map("Dash.Treeview", background=[("selected", "#334155")])
+        style.map("Dash.Treeview", background=[("selected", COLORS["accent"])])
 
         self._columns = columns
         self._tree = ttk.Treeview(
@@ -736,16 +858,33 @@ class LoginApp(ctk.CTk):
         ctk.CTkLabel(
             self,
             text="PythonTrading",
-            font=ctk.CTkFont(size=22, weight="bold"),
-        ).pack(pady=(24, 4))
+            font=_ctk_font("title"),
+        ).pack(pady=(28, 4))
         ctk.CTkLabel(
             self,
             text="Sign in to connect Alpaca and open your dashboard.",
+            font=_ctk_font("body_sm"),
             text_color=COLORS["muted"],
-        ).pack(pady=(0, 16))
+        ).pack(pady=(0, 18))
 
-        self._tabs = ctk.CTkTabview(self, width=360, height=360)
-        self._tabs.pack(padx=24, pady=8)
+        card = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["surface"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        card.pack(padx=28, pady=8, fill="both", expand=True)
+        self._tabs = ctk.CTkTabview(
+            card,
+            width=340,
+            height=340,
+            fg_color=COLORS["surface"],
+            segmented_button_fg_color=COLORS["surface2"],
+            segmented_button_selected_color=COLORS["accent"],
+            segmented_button_unselected_color=COLORS["surface2"],
+        )
+        self._tabs.pack(padx=12, pady=12)
         tab_login = self._tabs.add("Log in")
         tab_register = self._tabs.add("Register")
 
@@ -761,8 +900,19 @@ class LoginApp(ctk.CTk):
             tab_login,
             text="Remember username",
             variable=self._remember_var,
+            font=_ctk_font("body_sm"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
         ).pack(anchor="w", padx=8, pady=(4, 0))
-        ctk.CTkButton(tab_login, text="Log in", command=self._do_login).pack(pady=16)
+        ctk.CTkButton(
+            tab_login,
+            text="Log in",
+            command=self._do_login,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            corner_radius=10,
+            height=36,
+        ).pack(pady=16)
         self._login_user.bind("<Return>", lambda _e: self._login_pwd.focus_set())
         self._login_pwd.bind("<Return>", lambda _e: self._do_login())
         if last_user:
@@ -778,9 +928,15 @@ class LoginApp(ctk.CTk):
             show="*",
             required=False,
         )
-        ctk.CTkButton(tab_register, text="Create account", command=self._do_register).pack(
-            pady=16
-        )
+        ctk.CTkButton(
+            tab_register,
+            text="Create account",
+            command=self._do_register,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            corner_radius=10,
+            height=36,
+        ).pack(pady=16)
         self._reg_pwd2.bind("<Return>", lambda _e: self._do_register())
 
         init_db()
@@ -1102,11 +1258,12 @@ class TradingDashboardApp(ctk.CTk):
         save_last_book_id(self._book_id)
         self._apply_user_paths(username, self._book_id)
         self.title(f"PythonTrading — {book_label(self._book_id)}")
-        self.geometry("900x640")
-        self.minsize(900, 560)
+        self.geometry("960x720")
+        self.minsize(920, 620)
         self.configure(fg_color=COLORS["bg"])
 
         self._refresh_job: str | None = None
+        self._clock_job: str | None = None
         self._active_tab = "Overview"
         self._charts_dirty = True
         self._last_equity = 0.0
@@ -1121,127 +1278,198 @@ class TradingDashboardApp(ctk.CTk):
             except Exception:
                 pass
 
-        # Header — left/right sub-frames so pack order cannot clip dropdown or toolbar.
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=12, pady=(10, 0))
+        # Header bar
+        header_bar = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["surface"],
+            corner_radius=16,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        header_bar.pack(fill="x", padx=14, pady=(12, 6))
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
-        header_right = ctk.CTkFrame(header, fg_color="transparent")
-        header_right.pack(side="right", anchor="ne")
-        toolbar = header_right
-        ctk.CTkButton(
-            toolbar,
-            text="Refresh",
-            width=72,
-            height=28,
-            command=self.refresh_data,
-        ).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(
-            toolbar,
-            text="Start Bot",
-            width=82,
-            height=28,
-            fg_color="#166534",
-            hover_color="#14532d",
-            command=self._on_start_bot,
-        ).pack(side="left", padx=(0, 4))
-        ctk.CTkButton(
-            toolbar,
-            text="Stop Bot",
-            width=78,
-            height=28,
-            fg_color="#991b1b",
-            hover_color="#7f1d1d",
-            command=self._on_stop_bot,
-        ).pack(side="left", padx=(0, 8))
-        self._bot_badge = ctk.CTkLabel(
-            toolbar, text="Bot: —", font=ctk.CTkFont(size=12), text_color=COLORS["muted"]
-        )
-        self._bot_badge.pack(side="left")
+        header_inner = ctk.CTkFrame(header_bar, fg_color="transparent")
+        header_inner.pack(fill="x", padx=12, pady=10)
 
-        header_left = ctk.CTkFrame(header, fg_color="transparent")
-        header_left.pack(side="left", fill="x", expand=True, anchor="nw")
+        header_left = ctk.CTkFrame(header_inner, fg_color="transparent")
+        header_left.pack(side="left", fill="x", expand=True)
         ctk.CTkButton(
             header_left,
             text="☰",
-            width=36,
-            height=32,
+            width=38,
+            height=34,
             font=ctk.CTkFont(size=18),
-            fg_color="#334155",
-            hover_color="#475569",
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["accent"],
+            corner_radius=10,
             command=self._open_book_menu,
         ).pack(side="left", padx=(0, 8))
+        title_block = ctk.CTkFrame(header_left, fg_color="transparent")
+        title_block.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(
+            title_block,
+            text="PythonTrading Monitor",
+            font=_ctk_font("title"),
+            text_color=COLORS["text"],
+        ).pack(anchor="w")
+        sub_row = ctk.CTkFrame(title_block, fg_color="transparent")
+        sub_row.pack(anchor="w", pady=(2, 0))
+        self._clock_label = ctk.CTkLabel(
+            sub_row,
+            text="",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["muted"],
+        )
+        self._clock_label.pack(side="left")
+        ctk.CTkLabel(
+            sub_row,
+            text=f"  ·  {username}",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["text_dim"],
+        ).pack(side="left")
+        self._live_equity_label = ctk.CTkLabel(
+            title_block,
+            text="Live Equity: —",
+            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
+            text_color=COLORS["green"],
+        )
+        self._live_equity_label.pack(anchor="w", pady=(6, 0))
         self._book_menu = ctk.CTkOptionMenu(
             header_left,
             variable=self._book_var,
             values=_book_dropdown_values(),
             command=self._on_header_book_selected,
-            width=168,
-            font=ctk.CTkFont(size=12, weight="bold"),
-            fg_color="#1e3a5f",
-            button_color="#334155",
-            button_hover_color="#475569",
+            width=172,
+            font=_ctk_font("body_sm"),
+            fg_color=COLORS["accent"],
+            button_color=COLORS["surface2"],
+            button_hover_color=COLORS["accent_hover"],
+            dropdown_fg_color=COLORS["surface2"],
         )
-        self._book_menu.pack(side="left", padx=(0, 8))
-        ctk.CTkLabel(
-            header_left,
-            text="PythonTrading",
-            font=ctk.CTkFont(size=20, weight="bold"),
-        ).pack(side="left")
-        ctk.CTkLabel(
-            header_left,
-            text=username,
-            font=ctk.CTkFont(size=12),
+        self._book_menu.pack(side="right", padx=(8, 0))
+
+        header_right = ctk.CTkFrame(header_inner, fg_color="transparent")
+        header_right.pack(side="right", anchor="ne")
+        self._bot_badge = ctk.CTkLabel(
+            header_right,
+            text="Bot: —",
+            font=_ctk_font("body_sm"),
             text_color=COLORS["muted"],
-        ).pack(side="left", padx=(8, 0))
+        )
+        self._bot_badge.pack(side="right", padx=(12, 0))
+        btn_row = ctk.CTkFrame(header_right, fg_color="transparent")
+        btn_row.pack(side="right")
+        ctk.CTkButton(
+            btn_row,
+            text="Refresh",
+            width=78,
+            height=32,
+            corner_radius=10,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["accent"],
+            command=self.refresh_data,
+        ).pack(side="left", padx=3)
+        ctk.CTkButton(
+            btn_row,
+            text="Start",
+            width=72,
+            height=32,
+            corner_radius=10,
+            fg_color=COLORS["paper_ok_bg"],
+            hover_color=COLORS["green_dim"],
+            command=self._on_start_bot,
+        ).pack(side="left", padx=3)
+        ctk.CTkButton(
+            btn_row,
+            text="Stop",
+            width=68,
+            height=32,
+            corner_radius=10,
+            fg_color=COLORS["live_bg"],
+            hover_color=COLORS["live"],
+            command=self._on_stop_bot,
+        ).pack(side="left", padx=3)
 
         top_stack = ctk.CTkFrame(self, fg_color="transparent")
-        top_stack.pack(fill="x", padx=12, pady=4)
+        top_stack.pack(fill="x", padx=14, pady=4)
 
         self._banner_frame = ctk.CTkFrame(top_stack, fg_color="transparent")
         self._banner_frame.pack(fill="x")
 
-        self._small_panel = ctk.CTkFrame(top_stack, fg_color="#3d2a14", corner_radius=10)
+        self._small_panel = ctk.CTkFrame(
+            top_stack,
+            fg_color=COLORS["small_bg"],
+            corner_radius=14,
+            border_width=1,
+            border_color=COLORS["small"],
+        )
         self._small_title = ctk.CTkLabel(
             self._small_panel,
-            text="Small Account Summary",
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color="#fde68a",
+            text="Small Account Mode",
+            font=_ctk_font("heading"),
+            text_color=COLORS["amber"],
         )
-        self._small_title.pack(anchor="w", padx=12, pady=(8, 2))
+        self._small_title.pack(anchor="w", padx=14, pady=(10, 2))
         self._small_body = ctk.CTkLabel(
             self._small_panel,
             text="",
             justify="left",
-            font=ctk.CTkFont(size=12),
-            text_color="#fef3c7",
+            font=_ctk_font("body_sm"),
+            text_color="#fde68a",
         )
-        self._small_body.pack(anchor="w", padx=12, pady=(0, 10))
+        self._small_body.pack(anchor="w", padx=14, pady=(0, 10))
 
-        body_top = ctk.CTkFrame(top_stack, fg_color="transparent")
-        body_top.pack(fill="x", pady=(6, 0))
-
-        metrics = ctk.CTkFrame(body_top, fg_color="transparent")
-        metrics.pack(side="left", fill="both", expand=True)
+        hero_row = ctk.CTkFrame(top_stack, fg_color="transparent")
+        hero_row.pack(fill="x", pady=(8, 4))
         self._metric_cards: dict[str, MetricCard] = {}
-        for i, key in enumerate(("equity", "cash", "invested", "pnl", "market")):
+        self._metric_cards["equity"] = MetricCard(hero_row, "Equity", hero=True)
+        self._metric_cards["equity"].pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self._metric_cards["pnl"] = MetricCard(hero_row, "Open P&L", hero=True)
+        self._metric_cards["pnl"].pack(side="left", fill="both", expand=True, padx=(0, 6))
+
+        spark_wrap = ctk.CTkFrame(
+            hero_row,
+            fg_color=COLORS["card"],
+            corner_radius=14,
+            border_width=1,
+            border_color=COLORS["border"],
+            width=220,
+        )
+        spark_wrap.pack(side="right")
+        spark_wrap.pack_propagate(False)
+        ctk.CTkLabel(
+            spark_wrap,
+            text="EQUITY TREND",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        ).pack(anchor="w", padx=12, pady=(10, 0))
+        self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent", height=64)
+        self._spark_frame.pack(fill="both", expand=True, padx=8, pady=(4, 10))
+
+        metrics = ctk.CTkFrame(top_stack, fg_color="transparent")
+        metrics.pack(fill="x", pady=(0, 4))
+        for i, key in enumerate(("cash", "invested", "market")):
             card = MetricCard(metrics, key.title())
-            card.grid(row=0, column=i, padx=3, sticky="nsew")
+            card.grid(row=0, column=i, padx=4, sticky="nsew")
             metrics.grid_columnconfigure(i, weight=1)
             self._metric_cards[key] = card
 
-        spark_wrap = ctk.CTkFrame(body_top, fg_color=COLORS["card"], corner_radius=10, width=200)
-        spark_wrap.pack(side="right", padx=(8, 0))
-        spark_wrap.pack_propagate(False)
-        ctk.CTkLabel(
-            spark_wrap, text="Equity", font=ctk.CTkFont(size=10), text_color=COLORS["muted"]
-        ).pack(anchor="w", padx=8, pady=(6, 0))
-        self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent", height=52)
-        self._spark_frame.pack(fill="both", expand=True, padx=4, pady=4)
-
         # Tabs
-        self._tabs = ctk.CTkTabview(self, height=300, command=self._on_tab_changed)
-        self._tabs.pack(fill="both", expand=True, padx=12, pady=6)
+        self._tabs = ctk.CTkTabview(
+            self,
+            height=320,
+            command=self._on_tab_changed,
+            fg_color=COLORS["surface"],
+            segmented_button_fg_color=COLORS["surface2"],
+            segmented_button_selected_color=COLORS["accent"],
+            segmented_button_selected_hover_color=COLORS["accent_hover"],
+            segmented_button_unselected_color=COLORS["surface2"],
+            segmented_button_unselected_hover_color=COLORS["card_hover"],
+            text_color=COLORS["text"],
+            text_color_disabled=COLORS["muted"],
+        )
+        self._tabs.pack(fill="both", expand=True, padx=14, pady=8)
         self._tab_overview = self._tabs.add("Overview")
         self._tab_positions = self._tabs.add("Positions")
         self._tab_trades = self._tabs.add("Trades")
@@ -1276,56 +1504,54 @@ class TradingDashboardApp(ctk.CTk):
         self._build_wisdom_tab()
         self._build_charts_tab()
 
-        # Footer
-        footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.pack(fill="x", padx=12, pady=(0, 10))
-        ctk.CTkButton(footer, text="Refresh", width=90, height=28, command=self.refresh_data).pack(
-            side="left", padx=(0, 6)
+        # Footer — compact controls only (actions live in header)
+        footer = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["surface"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
         )
-        ctk.CTkButton(
-            footer,
-            text="Start Bot",
-            width=90,
-            height=28,
-            fg_color="#166534",
-            hover_color="#14532d",
-            command=self._on_start_bot,
-        ).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(
-            footer,
-            text="Stop Bot",
-            width=90,
-            height=28,
-            fg_color="#991b1b",
-            hover_color="#7f1d1d",
-            command=self._on_stop_bot,
-        ).pack(side="left")
+        footer.pack(fill="x", padx=14, pady=(0, 12))
+        footer_inner = ctk.CTkFrame(footer, fg_color="transparent")
+        footer_inner.pack(fill="x", padx=10, pady=8)
         self._charts_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            footer,
+            footer_inner,
             text="Charts on refresh",
             variable=self._charts_var,
-            font=ctk.CTkFont(size=11),
-        ).pack(side="left", padx=(12, 4))
+            font=_ctk_font("body_sm"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+        ).pack(side="left", padx=(0, 8))
         self._tray_var = ctk.BooleanVar(value=False)
         tray_cb = ctk.CTkCheckBox(
-            footer,
+            footer_inner,
             text="Minimize to tray",
             variable=self._tray_var,
-            font=ctk.CTkFont(size=11),
+            font=_ctk_font("body_sm"),
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
         )
-        tray_cb.pack(side="left", padx=4)
+        tray_cb.pack(side="left")
         if not TRAY_AVAILABLE:
             tray_cb.configure(state="disabled")
         self._status_label = ctk.CTkLabel(
-            footer, text="", font=ctk.CTkFont(size=11), text_color=COLORS["muted"]
+            footer_inner,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
         )
         self._status_label.pack(side="right")
+
+        self._tick_clock()
+        self._start_clock()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         if _needs_setup(username, self._book_id):
             self.after(200, self._show_setup_wizard)
         else:
+            self._bootstrap_live_equity()
             self.refresh_data()
             self._schedule_refresh()
             if self._auto_start_bot:
@@ -1369,6 +1595,8 @@ class TradingDashboardApp(ctk.CTk):
         if _needs_setup(self._username, book_id):
             self._show_setup_wizard()
         else:
+            _reset_equity_cache()
+            self._bootstrap_live_equity()
             self.refresh_data()
 
     def _on_logout_click(self) -> None:
@@ -1381,45 +1609,66 @@ class TradingDashboardApp(ctk.CTk):
         self._on_logout()
 
     def _build_overview_tab(self) -> None:
-        top = ctk.CTkFrame(self._tab_overview, fg_color="transparent")
-        top.pack(fill="x", padx=8, pady=8)
-        self._regime_label = ctk.CTkLabel(top, text="Regime: —", font=ctk.CTkFont(size=13))
-        self._regime_label.pack(side="left", padx=(0, 16))
-        self._status_label_tab = ctk.CTkLabel(top, text="Status: —", font=ctk.CTkFont(size=13))
-        self._status_label_tab.pack(side="left", padx=(0, 16))
+        top = ctk.CTkFrame(
+            self._tab_overview,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        top.pack(fill="x", padx=10, pady=10)
+        top_inner = ctk.CTkFrame(top, fg_color="transparent")
+        top_inner.pack(fill="x", padx=12, pady=10)
+        self._regime_label = ctk.CTkLabel(
+            top_inner, text="Regime: —", font=_ctk_font("body_sm"), text_color=COLORS["text_dim"]
+        )
+        self._regime_label.pack(side="left", padx=(0, 20))
+        self._status_label_tab = ctk.CTkLabel(
+            top_inner, text="Status: —", font=_ctk_font("body_sm"), text_color=COLORS["text_dim"]
+        )
+        self._status_label_tab.pack(side="left", padx=(0, 20))
         self._cycle_label = ctk.CTkLabel(
-            top, text="", font=ctk.CTkFont(size=11), text_color=COLORS["muted"]
+            top_inner, text="", font=_ctk_font("caption"), text_color=COLORS["muted"]
         )
         self._cycle_label.pack(side="right")
 
         ctk.CTkLabel(
             self._tab_overview,
             text="Next actions",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=_ctk_font("heading"),
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(4, 2))
+        ).pack(fill="x", padx=14, pady=(4, 4))
         self._actions_frame = ctk.CTkFrame(self._tab_overview, fg_color="transparent")
-        self._actions_frame.pack(fill="x", padx=12)
+        self._actions_frame.pack(fill="x", padx=14)
 
         ctk.CTkLabel(
             self._tab_overview,
             text="Wisdom",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=_ctk_font("heading"),
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 2))
+        ).pack(fill="x", padx=14, pady=(12, 4))
         self._wisdom_line = ctk.CTkLabel(
-            self._tab_overview, text="—", justify="left", anchor="w", text_color=COLORS["muted"]
+            self._tab_overview,
+            text="—",
+            justify="left",
+            anchor="w",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["muted"],
         )
-        self._wisdom_line.pack(fill="x", padx=12)
+        self._wisdom_line.pack(fill="x", padx=14)
 
         ctk.CTkLabel(
             self._tab_overview,
             text="Crypto vol sleeve",
-            font=ctk.CTkFont(size=12, weight="bold"),
+            font=_ctk_font("heading"),
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 2))
+        ).pack(fill="x", padx=14, pady=(12, 4))
         self._crypto_vol_panel = ctk.CTkFrame(
-            self._tab_overview, fg_color=COLORS["card"], corner_radius=8
+            self._tab_overview,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
         )
         self._crypto_vol_panel.pack(fill="x", padx=12, pady=(0, 4))
         self._crypto_vol_body = ctk.CTkLabel(
@@ -1460,10 +1709,17 @@ class TradingDashboardApp(ctk.CTk):
 
     def _build_charts_tab(self) -> None:
         bar = ctk.CTkFrame(self._tab_charts, fg_color="transparent")
-        bar.pack(fill="x", padx=8, pady=(8, 4))
-        ctk.CTkButton(bar, text="Redraw charts", width=110, height=28, command=self._draw_charts).pack(
-            side="left"
-        )
+        bar.pack(fill="x", padx=10, pady=(10, 6))
+        ctk.CTkButton(
+            bar,
+            text="Redraw charts",
+            width=120,
+            height=32,
+            corner_radius=10,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            command=self._draw_charts,
+        ).pack(side="left")
         self._charts_hint = ctk.CTkLabel(
             bar,
             text="VTI + SPY · GLD when small account",
@@ -1510,44 +1766,78 @@ class TradingDashboardApp(ctk.CTk):
     def _show_banners(self, equity: float, small_account: bool) -> None:
         self._clear_frame(self._banner_frame)
         if small_account:
-            banner = ctk.CTkFrame(self._banner_frame, fg_color=COLORS["small"], corner_radius=10)
-            banner.pack(fill="x", pady=(0, 4))
+            banner = ctk.CTkFrame(
+                self._banner_frame,
+                fg_color=COLORS["small_bg"],
+                corner_radius=12,
+                border_width=1,
+                border_color=COLORS["small"],
+            )
+            banner.pack(fill="x", pady=(0, 6))
             ctk.CTkLabel(
                 banner,
-                text="◆  SMALL ACCOUNT MODE ACTIVE  ◆",
-                font=ctk.CTkFont(size=16, weight="bold"),
-                text_color="#fffbeb",
-            ).pack(pady=(8, 0))
+                text="◆  SMALL ACCOUNT MODE  ◆",
+                font=_ctk_font("heading"),
+                text_color=COLORS["amber"],
+            ).pack(pady=(10, 0))
             ctk.CTkLabel(
                 banner,
                 text="1% risk per trade  ·  90% VTI core  ·  $10 max order",
-                font=ctk.CTkFont(size=12),
+                font=_ctk_font("body_sm"),
                 text_color="#fde68a",
-            ).pack(pady=(2, 8))
+            ).pack(pady=(2, 10))
         if not config.PAPER_TRADING:
-            live = ctk.CTkFrame(self._banner_frame, fg_color=COLORS["live"], corner_radius=10)
-            live.pack(fill="x")
+            live = ctk.CTkFrame(
+                self._banner_frame,
+                fg_color=COLORS["live_bg"],
+                corner_radius=12,
+                border_width=1,
+                border_color=COLORS["live"],
+            )
+            live.pack(fill="x", pady=(0, 6))
             ctk.CTkLabel(
                 live,
-                text="LIVE TRADING — REAL MONEY",
-                font=ctk.CTkFont(size=15, weight="bold"),
-                text_color="#ffffff",
-            ).pack(pady=(8, 2))
+                text="⚠  LIVE TRADING — REAL MONEY",
+                font=_ctk_font("heading"),
+                text_color="#fecaca",
+            ).pack(pady=(10, 2))
             ctk.CTkLabel(
                 live,
                 text=f"Equity ${equity:,.2f} · orders use real funds",
-                font=ctk.CTkFont(size=11),
-                text_color="#fecaca",
-            ).pack(pady=(0, 8))
+                font=_ctk_font("body_sm"),
+                text_color="#fca5a5",
+            ).pack(pady=(0, 10))
         elif not small_account:
-            paper = ctk.CTkFrame(self._banner_frame, fg_color="#1e3a5f", corner_radius=8)
-            paper.pack(fill="x")
+            paper = ctk.CTkFrame(
+                self._banner_frame,
+                fg_color=COLORS["paper_ok_bg"],
+                corner_radius=12,
+                border_width=1,
+                border_color=COLORS["green_dim"],
+            )
+            paper.pack(fill="x", pady=(0, 6))
             ctk.CTkLabel(
                 paper,
-                text="Paper trading mode",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color="#bae6fd",
-            ).pack(pady=6)
+                text="✓  Paper trading — simulated funds, no real risk",
+                font=_ctk_font("body_sm"),
+                text_color=COLORS["green"],
+            ).pack(pady=10)
+
+    def _tick_clock(self) -> None:
+        now = datetime.now()
+        self._clock_label.configure(
+            text=now.strftime("%A, %b %d · %I:%M:%S %p").replace(" 0", " ")
+        )
+
+    def _start_clock(self) -> None:
+        if self._clock_job:
+            self.after_cancel(self._clock_job)
+
+        def _loop() -> None:
+            self._tick_clock()
+            self._clock_job = self.after(1000, _loop)
+
+        _loop()
 
     def _update_small_panel(self, equity: float, heartbeat: dict | None) -> None:
         if not (equity > 0 and config.is_small_account(equity)):
@@ -1584,21 +1874,55 @@ class TradingDashboardApp(ctk.CTk):
                 return total / equity * 100
         return max(0.0, (equity - cash) / equity * 100)
 
+    def _bootstrap_live_equity(self) -> None:
+        """Force a fresh Alpaca read on startup / book switch before heartbeat fallback."""
+        _reset_equity_cache()
+        self._last_equity = 0.0
+        eq, cash, err = _fetch_account_summary(retries=3)
+        if eq is not None and eq > 0:
+            self._last_equity = eq
+            config.configure_account_profile(eq)
+            self._update_live_equity_header(eq, err)
+            return
+        self._update_live_equity_header(0.0, err)
+
+    def _update_live_equity_header(self, equity: float, acct_err: str | None) -> None:
+        live = not config.PAPER_TRADING
+        prefix = "Live" if live else "Paper"
+        if equity > 0:
+            color = COLORS["green"] if live else COLORS["blue"]
+            self._live_equity_label.configure(
+                text=f"{prefix} Equity: ${equity:,.2f}",
+                text_color=color,
+            )
+            return
+        if acct_err:
+            short = acct_err if len(acct_err) <= 48 else acct_err[:45] + "…"
+            self._live_equity_label.configure(
+                text=f"{prefix} Equity: unavailable · {short}",
+                text_color=COLORS["amber"],
+            )
+        else:
+            self._live_equity_label.configure(
+                text=f"{prefix} Equity: —",
+                text_color=COLORS["muted"],
+            )
+
     def refresh_data(self) -> None:
+        _reset_equity_cache()
         heartbeat = _load_json(_resolve_path(config.HEARTBEAT_FILE))
         scorecard, scorecard_src = _load_scorecard(self._username, self._book_id)
-        acct_eq, acct_cash, acct_err = _fetch_account_summary()
+        acct_eq, acct_cash, acct_err = _fetch_account_summary(retries=2)
         positions_df, pos_err = _fetch_positions()
         journal_df = _load_trade_history(self._username, self._book_id)
 
-        hb_eq = float((heartbeat or {}).get("equity") or 0)
-        hb_cash = float((heartbeat or {}).get("cash") or 0)
-        equity = acct_eq if acct_eq is not None else hb_eq
-        cash = acct_cash if acct_cash is not None else hb_cash
+        equity, cash, acct_err = _resolve_equity_cash(acct_eq, acct_cash, acct_err, heartbeat)
         self._last_equity = equity
         if equity > 0:
             config.configure_account_profile(equity)
         small_account = equity > 0 and config.is_small_account(equity)
+
+        self._update_live_equity_header(equity, acct_err)
 
         self._show_banners(equity, small_account)
         self._update_small_panel(equity, heartbeat)
@@ -2091,6 +2415,8 @@ class TradingDashboardApp(ctk.CTk):
         self._shutting_down = True
         if self._refresh_job:
             self.after_cancel(self._refresh_job)
+        if self._clock_job:
+            self.after_cancel(self._clock_job)
         self._stop_tray()
         self.destroy()
 

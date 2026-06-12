@@ -9,6 +9,16 @@ from __future__ import annotations
 import os
 
 BEST_PAPER_VERSION = "2.0"
+BEST_PAPER_LOCKED = True  # stack enforced via enforce_best_paper_stack() on every paper path
+
+# Production safety — always on (see modules/trading_safety.py)
+PRODUCTION_SAFETY = {
+    "daily_loss_limit_live_pct": 2.0,
+    "daily_loss_limit_paper_pct": 4.0,
+    "thinking_tilt_cap_pp": 6.0,
+    "live_thinking_manual_approval": True,
+    "daily_loss_blocks_entries": True,
+}
 
 # Core ON — beat mutual-fund Sharpe with systematic sleeves
 BEST_PAPER_CORE_ON: dict[str, bool] = {
@@ -68,6 +78,11 @@ def get_best_paper_feature_flags() -> dict[str, bool]:
 def get_locked_off_flags() -> dict[str, bool]:
     """Features that must stay off under Best Paper Bot v2."""
     return dict(BEST_PAPER_LOCKED_OFF)
+
+
+def get_production_safety() -> dict:
+    """Locked production safety limits (live vs paper)."""
+    return dict(PRODUCTION_SAFETY)
 
 
 def get_full_stack() -> dict[str, bool]:

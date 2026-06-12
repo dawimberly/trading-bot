@@ -153,6 +153,48 @@ def _universe_line() -> str:
         return "universe: n/a"
 
 
+def _safety_table_lines() -> list[str]:
+    s = config.get_production_safety_summary()
+    lines = [
+        "=== Production safety (always on) ===",
+        "| Guard | Live ($300) | Paper |",
+        "|-------|-------------|-------|",
+        f"| Daily loss circuit breaker | {s['daily_loss_limit_live_pct']:.0f}% → pause entries + tilts | {s['daily_loss_limit_paper_pct']:.0f}% |",
+        f"| Thinking max tilt / sleeve | ±{s['live_tilt_cap_pp']:.0f}% | ±{s['max_sleeve_delta_pp']:.0f}% |",
+        f"| Thinking manual approval | {'required' if s['manual_approval_live'] else 'off'} | auto (opt-in engine) |",
+        f"| Thinking engine default | off | {'on' if s['paper_thinking_enabled'] else 'off (opt-in)'} |",
+        f"| Daily loss breaker enabled | {'yes' if s['daily_loss_breaker_enabled'] else 'no'} | same |",
+    ]
+    try:
+        from modules.trading_safety import get_daily_loss_status
+
+        live_dl = get_daily_loss_status(paper=False)
+        paper_dl = get_daily_loss_status(paper=True)
+        lines.append(
+            f"| Today circuit (live) | "
+            f"{'TRIPPED' if live_dl['tripped'] else 'ok'} "
+            f"(limit {live_dl['limit_pct']:.0f}%) | "
+            f"{'TRIPPED' if paper_dl['tripped'] else 'ok'} "
+            f"(limit {paper_dl['limit_pct']:.0f}%) |"
+        )
+    except Exception:
+        pass
+    return lines
+
+
+def _profile_table_lines() -> list[str]:
+    return [
+        "=== Profiles ===",
+        "| | Live Profile A (~$300) | Paper Profile B (Best v2) |",
+        "|--|------------------------|---------------------------|",
+        f"| VTI core | {config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} (<$500) / 80% | dynamic 40–75% |",
+        f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1–3% |",
+        "| Stat arb / vol / options | off | on (locked stack) |",
+        "| Thinking engine | off (approval if enabled) | opt-in Ollama |",
+        "| Macro / social / risk parity | off | locked off |",
+    ]
+
+
 def main() -> None:
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
@@ -185,6 +227,14 @@ def main() -> None:
     logger.info(f"Paper OFF (locked): {paper_off}")
     logger.info(f"Paper thinking safety: {_paper_thinking_safety_line()}")
     logger.info(_universe_line())
+    for line in _profile_table_lines():
+        logger.info(line)
+    for line in _safety_table_lines():
+        logger.info(line)
+    logger.info(
+        "Monitor: python status.py | thinking_engine_last.json | "
+        "bot_heartbeat.json | trading_safety_state.json"
+    )
 
 
 if __name__ == "__main__":

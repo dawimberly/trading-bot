@@ -403,6 +403,17 @@ def main():
     config.configure_account_profile(equity)
     _last_equity = equity
 
+    from modules.trading_safety import (
+        daily_loss_circuit_tripped,
+        set_entry_block_for_cycle,
+    )
+
+    dl_tripped, dl_reason, _ = daily_loss_circuit_tripped(equity)
+    set_entry_block_for_cycle(dl_reason if dl_tripped else None)
+    if dl_tripped:
+        print(f"!!! DAILY LOSS CIRCUIT: {dl_reason} — no new entries or thinking tilts today !!!")
+        log_event("daily_loss_circuit", reason=dl_reason, equity=equity)
+
     prev_halted = risk_manager.halted
     can_trade = risk_manager.check_drawdown(equity)
     if not can_trade:

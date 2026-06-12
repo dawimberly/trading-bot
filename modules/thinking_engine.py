@@ -639,33 +639,18 @@ def _validate_thinking_quality(
     return len(errors) == 0, errors
 
 
-def _update_daily_equity_anchor(equity: float | None) -> None:
-    if equity is None or equity <= 0:
-        return
-    today = datetime.date.today().isoformat()
-    state = read_json_file(STATE_FILE)
-    if state.get("daily_equity_date") != today:
-        state["daily_equity_date"] = today
-        state["daily_equity_open"] = round(float(equity), 4)
-        write_json_file(STATE_FILE, state)
-
-
 def thinking_daily_loss_tripped(equity: float | None) -> tuple[bool, str]:
-    """True when intraday loss exceeds configured limit."""
-    if equity is None or equity <= 0:
-        return False, ""
-    _update_daily_equity_anchor(equity)
-    state = read_json_file(STATE_FILE)
-    open_eq = float(state.get("daily_equity_open") or equity)
-    if open_eq <= 0:
-        return False, ""
-    loss_pct = (open_eq - float(equity)) / open_eq
-    limit = config.thinking_daily_loss_limit_pct()
-    if loss_pct >= limit - 1e-9:
-        return True, (
-            f"daily loss circuit breaker ({loss_pct:.2%} >= {limit:.2%} limit)"
-        )
-    return False, ""
+    """True when intraday loss exceeds configured limit (delegates to trading_safety)."""
+    from modules.trading_safety import daily_loss_circuit_tripped
+
+    tripped, reason, _ = daily_loss_circuit_tripped(equity)
+    return tripped, reason
+
+
+def _update_daily_equity_anchor(equity: float | None) -> None:
+    from modules.trading_safety import update_daily_equity_anchor
+
+    update_daily_equity_anchor(equity)
 
 
 def is_thinking_tilt_approved(result: dict) -> bool:

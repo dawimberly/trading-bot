@@ -9,7 +9,14 @@ PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline"
 
 
 def regime_entries_paused(regime, data=None, sentiment=None):
-    """True when new entries should be blocked (rhyme pause or derived bear)."""
+    """True when new entries should be blocked (rhyme pause, bear, or daily loss circuit)."""
+    try:
+        from modules.trading_safety import entry_block_active
+
+        if entry_block_active():
+            return True
+    except ImportError:
+        pass
     if regime in PAUSED_REGIMES:
         return True
     if not config.DERIVED_BEAR_PAUSE_ENABLED or data is None:

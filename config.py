@@ -204,7 +204,11 @@ LIVE_THINKING_MAX_SLEEVE_DELTA = min(
     float(os.getenv("LIVE_THINKING_MAX_SLEEVE_DELTA", "0.06")),
     THINKING_PRODUCTION_MAX_SLEEVE_DELTA,
 )
-# Daily loss circuit breaker — blocks thinking tilt apply after intraday drawdown
+# Daily loss circuit breaker — blocks new entries + thinking tilts after intraday drawdown
+DAILY_LOSS_CIRCUIT_BREAKER_ENABLED = os.getenv(
+    "DAILY_LOSS_CIRCUIT_BREAKER_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+TRADING_SAFETY_STATE_FILE = os.getenv("TRADING_SAFETY_STATE_FILE", "trading_safety_state.json")
 THINKING_DAILY_LOSS_LIMIT_LIVE = float(os.getenv("THINKING_DAILY_LOSS_LIMIT_LIVE", "0.02"))
 THINKING_DAILY_LOSS_LIMIT_PAPER = float(os.getenv("THINKING_DAILY_LOSS_LIMIT_PAPER", "0.04"))
 # Live: require explicit approval file before applying tilts (see scripts/approve_thinking_tilt.py)
@@ -1688,10 +1692,21 @@ def get_thinking_safety_summary() -> dict[str, str | float | bool]:
         "max_sleeve_delta_pp": round(effective_thinking_max_sleeve_delta() * 100, 1),
         "daily_loss_limit_live_pct": round(THINKING_DAILY_LOSS_LIMIT_LIVE * 100, 1),
         "daily_loss_limit_paper_pct": round(THINKING_DAILY_LOSS_LIMIT_PAPER * 100, 1),
+        "daily_loss_breaker_enabled": DAILY_LOSS_CIRCUIT_BREAKER_ENABLED,
         "manual_approval_live": thinking_manual_approval_required(),
         "confidence_amplify": THINKING_CONFIDENCE_AMPLIFY_ENABLED,
         "paper_thinking_enabled": PAPER_THINKING_ENGINE_ENABLED,
     }
+
+
+def get_production_safety_summary() -> dict[str, str | float | bool]:
+    """Live vs paper production safety (entries + thinking)."""
+    s = get_thinking_safety_summary()
+    s["live_tilt_cap_pp"] = round(
+        min(LIVE_THINKING_MAX_SLEEVE_DELTA, THINKING_PRODUCTION_MAX_SLEEVE_DELTA) * 100, 1
+    )
+    s["production_tilt_cap_pp"] = round(THINKING_PRODUCTION_MAX_SLEEVE_DELTA * 100, 1)
+    return s
 
 
 def effective_risk_parity_enabled() -> bool:
