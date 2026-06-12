@@ -11,6 +11,7 @@ Run:  python backtester.py
 """
 
 import argparse
+import sys
 import warnings
 from pathlib import Path
 
@@ -596,7 +597,7 @@ def _resolve_backtest_vti_pct(
     if not paper_aggressive:
         return fixed_vti_core_pct
     if not config.PAPER_DYNAMIC_VTI_ENABLED:
-        return config.PAPER_VTI_CORE_PCT
+        return fixed_vti_core_pct
     return config.get_vti_core_pct(
         equity,
         vol_score=vol_score,
@@ -630,6 +631,7 @@ def run_backtest(
     paper_stat_arb: bool | None = None,
     paper_stat_arb_optimized: bool | None = None,
     paper_thinking: bool | None = None,
+    paper_crypto_v2: bool | None = None,
     paper_risk_parity: bool | None = None,
     paper_vol_trading: bool | None = None,
     paper_vol_live_parity: bool = False,
@@ -652,6 +654,7 @@ def run_backtest(
     saved_paper_stat_arb = config.PAPER_STAT_ARB_ENABLED
     saved_paper_stat_arb_opt = config.PAPER_STAT_ARB_OPTIMIZED
     saved_paper_thinking = config.PAPER_THINKING_ENGINE_ENABLED
+    saved_paper_crypto_v2 = config.PAPER_CRYPTO_V2_ENABLED
     saved_paper_risk_parity = config.PAPER_RISK_PARITY_ENABLED
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
@@ -691,6 +694,8 @@ def run_backtest(
         config.PAPER_STAT_ARB_OPTIMIZED = bool(paper_stat_arb_optimized)
     if paper_thinking is not None:
         config.PAPER_THINKING_ENGINE_ENABLED = bool(paper_thinking)
+    if paper_crypto_v2 is not None:
+        config.PAPER_CRYPTO_V2_ENABLED = bool(paper_crypto_v2)
     if paper_risk_parity is not None:
         config.PAPER_RISK_PARITY_ENABLED = bool(paper_risk_parity)
     if paper_vol_trading is not None:
@@ -714,7 +719,9 @@ def run_backtest(
 
     fixed_vti_core_pct = vti_core_pct
     if paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED:
-        fixed_vti_core_pct = config.PAPER_VTI_CORE_PCT
+        fixed_vti_core_pct = (
+            vti_core_pct if vti_core_pct > 0 else config.PAPER_VTI_CORE_PCT
+        )
 
     start_date = data.index[MIN_HISTORY]
     end_date = data.index[-1]
@@ -834,6 +841,10 @@ def run_backtest(
         "vti_pct": None,
         "events": [],
     }
+    from modules.crypto_dual_sleeve import CryptoV2State
+
+    crypto_v2_book = CryptoV2State()
+    last_executor = None
 
     for i in range(MIN_HISTORY, len(data)):
         window = data.iloc[: i + 1]
@@ -968,7 +979,7 @@ def run_backtest(
                         "crypto", 1.0
                     ),
                 }
-                if live_thinking and any(abs(v) > 0.001 for v in deltas.values()):
+                if any(abs(v) > 0.001 for v in deltas.values()):
                     summary = thinking.get("market_summary") or {}
                     vix = summary.get("vix")
                     thinking_cache["events"].append(
@@ -1023,6 +1034,9 @@ def run_backtest(
             active_fraction=active_fraction,
             cap_scale=cap_scale,
         )
+        if config.effective_crypto_v2_enabled():
+            executor._crypto_v2_book = crypto_v2_book
+        last_executor = executor
         if macro_regime is not None and macro_regime.get("active"):
             executor.set_regime_sleeve_scales(
                 spy_scale=macro_regime.get("spy_scale", 1.0),
@@ -1093,7 +1107,11 @@ def run_backtest(
             volatility=vol,
         )
         total_crypto += crypto_n
-        if config.effective_stat_arb_enabled() or config.effective_market_neutral_pairs_enabled():
+        if (
+            config.effective_stat_arb_enabled()
+            or config.effective_market_neutral_pairs_enabled()
+            or config.effective_crypto_v2_enabled()
+        ):
             pairs_traded += crypto_n
         spy_exit_n = run_spy_exits(window, executor, regime)
         spy_entry_n = run_spy_strategy(
@@ -1425,18 +1443,33 @@ def run_backtest(
                 ),
             }
         )
-    if simulate_live_thinking and thinking_cache["events"]:
+    if thinking_cache["events"]:
         vti_drops = [
             e["vti_before"] - e["vti_after"]
             for e in thinking_cache["events"]
             if e.get("vti_before") is not None and e.get("vti_after") is not None
         ]
-        result["live_thinking_sim"] = {
-            "tilt_cap_pp": round(config.LIVE_THINKING_MAX_SLEEVE_DELTA * 100, 1),
+        tilt_stats = {
             "events": thinking_cache["events"],
             "tilt_event_count": len(thinking_cache["events"]),
             "max_vti_drop_pp": round(max(vti_drops) * 100, 2) if vti_drops else 0.0,
         }
+        if simulate_live_thinking and small_account:
+            result["live_thinking_sim"] = {
+                **tilt_stats,
+                "tilt_cap_pp": round(config.LIVE_THINKING_MAX_SLEEVE_DELTA * 100, 1),
+            }
+        elif paper_aggressive and config.PAPER_THINKING_ENGINE_ENABLED:
+            result["thinking_tilt"] = {
+                **tilt_stats,
+                "tilt_cap_pp": round(
+                    config.effective_thinking_max_sleeve_delta() * 100, 1
+                ),
+            }
+    if config.effective_crypto_v2_enabled() and last_executor is not None:
+        from modules.crypto_dual_sleeve import summarize_crypto_v2_trades_from_executor
+
+        result["crypto_v2"] = summarize_crypto_v2_trades_from_executor(last_executor)
     config.set_paper_aggressive_context(saved_paper_ctx)
     config.set_backtest_paper_sleeves_context(saved_backtest_paper_sleeves)
     config.set_live_thinking_sim_context(saved_live_thinking_ctx)
@@ -1453,6 +1486,7 @@ def run_backtest(
     config.PAPER_STAT_ARB_ENABLED = saved_paper_stat_arb
     config.PAPER_STAT_ARB_OPTIMIZED = saved_paper_stat_arb_opt
     config.PAPER_THINKING_ENGINE_ENABLED = saved_paper_thinking
+    config.PAPER_CRYPTO_V2_ENABLED = saved_paper_crypto_v2
     config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     return result
@@ -1950,6 +1984,136 @@ def run_thinking_compare(days=None, refresh=False, use_max=False) -> None:
         pass
 
 
+def _crypto_sleeve_stats(result: dict) -> dict:
+    v2 = result.get("crypto_v2") or {}
+    if v2.get("trade_count"):
+        return {
+            "label": "crypto_v2",
+            "trades": v2["trade_count"],
+            "win_rate_pct": v2.get("win_rate_pct", 0.0),
+            "avg_pnl_pct": v2.get("avg_pnl_pct", 0.0),
+            "mean_reversion": v2.get("mean_reversion_trades", 0),
+            "breakout": v2.get("breakout_trades", 0),
+            "samples": v2.get("samples") or [],
+        }
+    return {
+        "label": "stat_arb",
+        "trades": result.get("crypto_signals", 0),
+        "pairs_traded": result.get("pairs_traded", 0),
+        "win_rate_pct": None,
+        "avg_pnl_pct": None,
+        "mean_reversion": None,
+        "breakout": None,
+        "samples": [],
+    }
+
+
+def run_compare_crypto_v2(days=None, refresh=False, use_max=False) -> None:
+    """Compare current stat-arb crypto sleeve vs dual-entry crypto v2 (paper aggressive)."""
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    from modules.crypto_dual_sleeve import crypto_v2_universe
+
+    uni = crypto_v2_universe(data.columns)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_stat_arb": True,
+        "paper_vol_trading": True,
+        "paper_options_sleeve": True,
+        "paper_macro_regime": False,
+    }
+    configs = [
+        ("Current (stat-arb crypto)", {**base_kwargs, "paper_crypto_v2": False}),
+        ("Crypto v2 (MR + breakout)", {**base_kwargs, "paper_crypto_v2": True, "paper_stat_arb": True}),
+    ]
+    print("--- CRYPTO SLEEVE V2 A/B (paper aggressive; live unchanged) ---")
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars) | v2 universe in data: {len(uni)} symbols"
+    )
+    print(
+        f"{'Config':<30} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Win%':>6} {'AvgPnL':>7}"
+    )
+    print("-" * 86)
+
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.SOCIAL_SLEEVE_ENABLED = False
+    results: list[tuple[str, dict, dict]] = []
+    try:
+        for label_cfg, kwargs in configs:
+            result = run_backtest(
+                data, track_active_exposure=True, track_metrics=True, **kwargs
+            )
+            stats = _crypto_sleeve_stats(result)
+            results.append((label_cfg, result, stats))
+            win = (
+                f"{stats['win_rate_pct']:>5.1f}%"
+                if stats["win_rate_pct"] is not None
+                else "   n/a"
+            )
+            avg = (
+                f"{stats['avg_pnl_pct']:>+6.2f}%"
+                if stats["avg_pnl_pct"] is not None
+                else "    n/a"
+            )
+            print(
+                f"{label_cfg:<30} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{stats['trades']:>7d} "
+                f"{win:>6} "
+                f"{avg:>7}"
+            )
+    finally:
+        config.SOCIAL_SLEEVE_ENABLED = saved_social
+    print("-" * 86)
+
+    if len(results) == 2:
+        _base_label, base, base_stats = results[0]
+        v2_label, v2, v2_stats = results[1]
+        print(
+            f"v2 vs current: return {v2['total_return_pct'] - base['total_return_pct']:+.2f}pp | "
+            f"Sharpe {v2['sharpe'] - base['sharpe']:+.2f} | "
+            f"MaxDD {v2['max_drawdown_pct'] - base['max_drawdown_pct']:+.2f}pp"
+        )
+        if v2_stats.get("mean_reversion") is not None:
+            print(
+                f"Crypto v2 entries: mean-reversion {v2_stats['mean_reversion']} | "
+                f"breakout {v2_stats['breakout']}"
+            )
+        samples = v2_stats.get("samples") or []
+        if samples:
+            print("\nSample crypto v2 trades:")
+            for t in samples[:4]:
+                kind = t.get("entry_type", "?")
+                sym = t.get("symbol", "?")
+                pnl = t.get("pnl_pct", 0)
+                reason = t.get("exit_reason", "")
+                extra = ""
+                if kind == "mean_reversion" and "rsi" in t:
+                    extra = f" RSI={t['rsi']}"
+                elif kind == "breakout" and "range_spike" in t:
+                    extra = f" spike={t['range_spike']}x"
+                print(f"  [{kind}] {sym} {pnl:+.2f}% ({reason}){extra}")
+
+
 def _equity_underperformance_stats(baseline: dict, with_thinking: dict) -> dict:
     """Compare equity curves: worst gap vs no-thinking baseline."""
     b_eq = baseline.get("equity_values") or []
@@ -1970,7 +2134,7 @@ def _equity_underperformance_stats(baseline: dict, with_thinking: dict) -> dict:
 
 def _post_tilt_drawdown_pp(result: dict, *, horizon: int = 5) -> float:
     """Max forward drawdown (pp) within `horizon` bars after each tilt event."""
-    sim = result.get("live_thinking_sim") or {}
+    sim = result.get("live_thinking_sim") or result.get("thinking_tilt") or {}
     events = sim.get("events") or []
     eq = result.get("equity_values") or []
     if not events or not eq:
@@ -2019,12 +2183,138 @@ def _volatile_thinking_samples(result: dict, *, max_samples: int = 5) -> list[di
     return volatile[:max_samples]
 
 
+VTI_LEVELS_COMPARE = [
+    (0.90, "90% VTI (live-like)"),
+    (0.80, "80% VTI"),
+    (0.70, "70% VTI"),
+    (0.60, "60% VTI (aggressive)"),
+]
+
+
+def _thinking_tilt_event_count(result: dict) -> int:
+    sim = result.get("live_thinking_sim") or result.get("thinking_tilt") or {}
+    return int(sim.get("tilt_event_count") or 0)
+
+
+def _vti_level_result_row(label: str, vti_pct: float, result: dict) -> dict:
+    post_dd = _post_tilt_drawdown_pp(result)
+    return {
+        "label": label,
+        "vti_pct": vti_pct,
+        "return_pct": result["total_return_pct"],
+        "sharpe": result["sharpe"],
+        "max_dd_pct": result["max_drawdown_pct"],
+        "avg_active_exposure_pct": result.get("avg_active_exposure_pct", 0.0),
+        "worst_post_tilt_dd_pp": post_dd,
+        "tilt_events": _thinking_tilt_event_count(result),
+        "avg_vti_pct": round(float(result.get("vti_core_pct") or vti_pct) * 100, 1),
+    }
+
+
+def _print_vti_levels_table(
+    title: str,
+    window_line: str,
+    rows: list[dict],
+    *,
+    note: str = "",
+) -> None:
+    print(title)
+    print(window_line)
+    if note:
+        print(note)
+    print(
+        f"{'VTI level':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'AvgAct':>7} {'PostTilt':>8} {'Tilts':>6}"
+    )
+    print("-" * 82)
+    for row in rows:
+        print(
+            f"{row['label']:<28} "
+            f"{row['return_pct']:>+7.2f}% "
+            f"{row['sharpe']:>7.2f} "
+            f"{row['max_dd_pct']:>7.2f}% "
+            f"{row['avg_active_exposure_pct']:>6.1f}% "
+            f"{row['worst_post_tilt_dd_pp']:>7.2f}pp "
+            f"{row['tilt_events']:>6d}"
+        )
+    print("-" * 82)
+    best_sharpe = max(rows, key=lambda r: r["sharpe"])
+    best_return = max(rows, key=lambda r: r["return_pct"])
+    shallowest = max(rows, key=lambda r: r["max_dd_pct"])
+    print(
+        f"Best Sharpe: {best_sharpe['label']} ({best_sharpe['sharpe']:.2f}) | "
+        f"Best return: {best_return['label']} ({best_return['return_pct']:+.2f}%) | "
+        f"Shallowest MaxDD: {shallowest['label']} ({shallowest['max_dd_pct']:.2f}%)"
+    )
+
+
+def run_compare_vti_levels(days=None, refresh=False, use_max=False) -> None:
+    """Best Paper Bot + Thinking Engine at fixed VTI core levels (90/80/70/60%)."""
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    rows: list[dict] = []
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.SOCIAL_SLEEVE_ENABLED = False
+    try:
+        for vti_pct, level_label in VTI_LEVELS_COMPARE:
+            kwargs = {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": False,
+                "paper_dynamic_risk": True,
+                "paper_stat_arb": True,
+                "paper_vol_trading": True,
+                "paper_options_sleeve": True,
+                "paper_macro_regime": False,
+                "vti_core_pct": vti_pct,
+                "paper_thinking": True,
+            }
+            result = run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                **kwargs,
+            )
+            rows.append(_vti_level_result_row(level_label, vti_pct, result))
+    finally:
+        config.SOCIAL_SLEEVE_ENABLED = saved_social
+
+    cap_pp = round(config.effective_thinking_max_sleeve_delta() * 100, 0)
+    _print_vti_levels_table(
+        "--- BEST PAPER BOT + THINKING @ FIXED VTI LEVELS ---",
+        (
+            f"Window ({label}): {data.index[MIN_HISTORY].date()} -> "
+            f"{data.index[-1].date()} ({len(data) - MIN_HISTORY} sim bars) | "
+            f"VTI B&H: {bench:+.2f}% | tilt cap ±{cap_pp:.0f}%"
+        ),
+        rows,
+        note=(
+            "Stack: stat arb + vol + options + overlap/chunk/cofire + thinking heuristic. "
+            "AvgAct = average non-VTI exposure. PostTilt = worst 5d forward DD after a tilt."
+        ),
+    )
+
+
 def run_simulate_live_thinking_compare(
     days=None,
     refresh=False,
     use_max=False,
     *,
     start_equity: float | None = None,
+    vti_levels: bool = False,
 ) -> None:
     """Small-account live profile + capped thinking tilts (heuristic proxy, not Ollama per bar)."""
     if use_max:
@@ -2039,6 +2329,47 @@ def run_simulate_live_thinking_compare(
         return
 
     eq_start = start_equity or config.SMALL_ACCOUNT_BACKTEST_EQUITY
+    cap_pp = round(config.LIVE_THINKING_MAX_SLEEVE_DELTA * 100, 0)
+
+    if vti_levels:
+        rows: list[dict] = []
+        for vti_pct, level_label in VTI_LEVELS_COMPARE:
+            kwargs = {
+                "small_account": True,
+                "vti_core_pct": vti_pct,
+                "live_thinking_start_equity": eq_start,
+                "simulate_live_thinking": True,
+                "paper_thinking": True,
+                "track_metrics": True,
+            }
+            result = run_backtest(data, track_active_exposure=True, **kwargs)
+            rows.append(_vti_level_result_row(level_label, vti_pct, result))
+        _print_vti_levels_table(
+            "--- LIVE SMALL-ACCOUNT + THINKING @ VTI LEVELS ---",
+            (
+                f"Window ({label}): {data.index[MIN_HISTORY].date()} -> "
+                f"{data.index[-1].date()} ({len(data) - MIN_HISTORY} sim bars) | "
+                f"start ${eq_start:,.0f} | 1% risk | "
+                f"${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max order | ±{cap_pp:.0f}% tilt cap"
+            ),
+            rows,
+            note=(
+                "Heuristic thinking proxy on regime change (not Ollama per bar). "
+                "PostTilt = worst 5d forward DD after a tilt event."
+            ),
+        )
+        print(
+            "\n--- Live $300–$1000 note ---"
+        )
+        best = max(rows, key=lambda r: (r["sharpe"], r["return_pct"]))
+        shallow = max(rows, key=lambda r: r["max_dd_pct"])
+        print(
+            f"For small live accounts, {best['label']} leads on risk-adjusted return "
+            f"(Sharpe {best['sharpe']:.2f}, {best['return_pct']:+.2f}%). "
+            f"Shallowest MaxDD: {shallow['label']} ({shallow['max_dd_pct']:.2f}%)."
+        )
+        return
+
     base_kwargs = {
         "small_account": True,
         "vti_core_pct": config.SMALL_ACCOUNT_VTI_CORE_PCT,
@@ -3213,6 +3544,24 @@ if __name__ == "__main__":
         help="Compare current vs optimized statistical arbitrage sleeve",
     )
     parser.add_argument(
+        "--compare-crypto-v2",
+        action="store_true",
+        help="Compare stat-arb crypto vs dual-entry crypto v2 sleeve (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-vti-levels",
+        action="store_true",
+        help=(
+            "Best Paper Bot + thinking at fixed VTI levels "
+            "(90/80/70/60%%; requires --paper-aggressive)"
+        ),
+    )
+    parser.add_argument(
+        "--vti-levels",
+        action="store_true",
+        help="With --simulate-live-thinking: sweep 90/80/70/60%% VTI base levels",
+    )
+    parser.add_argument(
         "--compare-final",
         action="store_true",
         help="Final comprehensive paper bot vs legacy, VTI, small-account sim",
@@ -3288,9 +3637,26 @@ if __name__ == "__main__":
         run_thinking_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_crypto_v2:
+        if not args.paper_aggressive:
+            print("--compare-crypto-v2 requires --paper-aggressive")
+            sys.exit(1)
+        run_compare_crypto_v2(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_vti_levels:
+        if not args.paper_aggressive:
+            print("--compare-vti-levels requires --paper-aggressive")
+            sys.exit(1)
+        run_compare_vti_levels(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
     elif args.simulate_live_thinking:
         run_simulate_live_thinking_compare(
-            days=args.days, refresh=args.refresh, use_max=args.max
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            vti_levels=args.vti_levels,
         )
     elif args.compare_final:
         run_final_compare(

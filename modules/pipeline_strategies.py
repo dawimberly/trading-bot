@@ -455,6 +455,23 @@ def run_crypto_strategy(
     spacex_snapshot=None,
 ):
     """Z-score pairs; paper aggressive uses cointegration stat arb when enabled."""
+    if config.effective_crypto_v2_enabled():
+        from modules.crypto_dual_sleeve import run_crypto_dual_sleeve
+
+        return run_crypto_dual_sleeve(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_bars=cooldown_bars,
+            max_trades=max_trades,
+            log_fn=log_fn,
+            portfolio_manager=portfolio_manager,
+            volatility=volatility,
+            spacex_snapshot=spacex_snapshot,
+        )
+
     if config.effective_stat_arb_enabled():
         from modules.stat_arb_sleeve import run_crypto_stat_arb
 

@@ -45,9 +45,11 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Best Paper Bot (`paper_aggressive`)
+### Profile B: Best Paper Bot v2 (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
+
+**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` (auto on paper aggressive).
 
 **Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) with a stable, simplified stack.
 
@@ -62,6 +64,7 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
 | **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
 | **Overlap / chunk / co-fire** | **On** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
+| **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
 | **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
 
 #### Locked OFF (enforced by `enforce_best_paper_stack()`)
@@ -121,6 +124,20 @@ python scripts/approve_thinking_tilt.py
 Every decision is persisted to `thinking_engine_last.json` (timestamp, full reasoning, validation, `decision_id`).
 
 **Not recommended on live ~$100–$300** until Ollama calibration improves. Use `--simulate-live-thinking` to estimate impact first.
+
+#### Monitoring checklist (daily / weekly)
+
+| Check | Command / file | Action if bad |
+|-------|----------------|---------------|
+| Live + paper equity | `python status.py` | Investigate halt / Alpaca disconnect |
+| Regime + stack flags | `python status.py` | Confirm Profile A live, Profile B paper |
+| Thinking audit | `thinking_engine_last.json` | Review before `scripts/approve_thinking_tilt.py` on live |
+| Risk events | `risk_events.log` | Check halt / resume / liquidations |
+| Paper heartbeat | `paper_chase_heartbeat.json` | Stale timestamp → restart paper bot |
+| Universe age | `status.py` universe line | >7d → `python scripts/analysis/universe_screener.py` |
+| Monthly scorecard | `wisdom_scorecard.json` | Review regime accuracy |
+
+**Live safety (always on when thinking enabled):** ±6% tilt cap · 2% daily loss breaker · manual approval required · validator fallback to heuristic.
 
 ---
 

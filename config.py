@@ -20,6 +20,9 @@ ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in ("1", "true"
 # --- Universe (single source of truth) ---
 UNIVERSE = [
     "BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD", "AVAX-USD", "LINK-USD",
+    "DOT-USD", "MATIC-USD", "ATOM-USD", "UNI-USD", "LTC-USD", "BCH-USD",
+    "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
+    "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
     "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "AMZN", "TSLA", "META",
     "VTI", "QQQ", "SPY", "IWM",
     "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX",
@@ -85,6 +88,18 @@ PAPER_CRYPTO_VOL_ONLY = os.getenv("PAPER_CRYPTO_VOL_ONLY", "false").lower() in (
     "true",
     "yes",
 )
+# Paper aggressive crypto v2: dual-entry sleeve (mean reversion + breakout); live stays on stat arb
+PAPER_CRYPTO_V2_ENABLED = os.getenv("PAPER_CRYPTO_V2_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_CRYPTO_V2_SYMBOLS = [
+    "BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD", "ADA-USD",
+    "DOT-USD", "MATIC-USD", "ATOM-USD", "UNI-USD", "LTC-USD", "BCH-USD",
+    "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
+    "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
+]
 PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
 PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
     "1",
@@ -92,6 +107,11 @@ PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
     "yes",
 )
 PAPER_DYNAMIC_RISK_ENABLED = os.getenv("PAPER_DYNAMIC_RISK_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_DYNAMIC_UNIVERSE_ENABLED = os.getenv("PAPER_DYNAMIC_UNIVERSE", "true").lower() in (
     "1",
     "true",
     "yes",
@@ -1019,7 +1039,8 @@ def nyse_momentum_universe(data_columns) -> list[str]:
     global _screener_fallback_warned
     cols = list(data_columns)
     static = [c for c in cols if _nyse_eligible_symbol(c)]
-    if not USE_DYNAMIC_UNIVERSE:
+    use_dynamic = USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe()
+    if not use_dynamic:
         return static
 
     screener = load_screener_universe_tickers()
@@ -1216,25 +1237,41 @@ def print_live_stack_flags() -> None:
 
 
 def get_best_paper_bot_stack() -> dict[str, bool]:
-    """Locked Best Paper Bot flags (paper aggressive only)."""
-    return {
-        "dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
-        "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
-        "stat_arb": PAPER_STAT_ARB_ENABLED,
-        "vol_overlay": PAPER_VOL_TRADING_ENABLED,
-        "options_income": PAPER_OPTIONS_SLEEVE_ENABLED,
-        "thinking_engine": PAPER_THINKING_ENGINE_ENABLED,
-        "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
-        "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
-        "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
-        # Locked off (enforce_best_paper_stack)
-        "macro_regime": False,
-        "risk_parity": False,
-        "stat_arb_optimized": False,
-        "social_sleeve": False,
-        "equity_pairs": False,
-        "spy_exit": False,
-    }
+    """Locked Best Paper Bot v2 flags (paper aggressive only)."""
+    try:
+        from config.best_paper_config import get_full_stack
+
+        stack = get_full_stack()
+        stack["stat_arb"] = effective_stat_arb_enabled() or PAPER_STAT_ARB_ENABLED
+        stack["thinking_engine"] = PAPER_THINKING_ENGINE_ENABLED
+        stack["vol_overlay"] = PAPER_VOL_TRADING_ENABLED
+        stack["options_income"] = PAPER_OPTIONS_SLEEVE_ENABLED
+        stack["dynamic_vti"] = PAPER_DYNAMIC_VTI_ENABLED
+        stack["dynamic_risk"] = PAPER_DYNAMIC_RISK_ENABLED
+        stack["nyse_overlap"] = PAPER_NYSE_OVERLAP_FILTER_ENABLED
+        stack["adaptive_chunk"] = PAPER_ADAPTIVE_CHUNK_ENABLED
+        stack["cofire_budget"] = PAPER_COFIRE_BUDGET_ENABLED
+        stack["dynamic_universe"] = PAPER_DYNAMIC_UNIVERSE_ENABLED
+        return stack
+    except ImportError:
+        return {
+            "dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
+            "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
+            "stat_arb": PAPER_STAT_ARB_ENABLED,
+            "vol_overlay": PAPER_VOL_TRADING_ENABLED,
+            "options_income": PAPER_OPTIONS_SLEEVE_ENABLED,
+            "thinking_engine": PAPER_THINKING_ENGINE_ENABLED,
+            "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+            "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
+            "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
+            "dynamic_universe": PAPER_DYNAMIC_UNIVERSE_ENABLED,
+            "macro_regime": False,
+            "risk_parity": False,
+            "stat_arb_optimized": False,
+            "social_sleeve": False,
+            "equity_pairs": False,
+            "spy_exit": False,
+        }
 
 
 BEST_PAPER_LOCKED_OFF = (
@@ -1268,6 +1305,7 @@ def format_best_paper_status_lines() -> tuple[str, str]:
             f"overlap={'on' if stack['nyse_overlap'] else 'off'}",
             f"chunk={'on' if stack['adaptive_chunk'] else 'off'}",
             f"cofire={'on' if stack['cofire_budget'] else 'off'}",
+            f"dyn_univ={'on' if stack.get('dynamic_universe') else 'off'}",
         ]
         off_parts = [
             "macro",
@@ -1446,7 +1484,7 @@ def paper_only_sleeves_active() -> bool:
 
 
 def enforce_best_paper_stack() -> None:
-    """Disable weak/redundant paper sleeves (Profile B locked stack)."""
+    """Disable weak/redundant paper sleeves (Profile B locked stack v2)."""
     global PAPER_RISK_PARITY_ENABLED
     global PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     global PAPER_SOCIAL_SLEEVE_ENABLED
@@ -1454,6 +1492,7 @@ def enforce_best_paper_stack() -> None:
     global PAPER_SPY_EXIT_ON_MA_BREAK
     global PAPER_STAT_ARB_OPTIMIZED
     global PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    global PAPER_CRYPTO_V2_ENABLED
     PAPER_RISK_PARITY_ENABLED = False
     PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
     PAPER_SOCIAL_SLEEVE_ENABLED = False
@@ -1461,6 +1500,7 @@ def enforce_best_paper_stack() -> None:
     PAPER_SPY_EXIT_ON_MA_BREAK = False
     PAPER_STAT_ARB_OPTIMIZED = False
     PAPER_SOCIAL_MACRO_BOOST_ENABLED = False
+    PAPER_CRYPTO_V2_ENABLED = False
 
 
 def init_paper_chase_if_enabled() -> list[str]:
@@ -1474,7 +1514,15 @@ def init_paper_chase_if_enabled() -> list[str]:
         enforce_best_paper_stack()
         set_paper_aggressive_context(True)
         extras = apply_paper_chase_runtime_tuning()
-        extras.insert(0, "best_paper_stack_locked")
+        try:
+            from modules.dynamic_universe import maybe_refresh_screener_universe
+
+            uni = maybe_refresh_screener_universe()
+            if uni.get("action") == "refreshed":
+                extras.append(f"universe_refresh_{uni.get('count', 0)}")
+        except Exception:
+            pass
+        extras.insert(0, "best_paper_stack_v2_locked")
     return extras
 
 
@@ -1561,7 +1609,25 @@ def effective_cofire_budget_enabled() -> bool:
 
 def effective_stat_arb_enabled() -> bool:
     """Cointegration + z-score stat arb — paper aggressive only."""
+    if effective_crypto_v2_enabled():
+        return False
     return bool(paper_only_sleeves_active() and PAPER_STAT_ARB_ENABLED)
+
+
+def effective_crypto_v2_enabled() -> bool:
+    """Dual-entry crypto sleeve (MR + breakout) — paper aggressive only, default off."""
+    if not paper_only_sleeves_active() or not PAPER_CRYPTO_V2_ENABLED:
+        return False
+    return True
+
+
+def effective_paper_dynamic_universe() -> bool:
+    """Weekly NYSE/screener refresh — paper aggressive only."""
+    return bool(paper_only_sleeves_active() and PAPER_DYNAMIC_UNIVERSE_ENABLED)
+
+
+def paper_crypto_v2_symbols() -> list[str]:
+    return list(PAPER_CRYPTO_V2_SYMBOLS)
 
 
 def effective_stat_arb_optimized() -> bool:

@@ -71,6 +71,7 @@ Be decisive. Avoid vague or balanced tilts unless truly uncertain. If conviction
 
 Maintain consistency with the previous day's tilt unless strong new evidence appears
 (VIX spike, trend break, major headline, or confirmed safe-haven bid in gold).
+If you change a sleeve by more than 5% vs yesterday, state the new evidence in TILT_RATIONALE.
 
 Hard rule: do NOT overweight gold when Gold 5d change is negative (liquidity sell, not safe-haven bid).
 If gold 5d change is negative, default to zero or minimal gold allocation unless asymmetry explicitly justifies a contrarian bounce.
@@ -433,6 +434,8 @@ def persist_thinking_last(
     payload = {
         "timestamp": now,
         "regime": regime or (result.get("market_summary") or {}).get("regime"),
+        "manual_review_required": config.thinking_manual_approval_required(),
+        "safety": config.get_thinking_safety_summary(),
         **result,
     }
     write_json_file(OUTPUT_FILE, payload)

@@ -60,7 +60,7 @@ def _alpaca_equity(*, paper: bool, credentials_fn=None) -> float | None:
         key, secret = cred_fn()
         client = TradingClient(key, secret, paper=paper)
         return float(client.get_account().equity)
-    except Exception as exc:
+    except Exception:
         logger.debug("_alpaca_equity lookup failed", exc_info=True)
         return None
 
@@ -92,8 +92,15 @@ def _flag(name: str, val: bool) -> str:
     return f"{name}={'on' if val else 'off'}"
 
 
+def _live_profile_line() -> str:
+    vti = config.SMALL_ACCOUNT_VTI_CORE_PCT
+    return (
+        f"Profile A (live) | VTI ~{vti:.0%} | risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
+        f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f}/order"
+    )
+
+
 def _live_flags() -> str:
-    safety = config.get_thinking_safety_summary()
     parts = [
         _flag("dyn_vti", False),
         _flag("overlap", config.NYSE_OVERLAP_FILTER_ENABLED),
@@ -102,7 +109,7 @@ def _live_flags() -> str:
         _flag("macro", config.MACRO_REGIME_ADAPTOR_ENABLED),
         _flag("social", config.SOCIAL_SLEEVE_ENABLED),
         _flag("spy_exit", config.SPY_EXIT_ON_MA_BREAK),
-        _flag("thinking", config.PAPER_THINKING_ENGINE_ENABLED),
+        _flag("thinking", False),
     ]
     return " | ".join(parts)
 
@@ -132,6 +139,20 @@ def _paper_flags() -> tuple[str, str]:
     return on_line, off_line
 
 
+def _universe_line() -> str:
+    try:
+        from modules.dynamic_universe import screener_universe_meta
+
+        meta = screener_universe_meta()
+        if not meta.get("exists"):
+            return "universe: static (no screener file)"
+        age = meta.get("age_days")
+        age_s = f"{age:.1f}d old" if age is not None else "unknown age"
+        return f"universe: {meta.get('count', 0)} tickers | screener {age_s}"
+    except Exception:
+        return "universe: n/a"
+
+
 def main() -> None:
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
@@ -155,12 +176,15 @@ def main() -> None:
         f"Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
         f"Regime {regime}{ts}"
     )
+    logger.info(_live_profile_line())
     logger.info(f"Live flags:  {_live_flags()}")
     logger.info(f"Thinking safety: {_thinking_safety_line()}")
+    logger.info("Paper Profile B (Best Paper Bot v2)")
     paper_on, paper_off = _paper_flags()
     logger.info(f"Paper ON:  {paper_on}")
     logger.info(f"Paper OFF (locked): {paper_off}")
     logger.info(f"Paper thinking safety: {_paper_thinking_safety_line()}")
+    logger.info(_universe_line())
 
 
 if __name__ == "__main__":
