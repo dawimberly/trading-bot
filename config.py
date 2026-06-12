@@ -12,6 +12,13 @@ if _env_override and os.path.isfile(_env_override):
 else:
     load_dotenv(find_dotenv())
 
+try:
+    from modules.ssl_certs import configure_ssl_certificates
+
+    configure_ssl_certificates()
+except ImportError:
+    pass
+
 # --- Alpaca (canonical: APCA_*; legacy ALPACA_* supported via get_alpaca_credentials) ---
 # Paper-only by default. Set ALLOW_LIVE_TRADING=yes in .env to override PAPER_TRADING=False.
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")

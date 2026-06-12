@@ -2186,8 +2186,8 @@ def _volatile_thinking_samples(result: dict, *, max_samples: int = 5) -> list[di
 VTI_LEVELS_COMPARE = [
     (0.90, "90% VTI (live-like)"),
     (0.80, "80% VTI"),
+    (0.75, "75% VTI"),
     (0.70, "70% VTI"),
-    (0.60, "60% VTI (aggressive)"),
 ]
 
 

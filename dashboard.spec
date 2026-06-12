@@ -11,11 +11,20 @@
 import sys
 from pathlib import Path
 
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
 block_cipher = None
 root = Path(SPECPATH)
 icon_path = root / "assets" / "dashboard.ico"
 
 datas = []
+if certifi is not None:
+    cacert = Path(certifi.where())
+    if cacert.is_file():
+        datas.append((str(cacert), "certifi"))
 icon_arg = str(icon_path) if icon_path.is_file() else None
 
 hiddenimports = [
@@ -24,6 +33,7 @@ hiddenimports = [
     "PIL",
     "PIL.Image",
     "pystray",
+    "certifi",
     "alpaca",
     "alpaca.trading",
     "dotenv",

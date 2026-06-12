@@ -35,6 +35,15 @@ def _app_root() -> Path:
 
 PROJECT_ROOT = _app_root()
 os.environ["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+    from modules.ssl_certs import configure_ssl_certificates
+
+    configure_ssl_certificates()
+except ImportError:
+    pass
 
 from modules.portal_paths import (  # noqa: E402
     bind_project_root,
