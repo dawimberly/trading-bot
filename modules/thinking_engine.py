@@ -59,14 +59,15 @@ _PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM with real 
 CORE MANDATE:
 - Be bold when asymmetry is clear. Be defensive when uncertainty dominates.
 - Maintain consistency with yesterday's tilt unless STRONG NEW EVIDENCE appears (VIX spike, trend break, major headline, confirmed safe-haven bid).
-- If you change any sleeve by more than 5% vs yesterday, you MUST cite the new evidence in TILT_RATIONALE.
+- If you change any sleeve by more than 5% vs yesterday, you MUST cite the new evidence in TILT_RATIONALE (production cap is ±6% per sleeve).
 
 HARD RULES (non-negotiable):
 1. Do NOT overweight gold when Gold 5d change is negative (liquidity sell, not safe-haven). Default gold to 0% unless asymmetry explicitly argues a contrarian bounce.
 2. When VIX is rising and there is NO strong momentum continuation narrative, bias toward cash — do not run max equity.
 3. When SPY is below MA200 and VIX is elevated, prioritize capital preservation over chasing beta.
-4. RECOMMENDED_TILT weights must sum to ~1.0 across sleeves (vti, spy, energy, gold, cash, crypto, bonds).
-5. TILT_RATIONALE must explicitly justify EVERY sleeve you allocate above 5% with its exact percentage (e.g. "VTI 52% because...", "cash 18% because VIX rising...").
+4. RECOMMENDED_TILT values are decimal weights 0.00–1.00 (not strings) and must sum to ~1.0 across sleeves (vti, spy, energy, gold, cash, crypto, bonds).
+5. Per-sleeve change vs yesterday's tilt should stay within ±6% unless STRONG NEW EVIDENCE appears; cite that evidence in TILT_RATIONALE when you exceed ±5%.
+6. TILT_RATIONALE must explicitly justify EVERY sleeve you allocate above 5% with its exact percentage (e.g. "VTI 52% because...", "cash 18% because VIX rising...").
 
 DECISION FRAMEWORK:
 1. Dominant narrative — what is actually moving markets (ignore noise)?
@@ -477,6 +478,27 @@ def _thinking_decision_id(regime: str, tilt: dict[str, float]) -> str:
 def get_pm_system_prompt() -> str:
     """Return the production PM system prompt (for docs/tests)."""
     return _PM_SYSTEM_PROMPT
+
+
+def get_thinking_status_snapshot() -> dict[str, object]:
+    """Compact audit snapshot for status.py / monitoring."""
+    cached = read_json_file(OUTPUT_FILE) or {}
+    approval = read_json_file(APPROVAL_FILE) or {}
+    pending_id = cached.get("decision_id") if cached else None
+    approved = bool(pending_id and is_thinking_tilt_approved(cached)) if pending_id else False
+    return {
+        "env_enabled": bool(config.PAPER_THINKING_ENGINE_ENABLED),
+        "effective_enabled": bool(config.effective_thinking_engine_enabled()),
+        "last_timestamp": cached.get("timestamp"),
+        "last_regime": cached.get("regime"),
+        "last_confidence": cached.get("confidence"),
+        "validation_score": cached.get("validation_score"),
+        "narrative_snip": str(cached.get("narrative") or "")[:100],
+        "manual_review_required": bool(cached.get("manual_review_required")),
+        "pending_decision_id": pending_id,
+        "approved": approved,
+        "has_approval_file": bool(approval),
+    }
 
 
 def _load_previous_tilt_full() -> dict | None:
@@ -1475,8 +1497,9 @@ Previous day tilt: {prev_line}
 
 {gold_note}
 Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline).
-Maximum sleeve change vs prior day is ±{config.effective_thinking_max_sleeve_delta():.0%} per sleeve without new evidence.
-TILT_RATIONALE must justify every sleeve above 5% with its exact percentage.
+Hard production cap: ±{config.effective_thinking_max_sleeve_delta():.0%} per sleeve vs prior day without new evidence (validator rejects larger swings).
+Use decimal weights in RECOMMENDED_TILT (e.g. 0.52 not "52%"); weights must sum to ~1.0.
+TILT_RATIONALE must justify every sleeve above 5% with its exact percentage and link to ASYMMETRY.
 Reply with ONLY the structured block (NARRATIVE through REASONING). Be decisive. Start with NARRATIVE:"""
 
 
