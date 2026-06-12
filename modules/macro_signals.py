@@ -9,6 +9,7 @@ import pandas as pd
 import yfinance as yf
 
 import config
+from modules.data_loader import safe_sql_table
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
 from modules.pipeline_strategies import _spy_market_up_signal
 
@@ -32,7 +33,7 @@ def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _load_daily_column(col: str) -> pd.Series:
-    table = f"{col}_daily"
+    table = safe_sql_table(f"{col}_daily")
     try:
         conn = sqlite3.connect(config.DB_PATH)
         df = pd.read_sql(f"SELECT * FROM '{table}'", conn)

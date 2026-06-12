@@ -6,11 +6,14 @@ Run: python status.py
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
 import config
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent
 LIVE_HEARTBEAT = Path(os.getenv("HEARTBEAT_FILE", config.HEARTBEAT_FILE))
@@ -58,6 +61,7 @@ def _alpaca_equity(*, paper: bool, credentials_fn=None) -> float | None:
         client = TradingClient(key, secret, paper=paper)
         return float(client.get_account().equity)
     except Exception:
+        logger.debug("_alpaca_equity lookup failed", exc_info=True)
         return None
 
 
@@ -70,6 +74,7 @@ def _paper_research_equity() -> float | None:
             return None
         return _alpaca_equity(paper=True, credentials_fn=lambda: creds)
     except Exception:
+        logger.debug("_paper_research_equity failed", exc_info=True)
         return None
 
 
@@ -87,6 +92,14 @@ def _flag(name: str, val: bool) -> str:
     return f"{name}={'on' if val else 'off'}"
 
 
+def _live_profile_line() -> str:
+    vti = config.SMALL_ACCOUNT_VTI_CORE_PCT
+    return (
+        f"Profile A (live) | VTI ~{vti:.0%} | risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
+        f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f}/order"
+    )
+
+
 def _live_flags() -> str:
     parts = [
         _flag("dyn_vti", False),
@@ -96,26 +109,48 @@ def _live_flags() -> str:
         _flag("macro", config.MACRO_REGIME_ADAPTOR_ENABLED),
         _flag("social", config.SOCIAL_SLEEVE_ENABLED),
         _flag("spy_exit", config.SPY_EXIT_ON_MA_BREAK),
+        _flag("thinking", False),
     ]
     return " | ".join(parts)
 
 
-def _paper_flags() -> str:
-    config.set_paper_aggressive_context(True)
+def _thinking_safety_line() -> str:
+    s = config.get_thinking_safety_summary()
+    approval = "required" if s["manual_approval_live"] else "off"
+    return (
+        f"tilt_cap=±{s['max_sleeve_delta_pp']:.0f}% | "
+        f"daily_loss_live={s['daily_loss_limit_live_pct']:.0f}% | "
+        f"daily_loss_paper={s['daily_loss_limit_paper_pct']:.0f}% | "
+        f"live_approval={approval} | amplify={'on' if s['confidence_amplify'] else 'off'}"
+    )
+
+
+def _paper_thinking_safety_line() -> str:
+    s = config.get_thinking_safety_summary()
+    return (
+        f"thinking={'on' if s['paper_thinking_enabled'] else 'off (opt-in)'} | "
+        f"tilt_cap=±{s['max_sleeve_delta_pp']:.0f}% | "
+        f"daily_loss={s['daily_loss_limit_paper_pct']:.0f}%"
+    )
+
+
+def _paper_flags() -> tuple[str, str]:
+    on_line, off_line = config.format_best_paper_status_lines()
+    return on_line, off_line
+
+
+def _universe_line() -> str:
     try:
-        pf = config.get_paper_feature_flags()
-        parts = [
-            _flag("dyn_vti", config.PAPER_DYNAMIC_VTI_ENABLED),
-            _flag("overlap", pf.get("nyse_overlap", False)),
-            _flag("chunk", pf.get("adaptive_chunk", False)),
-            _flag("cofire", pf.get("cofire_budget", False)),
-            _flag("macro", config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED),
-            _flag("social", config.PAPER_SOCIAL_SLEEVE_ENABLED),
-            _flag("spy_exit", pf.get("spy_exit_on_ma_break", False)),
-        ]
-        return " | ".join(parts)
-    finally:
-        config.set_paper_aggressive_context(False)
+        from modules.dynamic_universe import screener_universe_meta
+
+        meta = screener_universe_meta()
+        if not meta.get("exists"):
+            return "universe: static (no screener file)"
+        age = meta.get("age_days")
+        age_s = f"{age:.1f}d old" if age is not None else "unknown age"
+        return f"universe: {meta.get('count', 0)} tickers | screener {age_s}"
+    except Exception:
+        return "universe: n/a"
 
 
 def main() -> None:
@@ -137,13 +172,21 @@ def main() -> None:
     else:
         ts = f" @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-    print(
+    logger.info(
         f"Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
         f"Regime {regime}{ts}"
     )
-    print(f"Live flags:  {_live_flags()}")
-    print(f"Paper flags: {_paper_flags()}")
+    logger.info(_live_profile_line())
+    logger.info(f"Live flags:  {_live_flags()}")
+    logger.info(f"Thinking safety: {_thinking_safety_line()}")
+    logger.info("Paper Profile B (Best Paper Bot v2)")
+    paper_on, paper_off = _paper_flags()
+    logger.info(f"Paper ON:  {paper_on}")
+    logger.info(f"Paper OFF (locked): {paper_off}")
+    logger.info(f"Paper thinking safety: {_paper_thinking_safety_line()}")
+    logger.info(_universe_line())
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

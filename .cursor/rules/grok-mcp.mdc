@@ -1,0 +1,13 @@
+---
+description: Grok/xAI MCP usage — avoid provider tool-schema errors in Cursor
+globs:
+alwaysApply: true
+---
+
+# Grok MCP (not Grok as chat model)
+
+- **Do not** tell the user to select **Grok** as the Composer/Chat **model**. xAI rejects Cursor's bundled tool payload (`tools[0]: missing field function`).
+- **Do** use **Auto** (or another Cursor-native model) and call Grok via MCP tools: `grok_query`, `grok_chat`, `grok_code`.
+- If the user sees xAI deserialize errors, advise: Settings → MCP → disable GitKraken/GitLens/browser servers; keep only `grok`; Reload Window.
+- Grok API key: `GROK_API_KEY` or `XAI_API_KEY` in project `.env`.
+- Re-run `scripts/mcp/install_grok_mcp.ps1` after moving the repo.

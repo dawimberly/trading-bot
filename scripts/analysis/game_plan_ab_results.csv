@@ -1,0 +1,10 @@
+strategy,final_equity,metal_final,total_return_pct,sharpe,max_drawdown_pct,benchmark_pct,metal_trades,yield_gate_days,cash_trims,wisdom_pause_days,wisdom_mode,halted,start,end,window,mode
+baseline,35974.64,0.0,259.75,0.75,-25.1,238.04,0,0,0,0,price_only,True,2017-07-20,2026-06-02,full_2017_2026,
+game_plan_gld_slv_cper,35700.67,3383.48,257.01,0.8,-24.83,238.04,105,205,0,0,price_only,True,2017-07-20,2026-06-02,full_2017_2026,
+yield_gate_only,35915.85,0.0,259.16,0.75,-25.08,238.04,0,205,0,0,price_only,True,2017-07-20,2026-06-02,full_2017_2026,
+baseline,7859.69,0.0,-21.4,-0.78,-26.96,-19.52,0,0,0,0,price_only,True,2022-01-01,2022-12-31,fresh_2022,fresh_capital
+game_plan_gld_slv_cper,8683.68,974.77,-13.16,-0.71,-19.25,-19.52,3,35,0,0,price_only,True,2022-01-01,2022-12-31,fresh_2022,fresh_capital
+yield_gate_only,8224.63,0.0,-17.75,-0.81,-22.94,-19.52,0,35,0,0,price_only,True,2022-01-01,2022-12-31,fresh_2022,fresh_capital
+baseline,14490.42,0.0,44.9,1.03,-18.43,47.88,0,0,0,0,price_only,True,2024-05-14,2026-06-02,recent_750d,
+game_plan_gld_slv_cper,13798.92,1253.21,37.99,1.03,-16.28,47.88,169,192,12,0,price_only,True,2024-05-14,2026-06-02,recent_750d,
+yield_gate_only,14484.52,0.0,44.85,1.03,-18.43,47.88,0,82,0,0,price_only,True,2024-05-14,2026-06-02,recent_750d,

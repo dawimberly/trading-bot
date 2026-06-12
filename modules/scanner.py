@@ -4,6 +4,8 @@ import sqlite3
 
 import pandas as pd
 
+from modules.data_loader import safe_sql_table
+
 def get_trending_tickers(db_path='market_data.db'):
     """
     Scans the database for assets whose current price is 
@@ -17,8 +19,10 @@ def get_trending_tickers(db_path='market_data.db'):
         
         trending = []
         for t in tables:
-            # Query the most recent 50 days of data
-            df = pd.read_sql(f"SELECT Close FROM '{t}' ORDER BY Date DESC LIMIT 50", conn)
+            safe_t = safe_sql_table(t)
+            df = pd.read_sql(
+                f"SELECT Close FROM '{safe_t}' ORDER BY Date DESC LIMIT 50", conn
+            )
             
             # Trend logic: Current price > 50-period average
             if not df.empty and len(df) == 50:

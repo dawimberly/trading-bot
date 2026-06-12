@@ -55,9 +55,15 @@ def _verify_password(password: str, stored: str) -> bool:
 
 
 def registration_allowed(invite_code: str) -> bool:
+    if os.getenv("PORTAL_ALLOW_OPEN_REGISTRATION", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return True
     required = os.getenv("PORTAL_INVITE_CODE", "").strip()
     if not required:
-        return True
+        return False
     return secrets.compare_digest(invite_code.strip(), required)
 
 
