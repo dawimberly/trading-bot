@@ -6,11 +6,14 @@ Run: python status.py
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
 import config
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent
 LIVE_HEARTBEAT = Path(os.getenv("HEARTBEAT_FILE", config.HEARTBEAT_FILE))
@@ -57,7 +60,8 @@ def _alpaca_equity(*, paper: bool, credentials_fn=None) -> float | None:
         key, secret = cred_fn()
         client = TradingClient(key, secret, paper=paper)
         return float(client.get_account().equity)
-    except Exception:
+    except Exception as exc:
+        logger.debug("_alpaca_equity lookup failed", exc_info=True)
         return None
 
 
@@ -70,6 +74,7 @@ def _paper_research_equity() -> float | None:
             return None
         return _alpaca_equity(paper=True, credentials_fn=lambda: creds)
     except Exception:
+        logger.debug("_paper_research_equity failed", exc_info=True)
         return None
 
 
@@ -144,13 +149,14 @@ def main() -> None:
     else:
         ts = f" @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
-    print(
+    logger.info(
         f"Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
         f"Regime {regime}{ts}"
     )
-    print(f"Live flags:  {_live_flags()}")
-    print(f"Paper flags: {_paper_flags()}")
+    logger.info(f"Live flags:  {_live_flags()}")
+    logger.info(f"Paper flags: {_paper_flags()}")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     main()

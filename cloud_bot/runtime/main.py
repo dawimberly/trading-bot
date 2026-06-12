@@ -76,26 +76,26 @@ def _check_running(pid_file: Path) -> tuple[str, int | None]:
 def _stop_loop(settings: CloudSettings, logger) -> int:
     state, pid = _check_running(settings.pid_file)
     if state == "no":
-        print("No PID file found; is the cloud bot loop running?")
+        logger.warning("No PID file found; is the cloud bot loop running?")
         return 1
     if pid is None:
-        print(f"PID file invalid: {settings.pid_file}")
+        logger.warning("PID file invalid: %s", settings.pid_file)
         settings.pid_file.unlink(missing_ok=True)
         return 1
     if state == "stale":
-        print("Stale PID file removed (process not running).")
+        logger.info("Stale PID file removed (process not running).")
         settings.pid_file.unlink(missing_ok=True)
         return 1
 
-    print(f"Stopping cloud bot process {pid}...")
+    logger.info("Stopping cloud bot process %s...", pid)
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
-        print("Process not found; removing stale PID file")
+        logger.warning("Process not found; removing stale PID file")
         settings.pid_file.unlink(missing_ok=True)
         return 1
     except PermissionError as exc:
-        print(f"Permission denied while stopping process: {exc}")
+        logger.warning("Permission denied while stopping process: %s", exc)
         return 1
 
     logger.info("sent SIGTERM to pid=%s", pid)
@@ -104,58 +104,60 @@ def _stop_loop(settings: CloudSettings, logger) -> int:
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
-            print("Cloud bot stopped.")
+            logger.info("Cloud bot stopped.")
             settings.pid_file.unlink(missing_ok=True)
             return 0
         time.sleep(0.5)
-    print("Process still running after 20s; send SIGKILL manually if needed.")
+    logger.warning("Process still running after 20s; send SIGKILL manually if needed.")
     return 1
 
 
 def _print_stack_flags() -> None:
+    logger = __import__("logging").getLogger(__name__)
     on = [k for k, v in BEST_PAPER_ENV.items() if v.lower() in ("1", "true", "yes")]
-    print("best_paper_stack:")
+    logger.info("best_paper_stack:")
     for feature in STACK_FEATURES:
-        print(f"  - {feature}")
-    print(f"env_flags_on: {len(on)} (see cloud_bot/config/profile.py)")
+        logger.info("  - %s", feature)
+    logger.info("env_flags_on: %s (see cloud_bot/config/profile.py)", len(on))
 
 
 def _print_status(settings: CloudSettings) -> int:
-    print("Cloud Bot status")
-    print("---------------")
-    print(f"profile:          {settings.profile}")
-    print(f"dry_run:          {settings.dry_run}")
-    print(f"paper_trading:    {settings.paper_trading}")
-    print(f"cycle_sec:        {settings.cycle_sec}")
-    print(f"heartbeat_file:   {settings.heartbeat_file}")
-    print(f"journal_csv:      {settings.journal_csv}")
-    print(f"repo_root:        {settings.repo_root}")
-    print(f"run_all_script:   {settings.run_all_script}")
-    print(f"log_dir:          {settings.log_dir}")
-    print(f"pid_file:         {settings.pid_file}")
-    print(f"run_all exists:   {settings.run_all_script.is_file()}")
+    logger = __import__("logging").getLogger(__name__)
+    logger.info("Cloud Bot status")
+    logger.info("---------------")
+    logger.info("profile:          %s", settings.profile)
+    logger.info("dry_run:          %s", settings.dry_run)
+    logger.info("paper_trading:    %s", settings.paper_trading)
+    logger.info("cycle_sec:        %s", settings.cycle_sec)
+    logger.info("heartbeat_file:   %s", settings.heartbeat_file)
+    logger.info("journal_csv:      %s", settings.journal_csv)
+    logger.info("repo_root:        %s", settings.repo_root)
+    logger.info("run_all_script:   %s", settings.run_all_script)
+    logger.info("log_dir:          %s", settings.log_dir)
+    logger.info("pid_file:         %s", settings.pid_file)
+    logger.info("run_all exists:   %s", settings.run_all_script.is_file())
     _print_stack_flags()
     heartbeat = _load_heartbeat(settings.heartbeat_file)
     running, _ = _check_running(settings.pid_file)
-    print(f"running:          {running}")
+    logger.info("running:          %s", running)
     if heartbeat:
-        print(f"last_heartbeat:   {heartbeat.get('timestamp')}")
-        print(f"equity:           ${float(heartbeat.get('equity', 0)):,.2f}")
-        print(f"cash:             ${float(heartbeat.get('cash', 0)):,.2f}")
-        print(f"regime:           {heartbeat.get('regime', '—')}")
-        print(f"halted:           {heartbeat.get('halted', False)}")
-        print(f"paper:            {heartbeat.get('paper', False)}")
-        print(f"sleeves:          {', '.join(_active_sleeves(heartbeat)) or 'none'}")
+        logger.info("last_heartbeat:   %s", heartbeat.get('timestamp'))
+        logger.info("equity:           $%s", f"{float(heartbeat.get('equity', 0)):,.2f}")
+        logger.info("cash:             $%s", f"{float(heartbeat.get('cash', 0)):,.2f}")
+        logger.info("regime:           %s", heartbeat.get('regime', '—'))
+        logger.info("halted:           %s", heartbeat.get('halted', False))
+        logger.info("paper:            %s", heartbeat.get('paper', False))
+        logger.info("sleeves:          %s", ", ".join(_active_sleeves(heartbeat)) or "none")
         if settings.heartbeat_file.exists():
-            print(
-                f"heartbeat_age:    "
-                f"{int(time.time() - settings.heartbeat_file.stat().st_mtime)}s"
+            logger.info(
+                "heartbeat_age:    %ss",
+                int(time.time() - settings.heartbeat_file.stat().st_mtime),
             )
-        print(f"dynamic_vol_score:{heartbeat.get('dynamic_vol_score', '—')}")
+        logger.info("dynamic_vol_score:%s", heartbeat.get('dynamic_vol_score', '—'))
         caps = heartbeat.get("sleeve_caps") or {}
-        print(f"vti_target_pct:   {float(caps.get('vti_core', 0)):.2%}")
+        logger.info("vti_target_pct:   %s", f"{float(caps.get('vti_core', 0)):.2%}")
     else:
-        print("heartbeat:        none")
+        logger.info("heartbeat:        none")
     return 0
 
 
@@ -237,12 +239,12 @@ def main() -> int:
 
     if args.dry_run:
         logger.info("dry-run | config OK, not launching run_all.py")
-        print("Cloud bot config OK (dry-run). Best paper profile applied.")
-        print(f"  env file:    {env_path or '(none — using defaults)'}")
-        print(f"  data dir:    {settings.data_dir}")
-        print(f"  heartbeat:   {settings.heartbeat_file}")
-        print(f"  journal:     {settings.journal_csv}")
-        print(f"  dry_run:     {settings.dry_run}")
+        logger.info("Cloud bot config OK (dry-run). Best paper profile applied.")
+        logger.info("  env file:    %s", env_path or "(none — using defaults)")
+        logger.info("  data dir:    %s", settings.data_dir)
+        logger.info("  heartbeat:   %s", settings.heartbeat_file)
+        logger.info("  journal:     %s", settings.journal_csv)
+        logger.info("  dry_run:     %s", settings.dry_run)
         _print_stack_flags()
         return 0
 

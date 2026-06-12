@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 from pathlib import Path
 
@@ -10,66 +10,31 @@ import numpy as np
 import pandas as pd
 
 import config
+
+logger = logging.getLogger(__name__)
+from modules.logging_utils import log_event
 from modules.crypto_vol_gate import crypto_trading_allowed
 from modules.pipeline_strategies import (
+    _momentum_score,
+    _nyse_equity_columns,
+    _on_cooldown,
     execute_atomic_pair_entry,
     execute_atomic_pair_exit,
+    regime_entries_paused,
 )
+from modules.safe_io import read_json_file, write_json_file
 
 LOOKBACK_DEFAULT = 60
-PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
-
-
-def _on_cooldown(pair_cooldown, key, now, cooldown_bars=None):
-    last = pair_cooldown.get(key)
-    if last is None:
-        return False
-    if cooldown_bars is not None:
-        return (now - last) < cooldown_bars
-    return False
-
-
-def _momentum_score(data, symbol):
-    prices = data[symbol].dropna()
-    if len(prices) < 20:
-        return None
-    ma50 = prices.rolling(window=min(50, len(prices))).mean().iloc[-1]
-    current = prices.iloc[-1]
-    if ma50 <= 0:
-        return None
-    return current / ma50 - 1
-
-
-def _nyse_equity_columns(data):
-    from modules.pipeline_strategies import _nyse_equity_columns as _cols
-
-    return _cols(data)
-
-
-def _regime_paused(regime, data=None):
-    from modules.pipeline_strategies import regime_entries_paused
-
-    return regime_entries_paused(regime, data)
-
 
 BOOK_FILE = Path(os.getenv("STAT_ARB_BOOK_FILE", "stat_arb_open_book.json"))
 
 
 def _load_disk_book() -> dict:
-    if not BOOK_FILE.is_file():
-        return {}
-    try:
-        data = json.loads(BOOK_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError, TypeError):
-        return {}
+    return read_json_file(BOOK_FILE)
 
 
 def _persist_book(book: dict) -> None:
-    try:
-        BOOK_FILE.write_text(json.dumps(book, indent=2), encoding="utf-8")
-    except OSError:
-        pass
+    write_json_file(BOOK_FILE, book)
 
 
 def _open_book(executor) -> dict:
@@ -130,6 +95,11 @@ def reconcile_stat_arb_book(executor) -> dict:
 
     if removed or orphans:
         _save_book(executor)
+    if removed:
+        logger.info("reconcile_stat_arb_book removed entries", extra={"removed": removed})
+        log_event("stat_arb_reconcile", removed_count=len(removed), orphans_count=len(orphans) if orphans else 0)
+    if orphans:
+        logger.warning("reconcile_stat_arb_book found orphan positions", extra={"orphans": orphans})
     return {"kept": kept, "removed": removed, "orphans": orphans}
 
 
@@ -202,8 +172,14 @@ def pair_leg_notional(
     if equity_fn := getattr(executor, "_get_account", None):
         try:
             min_n = config.effective_min_notional(float(equity_fn().equity))
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             pass
+    if leg < min_n:
+        return None, None
+    pod_scale = float(getattr(executor, "pod_risk_scale", lambda _p: 1.0)("stat_arb"))
+    if pod_scale <= config.POD_PAUSE_SCALE + 0.05:
+        return None, None
+    leg = round(leg * pod_scale, 2)
     if leg < min_n:
         return None, None
     return leg, leg
@@ -253,6 +229,8 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "") -> int:
     if log_fn:
         log_fn(long_sym, "buy", regime, pair_key, z, leg_n, pair_msg=msg)
         log_fn(short_sym, "sell", regime, pair_key, z, leg_n, pair_msg=msg)
+    logger.info("stat arb entry executed", extra={"pair": pair_key, "long": long_sym, "short": short_sym, "z": round(z,1)})
+    log_event("stat_arb_entry", pair=pair_key, long_sym=long_sym, short_sym=short_sym, z_score=round(z, 1))
     return 1
 
 
@@ -276,6 +254,8 @@ def _close_position(executor, pair_key: str, position: dict, *, log_fn=None, reg
             leg_n or "",
             pair_msg=f"Stat arb exit: {pair_key} (Z mean-reverted)",
         )
+    logger.info("stat arb exit executed", extra={"pair": pair_key, "long": long_sym, "short": short_sym})
+    log_event("stat_arb_exit", pair=pair_key, long_sym=long_sym, short_sym=short_sym)
     return 1
 
 
@@ -320,6 +300,11 @@ def _scan_pair_candidates(
     for i in range(len(symbols)):
         for j in range(i + 1, len(symbols)):
             t1, t2 = symbols[i], symbols[j]
+            pair = data[[t1, t2]].dropna().tail(lookback)
+            if len(pair) < 30:
+                continue
+            if float(pair[t1].corr(pair[t2])) < min_corr:
+                continue
             ok, beta = engle_granger_cointegrated(
                 data[t1], data[t2], min_corr=min_corr, lookback=lookback
             )
@@ -424,7 +409,7 @@ def equity_stat_arb_intents(
 ):
     if not config.effective_equity_pairs_enabled() or not config.effective_stat_arb_enabled():
         return []
-    if _regime_paused(regime, data) or yield_gated:
+    if regime_entries_paused(regime, data) or yield_gated:
         return []
 
     equity_cols = _nyse_equity_columns(data)
@@ -482,7 +467,7 @@ def run_crypto_stat_arb(
     spacex_snapshot=None,
 ):
     """Cointegration-filtered crypto pairs with exits at mean reversion."""
-    if regime in PAUSED_REGIMES:
+    if regime_entries_paused(regime, data):
         return 0
     trades = process_exits(data, executor, log_fn=log_fn, regime=regime)
     if _skip_crypto_stat_arb_entries(executor):

@@ -1,6 +1,7 @@
 """Central configuration: credentials, universe, paths, and strategy constants."""
 
 import json
+import logging
 import os
 import warnings
 from dotenv import load_dotenv, find_dotenv
@@ -154,11 +155,33 @@ PAPER_THINKING_ENGINE_ENABLED = os.getenv("PAPER_THINKING_ENGINE_ENABLED", "fals
     "yes",
 )
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
+OLLAMA_FALLBACK_MODELS = os.getenv(
+    "OLLAMA_FALLBACK_MODELS", "llama3.2:3b,deepseek-r1:1.5b"
+)
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_TIMEOUT_SEC = int(os.getenv("OLLAMA_TIMEOUT_SEC", "600"))
+OLLAMA_TIMEOUT_SEC = int(os.getenv("OLLAMA_TIMEOUT_SEC", "1200"))
+THINKING_CACHE_HOURS = int(os.getenv("THINKING_CACHE_HOURS", "24"))
 THINKING_ENGINE_STATE_FILE = os.getenv("THINKING_ENGINE_STATE_FILE", "thinking_engine_state.json")
 THINKING_ENGINE_OUTPUT_FILE = os.getenv("THINKING_ENGINE_OUTPUT_FILE", "thinking_engine_last.json")
 THINKING_MAX_SLEEVE_DELTA = float(os.getenv("THINKING_MAX_SLEEVE_DELTA", "0.15"))
+# Risk parity / All Weather + pod drawdown limits — paper aggressive only
+PAPER_RISK_PARITY_ENABLED = os.getenv("PAPER_RISK_PARITY_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+RISK_PARITY_MAX_CAP_SHIFT = float(os.getenv("RISK_PARITY_MAX_CAP_SHIFT", "0.12"))
+POD_RISK_STATE_FILE = os.getenv("POD_RISK_STATE_FILE", "pod_risk_state.json")
+POD_REDUCE_SCALE = float(os.getenv("POD_REDUCE_SCALE", "0.50"))
+POD_PAUSE_SCALE = float(os.getenv("POD_PAUSE_SCALE", "0.0"))
+POD_MAX_DRAWDOWN_PCT = {
+    "spy": float(os.getenv("POD_MAX_DD_SPY", "0.08")),
+    "crypto": float(os.getenv("POD_MAX_DD_CRYPTO", "0.12")),
+    "nyse": float(os.getenv("POD_MAX_DD_NYSE", "0.10")),
+    "stat_arb": float(os.getenv("POD_MAX_DD_STAT_ARB", "0.06")),
+    "vol": float(os.getenv("POD_MAX_DD_VOL", "0.10")),
+    "options": float(os.getenv("POD_MAX_DD_OPTIONS", "0.08")),
+}
 # Options income sleeve (covered calls) — paper aggressive only; live stays off
 OPTIONS_SLEEVE_ENABLED = os.getenv("OPTIONS_SLEEVE_ENABLED", "false").lower() in (
     "1",
@@ -1076,6 +1099,45 @@ def _game_plan_label() -> str:
     return "off"
 
 
+# === Best Paper Config Support ===
+_best_paper_applied = False
+
+
+def use_best_paper_config() -> bool:
+    """True if BEST_PAPER_CONFIG env or best_paper_config mode should be applied."""
+    return os.getenv("BEST_PAPER_CONFIG", "").lower() in ("1", "true", "yes")
+
+
+def apply_best_paper_config_if_enabled() -> None:
+    """Apply best paper config if BEST_PAPER_CONFIG env is set.
+    
+    Call early in run_all.py main() to ensure best paper flags override config.py defaults.
+    """
+    global _best_paper_applied
+    if _best_paper_applied or not use_best_paper_config():
+        return
+    
+    try:
+        from config.best_paper_config import apply_best_paper_config, validate_best_paper_config
+        
+        # Check for deprecated features
+        is_valid, warnings = validate_best_paper_config()
+        if warnings:
+            logger = logging.getLogger(__name__)
+            for w in warnings:
+                logger.warning("best_paper_config: %s", w)
+        
+        # Apply best paper defaults (disables deprecated features)
+        apply_best_paper_config()
+        _best_paper_applied = True
+        
+        logger = logging.getLogger(__name__)
+        logger.info("best_paper_config applied: simplified paper bot stack enabled")
+    except ImportError as e:
+        logger = logging.getLogger(__name__)
+        logger.warning("Failed to import best_paper_config: %s", e, exc_info=True)
+
+
 def print_live_stack_flags() -> None:
     """Log Profile A: current_dynamic live stack (preflight / live run_all / backtest default)."""
     gp = _game_plan_label()
@@ -1392,6 +1454,15 @@ def effective_stat_arb_optimized() -> bool:
 def effective_thinking_engine_enabled() -> bool:
     """Local Ollama PM reasoning — paper aggressive only, never live."""
     if not paper_only_sleeves_active() or not PAPER_THINKING_ENGINE_ENABLED:
+        return False
+    if PAPER_TRADING:
+        return True
+    return bool(backtest_paper_sleeves_context())
+
+
+def effective_risk_parity_enabled() -> bool:
+    """All Weather risk parity + pod drawdown limits — paper aggressive only."""
+    if not paper_only_sleeves_active() or not PAPER_RISK_PARITY_ENABLED:
         return False
     if PAPER_TRADING:
         return True

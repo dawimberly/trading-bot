@@ -1,5 +1,6 @@
 """Canonical Alpaca paper-trading executor (notional orders, crypto formatting)."""
 
+import logging
 import time
 
 from alpaca.trading.client import TradingClient
@@ -9,6 +10,9 @@ from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 import config
 from modules import deployment_sizing
 from modules.cost_basis import underwater_sizing_scale
+from modules.logging_utils import log_event
+
+logger = logging.getLogger(__name__)
 
 
 class AlpacaExecutor:
@@ -32,6 +36,7 @@ class AlpacaExecutor:
         """Fetch account + positions once per pipeline cycle."""
         self._account = self.client.get_account()
         self._positions = list(self.client.get_all_positions())
+        logger.info("AlpacaExecutor initialized", extra={"paper": self.paper})
 
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
@@ -44,6 +49,12 @@ class AlpacaExecutor:
 
     def set_sleeve_pnl(self, sleeve_pnl: dict | None) -> None:
         self._sleeve_pnl = sleeve_pnl
+
+    def set_pod_risk_scales(self, scales: dict[str, float] | None) -> None:
+        self._pod_risk_scales = dict(scales) if scales else {}
+
+    def pod_risk_scale(self, pod: str) -> float:
+        return float(getattr(self, "_pod_risk_scales", {}).get(pod, 1.0))
 
     def set_wisdom_sizing_multiplier(self, multiplier: float = 1.0) -> None:
         self._wisdom_sizing_multiplier = float(multiplier)
@@ -74,10 +85,15 @@ class AlpacaExecutor:
     def _sleeve_cap_pct(self, key: str, base_pct: float) -> float:
         caps = getattr(self, "_dynamic_sleeve_caps", None)
         if caps and key in caps:
-            return caps[key]
-        if key == "vti_core":
+            pct = caps[key]
+        elif key == "vti_core":
             return config.vti_core_allocation_pct()
-        return config.effective_sleeve_cap(base_pct)
+        else:
+            pct = config.effective_sleeve_cap(base_pct)
+        pod_key = key if key in ("spy", "crypto", "nyse") else None
+        if pod_key:
+            pct *= self.pod_risk_scale(pod_key)
+        return pct
 
     def _account_equity(self) -> float:
         return float(self._get_account().equity)
@@ -119,6 +135,7 @@ class AlpacaExecutor:
     def refresh_cache(self):
         self._account = self.client.get_account()
         self._positions = list(self.client.get_all_positions())
+        logger.debug("AlpacaExecutor cache refreshed", extra={"equity": float(self._account.equity) if self._account else None})
 
     @property
     def equity_session_open(self):
@@ -233,6 +250,7 @@ class AlpacaExecutor:
             if config.normalize_symbol(o.symbol) == target:
                 self.client.cancel_order_by_id(o.id)
                 time.sleep(0.5)
+                logger.info("cancelled open order", extra={"symbol": target, "order_id": o.id})
 
     def cancel_open_equity_orders(self):
         """Cancel queued US equity orders (e.g. unfilled DAY orders after the close)."""
@@ -246,6 +264,7 @@ class AlpacaExecutor:
             time.sleep(0.2)
         if canceled:
             self._invalidate_cache()
+            logger.info("cancel_open_equity_orders: cancelled", extra={"count": canceled})
         return canceled
 
     def get_order_params(self, symbol):
@@ -492,9 +511,10 @@ class AlpacaExecutor:
                     side=OrderSide.BUY,
                     time_in_force=tif,
                 )
-        order = self.client.submit_order(order_data=order)
+        submitted = self.client.submit_order(order_data=order)
         self._invalidate_cache()
-        return order
+        logger.info("execute_reduce_notional submitted", extra={"symbol": symbol, "order_id": getattr(submitted, 'id', None)})
+        return submitted
 
     def execute_full_exit(self, symbol):
         if not self._equity_trading_allowed(symbol):
@@ -539,9 +559,10 @@ class AlpacaExecutor:
                     side=OrderSide.BUY,
                     time_in_force=tif,
                 )
-        order = self.client.submit_order(order_data=order)
+        submitted = self.client.submit_order(order_data=order)
         self._invalidate_cache()
-        return order
+        logger.info("execute_full_exit submitted", extra={"symbol": symbol, "order_id": getattr(submitted, 'id', None)})
+        return submitted
 
     def execute_order(self, symbol, side, notional=None, reduce_only=False):
         if not self._equity_trading_allowed(symbol):
@@ -580,6 +601,9 @@ class AlpacaExecutor:
         )
         submitted = self.client.submit_order(order_data=order)
         self._invalidate_cache()
+        order_id = getattr(submitted, 'id', None)
+        logger.info("order submitted", extra={"symbol": symbol, "side": side.lower(), "notional": target_notional, "order_id": order_id})
+        log_event("order_submitted", symbol=symbol, side=side.lower(), notional=target_notional, order_id=order_id)
         return submitted
 
 

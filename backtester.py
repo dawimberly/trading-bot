@@ -99,6 +99,12 @@ class BacktestExecutor:
         self._thinking_nyse_scale = float(nyse_scale)
         self._thinking_crypto_scale = float(crypto_scale)
 
+    def set_pod_risk_scales(self, scales: dict[str, float] | None) -> None:
+        self._pod_risk_scales = dict(scales) if scales else {}
+
+    def pod_risk_scale(self, pod: str) -> float:
+        return float(getattr(self, "_pod_risk_scales", {}).get(pod, 1.0))
+
     def _get_account(self):
         """Alpaca-compatible shim for pipeline_strategies (live uses real account)."""
         equity = self.portfolio.equity(self.prices)
@@ -224,6 +230,11 @@ class BacktestExecutor:
             scale *= getattr(self, "_thinking_nyse_scale", 1.0)
         elif sleeve == "crypto":
             scale *= getattr(self, "_thinking_crypto_scale", 1.0)
+            scale *= self.pod_risk_scale("crypto")
+        if sleeve == "spy":
+            scale *= self.pod_risk_scale("spy")
+        elif sleeve == "nyse":
+            scale *= self.pod_risk_scale("nyse")
         return round(sleeve_cap_pct * scale, 6)
 
     def _compute_capped_notional_raw(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
@@ -619,6 +630,7 @@ def run_backtest(
     paper_stat_arb: bool | None = None,
     paper_stat_arb_optimized: bool | None = None,
     paper_thinking: bool | None = None,
+    paper_risk_parity: bool | None = None,
     paper_vol_trading: bool | None = None,
     paper_vol_live_parity: bool = False,
     track_active_exposure: bool = False,
@@ -638,6 +650,7 @@ def run_backtest(
     saved_paper_stat_arb = config.PAPER_STAT_ARB_ENABLED
     saved_paper_stat_arb_opt = config.PAPER_STAT_ARB_OPTIMIZED
     saved_paper_thinking = config.PAPER_THINKING_ENGINE_ENABLED
+    saved_paper_risk_parity = config.PAPER_RISK_PARITY_ENABLED
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     config.set_paper_aggressive_context(paper_aggressive)
@@ -671,6 +684,8 @@ def run_backtest(
         config.PAPER_STAT_ARB_OPTIMIZED = bool(paper_stat_arb_optimized)
     if paper_thinking is not None:
         config.PAPER_THINKING_ENGINE_ENABLED = bool(paper_thinking)
+    if paper_risk_parity is not None:
+        config.PAPER_RISK_PARITY_ENABLED = bool(paper_risk_parity)
     if paper_vol_trading is not None:
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
     if paper_aggressive and (
@@ -790,6 +805,8 @@ def run_backtest(
         "hours_to_90pct": None,
         "reached_90pct": False,
     }
+    pod_risk_state: dict = {"peaks": {}}
+    sample_rp_meta: dict | None = None
     thinking_cache = {
         "regime": None,
         "scales": {"spy_scale": 1.0, "nyse_scale": 1.0, "crypto_scale": 1.0},
@@ -963,6 +980,45 @@ def run_backtest(
                 nyse_scale=macro_regime.get("nyse_scale", 1.0),
             )
         executor.set_thinking_sleeve_scales(**thinking_scales)
+        if config.effective_risk_parity_enabled() and paper_aggressive:
+            from modules.risk_parity_sleeve import apply_risk_parity_cycle
+            from modules.thinking_engine import executor_scales_from_caps
+
+            opt_val = sum(
+                float(c.get("notional", 0))
+                for c in options_state.get("contracts", [])
+            )
+            base_caps = dict(config.fund_allocation_pct())
+            base_caps["vti_core"] = vti_core_pct
+            merged_caps, pod_scales, rp_meta, _ = apply_risk_parity_cycle(
+                window,
+                regime,
+                vol,
+                executor,
+                macro_stress=macro_stress_flag,
+                equity=eq,
+                base_caps=base_caps,
+                pair_value=executor.pair_sleeve_value(),
+                vol_value=abs(float(vol_state.get("notional", 0))),
+                options_value=opt_val,
+                persist_pod=False,
+            )
+            if rp_meta and sample_rp_meta is None:
+                sample_rp_meta = rp_meta
+            pod_risk_state.update({"peaks": pod_risk_state.get("peaks", {})})
+            new_vti = float(merged_caps.get("vti_core", vti_core_pct))
+            if abs(new_vti - vti_core_pct) > 0.004:
+                vti_core_pct = new_vti
+                if vti_core_pct > 0:
+                    _rebalance_vti_core(portfolio, prices, vti_core_pct)
+            cap_scales = executor_scales_from_caps(base_caps, merged_caps)
+            thinking_scales = {
+                "spy_scale": thinking_scales["spy_scale"] * cap_scales.get("spy", 1.0),
+                "nyse_scale": thinking_scales["nyse_scale"] * cap_scales.get("nyse", 1.0),
+                "crypto_scale": thinking_scales["crypto_scale"] * cap_scales.get("crypto", 1.0),
+            }
+            executor.set_thinking_sleeve_scales(**thinking_scales)
+            executor.set_pod_risk_scales(pod_scales)
         executor.set_sizing_context(window)
         executor.set_wisdom_sizing_multiplier(sizing_mult)
         resolve_cycle_deploy(
@@ -1052,36 +1108,44 @@ def run_backtest(
             social_curve.append(social_portfolio.equity(prices))
         if config.effective_options_sleeve_enabled():
             from modules.options_sleeve import run_options_backtest_day
+            from modules.risk_parity_sleeve import pod_entries_allowed
 
-            _, opt_meta = run_options_backtest_day(
-                portfolio,
-                prices,
-                bar_i=i,
-                state=options_state,
-                volatility=vol,
-                vol_score=vol_score,
-                ts=data.index[i],
-                market_open=True,
-            )
+            if pod_entries_allowed(executor, "options"):
+                _, opt_meta = run_options_backtest_day(
+                    portfolio,
+                    prices,
+                    bar_i=i,
+                    state=options_state,
+                    volatility=vol,
+                    vol_score=vol_score,
+                    ts=data.index[i],
+                    market_open=True,
+                )
+            else:
+                opt_meta = {}
             if opt_meta.get("calm"):
                 options_state["calm_days"] = int(options_state.get("calm_days", 0)) + 1
             if opt_meta.get("premium", 0) > 0:
                 options_state["premium_days"] = int(options_state.get("premium_days", 0)) + 1
         if config.effective_vol_trading_enabled() and not paper_vol_live_parity:
             from modules.volatility_sleeve import run_volatility_backtest_day
+            from modules.risk_parity_sleeve import pod_entries_allowed
 
             equity_peak = max(equity_peak, eq)
-            _, vol_meta = run_volatility_backtest_day(
-                portfolio,
-                prices,
-                bar_i=i,
-                state=vol_state,
-                volatility=vol,
-                vol_score=vol_score,
-                ts=data.index[i],
-                market_open=True,
-                portfolio_peak=equity_peak,
-            )
+            if pod_entries_allowed(executor, "vol"):
+                _, vol_meta = run_volatility_backtest_day(
+                    portfolio,
+                    prices,
+                    bar_i=i,
+                    state=vol_state,
+                    volatility=vol,
+                    vol_score=vol_score,
+                    ts=data.index[i],
+                    market_open=True,
+                    portfolio_peak=equity_peak,
+                )
+            else:
+                vol_meta = {}
             if vol_meta.get("premium", 0) > 0:
                 vol_state["premium_days"] = int(vol_state.get("premium_days", 0)) + 1
         total_orders += len(executor.orders)
@@ -1327,6 +1391,7 @@ def run_backtest(
     config.PAPER_STAT_ARB_ENABLED = saved_paper_stat_arb
     config.PAPER_STAT_ARB_OPTIMIZED = saved_paper_stat_arb_opt
     config.PAPER_THINKING_ENGINE_ENABLED = saved_paper_thinking
+    config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     return result
 
@@ -1821,6 +1886,89 @@ def run_thinking_compare(days=None, refresh=False, use_max=False) -> None:
                 print(f"  Suggested tilt: {ex.get('suggested_tilt')}")
     except Exception:
         pass
+
+
+def run_risk_parity_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without risk parity + pod drawdown limits."""
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_vol_trading": True,
+        "paper_options_sleeve": True,
+        "paper_macro_regime": True,
+        "paper_stat_arb": True,
+    }
+    configs = [
+        ("Paper (no risk parity)", {**base_kwargs, "paper_risk_parity": False}),
+        ("Paper (+ risk parity)", {**base_kwargs, "paper_risk_parity": True}),
+    ]
+    print(
+        "--- RISK PARITY A/B (All Weather caps + pod DD limits; paper aggressive) ---"
+    )
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
+    print("-" * 58)
+
+    baseline = None
+    with_rp = None
+    for label_cfg, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        if kwargs.get("paper_risk_parity"):
+            with_rp = result
+        else:
+            baseline = result
+        print(
+            f"{label_cfg:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}%"
+        )
+    print("-" * 58)
+    if baseline and with_rp:
+        print(
+            f"Risk parity vs baseline: return "
+            f"{with_rp['total_return_pct'] - baseline['total_return_pct']:+.2f}pp | "
+            f"Sharpe {with_rp['sharpe'] - baseline['sharpe']:+.2f} | "
+            f"MaxDD {with_rp['max_drawdown_pct'] - baseline['max_drawdown_pct']:+.2f}pp"
+        )
+
+    from modules.risk_parity_sleeve import (
+        detect_economic_regime,
+        format_risk_parity_log,
+        risk_parity_allocation,
+    )
+    from modules.wisdom_sentiment import resolve_wisdom_regime
+
+    window = data.iloc[-60:]
+    wisdom = resolve_wisdom_regime(window)
+    econ = detect_economic_regime(
+        window, wisdom["regime"], wisdom["volatility"], macro_stress=False
+    )
+    alloc = risk_parity_allocation(econ, window)
+    print("\nSample regime-based allocation (most recent bar):")
+    print(f"  {format_risk_parity_log(econ, alloc)}")
 
 
 FINAL_PAPER_BOT_KWARGS = {
@@ -2783,6 +2931,11 @@ if __name__ == "__main__":
         help="Compare paper aggressive with vs without VIX vol overlay sleeve",
     )
     parser.add_argument(
+        "--compare-risk-parity",
+        action="store_true",
+        help="Compare paper aggressive with vs without risk parity + pod limits",
+    )
+    parser.add_argument(
         "--compare-thinking",
         action="store_true",
         help="Compare paper aggressive with vs without thinking-engine sleeve tilts",
@@ -2863,6 +3016,10 @@ if __name__ == "__main__":
         )
     elif args.compare_stat_arb_optimized:
         run_stat_arb_optimized_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_risk_parity:
+        run_risk_parity_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_thinking:

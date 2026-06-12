@@ -98,10 +98,10 @@ def run_forever(
         settings.repo_root,
         settings.heartbeat_file,
     )
-    print("--- Cloud Bot 24/7 loop (best paper profile) ---")
-    print(f"--- Heartbeat: {settings.heartbeat_file} ---")
-    print(f"--- Journal:   {settings.journal_csv} ---")
-    print(f"--- Logs:      {settings.log_dir / 'cloud_bot.log'} ---")
+    logger.info("Cloud Bot 24/7 loop (best paper profile)")
+    logger.info("Heartbeat: %s", settings.heartbeat_file)
+    logger.info("Journal: %s", settings.journal_csv)
+    logger.info("Logs: %s", settings.log_dir / "cloud_bot.log")
 
     while True:
         if shutdown_requested:

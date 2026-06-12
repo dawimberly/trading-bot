@@ -44,6 +44,51 @@ python runtime/main.py --stop
 
 ---
 
+## Beginner Quickstart
+
+If you're new to deploying on a VPS, follow these minimal steps to get a working paper-bot quickly:
+
+1. Provision an Ubuntu 22.04 or 24.04 VPS (2 vCPU / 4 GB RAM recommended).
+2. SSH into the server and run the setup below as a non-root user (replace <your-repo-url>):
+
+```bash
+sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
+
+sudo useradd -m -s /bin/bash trader || true
+sudo mkdir -p /opt/PythonTrading
+sudo chown trader:trader /opt/PythonTrading
+sudo -u trader git clone <your-repo-url> /opt/PythonTrading
+cd /opt/PythonTrading
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -r cloud_bot/requirements.txt
+```
+
+3. Copy the example env and set paper keys only:
+
+```bash
+cp cloud_bot/.env.example cloud_bot/.env
+# edit cloud_bot/.env and set CLOUD_BOT_DRY_RUN=true until keys are verified
+```
+
+4. Validate config (dry-run) and then run status:
+
+```bash
+cd cloud_bot
+python runtime/main.py --dry-run
+python runtime/main.py --status
+```
+
+5. When ready, set `CLOUD_BOT_DRY_RUN=false` and start the 24/7 loop:
+
+```bash
+python runtime/main.py --run
+```
+
+This quickstart intentionally keeps things simple; consult the full sections below for systemd, monitoring, and safety checklist.
+
 ## 1. VPS sizing ($30–50/mo)
 
 | Provider tier | Spec | Notes |

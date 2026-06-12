@@ -5,6 +5,8 @@ Preflight: python scripts/account/preflight.py
 """
 
 import datetime
+import logging
+from modules.logging_utils import setup_logging, log_event
 import os
 import time
 import traceback
@@ -61,6 +63,11 @@ from modules.scan_schedule import (
 pair_cooldown = {}
 
 
+def _warn_nonfatal(context: str, exc: BaseException) -> None:
+    logger = logging.getLogger(__name__)
+    logger.warning("%s (non-fatal): %s", context, exc, exc_info=True)
+
+
 def _make_executor() -> AlpacaExecutor:
     """Paper chase can use isolated PAPER_APCA_* research book when configured."""
     if (
@@ -114,7 +121,7 @@ def _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gat
         and _main_cycle_count < 2
     ):
         if _main_cycle_count == 1:
-            print("--- Live: startup rebalance deferred until cycle 2 ---")
+            logging.getLogger(__name__).info("Live: startup rebalance deferred until cycle 2", extra={"phase": _main_cycle_count})
         return
     _startup_rebalanced = True
     try:
@@ -130,15 +137,20 @@ def _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gat
         )
         n = len([a for a in result.get("actions", []) if a.get("phase") in ("buy", "sell")])
         if n:
-            print(f"--- Rebalance on startup: {n} order(s) ---")
+            logging.getLogger(__name__).info("Rebalance on startup: orders submitted", extra={"orders": n})
             for a in result["actions"]:
                 if a.get("phase") in ("buy", "sell"):
-                    print(
-                        f"  {a['phase'].upper()} {a.get('symbol', '')} "
-                        f"${a.get('notional', 0):,.0f} ({a.get('sleeve', '')})"
+                    logging.getLogger(__name__).info(
+                        "rebalance action",
+                        extra={
+                            "action": a.get('phase'),
+                            "symbol": a.get('symbol'),
+                            "notional": a.get('notional'),
+                            "sleeve": a.get('sleeve'),
+                        },
                     )
     except Exception as exc:
-        print(f"Rebalance error (non-fatal): {exc}")
+        _warn_nonfatal("Rebalance error", exc)
 
 
 def _maybe_reconcile_startup(executor):
@@ -156,28 +168,22 @@ def _maybe_reconcile_startup(executor):
         over = result["before"]["over_cap"]
         min_n = config.effective_min_notional(result["before"]["equity"])
         if any(v >= min_n for v in over.values()):
-            print("--- Holdings reconcile (startup) ---")
-            print(f"  Over-cap before: SPY ${over['spy']:,.0f} | crypto ${over['crypto']:,.0f} | NYSE ${over['nyse']:,.0f}")
+            logging.getLogger(__name__).info("Holdings reconcile (startup)", extra={"over_cap_before": over})
             if result.get("trim_actions"):
-                print(f"  Trim orders: {len(result['trim_actions'])}")
+                logging.getLogger(__name__).info("Holdings reconcile: trim orders", extra={"trim_orders": len(result['trim_actions'])})
             after = result["after"]["over_cap"]
-            print(f"  Over-cap after:  SPY ${after['spy']:,.0f} | crypto ${after['crypto']:,.0f} | NYSE ${after['nyse']:,.0f}")
+            logging.getLogger(__name__).info("Holdings reconcile (after)", extra={"over_cap_after": after})
         if result.get("ledger"):
-            print(f"  Ledger rebuilt: {result['ledger']['open_positions']} Alpaca positions")
+            logging.getLogger(__name__).info("Holdings reconcile ledger rebuilt", extra={"open_positions": result['ledger']['open_positions']})
         from modules.stat_arb_sleeve import reconcile_stat_arb_book
 
         stat = reconcile_stat_arb_book(executor)
         if stat.get("removed"):
-            print(
-                f"  Stat-arb book: kept {len(stat.get('kept', []))}, "
-                f"removed {len(stat['removed'])} stale"
-            )
+            logging.getLogger(__name__).info("Stat-arb book reconcile", extra={"kept": len(stat.get('kept', [])), "removed": len(stat['removed'])})
         if stat.get("orphans"):
-            print(
-                f"  Stat-arb orphans (not in book): {', '.join(stat['orphans'][:8])}"
-            )
+            logging.getLogger(__name__).warning("Stat-arb orphans (not in book)", extra={"orphans": stat['orphans'][:8]})
     except Exception as exc:
-        print(f"Holdings reconcile error (non-fatal): {exc}")
+        _warn_nonfatal("Holdings reconcile error", exc)
 
 
 def log_trade(symbol, side, regime):
@@ -187,33 +193,30 @@ def log_trade(symbol, side, regime):
 
 
 def _crypto_log(symbol, side, regime, pair_key, z, notional="", pair_msg=None):
+    logger = logging.getLogger(__name__)
     if pair_msg:
-        print(f"!!! {pair_msg} | ${notional}/leg | Regime: {regime}")
+        logger.info(pair_msg, extra={"symbol": symbol, "pair": pair_key, "action": side, "regime": regime, "notional": notional})
     else:
         cap = config.CRYPTO_SLEEVE_CAP_PCT
-        print(
-            f"!!! CRYPTO SLEEVE: {pair_key} | Z={round(z, 2)} | "
-            f"{side.upper()} ${notional} | cap {cap:.2%} | Regime: {regime}"
-        )
+        logger.info("CRYPTO SLEEVE", extra={"pair": pair_key, "z": round(z,2), "side": side.upper(), "notional": notional, "cap": cap, "regime": regime})
     log_trade(symbol, side, regime)
     trade_journal.log_signal(symbol, side, regime, pair_key, z, _last_equity, notional)
 
 
 def _equity_pair_log(symbol, side, regime, pair_key, z, notional="", pair_msg=None):
+    logger = logging.getLogger(__name__)
     if pair_msg:
-        print(f"!!! {pair_msg} | ${notional}/leg | Regime: {regime}")
+        logger.info(pair_msg, extra={"symbol": symbol, "pair": pair_key, "action": side, "regime": regime, "notional": notional})
     else:
-        print(
-            f"!!! NYSE PAIR: {pair_key} | {side.upper()} ${notional} | Regime: {regime}"
-        )
+        logger.info("NYSE PAIR", extra={"pair": pair_key, "side": side.upper(), "notional": notional, "regime": regime})
     log_trade(symbol, side, regime)
     trade_journal.log_signal(symbol, side, regime, pair_key, z, _last_equity, notional)
 
 
 def _equity_log(symbol, side, regime, pair_key, _z, notional=""):
-    print(
-        f"!!! NYSE SLEEVE: {symbol} above MA50 | BUY ${notional} | "
-        f"cap {config.NYSE_SLEEVE_CAP_PCT:.2%} | Regime: {regime}"
+    logging.getLogger(__name__).info(
+        "NYSE SLEEVE entry",
+        extra={"symbol": symbol, "notional": notional, "cap": config.NYSE_SLEEVE_CAP_PCT, "regime": regime},
     )
     log_trade(symbol, side, regime)
     trade_journal.log_signal(symbol, side, regime, pair_key, 0.0, _last_equity, notional)
@@ -221,15 +224,9 @@ def _equity_log(symbol, side, regime, pair_key, _z, notional=""):
 
 def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
     if side == "buy":
-        print(
-            f"!!! SPY SLEEVE: {symbol} above MA{config.SPY_MA_WINDOW} | "
-            f"BUY ${notional} | cap {config.SPY_SLEEVE_CAP_PCT:.2%} | Regime: {regime}"
-        )
+        logging.getLogger(__name__).info("SPY SLEEVE buy", extra={"symbol": symbol, "notional": notional, "ma_window": config.SPY_MA_WINDOW, "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
     else:
-        print(
-            f"!!! SPY SLEEVE: {symbol} below MA{config.SPY_MA_WINDOW} | "
-            f"SELL ${notional} | Regime: {regime}"
-        )
+        logging.getLogger(__name__).info("SPY SLEEVE sell", extra={"symbol": symbol, "notional": notional, "ma_window": config.SPY_MA_WINDOW, "regime": regime})
     log_trade(symbol, side, regime)
     trade_journal.log_signal(
         symbol, side, regime, pair_key, momentum, _last_equity, notional
@@ -261,6 +258,7 @@ def _write_heartbeat(
     sleeve_caps=None,
     dynamic_vol_score=None,
     thinking_engine=None,
+    risk_parity=None,
 ):
     macro_stress = bool(
         wisdom
@@ -305,6 +303,8 @@ def _write_heartbeat(
             "apply_log": thinking_engine.get("apply_log"),
             "reasoning_preview": (thinking_engine.get("reasoning") or "")[:400],
         }
+    if risk_parity:
+        payload["risk_parity"] = risk_parity
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
@@ -389,7 +389,7 @@ def main():
     market_open = refresh_scheduler.sync(
         executor.client, now_ts, equity_prep=schedule.get("equity_prep", False)
     )
-    schedule = equity_scan_state(executor.client, now_ts)
+    schedule["market_open"] = market_open
     equity_scans = schedule.get("equity_scans", market_open)
     executor.equity_session_open = market_open
     executor.refresh_cache()
@@ -420,21 +420,24 @@ def main():
         peak = risk_manager.peak_equity or equity
         dd = risk_manager.current_drawdown(equity)
         if not prev_halted:
+            log_event("risk_halt", equity=equity, peak=peak, drawdown=dd)
             print("!!! RISK HALT: Max drawdown reached. Skipping cycle. !!!")
         trade_journal.log_event("halt", equity=equity, cash=cash, notes="drawdown limit")
         alerts.notify_halt(equity, peak, dd)
         try:
             alerts.maybe_daily_summary(equity, cash, "HALTED", True)
         except Exception as exc:
-            print(f"Alert error (non-fatal): {exc}")
+            _warn_nonfatal("Alert error", exc)
         _write_heartbeat(
             "HALTED", equity, cash, 0, 0, 0, True, market_open, None, scan_schedule=schedule
         )
         return
 
     if prev_halted and not risk_manager.halted:
+        dd_resume = risk_manager.current_drawdown(equity)
+        log_event("risk_resume", equity=equity, drawdown=dd_resume)
         print(
-            f"--- RISK RESUME: drawdown {risk_manager.current_drawdown(equity):.1%} "
+            f"--- RISK RESUME: drawdown {dd_resume:.1%} "
             f"below {config.HALT_RESUME_DRAWDOWN_PCT:.0%} ---"
         )
     alerts.clear_halt_flag()
@@ -443,12 +446,15 @@ def main():
     if not market_open:
         canceled = executor.cancel_open_equity_orders()
         if canceled:
+            log_event("equity_orders_canceled", count=canceled, reason="session_closed")
             print(f"--- Canceled {canceled} stale equity order(s) (session closed) ---")
 
+    log_event("cycle_start", timestamp=str(datetime.datetime.now()))
     print("--- Pipeline Cycle: " + str(datetime.datetime.now()) + " ---")
     print(f"--- {format_scan_schedule_line(schedule)} ---")
     data = load_close_matrix()
     if data.empty or len(data) < 20:
+        log_event("cycle_skip", reason="insufficient_data", equity=equity)
         print("Insufficient market data. Skipping cycle.")
         trade_journal.log_event("skip", equity=equity, notes="empty or short data")
         return
@@ -517,8 +523,6 @@ def main():
             log_regime_messages,
             merge_regime_sleeve_caps,
         )
-        from modules.macro_signals import load_daily_matrix
-
         try:
             macro_daily = load_daily_matrix(days=120)
         except Exception:
@@ -638,8 +642,10 @@ def main():
         try:
             alerts.maybe_spacex_ipo_alert(spacex_snapshot)
         except Exception as exc:
-            print(f"SpaceX IPO alert error (non-fatal): {exc}")
+            _warn_nonfatal("SpaceX IPO alert error", exc)
 
+    risk_parity_meta = None
+    pod_risk_meta = None
     thinking_result = None
     if config.effective_thinking_engine_enabled():
         from modules.thinking_engine import (
@@ -665,6 +671,33 @@ def main():
         )
         if sleeve_cap_pcts:
             executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
+
+    if config.effective_risk_parity_enabled():
+        from modules.risk_parity_sleeve import (
+            apply_risk_parity_cycle,
+            format_pod_risk_log,
+            format_risk_parity_log,
+        )
+
+        sleeve_cap_pcts, pod_scales, risk_parity_meta, pod_risk_meta = apply_risk_parity_cycle(
+            data,
+            regime,
+            vol,
+            executor,
+            macro_stress=macro_stress_flag,
+            equity=equity,
+            base_caps=sleeve_cap_pcts or config.fund_allocation_pct(),
+        )
+        executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
+        executor.set_pod_risk_scales(pod_scales)
+        if risk_parity_meta.get("allocation"):
+            print(format_risk_parity_log(
+                risk_parity_meta["economic_regime"],
+                risk_parity_meta["allocation"],
+            ))
+        pod_log = format_pod_risk_log(pod_risk_meta)
+        if pod_log:
+            print(f"--- {pod_log} ---")
 
     listing_snapshot = None
     if not schedule.get("crypto_only"):
@@ -694,7 +727,7 @@ def main():
             alerts.maybe_spacex_listing_alert(listing_snapshot)
             alerts.maybe_spacex_ipo_countdown_alert(listing_snapshot)
         except Exception as exc:
-            print(f"SpaceX listing alert error (non-fatal): {exc}")
+            _warn_nonfatal("SpaceX listing alert error", exc)
         if listing_snapshot.get("ready_to_buy_kraken"):
             kraken_buy = maybe_buy_kraken_spcx(listing_snapshot)
             if kraken_buy:
@@ -937,6 +970,7 @@ def main():
                 dry = " (dry-run)" if item.get("dry_run") else ""
                 print(f"--- Kraken rebalance: {tr.get('side')} {sym}{dry} ---")
         except Exception as exc:
+            log_event("kraken_autopilot_error", error=str(exc))
             print(f"--- Kraken autopilot error (non-fatal): {exc} ---")
 
     sleeves = executor.sleeve_snapshot()
@@ -983,7 +1017,7 @@ def main():
     try:
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as exc:
-        print(f"Alert error (non-fatal): {exc}")
+        _warn_nonfatal("Alert error", exc)
     _write_heartbeat(
         regime,
         equity,
@@ -1008,6 +1042,12 @@ def main():
         if config.DYNAMIC_SLEEVE_CAPS_ENABLED or config.paper_aggressive_context()
         else None,
         thinking_engine=thinking_result,
+        risk_parity={
+            **(risk_parity_meta or {}),
+            "pod": pod_risk_meta,
+        }
+        if (risk_parity_meta or pod_risk_meta)
+        else None,
     )
 
     wisdom_journal.log_cycle(
@@ -1035,7 +1075,7 @@ def main():
         try:
             alerts.maybe_monthly_wisdom_summary(rollup)
         except Exception as exc:
-            print(f"Monthly wisdom alert error (non-fatal): {exc}")
+            _warn_nonfatal("Monthly wisdom alert error", exc)
 
 
 def _print_kraken_banner():
@@ -1244,6 +1284,8 @@ def _confirm_live_trading_startup(equity: float) -> None:
 
 if __name__ == "__main__":
     install_safe_stdout()
+    # initialize centralized logging for the main project
+    setup_logging()
     chase_extras = config.init_paper_chase_if_enabled()
     if chase_extras:
         print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
@@ -1263,6 +1305,7 @@ if __name__ == "__main__":
             main()
         except Exception as e:
             tb = traceback.format_exc()
+            log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
             print("Cycle Error: " + str(e))
             if tb.strip() and tb.strip() != f"{type(e).__name__}: {e}":
                 print(tb)

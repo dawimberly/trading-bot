@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import datetime
 import json
-import os
+import logging
 import re
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
+import threading
 
 import config
+from modules.safe_io import read_json_file, write_json_file
+from modules.logging_utils import log_event
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT / config.THINKING_ENGINE_STATE_FILE
@@ -47,22 +52,40 @@ _GEO_KEYWORDS = (
     "missile",
 )
 
+_PM_SYSTEM_PROMPT = """You are a battle-hardened hedge fund portfolio manager specializing in asymmetric risk and paradigm shifts.
+You think like Eric Weinstein combined with top macro traders — you hunt for situations where upside is significantly larger than downside.
 
-def _load_json(path: Path) -> dict:
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError, TypeError):
-        return {}
+Given current market data:
+- SPY vs MA200 trend
+- VIX level & trend
+- Oil & Gold 5-day moves
+- TNX / yield curve
+- Current regime (RHYME_*)
+- Bot current exposure
+- Any major headline or geopolitical event
 
+Think step-by-step like a senior PM with skin in the game:
 
-def _save_json(path: Path, payload: dict) -> None:
-    try:
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    except OSError:
-        pass
+1. What is the dominant narrative right now? (What story is the market telling itself?)
+2. Where is the asymmetry? (Where is the crowd wrong or forced to change?)
+3. What are the 1-2 biggest risks and the highest-conviction opportunities?
+4. Recommend a clear allocation tilt for the next 3-7 days. Be decisive. Use percentages for VTI, SPY, Energy, Gold, Cash, etc.
+
+Output format (strict — your ENTIRE reply must be ONLY these lines, no preamble):
+NARRATIVE: [One powerful sentence]
+ASYMMETRY: [Where the edge is]
+RISKS: [bullet list, max 2]
+OPPORTUNITIES: [bullet list, max 2]
+RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, ...}
+CONFIDENCE: 0.XX
+REASONING: [Concise but high-signal explanation]
+
+Do not explain your process. Do not repeat the input. Start with NARRATIVE:"""
+
+_STRUCTURED_FIELD_RE = re.compile(
+    r"^(NARRATIVE|ASYMMETRY|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|CONFIDENCE|REASONING|PARADIGM_SHIFT)\s*:\s*(.*)$",
+    re.I,
+)
 
 
 def _pct_change(series, days: int = 5) -> float | None:
@@ -78,10 +101,63 @@ def _pct_change(series, days: int = 5) -> float | None:
         return None
 
 
-def _load_macro_close(col: str):
+def _series_trend_desc(series, *, days: int = 5) -> str:
+    ch = _pct_change(series, days)
+    if ch is None:
+        return "n/a"
+    if ch > 5.0:
+        return f"rising ({ch:+.1f}% {days}d)"
+    if ch < -5.0:
+        return f"falling ({ch:+.1f}% {days}d)"
+    return f"stable ({ch:+.1f}% {days}d)"
+
+
+def _load_macro_close(col: str, cache: dict | None = None):
     from modules.macro_regime_adaptor import _load_daily_close
 
+    if cache is not None:
+        if col not in cache:
+            cache[col] = _load_daily_close(col)
+        return cache[col]
     return _load_daily_close(col)
+
+
+def _yield_curve_summary(macro_cache: dict | None = None) -> str:
+    """TLT/TNX levels and 5d moves; yield stress when TNX rising + TLT weak."""
+    tlt = _load_macro_close("TLT", macro_cache)
+    tnx = _load_macro_close("TNX", macro_cache)
+    if tlt.empty and tnx.empty:
+        return "n/a"
+    parts: list[str] = []
+    if not tnx.empty:
+        try:
+            parts.append(f"TNX {float(tnx.iloc[-1]):.2f}%")
+        except (TypeError, ValueError):
+            pass
+    tlt_5d = _pct_change(tlt) if not tlt.empty else None
+    tnx_5d = _pct_change(tnx) if not tnx.empty else None
+    if tlt_5d is not None:
+        parts.append(f"TLT {tlt_5d:+.1f}% 5d")
+    if tnx_5d is not None:
+        parts.append(f"TNX {tnx_5d:+.1f}% 5d")
+    try:
+        from modules.macro_regime_adaptor import _tlt_yield_stress
+
+        if _tlt_yield_stress(tlt, tnx):
+            parts.append("yield stress (TNX up + TLT weak)")
+    except Exception:
+        pass
+    return ", ".join(parts) if parts else "n/a"
+
+
+def _format_bot_exposure(base_caps: dict[str, float] | None = None) -> str:
+    caps = base_caps or config.fund_allocation_pct()
+    parts: list[str] = []
+    for key in _CAP_KEYS:
+        pct = float(caps.get(key, 0.0))
+        if pct >= 0.005:
+            parts.append(f"{_CAP_LABELS[key]} {pct:.0%}")
+    return ", ".join(parts) if parts else "n/a"
 
 
 def build_market_summary(
@@ -91,10 +167,12 @@ def build_market_summary(
     *,
     wisdom: dict | None = None,
     top_headline: str | None = None,
+    base_caps: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Assemble context for the PM-style reasoning prompt."""
     from modules.pipeline_strategies import _spy_market_up_signal
 
+    macro_cache: dict = {}
     spy_sym = config.SPY_BOT_SYMBOL
     up, mom = _spy_market_up_signal(data, spy_sym, config.SPY_MA_WINDOW)
     if up:
@@ -102,13 +180,17 @@ def build_market_summary(
     else:
         spy_trend = f"below MA{config.SPY_MA_WINDOW}"
 
-    vix_series = _load_macro_close("VIX")
+    vix_series = _load_macro_close("VIX", macro_cache)
     vix_val = float(vix_series.iloc[-1]) if len(vix_series) else None
+    vix_trend = _series_trend_desc(vix_series)
+    yield_curve = _yield_curve_summary(macro_cache)
+    caps = base_caps or config.fund_allocation_pct()
+    bot_exposure = {k: round(float(caps.get(k, 0.0)), 4) for k in _CAP_KEYS}
 
-    oil_series = _load_macro_close("USO")
+    oil_series = _load_macro_close("USO", macro_cache)
     if oil_series.empty:
-        oil_series = _load_macro_close("XOM")
-    gold_series = _load_macro_close("GLD")
+        oil_series = _load_macro_close("XOM", macro_cache)
+    gold_series = _load_macro_close("GLD", macro_cache)
 
     web = (wisdom or {}).get("web_sentiment")
     price = (wisdom or {}).get("price_sentiment")
@@ -131,11 +213,15 @@ def build_market_summary(
     return {
         "spy_trend": spy_trend,
         "vix": round(vix_val, 1) if vix_val is not None else "n/a",
+        "vix_trend": vix_trend,
+        "yield_curve": yield_curve,
         "oil_change": _pct_change(oil_series) if not oil_series.empty else 0.0,
         "gold_change": _pct_change(gold_series) if not gold_series.empty else 0.0,
         "macro_sentiment": macro_sentiment,
         "top_headline": str(headline)[:240],
         "regime": regime,
+        "bot_exposure": bot_exposure,
+        "bot_exposure_str": _format_bot_exposure(caps),
     }
 
 
@@ -296,6 +382,8 @@ def apply_thinking_tilt_to_caps(
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
     log_line = _format_thinking_log(_infer_narrative(market_summary), actual_deltas)
+    if any(v != 0 for v in actual_deltas.values()):
+        log_event("thinking_tilt_applied", confidence=conf, deltas=actual_deltas, log_line=log_line)
     return merged, actual_deltas, log_line
 
 
@@ -369,28 +457,59 @@ def executor_scales_from_caps(
 
 
 def should_refresh_thinking(regime: str) -> bool:
-    """Run at most once per day, or again on regime change."""
-    state = _load_json(STATE_FILE)
-    today = datetime.date.today().isoformat()
-    last_date = state.get("last_date")
+    """Refresh after THINKING_CACHE_HOURS or on regime change."""
+    state = read_json_file(STATE_FILE)
     last_regime = state.get("last_regime")
-    if last_date != today:
+    if last_regime != regime:
         return True
-    return last_regime != regime
+    last_run_at = state.get("last_run_at")
+    if not last_run_at:
+        return True
+    try:
+        last = datetime.datetime.fromisoformat(str(last_run_at))
+        age_h = (datetime.datetime.now() - last).total_seconds() / 3600.0
+        return age_h >= float(config.THINKING_CACHE_HOURS)
+    except (TypeError, ValueError):
+        return True
+
+
+def build_heuristic_reasoning_result(
+    market_summary: dict,
+    *,
+    reason: str = "heuristic-fallback",
+) -> dict[str, Any]:
+    """Rule-based tilt when Ollama is unavailable or all LLM attempts fail."""
+    tilt = derive_heuristic_tilt(market_summary)
+    narrative = _infer_narrative(market_summary)
+    return {
+        "reasoning": f"Rule-based fallback ({reason}): {narrative}",
+        "narrative": narrative,
+        "asymmetry": "",
+        "risks": [],
+        "opportunities": [],
+        "justification": reason,
+        "suggested_tilt": tilt,
+        "confidence": 0.70,
+        "model": reason,
+        "source": "heuristic",
+        "parse_quality": 0.0,
+        "market_summary": market_summary,
+    }
 
 
 def _record_thinking_run(regime: str, result: dict) -> None:
     now = datetime.datetime.now().isoformat()
-    _save_json(
+    write_json_file(
         STATE_FILE,
         {
             "last_date": datetime.date.today().isoformat(),
             "last_regime": regime,
             "last_run_at": now,
-            "model": config.OLLAMA_MODEL,
+            "model": result.get("model", config.OLLAMA_MODEL),
+            "source": result.get("source", "llm"),
         },
     )
-    _save_json(
+    write_json_file(
         OUTPUT_FILE,
         {
             "timestamp": now,
@@ -410,16 +529,76 @@ def ollama_available() -> bool:
         return False
 
 
-def _ollama_generate(prompt: str, *, model: str | None = None) -> str:
+def ollama_installed_models() -> set[str]:
+    """Return model names reported by Ollama /api/tags."""
+    url = f"{config.OLLAMA_HOST.rstrip('/')}/api/tags"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return set()
+    names: set[str] = set()
+    for item in body.get("models") or []:
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _model_available(model: str, installed: set[str]) -> bool:
+    if not installed:
+        return True
+    if model in installed:
+        return True
+    if ":" not in model:
+        return any(n.startswith(f"{model}:") for n in installed)
+    return False
+
+
+def thinking_model_chain(*, fast_only: bool = False) -> list[str]:
+    """Primary deepseek-r1:8b, then fast fallbacks (llama3.2:3b, deepseek-r1:1.5b)."""
+    fallbacks = [
+        m.strip()
+        for m in config.OLLAMA_FALLBACK_MODELS.split(",")
+        if m.strip()
+    ]
+    if fast_only:
+        return fallbacks or [config.OLLAMA_MODEL]
+    chain = [config.OLLAMA_MODEL]
+    for model in fallbacks:
+        if model not in chain:
+            chain.append(model)
+    return chain
+
+
+def _is_fast_model(model: str) -> bool:
+    low = model.lower()
+    return any(tag in low for tag in ("1.5b", "3b", "llama3.2"))
+
+
+def _model_num_predict(model: str) -> int:
+    return 450 if _is_fast_model(model) else 900
+
+
+def _ollama_generate(
+    prompt: str,
+    *,
+    system: str | None = None,
+    model: str | None = None,
+    timeout_sec: int | None = None,
+) -> tuple[str, str]:
+    """Return (full_text_for_logs, answer_text_for_parsing)."""
     model = model or config.OLLAMA_MODEL
-    payload = json.dumps(
-        {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.4, "num_predict": 1200},
-        }
-    ).encode("utf-8")
+    body: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.3, "num_predict": _model_num_predict(model)},
+    }
+    if system:
+        body["system"] = system
+    payload = json.dumps(body).encode("utf-8")
     url = f"{config.OLLAMA_HOST.rstrip('/')}/api/generate"
     req = urllib.request.Request(
         url,
@@ -427,47 +606,55 @@ def _ollama_generate(prompt: str, *, model: str | None = None) -> str:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=config.OLLAMA_TIMEOUT_SEC) as resp:
+    timeout = timeout_sec if timeout_sec is not None else config.OLLAMA_TIMEOUT_SEC
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = json.loads(resp.read().decode("utf-8"))
     answer = str(body.get("response") or "").strip()
     thinking = str(body.get("thinking") or "").strip()
     if answer and thinking:
-        text = f"{thinking}\n\n---\n{answer}"
+        full = f"{thinking}\n\n---\n{answer}"
+        if re.search(r"NARRATIVE\s*:", answer, re.I):
+            parse_text = answer
+        elif re.search(r"NARRATIVE\s*:", thinking, re.I):
+            parse_text = thinking
+        else:
+            parse_text = f"{thinking}\n{answer}" if thinking else answer
     elif answer:
-        text = answer
+        full = answer
+        parse_text = answer
     elif thinking:
-        text = thinking
+        full = thinking
+        parse_text = thinking
     else:
         raise RuntimeError("Ollama returned empty response")
-    return text
+    return full, parse_text
 
 
 def _extract_json_block(text: str) -> dict | None:
-    # Look for a fenced JSON block first
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S | re.I)
+    fenced = re.search(r"```(?:json)?\s*(\{)", text, re.S | re.I)
     if fenced:
-        try:
-            return json.loads(fenced.group(1))
-        except json.JSONDecodeError:
-            pass
-    # Fall back to scanning for any JSON-like object and prefer one that
-    # contains either explicit `suggested_tilt` or any known tilt keys.
-    candidate = None
-    for match in re.finditer(r"\{.*?\}", text, re.S):
-        try:
-            obj = json.loads(match.group(0))
-            if not isinstance(obj, dict):
-                continue
-            if "suggested_tilt" in obj:
+        span = _find_balanced_brace(text, fenced.start(1))
+        if span:
+            obj = _coerce_tilt_json(text[span[0] : span[1] + 1])
+            if isinstance(obj, dict):
                 return obj
-            if any(k in obj for k in _TILT_KEYS):
-                # wrap legacy flat tilt into new schema
-                return {"suggested_tilt": obj}
-            # keep the first dict as a fallback
-            if candidate is None:
-                candidate = obj
-        except json.JSONDecodeError:
+    candidate = None
+    idx = 0
+    while idx < len(text):
+        span = _find_balanced_brace(text, idx)
+        if not span:
+            break
+        obj = _coerce_tilt_json(text[span[0] : span[1] + 1])
+        if not isinstance(obj, dict):
+            idx = span[1] + 1
             continue
+        if "suggested_tilt" in obj:
+            return obj
+        if any(str(k).lower() in _TILT_KEYS for k in obj):
+            return {"suggested_tilt": obj}
+        if candidate is None:
+            candidate = obj
+        idx = span[1] + 1
     return candidate
 
 
@@ -488,7 +675,10 @@ def _normalize_tilt(raw: dict | None) -> dict[str, float]:
         if k not in base:
             continue
         try:
-            base[k] = float(val)
+            val = float(val)
+            if val > 1.0 and val <= 100.0:
+                val = val / 100.0
+            base[k] = val
         except (TypeError, ValueError):
             continue
     total = sum(v for v in base.values() if v > 0)
@@ -498,73 +688,397 @@ def _normalize_tilt(raw: dict | None) -> dict[str, float]:
     return {k: round(v / total, 4) for k, v in base.items() if v > 0}
 
 
-def get_market_reasoning(market_summary: dict) -> dict:
-    """Use local LLM to think about the market like a senior PM."""
-    prompt = f"""You are a senior hedge fund portfolio manager with an asymmetric risk focus.
+def _parse_list_value(raw: str) -> list[str]:
+    raw = raw.strip()
+    if not raw:
+        return []
+    if raw.startswith("["):
+        try:
+            val = json.loads(raw)
+            if isinstance(val, list):
+                return [str(x).strip() for x in val if str(x).strip()]
+        except json.JSONDecodeError:
+            inner = raw.strip("[]")
+            return [x.strip().strip('"\'') for x in inner.split(",") if x.strip()]
+    sep = ";" if ";" in raw and "," not in raw else ","
+    if sep in raw:
+        return [x.strip().strip("-•*") for x in raw.split(sep) if x.strip()]
+    lines = [ln.strip().strip("-•*") for ln in raw.splitlines() if ln.strip()]
+    if lines:
+        return lines
+    return [raw]
 
-Current market state:
-SPY trend: {market_summary['spy_trend']}
-VIX: {market_summary['vix']}
-Oil 5d change: {market_summary['oil_change']}%
-Gold 5d change: {market_summary['gold_change']}%
-Recent macro: {market_summary['macro_sentiment']}
-Top headline: {market_summary['top_headline']}
-Regime: {market_summary.get('regime', 'unknown')}
 
-Think step-by-step and prioritize downside protection where appropriate.
+def _find_balanced_brace(text: str, start: int = 0) -> tuple[int, int] | None:
+    """Return (open_idx, close_idx) for a balanced {...} object."""
+    open_idx = text.find("{", start)
+    if open_idx < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    quote = ""
+    for i in range(open_idx, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                in_string = False
+            continue
+        if ch in ('"', "'"):
+            in_string = True
+            quote = ch
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return open_idx, i
+    return None
 
-1) Provide a concise dominant narrative (1-2 sentences).
-2) List the 1-2 biggest risks (bullet points) and 1-2 highest-conviction opportunities (bullet points).
-3) Give an allocation tilt (target weights for: vti, spy, energy, gold, crypto, cash, bonds) for the next 1-7 days, with a 1-2 sentence justification that links the tilt to the narrative and risks.
-4) Provide a clear numeric confidence score (0.0-1.0) for your tilt (how actionable you believe this is).
 
-End your output with a single JSON object (fenced with ```json if you like) with these keys:
- - `suggested_tilt`: object of allocation weights (0-1, may sum ~1)
- - `confidence`: number between 0 and 1
- - `narrative`: short string summary
- - `risks`: array of short strings
- - `opportunities`: array of short strings
- - `justification`: short string tying tilt -> narrative
+def _coerce_tilt_json(raw: str) -> dict | None:
+    """Parse tilt dict from LLM output; tolerate quotes, trailing commas, pct values."""
+    cleaned = raw.strip()
+    if not cleaned:
+        return None
+    cleaned = cleaned.replace("'", '"')
+    cleaned = re.sub(r",\s*}", "}", cleaned)
+    cleaned = re.sub(r",\s*]", "]", cleaned)
+    try:
+        obj = json.loads(cleaned)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    quoted = re.sub(r"([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'\1"\2":', cleaned)
+    try:
+        obj = json.loads(quoted)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    return None
 
-    Example:
-    ```json
-    {{"suggested_tilt": {{"vti":0.72, "spy":0.06, "energy":0.06, "gold":0.04, "crypto":0.06, "cash":0.04, "bonds":0.02}}, "confidence":0.72, "narrative":"Risk-off driven by rising VIX and gold bid", "risks":["oil shock","geopolitical"], "opportunities":["energy overshoot"], "justification":"Trim equities and add energy/gold as hedge given VIX+gold move"}}
-    ```
 
-Be concise, factual, and supply the JSON for machine parsing.
-"""
+def _parse_tilt_value(raw: str) -> dict | None:
+    raw = raw.strip()
+    span = _find_balanced_brace(raw)
+    if span:
+        obj = _coerce_tilt_json(raw[span[0] : span[1] + 1])
+        if obj:
+            return obj
+    return None
 
-    text = _ollama_generate(prompt)
-    parsed = _extract_json_block(text) or {}
 
-    # Normalize confidence
-    confidence = parsed.get("confidence", None)
+def _recover_partial_tilt(text: str) -> dict | None:
+    """Best-effort parse when RECOMMENDED_TILT JSON is truncated mid-stream."""
+    match = re.search(r"RECOMMENDED_TILT\s*:\s*\{([^}\n]*)", text, re.I)
+    if not match:
+        return None
+    pairs = re.findall(r'"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*:\s*([\d.]+)', match.group(1))
+    if not pairs:
+        return None
+    raw: dict[str, float] = {}
+    for key, val in pairs:
+        try:
+            raw[key.lower()] = float(val)
+        except ValueError:
+            continue
+    return raw if raw else None
+
+
+def _extract_recommended_tilt(text: str) -> dict | None:
+    """Extract RECOMMENDED_TILT dict from full LLM response (multi-strategy)."""
+    for match in re.finditer(r"RECOMMENDED_TILT\s*:", text, re.I):
+        span = _find_balanced_brace(text, match.end())
+        if span:
+            obj = _coerce_tilt_json(text[span[0] : span[1] + 1])
+            if obj and any(
+                str(k).lower() in _TILT_KEYS or str(k).lower() in ("vti_core", "xle", "gld")
+                for k in obj
+            ):
+                return obj
+    for match in re.finditer(r"suggested_tilt\s*:", text, re.I):
+        span = _find_balanced_brace(text, match.end())
+        if span:
+            obj = _coerce_tilt_json(text[span[0] : span[1] + 1])
+            if obj:
+                return obj
+    best: dict | None = None
+    idx = 0
+    while idx < len(text):
+        span = _find_balanced_brace(text, idx)
+        if not span:
+            break
+        obj = _coerce_tilt_json(text[span[0] : span[1] + 1])
+        if obj:
+            if "suggested_tilt" in obj and isinstance(obj["suggested_tilt"], dict):
+                return obj["suggested_tilt"]
+            if any(str(k).lower() in _TILT_KEYS for k in obj):
+                best = obj
+        idx = span[1] + 1
+    return best or _recover_partial_tilt(text)
+
+
+def _parse_confidence_value(raw: str) -> float | None:
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    match = re.search(r"(\d+\.?\d*)", raw)
+    if match:
+        try:
+            val = float(match.group(1))
+            return val / 100.0 if val > 1.0 else val
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_structured_reasoning(text: str) -> dict[str, Any]:
+    """Parse NARRATIVE/ASYMMETRY/RISKS/OPPORTUNITIES/RECOMMENDED_TILT/CONFIDENCE/REASONING."""
+    result: dict[str, Any] = {}
+    current_field: str | None = None
+    buf: list[str] = []
+
+    def flush() -> None:
+        nonlocal current_field, buf
+        if not current_field:
+            return
+        raw = "\n".join(buf).strip()
+        key = current_field.lower()
+        if key == "narrative":
+            result["narrative"] = raw.splitlines()[0] if raw else ""
+        elif key == "asymmetry":
+            result["asymmetry"] = raw.splitlines()[0] if raw else ""
+        elif key == "paradigm_shift":
+            result["paradigm_shift"] = raw.splitlines()[0] if raw else ""
+        elif key == "risks":
+            result["risks"] = _parse_list_value(raw)
+        elif key == "opportunities":
+            result["opportunities"] = _parse_list_value(raw)
+        elif key == "recommended_tilt":
+            tilt = _parse_tilt_value(raw) or _extract_recommended_tilt(raw)
+            if tilt:
+                result["suggested_tilt"] = tilt
+        elif key == "confidence":
+            conf = _parse_confidence_value(raw.splitlines()[0] if raw else "")
+            if conf is not None:
+                result["confidence"] = conf
+        elif key == "reasoning":
+            result["reasoning_excerpt"] = raw
+        current_field = None
+        buf = []
+
+    for line in text.splitlines():
+        match = _STRUCTURED_FIELD_RE.match(line.strip())
+        if match:
+            flush()
+            current_field = match.group(1).upper()
+            rest = match.group(2).strip()
+            buf = [rest] if rest else []
+        elif current_field:
+            buf.append(line)
+    flush()
+    return result
+
+
+def _structured_parse_candidates(full_text: str, answer_text: str) -> list[str]:
+    """Prefer the final structured block (often after deepseek-r1 '---' separator)."""
+    candidates: list[str] = []
+    if "---" in full_text:
+        candidates.append(full_text.rsplit("---", 1)[-1])
+    if answer_text.strip():
+        candidates.append(answer_text)
+    candidates.append(full_text)
+    return candidates
+
+
+def _best_structured_parse(full_text: str, answer_text: str) -> dict[str, Any]:
+    best: dict[str, Any] = {}
+    for chunk in _structured_parse_candidates(full_text, answer_text):
+        parsed = _parse_structured_reasoning(chunk)
+        if not parsed:
+            continue
+        if len(parsed) > len(best):
+            best = parsed
+        if parsed.get("suggested_tilt") and parsed.get("confidence") is not None:
+            return parsed
+    return best
+
+
+def _looks_like_meta_narrative(text: str) -> bool:
+    low = text.lower().strip()
+    return low.startswith("first,") or "i need to" in low or "user provided" in low
+
+
+def _build_reasoning_user_prompt(market_summary: dict) -> str:
+    return f"""Market snapshot:
+
+SPY vs MA200: {market_summary['spy_trend']}
+VIX: {market_summary['vix']} ({market_summary.get('vix_trend', 'n/a')})
+Oil 5d: {market_summary['oil_change']}% | Gold 5d: {market_summary['gold_change']}%
+Rates: {market_summary.get('yield_curve', 'n/a')}
+Regime: {market_summary.get('regime', 'unknown')} | {market_summary['macro_sentiment']}
+Headline: {market_summary['top_headline']}
+Bot exposure: {market_summary.get('bot_exposure_str', 'n/a')}
+
+Reply with ONLY the structured block. Start with NARRATIVE:"""
+
+
+def _is_default_tilt(tilt: dict[str, float]) -> bool:
+    return (
+        abs(float(tilt.get("vti", 0.0)) - 0.8) < 0.02
+        and abs(float(tilt.get("cash", 0.0)) - 0.2) < 0.02
+        and sum(float(tilt.get(k, 0.0)) for k in ("spy", "energy", "gold", "crypto", "bonds")) < 0.02
+    )
+
+
+def _llm_parse_quality(
+    structured: dict[str, Any],
+    tilt: dict[str, float],
+    *,
+    had_conf_field: bool,
+) -> float:
+    score = 0.0
+    narrative = str(structured.get("narrative") or "")
+    if narrative and not _looks_like_meta_narrative(narrative):
+        score += 0.25
+    if structured.get("asymmetry"):
+        score += 0.15
+    if structured.get("risks"):
+        score += 0.1
+    if structured.get("opportunities"):
+        score += 0.1
+    if structured.get("suggested_tilt") or not _is_default_tilt(tilt):
+        score += 0.3
+    if had_conf_field:
+        score += 0.1
+    return round(min(1.0, score), 2)
+
+
+def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[str, Any]:
+    """Single Ollama attempt; raises on transport/empty response."""
+    user_prompt = _build_reasoning_user_prompt(market_summary)
+    full_text, answer_text = _ollama_generate(user_prompt, system=_PM_SYSTEM_PROMPT, model=model)
+    structured = _best_structured_parse(full_text, answer_text)
+    parse_chunks = _structured_parse_candidates(full_text, answer_text)
+    parsed: dict = {}
+    for chunk in parse_chunks:
+        parsed = _extract_json_block(chunk) or parsed
+
+    had_conf_field = "confidence" in structured or "confidence" in parsed
+    confidence = structured.get("confidence", parsed.get("confidence"))
     try:
         confidence = 0.0 if confidence is None else max(0.0, min(1.0, float(confidence)))
     except (TypeError, ValueError):
         confidence = 0.65
+    if confidence < 0.05 and not had_conf_field:
+        confidence = 0.65
 
-    # Extract suggested tilt from new or legacy formats
-    suggested = parsed.get("suggested_tilt") or parsed.get("tilt") or parsed
-    tilt = _normalize_tilt(suggested)
+    raw_tilt = (
+        structured.get("suggested_tilt")
+        or next(
+            (t for c in parse_chunks if (t := _extract_recommended_tilt(c))),
+            None,
+        )
+        or parsed.get("suggested_tilt")
+        or parsed.get("recommended_tilt")
+        or parsed.get("tilt")
+        or parsed
+    )
+    tilt = _normalize_tilt(raw_tilt if isinstance(raw_tilt, dict) else None)
 
-    # Pull narrative + risks/opps/justification if provided
-    narrative = parsed.get("narrative") or (text.splitlines()[0] if text else "")
-    risks = parsed.get("risks") or []
-    opportunities = parsed.get("opportunities") or parsed.get("opps") or []
-    justification = parsed.get("justification") or ""
+    narrative = structured.get("narrative") or parsed.get("narrative") or ""
+    if not narrative or _looks_like_meta_narrative(narrative):
+        narrative = _infer_narrative(market_summary)
+
+    risks = structured.get("risks") or parsed.get("risks") or []
+    opportunities = (
+        structured.get("opportunities")
+        or parsed.get("opportunities")
+        or parsed.get("opps")
+        or []
+    )
+    asymmetry = structured.get("asymmetry") or parsed.get("asymmetry") or ""
+    justification = (
+        structured.get("reasoning_excerpt")
+        or parsed.get("justification")
+        or parsed.get("reasoning")
+        or ""
+    )
+    quality = _llm_parse_quality(structured, tilt, had_conf_field=had_conf_field)
 
     return {
-        "reasoning": text.strip(),
+        "reasoning": full_text.strip(),
         "narrative": str(narrative).strip(),
+        "asymmetry": str(asymmetry).strip() if asymmetry else "",
         "risks": risks if isinstance(risks, list) else [str(risks)],
-        "opportunities": opportunities if isinstance(opportunities, list) else [str(opportunities)] if opportunities else [],
+        "opportunities": (
+            opportunities if isinstance(opportunities, list)
+            else [str(opportunities)] if opportunities else []
+        ),
         "justification": str(justification).strip(),
         "suggested_tilt": tilt,
         "confidence": round(confidence, 2),
-        "model": config.OLLAMA_MODEL,
+        "model": model,
+        "source": "llm",
+        "parse_quality": quality,
         "market_summary": market_summary,
     }
+
+
+def get_market_reasoning(
+    market_summary: dict,
+    *,
+    fast_model: bool = False,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Use local LLM with primary -> fallback chain; heuristic if all fail."""
+    installed = ollama_installed_models()
+    chain = thinking_model_chain(fast_only=fast_model)
+    if model:
+        candidates = [model]
+    else:
+        candidates = [m for m in chain if _model_available(m, installed)]
+        if not candidates:
+            if fast_model:
+                return build_heuristic_reasoning_result(
+                    market_summary,
+                    reason="fast-models-not-installed",
+                )
+            candidates = chain
+
+    errors: list[str] = []
+    best: dict[str, Any] | None = None
+    for idx, candidate in enumerate(candidates):
+        try:
+            result = _get_market_reasoning_with_model(market_summary, candidate)
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as exc:
+            errors.append(f"{candidate}: {exc}")
+            continue
+        quality = float(result.get("parse_quality") or 0.0)
+        if best is None or quality > float(best.get("parse_quality") or 0.0):
+            best = result
+        if quality >= 0.45:
+            return result
+        if idx < len(candidates) - 1:
+            continue
+        return result
+
+    if best is not None:
+        return best
+
+    reason = "; ".join(errors) if errors else "no-models"
+    return build_heuristic_reasoning_result(market_summary, reason=reason)
 
 
 def maybe_run_thinking(
@@ -576,27 +1090,61 @@ def maybe_run_thinking(
     top_headline: str | None = None,
     force: bool = False,
 ) -> dict | None:
-    """Paper-only hook: run LLM reasoning at most once/day or on regime change."""
+    """Paper-only hook: run LLM reasoning at most once per THINKING_CACHE_HOURS or on regime change."""
     if not config.effective_thinking_engine_enabled():
         return None
     if not force and not should_refresh_thinking(regime):
-        cached = _load_json(OUTPUT_FILE)
+        cached = read_json_file(OUTPUT_FILE)
         if cached:
             return cached
         return None
-    if not ollama_available():
-        print("--- Thinking engine: Ollama not reachable (run scripts/setup_ollama.py) ---")
-        return None
-
     summary = build_market_summary(
         data, regime, vol, wisdom=wisdom, top_headline=top_headline
     )
-    try:
-        result = get_market_reasoning(summary)
-    except Exception as exc:
-        print(f"--- Thinking engine error (non-fatal): {exc} ---")
-        return None
+    if not ollama_available():
+        logger.info("Thinking engine: Ollama not reachable, using rule-based tilt")
+        result = build_heuristic_reasoning_result(summary, reason="ollama-unreachable")
+        _record_thinking_run(regime, result)
+        return result
+    # If caller asked for a synchronous forced run, do it now.
+    if force:
+        try:
+            result = get_market_reasoning(summary)
+        except Exception:
+            logger.exception("Thinking engine: LLM failed during forced run; falling back to heuristic")
+            result = build_heuristic_reasoning_result(summary, reason="llm-error-forced")
+        if result.get("source") == "heuristic":
+            logger.info("Thinking engine: heuristic fallback (%s)", result.get("model"))
+        elif float(result.get("parse_quality") or 0.0) < 0.45:
+            logger.info(
+                "Thinking engine: low parse quality (%s), using best-effort LLM output",
+                result.get("parse_quality"),
+            )
+        _record_thinking_run(regime, result)
+        return result
 
+    # Non-forced path: refresh in background to avoid blocking main loop.
+    def _bg_refresh():
+        try:
+            logger.info("Thinking engine: background refresh started for regime=%s", regime)
+            res = get_market_reasoning(summary)
+            if res.get("source") == "heuristic":
+                logger.info("Thinking engine background: heuristic fallback (%s)", res.get("model"))
+            elif float(res.get("parse_quality") or 0.0) < 0.45:
+                logger.info("Thinking engine background: low parse quality: %s", res.get("parse_quality"))
+            _record_thinking_run(regime, res)
+            logger.info("Thinking engine: background refresh completed for regime=%s", regime)
+        except Exception:
+            logger.exception("Thinking engine background refresh failed")
+
+    t = threading.Thread(target=_bg_refresh, daemon=True)
+    t.start()
+
+    # Return cached output if available, else a heuristic immediate result.
+    cached = read_json_file(OUTPUT_FILE)
+    if cached:
+        return cached
+    result = build_heuristic_reasoning_result(summary, reason="background-refresh-started")
     _record_thinking_run(regime, result)
     return result
 
@@ -609,28 +1157,24 @@ def log_thinking_result(thinking_result: dict) -> None:
     tilt_s = ", ".join(f"{k} {v:.0%}" for k, v in top_tilts)
     model = thinking_result.get("model", config.OLLAMA_MODEL)
     conf = float(thinking_result.get("confidence", 0.0))
-    print(
-        f"--- Thinking engine ({model}): "
-        f"conf {conf:.0%} | tilt {tilt_s} ---"
-    )
+    logger.info("Thinking engine (%s): conf %s | tilt %s", model, f"{conf:.0%}", tilt_s)
     if narrative:
-        print(f"--- PM view: {narrative} ---")
-    # Print brief sample of the full reasoning for human inspection
+        logger.info("PM view: %s", narrative)
+    asymmetry = thinking_result.get("asymmetry") or ""
+    if asymmetry:
+        logger.info("Asymmetry: %s", asymmetry)
     if reasoning:
         sample_lines = [ln for ln in reasoning.splitlines() if ln.strip()][:6]
-        print("--- Sample reasoning: ---")
-        for ln in sample_lines:
-            print(f"  {ln}")
-    # Also surface extracted risks / opportunities / justification when present
+        logger.debug("Sample reasoning:\n%s", "\n".join(sample_lines))
     risks = thinking_result.get("risks") or []
     opps = thinking_result.get("opportunities") or []
     just = thinking_result.get("justification") or ""
     if risks:
-        print(f"--- Risks: {', '.join(risks)} ---")
+        logger.info("Risks: %s", ", ".join(risks))
     if opps:
-        print(f"--- Opportunities: {', '.join(opps)} ---")
+        logger.info("Opportunities: %s", ", ".join(opps))
     if just:
-        print(f"--- Justification: {just} ---")
+        logger.info("Justification: %s", just)
 
 
 def maybe_apply_thinking_caps(
@@ -642,17 +1186,15 @@ def maybe_apply_thinking_caps(
     """Merge thinking tilt into sleeve caps; returns (caps, thinking_result with apply meta)."""
     if not thinking_result or not config.effective_thinking_engine_enabled():
         return base_caps, thinking_result
-    # Only apply when LLM expresses reasonable confidence and narrative is substantive
     conf = float(thinking_result.get("confidence", 0.0))
     narrative = str(thinking_result.get("narrative") or "").strip()
     narrative_ok = len(narrative) >= 20 and "range-bound" not in narrative.lower()
     if conf < 0.65 or not narrative_ok:
-        # mark as skipped for clarity
         thinking_result = dict(thinking_result)
         thinking_result["apply_log"] = "Thinking skipped: insufficient confidence or weak narrative"
         thinking_result["applied_deltas"] = {}
         thinking_result["adjusted_caps"] = dict(base_caps)
-        print(f"--- Thinking engine: skipped apply (conf {conf:.2f}, narrative_ok={narrative_ok}) ---")
+        logger.info("Thinking engine: skipped apply (conf %.2f, narrative_ok=%s)", conf, narrative_ok)
         return base_caps, thinking_result
 
     merged, deltas, log_line = apply_thinking_to_sleeve_caps(
@@ -663,10 +1205,10 @@ def maybe_apply_thinking_caps(
     thinking_result["adjusted_caps"] = merged
     thinking_result["apply_log"] = log_line
     if log_line:
-        state = _load_json(STATE_FILE)
+        state = read_json_file(STATE_FILE)
         today = datetime.date.today().isoformat()
         if state.get("last_apply_log_date") != today:
-            print(log_line)
+            logger.info(log_line)
             state["last_apply_log_date"] = today
-            _save_json(STATE_FILE, state)
+            write_json_file(STATE_FILE, state)
     return merged, thinking_result
