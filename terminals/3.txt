@@ -3,7 +3,7 @@ pid: 9940
 cwd: "C:\Users\Owner\PythonTrading"
 command: "python \"C:\\Users\\Owner\\PythonTrading\\scripts\\test_thinking_engine.py\""
 started_at: 2026-06-12T00:50:03.216Z
-running_for_ms: 2250012  
+running_for_ms: 2265008  
 ---
 Timeout: 1200s | Cache: 24h
 Model chain: ['deepseek-r1:8b', 'llama3.2:3b', 'deepseek-r1:1.5b']
