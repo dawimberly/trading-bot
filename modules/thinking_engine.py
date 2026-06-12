@@ -358,6 +358,7 @@ def compute_cap_deltas(
     *,
     confidence: float = 0.7,
     market_summary: dict | None = None,
+    max_sleeve_delta: float | None = None,
 ) -> dict[str, float]:
     """Combine rule-based macro tilts with optional LLM nudges."""
     deltas = {k: 0.0 for k in _CAP_KEYS}
@@ -366,7 +367,11 @@ def compute_cap_deltas(
             deltas[k] += v
     for k, v in _llm_nudge_deltas(base_caps, suggested_tilt, confidence).items():
         deltas[k] += v
-    max_delta = config.THINKING_MAX_SLEEVE_DELTA
+    max_delta = (
+        float(max_sleeve_delta)
+        if max_sleeve_delta is not None
+        else config.THINKING_MAX_SLEEVE_DELTA
+    )
     return {k: round(max(-max_delta, min(max_delta, v)), 6) for k, v in deltas.items()}
 
 
@@ -567,9 +572,15 @@ def apply_thinking_tilt_to_caps(
     confidence: float = 0.7,
     market_summary: dict | None = None,
     equity: float | None = None,
+    max_sleeve_delta: float | None = None,
+    allow_small_account: bool = False,
 ) -> tuple[dict[str, float], dict[str, float], str]:
-    """Apply LLM/heuristic tilt to sleeve caps (±THINKING_MAX_SLEEVE_DELTA per sleeve)."""
-    if equity is not None and equity < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
+    """Apply LLM/heuristic tilt to sleeve caps (±max_sleeve_delta per sleeve)."""
+    if (
+        equity is not None
+        and equity < config.SMALL_ACCOUNT_EQUITY_THRESHOLD
+        and not allow_small_account
+    ):
         return dict(base_caps), {}, ""
 
     base = {k: float(base_caps.get(k, 0.0)) for k in _CAP_KEYS}
@@ -579,6 +590,7 @@ def apply_thinking_tilt_to_caps(
         suggested_tilt,
         confidence=conf,
         market_summary=market_summary,
+        max_sleeve_delta=max_sleeve_delta,
     )
 
     merged = dict(base)

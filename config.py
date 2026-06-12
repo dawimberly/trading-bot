@@ -164,6 +164,8 @@ THINKING_CACHE_HOURS = int(os.getenv("THINKING_CACHE_HOURS", "24"))
 THINKING_ENGINE_STATE_FILE = os.getenv("THINKING_ENGINE_STATE_FILE", "thinking_engine_state.json")
 THINKING_ENGINE_OUTPUT_FILE = os.getenv("THINKING_ENGINE_OUTPUT_FILE", "thinking_engine_last.json")
 THINKING_MAX_SLEEVE_DELTA = float(os.getenv("THINKING_MAX_SLEEVE_DELTA", "0.15"))
+# Tighter cap when simulating thinking on live small-account profile
+LIVE_THINKING_MAX_SLEEVE_DELTA = float(os.getenv("LIVE_THINKING_MAX_SLEEVE_DELTA", "0.08"))
 # Disabled until live confidence calibration improves (see thinking engine accuracy analysis)
 THINKING_CONFIDENCE_AMPLIFY_ENABLED = os.getenv(
     "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "false"
@@ -672,6 +674,7 @@ _account_equity: float | None = None
 _small_account_mode = False
 _backtest_small_account_ctx = False
 _backtest_paper_sleeves_ctx = False
+_live_thinking_sim_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
     "regime": "",
@@ -840,6 +843,16 @@ def set_backtest_paper_sleeves_context(active: bool) -> None:
 
 def backtest_paper_sleeves_context() -> bool:
     return _backtest_paper_sleeves_ctx
+
+
+def set_live_thinking_sim_context(active: bool) -> None:
+    """True while backtest simulates thinking tilts on live small-account profile."""
+    global _live_thinking_sim_ctx
+    _live_thinking_sim_ctx = bool(active)
+
+
+def live_thinking_sim_context() -> bool:
+    return _live_thinking_sim_ctx
 
 
 def is_small_account(equity: float | None = None) -> bool:
@@ -1530,7 +1543,9 @@ def effective_stat_arb_optimized() -> bool:
 
 
 def effective_thinking_engine_enabled() -> bool:
-    """Local Ollama PM reasoning — paper aggressive only, never live."""
+    """Local Ollama PM reasoning — paper aggressive or live-thinking sim only."""
+    if live_thinking_sim_context() and PAPER_THINKING_ENGINE_ENABLED:
+        return backtest_small_account_context()
     if not paper_only_sleeves_active() or not PAPER_THINKING_ENGINE_ENABLED:
         return False
     if PAPER_TRADING:

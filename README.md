@@ -40,6 +40,7 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 | **NYSE overlap / beta scaling** | **off** (opt-in via `.env`) |
 | **Adaptive chunk / co-fire** | **off** (opt-in) |
 | **SPY MA exit** | **off** (opt-in) |
+| **Thinking engine** | **off** (paper opt-in only; see Profile B) |
 | **Halt** | 10% DD; resume 8%; liquidate on breach |
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
@@ -88,6 +89,24 @@ python backtester.py --paper-aggressive --compare-final --final-all-windows
 ```
 
 Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
+
+#### Thinking engine (Ollama — paper only, opt-in)
+
+Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default**; enable with `PAPER_THINKING_ENGINE_ENABLED=true` and run `scripts/setup_ollama.py` first.
+
+| Command | Purpose |
+|---------|---------|
+| `python scripts/test_thinking_engine.py --max-examples 3` | Live Ollama smoke test |
+| `python backtester.py --days 365 --paper-aggressive --compare-thinking` | Paper stack A/B (heuristic proxy in backtest) |
+| `python scripts/analyze_thinking_engine.py` | Accuracy / tilt scoring |
+
+**Not enabled on live Profile A** (~$100–$300). To estimate live impact:
+
+```bash
+python backtester.py --days 365 --simulate-live-thinking
+```
+
+Simulates **90% VTI, 1% risk, $10 max order** with thinking tilts capped at **±8% per sleeve** (`LIVE_THINKING_MAX_SLEEVE_DELTA`). Uses the same heuristic proxy as paper backtests (not Ollama per bar). Latest 365d: thinking **−0.8 pp return**, **+0.96 pp shallower MaxDD** vs no-thinking small-account sim — live Ollama may be less stable; keep off live until calibration improves.
 
 ---
 
@@ -831,6 +850,14 @@ python backtester.py --days 500
 python backtester.py --max              # full history with halt
 python backtester.py --max --no-halt    # validate crypto sleeve path
 
+# Paper aggressive (dynamic VTI, overlap/chunk/co-fire; social/macro off)
+python backtester.py --days 365 --paper-aggressive
+python backtester.py --days 365 --paper-aggressive --compare-final
+python backtester.py --days 365 --paper-aggressive --compare-thinking
+
+# Live small-account + thinking what-if (90% VTI, ±8% tilt cap; not for production live)
+python backtester.py --days 365 --simulate-live-thinking
+
 # VTI core A/B (70/30, 80/20 vs active-only)
 python backtester.py --days 365 --compare-vti-core
 python backtester.py --days 365 --vti-core 0.8
@@ -865,7 +892,7 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | Integrated fund + sleeve-aware executor; `--vti-core`, `--compare-vti-core`, `--paper-aggressive`, `--compare-paper-aggressive` |
+| `backtester.py` | Integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
 | `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
 | `scripts/maintenance/sync_felix_transcripts.py` | Bulk-sync Felix YouTube transcripts for social sleeve |
 | `backtester_metals.py` | Game plan variants incl. `yield_gate_only` |
