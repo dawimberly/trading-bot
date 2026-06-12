@@ -143,13 +143,8 @@ def apply_best_paper_config() -> None:
         config.PAPER_ADAPTIVE_CHUNK_ENABLED = flags["adaptive_chunk"]
         config.PAPER_COFIRE_BUDGET_ENABLED = flags["cofire_budget"]
     
-    # Ensure deprecated features are disabled
-    config.PAPER_RISK_PARITY_ENABLED = False
-    config.PAPER_STAT_ARB_OPTIMIZED = False
-    config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
-    config.PAPER_SOCIAL_SLEEVE_ENABLED = False
-    config.PAPER_EQUITY_PAIRS = False
-    config.PAPER_SPY_EXIT_ON_MA_BREAK = False
+    # Ensure deprecated features stay disabled (single source: config.enforce_best_paper_stack)
+    config.enforce_best_paper_stack()
 
 
 if __name__ == "__main__":

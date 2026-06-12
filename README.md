@@ -16,7 +16,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 - **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
 - Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
 
-**Paper research** (`paper_aggressive`): dynamic VTI (40–75%), overlap filter + adaptive chunk + co-fire **on**, macro adaptor + social + SPY MA exit **off**. See [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase).
+**Paper research** (`paper_aggressive`): **Best Paper Bot** stack — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** via Ollama. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -48,39 +48,46 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
-**Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) while staying lightweight on the laptop.
+**Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) with a stable, simplified stack.
+
+#### ON (default)
 
 | Layer | Default | Env flag |
 |-------|---------|----------|
 | **VTI core** | Dynamic **40–75%** | `PAPER_DYNAMIC_VTI=true` |
 | **Risk per trade** | Dynamic **1–3%** | `PAPER_DYNAMIC_RISK_ENABLED=true` |
-| **Stat arb** | Cointegration + both legs | `PAPER_STAT_ARB_ENABLED=true` |
+| **Stat arb** | Original cointegration pairs | `PAPER_STAT_ARB_ENABLED=true` |
 | **Vol overlay** | VIX regime hedge/income | `PAPER_VOL_TRADING_ENABLED=true` |
 | **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
-| **Macro regime** | Oil/gold/VIX/geo shifts | `PAPER_MACRO_REGIME_ADAPTOR_ENABLED=true` |
+| **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
+| **Overlap / chunk / co-fire** | **On** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
 | **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
-| **Overlap / chunk / co-fire** | **on** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
-| **SPY MA exit / social** | **off** | `PAPER_SPY_EXIT_ON_MA_BREAK=false`, `PAPER_SOCIAL_SLEEVE_ENABLED=false` |
-| **Crypto vol gate** | **off** (all vol) | `PAPER_CRYPTO_VOL_ONLY=false` |
 
-Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). `python status.py` and preflight print the stack via `config.print_paper_research_stack_flags()`.
+#### Locked OFF (enforced by `enforce_best_paper_stack()`)
 
-#### Backtest performance (final validation)
+Macro regime adaptor, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit. Do not enable these on paper without re-backtesting.
 
-Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
+Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Check stack anytime:
 
-| Window | Return | Sharpe | Max DD | vs VTI |
+```powershell
+python status.py
+python scripts/account/preflight.py   # paper chase context
+```
+
+#### Backtest validation (365d, latest)
+
+| Config | Return | Sharpe | Max DD | vs VTI |
 |--------|--------|--------|--------|--------|
-| 365d | +20.74% | **1.08** | -9.77% | +2.08 pp |
-| 1000d | +41.33% | 0.64 | -27.76% | -8.88 pp |
-| max | +59.81% | 0.66 | -22.01% | -8.21 pp |
-
-Typical active mutual funds land around **0.4–0.7 Sharpe**. Best Paper Bot beats that on **365d** (Sharpe **1.08**, beats VTI) and remains competitive on return over long windows; monitor **1000d drawdown** (~28%) if tightening risk. Re-validate anytime:
+| **Best Paper Bot** | **+29.29%** | **1.63** | **−6.45%** | **+12.41 pp** |
+| Legacy paper (pre-sleeve) | +14.49% | 0.96 | −11.92% | −2.39 pp |
+| VTI buy & hold | +16.88% | — | — | — |
 
 ```bash
+python backtester.py --days 365 --paper-aggressive --compare-final
 python backtester.py --paper-aggressive --compare-final --final-all-windows
-python backtester.py --max --paper-aggressive --compare-final
 ```
+
+Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
 
 ---
 

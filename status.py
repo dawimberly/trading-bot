@@ -105,34 +105,9 @@ def _live_flags() -> str:
     return " | ".join(parts)
 
 
-def _paper_flags() -> str:
-    stack = config.get_best_paper_bot_stack()
-    config.set_paper_aggressive_context(True)
-    config.set_backtest_paper_sleeves_context(True)
-    config.enforce_best_paper_stack()
-    try:
-        pf = config.get_paper_feature_flags()
-        chase = config.paper_chase_mode_enabled()
-        parts = [
-            _flag("chase", chase),
-            _flag("dyn_vti", pf.get("dynamic_vti", stack["dynamic_vti"])),
-            _flag("dyn_risk", pf.get("dynamic_risk", stack["dynamic_risk"])),
-            _flag("stat_arb", pf.get("stat_arb", stack["stat_arb"])),
-            _flag("vol", pf.get("vol_overlay", stack["vol_overlay"])),
-            _flag("options", pf.get("options", stack["options_income"])),
-            _flag("overlap", pf.get("nyse_overlap", stack["nyse_overlap"])),
-            _flag("chunk", pf.get("adaptive_chunk", stack["adaptive_chunk"])),
-            _flag("cofire", pf.get("cofire_budget", stack["cofire_budget"])),
-            _flag("thinking", pf.get("thinking_engine", False)),
-            _flag("macro", pf.get("macro_regime", stack["macro_regime"])),
-            _flag("risk_parity", pf.get("risk_parity", False)),
-            _flag("social", pf.get("social", stack["social_sleeve"])),
-            _flag("spy_exit", pf.get("spy_exit_on_ma_break", stack["spy_exit"])),
-        ]
-        return " | ".join(parts)
-    finally:
-        config.set_paper_aggressive_context(False)
-        config.set_backtest_paper_sleeves_context(False)
+def _paper_flags() -> tuple[str, str]:
+    on_line, off_line = config.format_best_paper_status_lines()
+    return on_line, off_line
 
 
 def main() -> None:
@@ -159,7 +134,9 @@ def main() -> None:
         f"Regime {regime}{ts}"
     )
     logger.info(f"Live flags:  {_live_flags()}")
-    logger.info(f"Paper (Best Paper Bot): {_paper_flags()}")
+    paper_on, paper_off = _paper_flags()
+    logger.info(f"Paper ON:  {paper_on}")
+    logger.info(f"Paper OFF (locked): {paper_off}")
 
 
 if __name__ == "__main__":

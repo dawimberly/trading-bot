@@ -1,13 +1,10 @@
-"""24/7 paper Sharpe-chase bot — aggressive profile, isolated from live ~$100.
+"""24/7 paper Sharpe-chase bot — Best Paper Bot stack, isolated from live ~$100.
 
-Uses run_all.py with PAPER_CHASE_MODE:
-  - Dynamic VTI 50-75% / 25-50% active (vol + macro stress)
-  - Full active sleeve deployment (PAPER_ACTIVE_SLEEVE_BOOST)
-  - Wisdom sizing floor 1.0 (no defensive shrink on paper)
-  - Optional wider crypto (PAPER_CRYPTO_VOL_ONLY=false)
-
-When CRYPTO_VOL_SLEEVE_ENABLED=true, runs the isolated crypto vol sleeve on a
-timer in this parent process while run_all.py subprocess handles other sleeves.
+Uses run_all.py with PAPER_CHASE_MODE and enforce_best_paper_stack():
+  - Dynamic VTI (40-75%), dynamic risk (1-3%), original stat arb, vol overlay, options
+  - Overlap filter, adaptive chunk, co-fire budget
+  - Thinking engine opt-in (PAPER_THINKING_ENGINE_ENABLED=true + Ollama)
+  - Locked OFF: macro regime, risk parity, stat arb optimized, social, equity pairs, SPY MA exit
 
 Run:
     python run_paper_bot.py

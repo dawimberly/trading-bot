@@ -1190,13 +1190,64 @@ def get_best_paper_bot_stack() -> dict[str, bool]:
         "stat_arb": PAPER_STAT_ARB_ENABLED,
         "vol_overlay": PAPER_VOL_TRADING_ENABLED,
         "options_income": PAPER_OPTIONS_SLEEVE_ENABLED,
-        "macro_regime": PAPER_MACRO_REGIME_ADAPTOR_ENABLED,
+        "thinking_engine": PAPER_THINKING_ENGINE_ENABLED,
         "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
         "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
         "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
-        "social_sleeve": PAPER_SOCIAL_SLEEVE_ENABLED,
-        "spy_exit": PAPER_SPY_EXIT_ON_MA_BREAK,
+        # Locked off (enforce_best_paper_stack)
+        "macro_regime": False,
+        "risk_parity": False,
+        "stat_arb_optimized": False,
+        "social_sleeve": False,
+        "equity_pairs": False,
+        "spy_exit": False,
     }
+
+
+BEST_PAPER_LOCKED_OFF = (
+    "macro_regime",
+    "risk_parity",
+    "stat_arb_optimized",
+    "social_sleeve",
+    "equity_pairs",
+    "spy_exit",
+)
+
+
+def format_best_paper_status_lines() -> tuple[str, str]:
+    """Compact ON / locked-OFF lines for status.py and docs."""
+    was_ctx = paper_aggressive_context()
+    was_bt = backtest_paper_sleeves_context()
+    set_paper_aggressive_context(True)
+    set_backtest_paper_sleeves_context(True)
+    enforce_best_paper_stack()
+    try:
+        stack = get_best_paper_bot_stack()
+        chase = paper_chase_mode_enabled()
+        on_parts = [
+            f"chase={'on' if chase else 'off'}",
+            f"dyn_vti={'on' if stack['dynamic_vti'] else 'off'}",
+            f"dyn_risk={'on' if stack['dynamic_risk'] else 'off'}",
+            f"stat_arb={'on' if stack['stat_arb'] else 'off'}",
+            f"vol={'on' if stack['vol_overlay'] else 'off'}",
+            f"options={'on' if stack['options_income'] else 'off'}",
+            f"thinking={'on' if stack['thinking_engine'] else 'off'}",
+            f"overlap={'on' if stack['nyse_overlap'] else 'off'}",
+            f"chunk={'on' if stack['adaptive_chunk'] else 'off'}",
+            f"cofire={'on' if stack['cofire_budget'] else 'off'}",
+        ]
+        off_parts = [
+            "macro",
+            "risk_parity",
+            "stat_arb_opt",
+            "social",
+            "equity_pairs",
+            "spy_exit",
+        ]
+        return " | ".join(on_parts), " | ".join(off_parts)
+    finally:
+        set_paper_aggressive_context(was_ctx)
+        set_backtest_paper_sleeves_context(was_bt)
 
 
 def print_paper_research_stack_flags() -> None:
@@ -1212,30 +1263,17 @@ def print_paper_research_stack_flags() -> None:
             print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
         print(f"  game_plan:              {gp}")
         print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
-        flags = get_paper_feature_flags()
-        print(
-            f"  nyse_overlap_filter:    {flags.get('nyse_overlap', NYSE_OVERLAP_FILTER_ENABLED)} "
-            f"(paper flags: {bool(flags)})"
-        )
+        on_line, off_line = format_best_paper_status_lines()
+        print(f"  stack ON:               {on_line}")
+        print(f"  locked OFF:             {off_line}")
         print(
             f"  nyse_beta_scaling:      {NYSE_BETA_SCALING_ENABLED} "
-            f"(recommended ON for research grids)"
+            f"(paper chase tuning)"
         )
-        print(
-            f"  spy_exit_on_ma_break:   {flags.get('spy_exit_on_ma_break', SPY_EXIT_ON_MA_BREAK)}"
-        )
-        print(f"  adaptive_chunk:         {flags.get('adaptive_chunk', ADAPTIVE_CHUNK_ENABLED)}")
-        print(f"  cofire_budget:          {flags.get('cofire_budget', COFIRE_BUDGET_ENABLED)}")
         print(
             f"  options_sleeve:       "
             f"{'on' if effective_options_sleeve_enabled() else 'off'} "
             f"(cap {OPTIONS_SLEEVE_CAP_PCT:.0%}, calm VIX<{OPTIONS_VIX_CALM_MAX:.0f})"
-        )
-        print(
-            f"  regime_shift:         "
-            f"{'on' if effective_macro_regime_adaptor_enabled() else 'off'} "
-            f"(oil {MACRO_OIL_SURGE_PCT:.0%}, GLD {MACRO_GLD_SURGE_PCT:.0%}, "
-            f"VIX>{MACRO_VIX_SAFE_HAVEN_MIN:.0f})"
         )
         print(
             f"  dynamic_vti:          "
@@ -1260,15 +1298,7 @@ def print_paper_research_stack_flags() -> None:
         )
         print(
             f"  thinking_engine:      "
-            f"{'on' if effective_thinking_engine_enabled() else 'off'} "
-            f"(Ollama, cache {THINKING_CACHE_HOURS}h)"
-        )
-        print(
-            f"  risk_parity:          "
-            f"{'on' if effective_risk_parity_enabled() else 'off'} (deprecated)"
-        )
-        print(
-            f"  stat_arb_optimized:   off (use original stat arb)"
+            f"{'on' if effective_thinking_engine_enabled() else 'off (opt-in: PAPER_THINKING_ENGINE_ENABLED=true)'}"
         )
         print(
             f"  halt_resume_dd:         {HALT_RESUME_DRAWDOWN_PCT:.0%} | "
@@ -1293,7 +1323,7 @@ def print_paper_research_stack_flags() -> None:
                 f"| live mirror {SOCIAL_MIRROR_TO_LIVE_PCT:.0%} of social cap"
             )
         elif paper_chase_mode_enabled():
-            print("  social_sleeve:      off (set SOCIAL_SLEEVE_ENABLED or PAPER_CHASE_EXTRA)")
+            print("  social_sleeve:      off (locked by Best Paper Bot stack)")
     finally:
         set_paper_aggressive_context(was_ctx)
 
@@ -1404,6 +1434,7 @@ def init_paper_chase_if_enabled() -> list[str]:
         enforce_best_paper_stack()
         set_paper_aggressive_context(True)
         extras = apply_paper_chase_runtime_tuning()
+        extras.insert(0, "best_paper_stack_locked")
     return extras
 
 

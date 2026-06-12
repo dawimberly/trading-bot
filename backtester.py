@@ -688,6 +688,16 @@ def run_backtest(
         config.PAPER_RISK_PARITY_ENABLED = bool(paper_risk_parity)
     if paper_vol_trading is not None:
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
+    if paper_aggressive and not any(
+        flag is True
+        for flag in (
+            paper_risk_parity,
+            paper_macro_regime,
+            paper_stat_arb_optimized,
+            paper_social_enhanced,
+        )
+    ):
+        config.enforce_best_paper_stack()
     if paper_aggressive and (
         config.PAPER_OPTIONS_SLEEVE_ENABLED or config.PAPER_VOL_TRADING_ENABLED
     ):
