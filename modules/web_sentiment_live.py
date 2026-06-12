@@ -28,11 +28,11 @@ def _strip_html(html: str) -> str:
     return " ".join(html.split())
 
 
-def _fetch_page_sentiment(url: str) -> tuple[float, int]:
+def _fetch_page_sentiment(url: str) -> tuple[float, int, str]:
     resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=30)
     resp.raise_for_status()
     text = _strip_html(resp.text)
-    return score_text_sentiment(text), len(text)
+    return score_text_sentiment(text), len(text), text[:2500]
 
 
 def _load_cache() -> dict | None:
@@ -73,9 +73,16 @@ def get_live_web_sentiment(force_refresh: bool = False) -> float | None:
     sources: list[dict] = []
     for url in FETCH_URLS:
         try:
-            score, chars = _fetch_page_sentiment(url)
+            score, chars, snippet = _fetch_page_sentiment(url)
             scores.append(score)
-            sources.append({"url": url, "sentiment": score, "text_chars": chars})
+            sources.append(
+                {
+                    "url": url,
+                    "sentiment": score,
+                    "text_chars": chars,
+                    "headline_text": snippet,
+                }
+            )
         except requests.RequestException as exc:
             sources.append({"url": url, "error": str(exc)})
 
@@ -86,10 +93,14 @@ def get_live_web_sentiment(force_refresh: bool = False) -> float | None:
         return None
 
     sentiment = round(sum(scores) / len(scores), 4)
+    headline_text = " ".join(
+        str(s.get("headline_text") or "") for s in sources if isinstance(s, dict)
+    )[:4000]
     _save_cache(
         {
             "fetched_at": datetime.datetime.now().isoformat(),
             "sentiment": sentiment,
+            "headline_text": headline_text,
             "sources": sources,
         }
     )

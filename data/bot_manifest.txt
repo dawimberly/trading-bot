@@ -1,0 +1,102 @@
+# PythonTrading BOT_MANIFEST (compact; not full source)
+# Use this for architecture review — ask for file paths to drill down.
+
+## PROFILES
+A live current_dynamic: 90% VTI (<$500), yield-gate-only, overlap/chunk/cofire OFF, ~$100 account.
+B paper_aggressive: dynamic VTI 40-75%, overlap+chunk+cofire ON, macro/social/options(opt) paper-only.
+
+## MAIN LOOP (run_all.py)
+fetch/refresh bars -> regime(vol,sentiment) -> game_plan yield gate -> VTI core rebalance
+-> optional macro/options/social sleeves (paper) -> position exits -> SPY/NYSE/crypto strategies
+-> AlpacaExecutor sleeve caps -> heartbeat JSON -> sleep cycle.
+
+## SLEEVES (pipeline_strategies + alpaca_executor)
+SPY 45% MA200 trend | Crypto 20% z-score pairs vol-gated live | NYSE 20% momentum MA50
+VTI passive core | Cash 15% | Metal 0% yield-gate-only
+
+## KEY ROOT FILES
+backtester.py|Backtest that mirrors run_all.py (regime + crypto pairs + equity MA50). Default: 365-day simulation on daily bars (fetch
+config.py|Central configuration: credentials, universe, paths, and strategy constants.
+dashboard_app.py|Desktop monitor for PythonTrading — CustomTkinter dark theme. Run: python dashboard_app.py python dashboard_app.py --lau
+fetch_data.py|Download market OHLCV from yfinance into SQLite. Run live 5m refresh: python fetch_data.py Run 365d daily hist: python f
+launch_bots.py|Start or stop **both** fund bots: live (~$100) + paper Sharpe chase. Each bot is a separate run_all.py process with isol
+portal.py|Web portal: login → Alpaca keys → dashboard → bot control. Friends (after git clone): friend_setup.bat # Windows ./frien
+run_all.py|24/7 live trading loop: refresh data, detect regime, run crypto and equity strategies. Run: python run_all.py Preflight:
+run_paper_bot.py|24/7 paper Sharpe-chase bot — aggressive profile, isolated from live ~$100. Uses run_all.py with PAPER_CHASE_MODE: - Dyn
+run_spy.py|Optional standalone SPY loop. Prefer integrated mode: python run_all.py SPY is capped at SPY_SLEEVE_CAP_PCT (33.33%) ins
+status.py|At-a-glance bot status: live + paper equity, regime, key flags. Run: python status.py
+
+## MODULES (path|doc)
+modules/__init__.py|Shared trading library: execution, data, risk, and strategy helpers.
+modules/advisor_ranker.py|Rank asset pairs by z-score mean-reversion potential.
+modules/alerts.py|Email and Telegram alerts for halts and daily paper-trading summaries.
+modules/alpaca_executor.py|Canonical Alpaca paper-trading executor (notional orders, crypto formatting).
+modules/backtest_engine.py|Multi-asset momentum backtest using the backtesting library. Run: python modules/backtest_engine.py
+modules/bridge.py|Load legacy *_5m tables from SQLite (older schema).
+modules/cost_basis.py|Cost-basis awareness from Alpaca positions (avg_entry_price).
+modules/crypto_vol_gate.py|Crypto sleeve vol gate + optional SpaceX IPO narrative override.
+modules/crypto_vol_sleeve.py|Crypto vol mean-reversion sleeve — paper-only, isolated PAPER_APCA book (v4 filters).
+modules/data_loader.py|Load close-price matrices from the SQLite market database.
+modules/data_refresh.py|Market-hours-aware refresh scheduling for live bots.
+modules/database.py|Sync daily yfinance bars into SQLite.
+modules/deployment_sizing.py|Shared sleeve deployment sizing (adaptive chunks + co-fire budget pooling).
+modules/felix_sentiment.py|YouTube creator transcripts (Felix, Andrei Jikh, …): sync, store, wisdom/social blend.
+modules/fund_config.py|Live + paper fund pair and dynamic fund allocation helpers.
+modules/game_plan.py|Live game plan: yield gate, metal blend sleeve, stress cash trim.
+modules/holdings_rebalance.py|Rebalance Alpaca holdings toward fund sleeve targets + strategy gates.
+modules/holdings_reconcile.py|Sync Alpaca holdings with local ledger and trim sleeves to fund caps.
+modules/kraken_advisor.py|Kraken Pro playbook: macro context + holdings → short phone-friendly actions.
+modules/kraken_autopilot.py|Kraken autopilot: cleanup (A), crypto mirror (B), paper-bot mirror (C). Uses wisdom regime, game-plan stress/yield gate,
+modules/kraken_budget.py|Per-cycle buy budget for Kraken autopilot (caps total USD deployed on buys).
+modules/kraken_capabilities.py|Probe what Kraken API can trade with the configured key (cached daily).
+modules/kraken_cleanup.py|Kraken portfolio cleanup (playbook rules): leverage, duplicate core, trim small names.
+modules/kraken_equity_monitor.py|Detect SpaceX (SPCX) on Kraken Pro: xStocks API + pair scan.
+modules/kraken_execute.py|Route Kraken orders: crypto spot, xStocks, legacy .EQ (not API-tradable).
+modules/kraken_executor.py|Fixed-notional crypto buy/sell helpers using an Alpaca TradingClient.
+modules/kraken_ipo_buy.py|Live Kraken Pro buy when SPCX / SPCXx becomes tradable on Kraken.
+modules/kraken_pairs.py|Map Alpaca / universe symbols to Kraken spot or Pro equity pair names.
+modules/kraken_portfolio.py|Kraken holdings snapshot: USD values for rebalance.
+modules/kraken_rebalance.py|Rebalance Kraken Pro toward reference/kraken_targets.json (wisdom + game plan).
+modules/kraken_scanner.py|Scan Kraken pairs for SMA-20 trend via ccxt.
+modules/kraken_spot.py|Kraken spot helpers: market buy/sell with dry-run validate support.
+modules/kraken_stock_routes.py|How each ticker can be traded on Kraken via API (xStock, equity spot, or app-only .EQ).
+modules/kraken_xstocks.py|Kraken xStock (tokenized_asset) pair resolution and orders.
+modules/macro_calendar.py|Scheduled US macro release calendar (hardcoded; no per-cycle scraping).
+modules/macro_regime_adaptor.py|Macro Regime Adaptor — oil/gold/VIX/yield/geo signals for paper aggressive profile.
+modules/macro_signals.py|Daily macro signals for game plan (bonds, yields, stress).
+modules/market_context.py|Market regime, volatility, and sentiment helpers for the trading pipeline.
+modules/market_hours.py|US equity session helpers via Alpaca clock.
+modules/market_screener.py|Generate a static buy plan JSON for target allocations. Run: python scripts/dev/market_screener.py
+modules/mock_executor.py|Mock order executor for backtesting without live API calls.
+modules/options_sleeve.py|Options income sleeve — monthly covered calls on VTI/SPY (paper aggressive only).
+modules/pipeline_strategies.py|Crypto pair and equity MA50 strategies shared by run_all.py and backtester.py.
+modules/portal_auth.py|Simple user accounts for the shared Streamlit portal (trusted friends / self-hosted).
+modules/portal_bot.py|Start/stop run_all.py with per-user / per-book environment.
+modules/portal_paths.py|Per-user directories for portal (credentials, bot state, logs).
+modules/portfolio_manager.py|JSONL ledger for open and closed pair positions.
+modules/position_exits.py|Stop-loss and max-hold exits for open Alpaca positions.
+modules/regime_detector.py|Backward-compatible re-exports for market regime detection.
+modules/risk_management.py|Drawdown monitoring and position-size helpers.
+modules/safe_io.py|Windows-safe console and file writes (avoids OSError errno 22 on broken stdout).
+modules/scan_schedule.py|Equity scan windows: crypto-only overnight, SPY/NYSE around the US open.
+modules/scanner.py|Scan daily tables for price above 50-day moving average.
+modules/sentiment_keywords.py|Keyword sentiment scoring (shared by Wayback research and live web fetch).
+modules/social_sleeve.py|Social / creator macro sleeve (Felix & shared sources) — paper-first, optional live mirror.
+modules/social_sleeve_backtest.py|Social sleeve simulation on daily backtests (paper book parallel to main fund).
+modules/spacex_ipo_buy.py|Optional first-day market buy when SPCX becomes tradable on Alpaca.
+modules/spacex_ipo_listing_monitor.py|Monitor the real SpaceX IPO (Nasdaq SPCX): SEC milestones + Alpaca tradability.
+modules/spacex_ipo_monitor.py|SpaceX IPO ↔ crypto headline monitor (free RSS; no Tavily). SpaceX S-1 disclosed ~18,712 BTC on the balance sheet — cryp
+modules/trade_journal.py|Structured CSV journal for paper-trading data collection.
+modules/trading_books.py|Trading books — multiple platforms/accounts under one portal login.
+modules/universe_manager.py|Ticker universe access — delegates to config.UNIVERSE.
+modules/vti_core.py|Passive VTI core sleeve — index anchor; active bot runs on the remainder.
+modules/wayback_sentiment.py|Load monthly Wayback web sentiment and forward-fill to daily bars.
+modules/web_sentiment_live.py|Live web mood: daily cached headline sentiment (free, no Tavily).
+modules/wisdom_adaptor.py|Dynamic wisdom adaptor — single intelligent mode replacing discrete WISDOM_MODE variants.
+modules/wisdom_evaluator.py|Rolling self-evaluation of wisdom modes (live journal + simulated sleeves).
+modules/wisdom_journal.py|Append-only journal of wisdom layer state and account metrics (live bot).
+modules/wisdom_sentiment.py|Wisdom layer: combine live/Wayback web mood with price math for RHYME regimes.
+
+
+## NOTE
+Full file tree in data/bot_manifest.txt; drill down by path.

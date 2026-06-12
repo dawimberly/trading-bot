@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "grok": {
+      "command": "C:\\Users\\Owner\\PythonTrading\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\Owner\\PythonTrading\\scripts\\mcp\\run_grok_mcp.py"],
+      "cwd": "C:\\Users\\Owner\\PythonTrading",
+      "env": {
+        "GROK_CLI_PATH": "C:\\Users\\Owner\\PythonTrading\\scripts\\mcp\\grok_cli.cmd",
+        "PYTHONUTF8": "1"
+      }
+    }
+  }
+}

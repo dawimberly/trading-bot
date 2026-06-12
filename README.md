@@ -16,7 +16,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 - **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
 - Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
 
-**Paper research** (`paper_aggressive`): dynamic VTI (40–75%), overlap filter + adaptive chunk + co-fire **on**, macro adaptor + social + SPY MA exit **off**. See [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase).
+**Paper research** (`paper_aggressive`): **Best Paper Bot** stack — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** via Ollama. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -40,28 +40,104 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 | **NYSE overlap / beta scaling** | **off** (opt-in via `.env`) |
 | **Adaptive chunk / co-fire** | **off** (opt-in) |
 | **SPY MA exit** | **off** (opt-in) |
+| **Thinking engine** | **off** (paper opt-in; live requires approval) |
 | **Halt** | 10% DD; resume 8%; liquidate on breach |
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Paper research (`paper_aggressive`)
+### Profile B: Best Paper Bot v2 (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
-| Layer | Setting |
-|-------|---------|
-| **VTI core** | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`) or 20% static fallback |
-| **Active sleeves** | Full 45/20/20 base caps × **1.40 boost** (~79% deployed) |
-| **Game plan** | Yield-gate-only (same gate logic) |
-| **NYSE overlap filter** | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
-| **NYSE beta scaling** | **on** when `PAPER_CHASE_EXTRA=true` |
-| **Adaptive chunk / co-fire** | **on** (`PAPER_ADAPTIVE_CHUNK_ENABLED`, `PAPER_COFIRE_BUDGET_ENABLED`) |
-| **SPY MA exit** | **off** (`PAPER_SPY_EXIT_ON_MA_BREAK=false`) |
-| **Macro regime adaptor** | **off** (`PAPER_MACRO_REGIME_ADAPTOR_ENABLED=false`) |
-| **Crypto vol gate** | **off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| **Social / Felix sleeve** | **off** (`PAPER_SOCIAL_SLEEVE_ENABLED=false`; Felix sync optional via chase extras) |
+**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` (auto on paper aggressive).
 
-Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Preflight prints Profile B via `config.print_paper_research_stack_flags()`.
+**Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) with a stable, simplified stack.
+
+#### ON (default)
+
+| Layer | Default | Env flag |
+|-------|---------|----------|
+| **VTI core** | Dynamic **40–75%** | `PAPER_DYNAMIC_VTI=true` |
+| **Risk per trade** | Dynamic **1–3%** | `PAPER_DYNAMIC_RISK_ENABLED=true` |
+| **Stat arb** | Original cointegration pairs | `PAPER_STAT_ARB_ENABLED=true` |
+| **Vol overlay** | VIX regime hedge/income | `PAPER_VOL_TRADING_ENABLED=true` |
+| **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
+| **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
+| **Overlap / chunk / co-fire** | **On** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
+| **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
+| **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
+
+#### Locked OFF (enforced by `enforce_best_paper_stack()`)
+
+Macro regime adaptor, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit. Do not enable these on paper without re-backtesting.
+
+Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Check stack anytime:
+
+```powershell
+python status.py
+python scripts/account/preflight.py   # paper chase context
+```
+
+#### Backtest validation (365d, latest)
+
+| Config | Return | Sharpe | Max DD | vs VTI |
+|--------|--------|--------|--------|--------|
+| **Best Paper Bot** | **+29.29%** | **1.63** | **−6.45%** | **+12.41 pp** |
+| Legacy paper (pre-sleeve) | +14.49% | 0.96 | −11.92% | −2.39 pp |
+| VTI buy & hold | +16.88% | — | — | — |
+
+```bash
+python backtester.py --days 365 --paper-aggressive --compare-final
+python backtester.py --paper-aggressive --compare-final --final-all-windows
+```
+
+Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
+
+#### Thinking engine (Ollama — paper opt-in, live guarded)
+
+Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default** on paper; **never auto-applies on live** without explicit approval.
+
+**Production safety (always on when thinking runs):**
+
+| Guard | Live | Paper |
+|-------|------|-------|
+| Max sleeve tilt | **±6%** per sleeve (`THINKING_PRODUCTION_MAX_SLEEVE_DELTA`) | same |
+| Daily loss circuit breaker | **2%** intraday → block tilts | **4%** |
+| Manual approval | **Required** (`THINKING_MANUAL_APPROVAL_LIVE=true`) | auto (no approval file) |
+| Confidence amplification | **Off** | **Off** |
+| Post-apply validator | Rejects contradictory tilts; falls back to heuristic | same |
+
+Approve a pending live tilt after reviewing `thinking_engine_last.json`:
+
+```bash
+python scripts/approve_thinking_tilt.py --show
+python scripts/approve_thinking_tilt.py
+```
+
+| Command | Purpose |
+|---------|---------|
+| `python scripts/test_thinking_engine.py --max-examples 3` | Live Ollama smoke test |
+| `python backtester.py --days 365 --paper-aggressive --compare-thinking` | Paper stack A/B (heuristic proxy) |
+| `python backtester.py --days 365 --simulate-live-thinking` | Live small-account what-if (±6% cap) |
+| `python scripts/analyze_thinking_engine.py` | Accuracy / tilt scoring |
+
+Every decision is persisted to `thinking_engine_last.json` (timestamp, full reasoning, validation, `decision_id`).
+
+**Not recommended on live ~$100–$300** until Ollama calibration improves. Use `--simulate-live-thinking` to estimate impact first.
+
+#### Monitoring checklist (daily / weekly)
+
+| Check | Command / file | Action if bad |
+|-------|----------------|---------------|
+| Live + paper equity | `python status.py` | Investigate halt / Alpaca disconnect |
+| Regime + stack flags | `python status.py` | Confirm Profile A live, Profile B paper |
+| Thinking audit | `thinking_engine_last.json` | Review before `scripts/approve_thinking_tilt.py` on live |
+| Risk events | `risk_events.log` | Check halt / resume / liquidations |
+| Paper heartbeat | `paper_chase_heartbeat.json` | Stale timestamp → restart paper bot |
+| Universe age | `status.py` universe line | >7d → `python scripts/analysis/universe_screener.py` |
+| Monthly scorecard | `wisdom_scorecard.json` | Review regime accuracy |
+
+**Live safety (always on when thinking enabled):** ±6% tilt cap · 2% daily loss breaker · manual approval required · validator fallback to heuristic.
 
 ---
 
@@ -244,29 +320,23 @@ Preflight prints Profile A via `config.print_recommended_stack_flags()` (dispatc
 
 (Sleeve percentages above are effective on a ~$100 account with 90% VTI core.)
 
-### Profile B — paper research (`paper_aggressive`)
+### Profile B — Best Paper Bot (`paper_aggressive`)
 
-| Layer | Setting |
-|-------|---------|
-| **VTI core** | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`); static 20% fallback |
-| **Game plan** | Yield-gate-only (same as live) |
-| **NYSE overlap filter** | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
-| **NYSE beta scaling** | on when `PAPER_CHASE_EXTRA=true` |
-| **Adaptive chunk / co-fire** | **on** (paper defaults) |
-| **SPY MA exit** | **off** |
-| **Macro regime adaptor** | **off** |
-| **Crypto** | All vol regimes (`PAPER_CRYPTO_VOL_ONLY=false`) |
-| **Social / Felix sleeve** | **off** (opt-in via `.env`) |
+Same locked stack as [Profile B above](#profile-b-best-paper-bot-paper_aggressive). See `config.get_best_paper_bot_stack()`.
 
 ```
---- paper_aggressive research stack (Profile B) ---
+--- Best Paper Bot (paper_aggressive / Profile B) ---
   paper_chase_mode:       ON (PAPER_CHASE_MODE)
+  dynamic_vti:            on (40%-75% by vol/stress)
+  dynamic_risk:           on (3% / 2.2% / 1%)
+  stat_arb:               on
+  vol_overlay:            on
+  options_sleeve:         on
+  regime_shift:           on
   nyse_overlap_filter:    True
-  nyse_beta_scaling:      True (recommended ON for research grids)
   adaptive_chunk:         True
   cofire_budget:          True
   spy_exit_on_ma_break:   False
-  macro_regime_adaptor:   False
   social_sleeve:          off
   vti_core:             dynamic 40-75% VTI | active boost 1.40x
   crypto_vol_only:      False
@@ -811,6 +881,14 @@ python backtester.py --days 500
 python backtester.py --max              # full history with halt
 python backtester.py --max --no-halt    # validate crypto sleeve path
 
+# Paper aggressive (dynamic VTI, overlap/chunk/co-fire; social/macro off)
+python backtester.py --days 365 --paper-aggressive
+python backtester.py --days 365 --paper-aggressive --compare-final
+python backtester.py --days 365 --paper-aggressive --compare-thinking
+
+# Live small-account + thinking what-if (90% VTI, ±8% tilt cap; not for production live)
+python backtester.py --days 365 --simulate-live-thinking
+
 # VTI core A/B (70/30, 80/20 vs active-only)
 python backtester.py --days 365 --compare-vti-core
 python backtester.py --days 365 --vti-core 0.8
@@ -845,7 +923,7 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | Integrated fund + sleeve-aware executor; `--vti-core`, `--compare-vti-core`, `--paper-aggressive`, `--compare-paper-aggressive` |
+| `backtester.py` | Integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
 | `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
 | `scripts/maintenance/sync_felix_transcripts.py` | Bulk-sync Felix YouTube transcripts for social sleeve |
 | `backtester_metals.py` | Game plan variants incl. `yield_gate_only` |

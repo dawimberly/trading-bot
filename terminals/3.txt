@@ -1,0 +1,74 @@
+---
+pid: 9940
+cwd: "C:\Users\Owner\PythonTrading"
+command: "python \"C:\\Users\\Owner\\PythonTrading\\scripts\\test_thinking_engine.py\""
+started_at: 2026-06-12T00:50:03.216Z
+running_for_ms: 2265008  
+---
+Timeout: 1200s | Cache: 24h
+Model chain: ['deepseek-r1:8b', 'llama3.2:3b', 'deepseek-r1:1.5b']
+Installed: deepseek-r1:8b
+Testing thinking engine (primary+fallback) on 2 window(s)...
+
+--- Example 1 (2026-06-08, RHYME_D: Range_Bound_Neutral, Low) ---
+{
+  "spy_trend": "above MA200 (+6.8%)",
+  "vix": 22.2,
+  "vix_trend": "rising (+38.4% 5d)",
+  "yield_curve": "TNX 4.53%, TLT -0.2% 5d, TNX +0.8% 5d",
+  "oil_change": -4.66,
+  "gold_change": -8.11,
+  "macro_sentiment": "regime=RHYME_D: Range_Bound_Neutral, vol=Low",
+  "top_headline": "finance headline mood cached (see web sentiment)",
+  "regime": "RHYME_D: Range_Bound_Neutral",
+  "bot_exposure": {
+    "vti_core": 0.8,
+    "spy": 0.0887,
+    "crypto": 0.0394,
+    "nyse": 0.0394,
+    "metal": 0.0,
+    "cash_buffer": 0.0326
+  },
+  "bot_exposure_str": "VTI 80%, SPY 9%, Crypto 4%, Energy 4%, Cash 3%"
+}
+Calling Ollama...
+MODEL: deepseek-r1:8b | SOURCE: llm | QUALITY: 1.0
+NARRATIVE: The market is cautiously trading above its 200-day moving average despite recent declines, suggesting institutional accumulation underpinned by dollar strength and Treasury yields stabilizing from post-election volatility.
+ASYMMETRY: The crowd remains wedded to the "recovery" narrative (SPY/MA200 positive) while ignoring the simultaneous sharp sell-off in risk assets like Oil (-4.66%) and Gold (-8.11%), which signals a disconnect between headline indices and underlying asset sentiment, often pointing towards near-term negative feedback loops.
+RISKS: ['   Sudden reversal of recent gains driven by dollar strength or Treasury support (e.g.', 'Fed intervention).\n*   Geopolitical escalation in the Middle East or elsewhere leading to oil/gold spikes despite broader market aversion due to regime classification indicating low volatility range-bound neutral', 'which might mask true risks.']
+OPPORTUNITIES: ['   Energy sector: Potential for a short-term bounce driven by profit-taking after sharp 5-day declines', 'offering asymmetric upside if temporary.\n*   Gold: Despite recent weakness', 'the disconnect from equities suggests it could be oversold and due for a tactical recovery within days against the prevailing trend.']
+RECOMMENDED_TILT: {"vti": 0.8, "spy": 0.125, "energy": 0.045, "gold": 0.03}
+CONFIDENCE: 0.7
+REASONING: Maintain heavy equity exposure (VTI/SPY) for the dominant recovery narrative but tilt towards Energy and Gold as contrarian plays against their recent sharp sell-off within a low-volatility range-bound regime where small reversals can occur.
+
+--- Example 2 (2026-06-07, RHYME_D: Range_Bound_Neutral, Low) ---
+{
+  "spy_trend": "above MA200 (+6.6%)",
+  "vix": 22.2,
+  "vix_trend": "rising (+38.4% 5d)",
+  "yield_curve": "TNX 4.53%, TLT -0.2% 5d, TNX +0.8% 5d",
+  "oil_change": -4.66,
+  "gold_change": -8.11,
+  "macro_sentiment": "regime=RHYME_D: Range_Bound_Neutral, vol=Low",
+  "top_headline": "finance headline mood cached (see web sentiment)",
+  "regime": "RHYME_D: Range_Bound_Neutral",
+  "bot_exposure": {
+    "vti_core": 0.8,
+    "spy": 0.0887,
+    "crypto": 0.0394,
+    "nyse": 0.0394,
+    "metal": 0.0,
+    "cash_buffer": 0.0326
+  },
+  "bot_exposure_str": "VTI 80%, SPY 9%, Crypto 4%, Energy 4%, Cash 3%"
+}
+Calling Ollama...
+MODEL: deepseek-r1:8b: timed out | SOURCE: heuristic | QUALITY: 0.0
+NARRATIVE: Risk-off / safe-haven bid
+RISKS: []
+OPPORTUNITIES: []
+RECOMMENDED_TILT: {"vti": 0.5566, "spy": 0.0849, "energy": 0.0472, "gold": 0.0943, "cash": 0.0943, "crypto": 0.0755, "bonds": 0.0472}
+CONFIDENCE: 0.7
+REASONING: deepseek-r1:8b: timed out
+
+Saved samples to C:\Users\Owner\PythonTrading\thinking_engine_test_samples.json

@@ -3,6 +3,7 @@
 Run: python simulate.py
 """
 
+import logging
 import numpy as np
 import pandas as pd
 import sqlite3
@@ -10,6 +11,8 @@ import sqlite3
 import config
 from modules.data_loader import load_close_matrix
 from modules.universe_manager import get_full_market_universe
+
+logger = logging.getLogger(__name__)
 
 
 def run_backtest(data):
@@ -56,14 +59,15 @@ if __name__ == "__main__":
                     df["Date"] = pd.to_datetime(df["Date"])
                     df.set_index("Date", inplace=True)
                     combined[ticker] = df[price_col]
-            except Exception:
-                continue
+                    except Exception:
+                        logger.debug("simulate: failed reading ticker %s", ticker, exc_info=True)
+                        continue
         conn.close()
         data = combined.ffill().dropna()
-    print("--- Running 365-Day Backtest Simulation ---")
+    logging.basicConfig(level=logging.INFO)
+    logger.info("--- Running 365-Day Backtest Simulation ---")
     history = run_backtest(data)
     success_rate = history["Success"].mean() * 100 if len(history) else 0
-    print(f"Total signals: {len(history)}")
-    print(f"Strategy Mean Reversion Success Rate: {success_rate:.2f}%")
-    print("\nSample of signals:")
-    print(history.head(10))
+    logger.info(f"Total signals: {len(history)}")
+    logger.info(f"Strategy Mean Reversion Success Rate: {success_rate:.2f}%")
+    logger.info("Sample of signals:\n%s", history.head(10))

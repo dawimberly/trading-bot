@@ -1,0 +1,8 @@
+---
+pid: 14616
+cwd: "C:\Users\Owner\PythonTrading"
+command: "C:\\Users\\Owner\\.grok\\bin\\grok.exe -p \"Reply with exactly: GROK_CONNECTED_OK\" --output-format plain"
+started_at: 2026-06-11T01:44:35.700Z
+running_for_ms: 13415002 
+---
+GROK_CONNECTED_OK

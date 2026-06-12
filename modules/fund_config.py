@@ -45,7 +45,7 @@ def get_vti_core_pct(
     if equity < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
         return config.SMALL_ACCOUNT_VTI_CORE_PCT
 
-    if config.paper_aggressive_context():
+    if config.PAPER_TRADING and config.paper_aggressive_context():
         if not config.PAPER_DYNAMIC_VTI_ENABLED:
             return config.PAPER_VTI_CORE_PCT
 
@@ -59,6 +59,35 @@ def get_vti_core_pct(
         return max(pct, _VTI_PAPER_FLOOR)
 
     return config.VTI_CORE_PCT
+
+
+def get_dynamic_risk_per_trade(
+    equity: float,
+    vol_score: float,
+    regime: str,
+    macro_stress: bool,
+) -> float:
+    """Dynamic risk % — paper aggressive / paper chase only; live stays fixed."""
+    if equity < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
+        return config.SMALL_ACCOUNT_RISK_PER_TRADE
+    if not config.PAPER_TRADING:
+        return config.RISK_PER_TRADE
+
+    paper_active = config.paper_aggressive_context() or config.paper_chase_mode_enabled()
+    if not (config.PAPER_AGGRESSIVE_ENABLED and paper_active):
+        return config.RISK_PER_TRADE
+
+    if not config.PAPER_DYNAMIC_RISK_ENABLED:
+        return config.RISK_PER_TRADE
+
+    regime_l = (regime or "").lower()
+    if vol_score < 0.015 and "bull" in regime_l and not macro_stress:
+        risk = config.PAPER_RISK_CALM_BULL_PCT
+    elif vol_score < 0.02 and not macro_stress:
+        risk = config.PAPER_RISK_MODERATE_PCT
+    else:
+        risk = config.PAPER_RISK_STRESS_PCT
+    return min(risk, config.PAPER_RISK_CALM_BULL_PCT)
 
 
 def get_dynamic_sleeve_caps(vol_score: float, equity: float) -> dict[str, float]:
