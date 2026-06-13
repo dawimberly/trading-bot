@@ -656,6 +656,56 @@ def _universe_sample_lines(data, screener: list[str]) -> list[str]:
     return lines
 
 
+def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
+    """Ensure screener tickers exist in SQLite for dynamic-universe backtests."""
+    from modules.dynamic_universe import maybe_refresh_screener_universe
+
+    maybe_refresh_screener_universe(force=refresh)
+    screener = config.load_screener_universe_tickers() or []
+    extra = [t for t in screener if t not in config.UNIVERSE]
+    if extra:
+        fetch_days = _calendar_days_to_fetch(days or config.BACKTEST_DAYS)
+        fetch_daily_history_for_tickers(
+            extra,
+            days=fetch_days if not use_max else None,
+            use_max=use_max,
+        )
+    return screener
+
+
+def _static_equity_universe(data_columns) -> list[str]:
+    return [c for c in data_columns if config._nyse_eligible_symbol(c)]
+
+
+def _dynamic_equity_universe(data_columns) -> list[str]:
+    return config.nyse_momentum_universe(data_columns)
+
+
+def _universe_sample_lines(data, screener: list[str]) -> list[str]:
+    """Highlight NASDAQ / IPO names present in the dynamic pool."""
+    from modules.dynamic_universe import load_screener_ticker_meta
+
+    meta = load_screener_ticker_meta()
+    watch = {"NVDA", "TSLA", "AMD", "AAPL", "SPCX", "META", "GOOGL", "AMZN", "MSFT"}
+    lines: list[str] = []
+    dyn = set(_dynamic_equity_universe(data.columns))
+    for sym in sorted(watch & dyn):
+        row = meta.get(sym, {})
+        ipo = " IPO" if row.get("is_ipo") else ""
+        exch = row.get("exchange") or "?"
+        lines.append(f"  {sym} ({exch}{ipo})")
+    ipo_in_pool = [
+        row["ticker"]
+        for row in meta.values()
+        if row.get("is_ipo") and row.get("ticker") in dyn
+    ]
+    if ipo_in_pool:
+        lines.append(f"  IPO slots in pool: {', '.join(sorted(ipo_in_pool)[:8])}")
+    if "SPCX" in watch and "SPCX" not in dyn and "SPCX" in screener:
+        lines.append("  SPCX in screener file but no price column in backtest window")
+    return lines
+
+
 def _paper_cap_scale_for_vti(vti_core_pct: float) -> float:
     """Paper aggressive sleeve scale for a given VTI core fraction."""
     active_fraction = max(0.0, 1.0 - vti_core_pct)
