@@ -858,6 +858,8 @@ def run_backtest(
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
     if paper_dynamic_universe is not None:
         config.PAPER_DYNAMIC_UNIVERSE_ENABLED = bool(paper_dynamic_universe)
+    if RUN_OPTIONS.fast_mode:
+        apply_run_options_to_config()
     if paper_aggressive and not any(
         flag is True
         for flag in (
