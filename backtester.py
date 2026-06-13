@@ -11,12 +11,16 @@ Satellite research scripts (shared helpers in modules/backtest_common.py):
 
 Run:  python backtester.py
        python backtester.py --days 180
-       python backtester.py --days 365 --small-account
-       python backtester.py --days 365 --small-account --compare-vti-core
+       python backtester.py --days 365 --paper-aggressive --compare-final
+       python backtester.py --days 365 --paper-aggressive --fast-mode
+       python backtester.py --days 365 --vti-core 0.80 --no-thinking
        python fetch_data.py --daily --days 365
+
+Core engine: modules/backtester_core.py (data cache, metrics, slippage, walk-forward).
 """
 
 import argparse
+import os
 import sys
 import warnings
 from pathlib import Path
@@ -45,6 +49,38 @@ from modules.pipeline_strategies import (
     run_spy_strategy,
 )
 from modules.pipeline_strategies import regime_entries_paused
+from modules.console_output import print_table
+from modules.backtester_core import (
+    DEFAULT_EXPORT_CSV,
+    DEFAULT_EXPORT_JSON,
+    DEFAULT_HTML_REPORT,
+    DEFAULT_CRYPTO_SLIPPAGE_BPS,
+    DEFAULT_EQUITY_SLIPPAGE_BPS,
+    FAST_MODE_MAX_TICKERS,
+    LAST_BACKTEST_RESULT,
+    ROLLING_METRIC_WINDOW,
+    RUN_OPTIONS,
+    apply_fast_mode_data,
+    apply_run_options_to_config,
+    apply_default_execution_costs,
+    compute_performance_metrics,
+    effective_execution,
+    ensure_daily_data_cached,
+    export_results_csv,
+    export_results_json,
+    format_enhanced_final_table,
+    format_slippage_table,
+    format_walk_forward_table,
+    generate_html_report,
+    get_indicator_cache,
+    parallel_map_backtests,
+    prepare_indicator_cache,
+    reset_caches,
+    run_slippage_sensitivity,
+    store_last_result,
+    walk_forward_purged,
+    walk_forward_summary,
+)
 from modules.risk_management import RiskManager, trim_long_sleeves_to_cash_target
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -372,6 +408,7 @@ class BacktestPortfolio:
         self.cash = initial_capital
         self.initial_capital = initial_capital
         self.positions = {}
+        self.execution_cost_usd = 0.0
 
     def equity(self, prices):
         total = self.cash
@@ -381,7 +418,17 @@ class BacktestPortfolio:
                 total += qty * p
         return total
 
+    def _track_execution_cost(
+        self, raw_price: float, fill_price: float, qty: float, tx_cost: float
+    ) -> None:
+        notional = abs(qty * fill_price)
+        slip = abs(fill_price - raw_price) * abs(qty)
+        fee = notional * max(0.0, tx_cost)
+        self.execution_cost_usd += slip + fee
+
     def trade(self, symbol, side, price, tx_cost=TX_COST, notional=None):
+        raw_price = float(price)
+        price, tx_cost, slip_pct = effective_execution(raw_price, side, symbol, tx_cost)
         if notional is None:
             equity = self.equity({symbol: price})
             if config.backtest_small_account_context() or config.paper_aggressive_context():
@@ -419,6 +466,7 @@ class BacktestPortfolio:
                 self.positions[symbol] = existing + cover_qty
                 if abs(self.positions[symbol]) < 1e-9:
                     del self.positions[symbol]
+                self._track_execution_cost(raw_price, price, cover_qty, tx_cost)
                 return {
                     "symbol": symbol,
                     "side": "buy",
@@ -434,6 +482,7 @@ class BacktestPortfolio:
             qty = notional / price
             self.cash -= cost
             self.positions[symbol] = self.positions.get(symbol, 0) + qty
+            self._track_execution_cost(raw_price, price, qty, tx_cost)
             return {"symbol": symbol, "side": "buy", "qty": qty, "notional": notional}
         if side == "sell":
             qty = self.positions.get(symbol, 0)
@@ -451,6 +500,7 @@ class BacktestPortfolio:
                     proceeds = notional * (1 - tx_cost)
                     self.cash += proceeds
                     self.positions[symbol] = self.positions.get(symbol, 0.0) - short_qty
+                    self._track_execution_cost(raw_price, price, short_qty, tx_cost)
                     return {
                         "symbol": symbol,
                         "side": "sell",
@@ -465,6 +515,7 @@ class BacktestPortfolio:
                     proceeds = notional * (1 - tx_cost)
                     self.cash += proceeds
                     self.positions[symbol] = self.positions.get(symbol, 0.0) - short_qty
+                    self._track_execution_cost(raw_price, price, short_qty, tx_cost)
                     return {
                         "symbol": symbol,
                         "side": "sell",
@@ -480,6 +531,7 @@ class BacktestPortfolio:
             self.positions[symbol] = qty - sell_qty
             if self.positions[symbol] < 1e-9:
                 del self.positions[symbol]
+            self._track_execution_cost(raw_price, price, sell_qty, tx_cost)
             return {"symbol": symbol, "side": "sell", "qty": sell_qty, "notional": sell_notional}
         return None
 
@@ -510,6 +562,19 @@ def _rebalance_vti_core(portfolio, prices, core_pct: float) -> None:
         )
 
 
+def _parallel_backtest_worker(payload: tuple) -> dict:
+    """ProcessPool worker — must stay at module top level for pickling."""
+    data, kwargs = payload
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.SOCIAL_SLEEVE_ENABLED = False
+    try:
+        return run_backtest(
+            data, track_active_exposure=True, track_metrics=True, **kwargs
+        )
+    finally:
+        config.SOCIAL_SLEEVE_ENABLED = saved_social
+
+
 def _benchmark_return(data, start_idx):
     if BENCHMARK not in data.columns:
         return None
@@ -529,40 +594,16 @@ def _min_rows_for_backtest(sim_days: int) -> int:
 
 
 def _ensure_daily_data(days, refresh=False, use_max=False):
-    if use_max:
-        if not refresh:
-            data = load_close_matrix(interval="1d")
-            if len(data) >= MIN_HISTORY + 10:
-                return data
-        print("--- Downloading max daily history (may take a few minutes) ---")
-        fetch_daily_history(use_max=True)
-        return load_close_matrix(interval="1d")
-
-    sim_days = days or config.BACKTEST_DAYS
-    need_rows = _min_rows_for_backtest(sim_days)
-    if not refresh:
-        data = load_close_matrix(interval="1d")
-        if len(data) >= need_rows:
-            if len(data) > need_rows:
-                data = data.iloc[-need_rows:]
-            return data
-
-    fetch_days = _calendar_days_to_fetch(sim_days)
-    print(
-        f"--- Downloading {fetch_days} calendar days of daily history "
-        f"({MIN_HISTORY}-bar SPY MA warmup + ~{sim_days} sim days) ---"
+    return ensure_daily_data_cached(
+        days,
+        refresh=refresh,
+        use_max=use_max,
+        min_history=MIN_HISTORY,
+        backtest_days=config.BACKTEST_DAYS,
+        load_close_matrix=load_close_matrix,
+        fetch_daily_history=fetch_daily_history,
+        fetch_daily_history_for_tickers=fetch_daily_history_for_tickers,
     )
-    fetch_daily_history(fetch_days)
-    data = load_close_matrix(interval="1d")
-    if len(data) > need_rows:
-        data = data.iloc[-need_rows:]
-    if len(data) < MIN_HISTORY:
-        print(
-            f"--- Still short ({len(data)} rows); downloading max daily history ---"
-        )
-        fetch_daily_history(use_max=True)
-        data = load_close_matrix(interval="1d")
-    return data
 
 
 def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
@@ -697,6 +738,11 @@ def run_backtest(
     live_thinking_start_equity: float | None = None,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
+    apply_run_options_to_config()
+    apply_default_execution_costs()
+    if RUN_OPTIONS.fast_mode:
+        data = apply_fast_mode_data(data)
+    prepare_indicator_cache(data, spy_ma_window=config.SPY_MA_WINDOW)
     saved_paper_ctx = config.paper_aggressive_context()
     saved_small_ctx = config.backtest_small_account_context()
     saved_social = config.SOCIAL_SLEEVE_ENABLED
@@ -752,6 +798,8 @@ def run_backtest(
         config.PAPER_STAT_ARB_OPTIMIZED = bool(paper_stat_arb_optimized)
     if paper_thinking is not None:
         config.PAPER_THINKING_ENGINE_ENABLED = bool(paper_thinking)
+    elif RUN_OPTIONS.no_thinking or RUN_OPTIONS.fast_mode:
+        config.PAPER_THINKING_ENGINE_ENABLED = False
     if paper_crypto_v2 is not None:
         config.PAPER_CRYPTO_V2_ENABLED = bool(paper_crypto_v2)
     if paper_risk_parity is not None:
@@ -1316,23 +1364,26 @@ def run_backtest(
                     spy_fill["cycles_to_90pct"] * (COOLDOWN_SECONDS / 3600), 1
                 )
 
-    curve = pd.Series(equity_curve)
-    returns = curve.pct_change().dropna()
-    total_ret = (curve.iloc[-1] / portfolio.initial_capital - 1) * 100
-    sharpe = (
-        (returns.mean() / returns.std()) * sharpe_scale if returns.std() != 0 else 0
-    )
-    downside = returns[returns < 0]
-    sortino = (
-        (returns.mean() / downside.std()) * sharpe_scale
-        if len(downside) > 0 and downside.std() != 0
-        else 0
-    )
-    max_dd = ((curve / curve.cummax()) - 1).min() * 100
-    calmar = (total_ret / abs(max_dd)) if max_dd != 0 else 0.0
     bench = _benchmark_return(data, MIN_HISTORY)
+    perf = compute_performance_metrics(
+        equity_curve,
+        initial_capital=portfolio.initial_capital,
+        benchmark_return_pct=bench,
+        total_orders=total_orders,
+        equity_index=[data.index[i].isoformat() for i in range(MIN_HISTORY, len(data))],
+    )
+    total_ret = perf["total_return_pct"]
+    sharpe = perf["sharpe"]
+    sortino = perf["sortino"]
+    calmar = perf["calmar"]
+    max_dd = perf["max_drawdown_pct"]
+    win_rate_pct = perf["win_rate_pct"]
+    rolling_sharpe_mean = perf["rolling_sharpe_mean"]
+    profit_factor = perf["profit_factor"]
 
     pair_pnl_corr = None
+    curve = pd.Series(equity_curve)
+    returns = curve.pct_change().dropna()
     corr_n = min(len(pair_daily_pnl), len(returns))
     if corr_n > 2:
         pair_s = pd.Series(pair_daily_pnl[-corr_n:], index=returns.index[-corr_n:])
@@ -1344,17 +1395,26 @@ def run_backtest(
         "start_date": str(start_date.date()),
         "end_date": str(end_date.date()),
         "sim_days": sim_days,
-        "final_equity": round(curve.iloc[-1], 2),
-        "total_return_pct": round(total_ret, 2),
-        "sharpe": round(sharpe, 2),
-        "sortino": round(sortino, 2),
-        "calmar": round(calmar, 2),
-        "max_drawdown_pct": round(max_dd, 2),
-        "benchmark_return_pct": round(bench, 2) if bench is not None else None,
+        "final_equity": perf["final_equity"],
+        "total_return_pct": total_ret,
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "calmar": calmar,
+        "max_drawdown_pct": max_dd,
+        "win_rate_pct": win_rate_pct,
+        "rolling_sharpe_mean": rolling_sharpe_mean,
+        "profit_factor": profit_factor,
+        "avg_trade_return_pct": perf.get("avg_trade_return_pct", 0.0),
+        "rolling_sharpe_series": perf.get("rolling_sharpe_series"),
+        "drawdown_series": perf.get("drawdown_series"),
+        "benchmark_return_pct": perf.get("benchmark_return_pct"),
         "spy_signals": total_spy,
         "crypto_signals": total_crypto,
         "nyse_signals": total_equity,
         "total_orders": total_orders,
+        "execution_cost_pct": round(
+            100.0 * portfolio.execution_cost_usd / max(portfolio.initial_capital, 1.0), 3
+        ),
         "regime_counts": regime_counts,
         "spy_fill": spy_fill,
         "halt_events": risk_manager.halt_events,
@@ -1552,6 +1612,7 @@ def run_backtest(
     config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_paper_dynamic_univ
+    store_last_result(result)
     return result
 
 
@@ -2657,7 +2718,15 @@ def _result_row(label: str, result: dict, *, bench: float | None = None) -> dict
         "sharpe": result["sharpe"],
         "max_dd_pct": result["max_drawdown_pct"],
         "sortino": result.get("sortino"),
+        "calmar": result.get("calmar"),
+        "win_rate_pct": result.get("win_rate_pct"),
+        "rolling_sharpe_mean": result.get("rolling_sharpe_mean"),
+        "profit_factor": result.get("profit_factor"),
+        "avg_trade_return_pct": result.get("avg_trade_return_pct"),
         "final_equity": result.get("final_equity"),
+        "total_orders": result.get("total_orders"),
+        "halt_events": len(result.get("halt_events") or []),
+        "execution_cost_pct": result.get("execution_cost_pct"),
         "pairs_traded": result.get("pairs_traded", 0),
         "avg_risk_pct": dr.get("avg_risk_pct"),
         "vol_trades": vs.get("trades", 0),
@@ -2668,43 +2737,52 @@ def _result_row(label: str, result: dict, *, bench: float | None = None) -> dict
 
 
 def _run_final_window(data, *, window_label: str) -> dict:
-    """Run all compare arms for one data window."""
+    """Run all compare arms for one data window (parallel when enabled)."""
     bench = _benchmark_return(data, MIN_HISTORY)
+    arm_specs: list[tuple[str, dict, dict]] = [
+        ("Best Paper Bot (current)", FINAL_PAPER_BOT_KWARGS, {}),
+        (
+            "Best Paper (live vol parity)",
+            FINAL_PAPER_BOT_KWARGS,
+            {"paper_vol_live_parity": True},
+        ),
+        ("Legacy paper (pre-sleeve stack)", LEGACY_PAPER_KWARGS, {}),
+        (
+            "Live small-account sim",
+            {},
+            {
+                "small_account": True,
+                "vti_core_pct": config.SMALL_ACCOUNT_VTI_CORE_PCT,
+            },
+        ),
+    ]
     saved_social = config.SOCIAL_SLEEVE_ENABLED
     config.SOCIAL_SLEEVE_ENABLED = False
     rows: list[dict] = []
+    arm_results: list[dict] = []
     try:
-        final = run_backtest(
-            data, track_active_exposure=True, track_metrics=True, **FINAL_PAPER_BOT_KWARGS
-        )
-        rows.append(_result_row("Best Paper Bot (current)", final, bench=bench))
-
-        live_parity = run_backtest(
-            data,
-            track_active_exposure=True,
-            track_metrics=True,
-            **FINAL_PAPER_BOT_KWARGS,
-            paper_vol_live_parity=True,
-        )
-        rows.append(
-            _result_row("Best Paper (live vol parity)", live_parity, bench=bench)
-        )
-
-        legacy = run_backtest(
-            data, track_active_exposure=True, track_metrics=True, **LEGACY_PAPER_KWARGS
-        )
-        rows.append(_result_row("Legacy paper (pre-sleeve stack)", legacy, bench=bench))
-
-        small = run_backtest(
-            data,
-            track_active_exposure=True,
-            track_metrics=True,
-            small_account=True,
-            vti_core_pct=config.SMALL_ACCOUNT_VTI_CORE_PCT,
-        )
-        rows.append(_result_row("Live small-account sim", small, bench=bench))
+        if RUN_OPTIONS.parallel_arms and len(arm_specs) > 1:
+            tasks = [
+                (data.copy(), {**base_kw, **extra}) for _, base_kw, extra in arm_specs
+            ]
+            arm_results = parallel_map_backtests(tasks, _parallel_backtest_worker)
+        else:
+            for _, base_kw, extra in arm_specs:
+                arm_results.append(
+                    run_backtest(
+                        data,
+                        track_active_exposure=True,
+                        track_metrics=True,
+                        **{**base_kw, **extra},
+                    )
+                )
+        for (label, _, _), result in zip(arm_specs, arm_results):
+            rows.append(_result_row(label, result, bench=bench))
     finally:
         config.SOCIAL_SLEEVE_ENABLED = saved_social
+
+    final = arm_results[0]
+    legacy = arm_results[2]
 
     if bench is not None:
         rows.append(
@@ -2737,43 +2815,12 @@ def _run_final_window(data, *, window_label: str) -> dict:
 
 
 def _format_final_table(rows: list[dict]) -> str:
-    lines = [
-        f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
-        f"{'vs VTI':>8} {'Pairs':>6} {'AvgRisk':>8}",
-        "-" * 88,
-    ]
-    for r in rows:
-        ret = f"{r['return_pct']:>+7.2f}%" if r["return_pct"] is not None else "      —"
-        sh = f"{r['sharpe']:>7.2f}" if r["sharpe"] is not None else "      —"
-        dd = (
-            f"{r['max_dd_pct']:>7.2f}%"
-            if r["max_dd_pct"] is not None
-            else "      —"
-        )
-        vs = (
-            f"{r['vs_vti']:>+7.2f}pp"
-            if r.get("vs_vti") is not None and r["label"] != "VTI buy & hold"
-            else "      —"
-        )
-        pairs = (
-            f"{r['pairs_traded']:>6}"
-            if r.get("pairs_traded") is not None
-            else "     —"
-        )
-        risk = (
-            f"{r['avg_risk_pct']:.2f}%"
-            if r.get("avg_risk_pct") is not None
-            else "      —"
-        )
-        lines.append(
-            f"{r['label']:<34} {ret} {sh} {dd} {vs} {pairs} {risk:>8}"
-        )
-    lines.append("-" * 88)
-    lines.append(
-        "Note: vol overlay PnL is synthetic in backtest; live/cloud logs only "
+    table = format_enhanced_final_table(rows)
+    return (
+        table
+        + "\nNote: vol overlay PnL is synthetic in backtest; live/cloud logs only "
         "(see 'live vol parity' row)."
     )
-    return "\n".join(lines)
 
 
 def _build_final_verdict(windows: list[dict]) -> str:
@@ -2902,14 +2949,41 @@ def run_final_compare(
         if len(data) < MIN_HISTORY:
             print(f"{label}: need {MIN_HISTORY} bars; got {len(data)}.")
             continue
-        print(f"\n=== {label.upper()} ===")
         w = _run_final_window(data, window_label=label)
         results.append(w)
-        print(_format_final_table(w["rows"]))
+        print_table(_format_final_table(w["rows"]), title=f"=== {label.upper()} ===")
+        folds = RUN_OPTIONS.walk_forward_folds
+        if folds >= 2 and label == window_specs[0][0]:
+            wf = walk_forward_purged(
+                data,
+                min_history=MIN_HISTORY,
+                n_folds=folds,
+                run_fn=lambda d, _tb, _te: run_backtest(
+                    d, track_active_exposure=True, track_metrics=True, **FINAL_PAPER_BOT_KWARGS
+                ),
+            )
+            if wf:
+                print_table(format_walk_forward_table(wf, purged=True), title="Purged walk-forward (Best Paper Bot)")
 
     if report_path and results:
         _write_final_report(results, report_path)
         print(f"\nReport saved: {report_path}")
+
+    if RUN_OPTIONS.report_html and results:
+        primary = results[0]
+        final = primary["final"]
+        html_path = generate_html_report(
+            final,
+            RUN_OPTIONS.report_html,
+            title="Best Paper Bot — Compare Final",
+            header_label=(
+                f"Header stats: Best Paper Bot (current) | "
+                f"{final.get('total_return_pct', 0):+.2f}% return | "
+                f"Sharpe {final.get('sharpe', 0):.2f}"
+            ),
+            compare_rows=primary["rows"],
+        )
+        print(f"HTML report: {html_path.resolve()}")
 
     return results
 
@@ -3564,6 +3638,9 @@ def run_performance_test(
     if bench is not None:
         print(f"VTI Buy & Hold:   {round(bench, 2)}%")
     print(f"Sharpe Ratio:     {round(sharpe, 2)}")
+    print(f"Sortino Ratio:    {round(result.get('sortino', 0), 2)}")
+    print(f"Calmar Ratio:     {round(result.get('calmar', 0), 2)}")
+    print(f"Win rate (daily): {round(result.get('win_rate_pct', 0), 1)}%")
     print(f"Max Drawdown:     {round(max_dd, 2)}%")
     print(f"SPY signals:      {total_spy}")
     print(f"Crypto signals:   {total_crypto}")
@@ -3582,6 +3659,69 @@ def run_performance_test(
     print("Regime distribution:")
     for name, count in sorted(regime_counts.items(), key=lambda x: -x[1]):
         print(f"  {name}: {count}")
+    print(f"Profit factor:    {round(result.get('profit_factor', 0), 2)}")
+    print(f"Avg trade return: {round(result.get('avg_trade_return_pct', 0), 3)}%")
+    if result.get("rolling_sharpe_mean") is not None:
+        print(f"Rolling Sharpe:   {round(result['rolling_sharpe_mean'], 2)} (mean {ROLLING_METRIC_WINDOW}d)")
+
+    folds = RUN_OPTIONS.walk_forward_folds
+    if folds >= 2 and not RUN_OPTIONS.fast_mode:
+        wf = walk_forward_purged(
+            data,
+            min_history=MIN_HISTORY,
+            n_folds=folds,
+            run_fn=lambda d, _tb, _te: run_backtest(
+                d,
+                track_active_exposure=True,
+                track_metrics=True,
+                paper_aggressive=paper_aggressive,
+                small_account=small_account,
+                vti_core_pct=vti_core_pct,
+            ),
+        )
+        if wf:
+            print_table(format_walk_forward_table(wf, purged=True), title="Purged walk-forward")
+
+    if RUN_OPTIONS.slippage_sensitivity:
+
+        def _slip_run():
+            return run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                vti_core_pct=vti_core_pct,
+                paper_aggressive=paper_aggressive,
+                small_account=small_account,
+            )
+
+        slip_rows = run_slippage_sensitivity(_slip_run)
+        print_table(format_slippage_table(slip_rows), title="Slippage sensitivity")
+
+    if RUN_OPTIONS.export_json:
+        path = export_results_json(result, RUN_OPTIONS.export_json)
+        print(f"JSON export: {path.resolve()}")
+
+    if RUN_OPTIONS.export_csv:
+        row = {
+            "start": str(start_date.date()),
+            "end": str(end_date.date()),
+            "return_pct": total_ret,
+            "sharpe": sharpe,
+            "sortino": result.get("sortino"),
+            "calmar": result.get("calmar"),
+            "max_dd_pct": max_dd,
+            "win_rate_pct": result.get("win_rate_pct"),
+            "profit_factor": result.get("profit_factor"),
+            "avg_trade_return_pct": result.get("avg_trade_return_pct"),
+            "total_orders": total_orders,
+        }
+        path = export_results_csv([row], RUN_OPTIONS.export_csv)
+        print(f"CSV export: {path.resolve()}")
+
+    if RUN_OPTIONS.report_html:
+        html_path = generate_html_report(result, RUN_OPTIONS.report_html)
+        print(f"HTML report: {html_path.resolve()}")
+
     print("---------------------------------------------------")
 
 
@@ -3745,7 +3885,119 @@ if __name__ == "__main__":
         default=FINAL_REPORT_DEFAULT,
         help="Markdown report path for --compare-final",
     )
+    parser.add_argument(
+        "--fast-mode",
+        action="store_true",
+        help="Quick test: smaller ticker universe, no thinking engine",
+    )
+    parser.add_argument(
+        "--no-thinking",
+        action="store_true",
+        help="Disable thinking-engine tilts for this run",
+    )
+    parser.add_argument(
+        "--equity-slippage-bps",
+        type=float,
+        default=None,
+        metavar="BPS",
+        help=f"Equity/ETF slippage bps (default {DEFAULT_EQUITY_SLIPPAGE_BPS} with realistic costs)",
+    )
+    parser.add_argument(
+        "--crypto-slippage-bps",
+        type=float,
+        default=None,
+        metavar="BPS",
+        help=f"Crypto slippage bps (default {DEFAULT_CRYPTO_SLIPPAGE_BPS} with realistic costs)",
+    )
+    parser.add_argument(
+        "--equity-commission-bps",
+        type=float,
+        default=float(os.getenv("BACKTEST_EQUITY_COMMISSION_BPS", "0")),
+        help="Extra equity commission bps per trade (Alpaca stocks $0; default 0)",
+    )
+    parser.add_argument(
+        "--crypto-commission-bps",
+        type=float,
+        default=float(os.getenv("BACKTEST_CRYPTO_COMMISSION_BPS", "0")),
+        help="Extra crypto commission bps on top of taker fee (default 0)",
+    )
+    parser.add_argument(
+        "--no-realistic-costs",
+        action="store_true",
+        help="Disable default 5/10 bps slippage; use zero unless --equity-slippage-bps set",
+    )
+    parser.add_argument(
+        "--walk-forward",
+        type=int,
+        default=0,
+        metavar="FOLDS",
+        help="Purged N-fold walk-forward (with --compare-final or standalone run)",
+    )
+    parser.add_argument(
+        "--report-html",
+        nargs="?",
+        const=str(DEFAULT_HTML_REPORT),
+        default=None,
+        metavar="PATH",
+        help="Write HTML report with equity, rolling Sharpe, drawdown charts",
+    )
+    parser.add_argument(
+        "--export-json",
+        nargs="?",
+        const=str(DEFAULT_EXPORT_JSON),
+        default=None,
+        metavar="PATH",
+        help="Export last run metrics to JSON",
+    )
+    parser.add_argument(
+        "--export-csv",
+        nargs="?",
+        const=str(DEFAULT_EXPORT_CSV),
+        default=None,
+        metavar="PATH",
+        help="Export last run summary row to CSV",
+    )
+    parser.add_argument(
+        "--no-parallel",
+        action="store_true",
+        help="Disable parallel --compare-final arms (sequential fallback)",
+    )
+    parser.add_argument(
+        "--slippage-sensitivity",
+        action="store_true",
+        help="Run slippage sweep (0/5/10/25 bps) after main backtest",
+    )
     args = parser.parse_args()
+
+    RUN_OPTIONS.fast_mode = bool(args.fast_mode)
+    RUN_OPTIONS.no_thinking = bool(args.no_thinking)
+    RUN_OPTIONS.realistic_costs = not args.no_realistic_costs
+    if args.equity_slippage_bps is not None:
+        RUN_OPTIONS.equity_slippage_bps = max(0.0, float(args.equity_slippage_bps))
+    if args.crypto_slippage_bps is not None:
+        RUN_OPTIONS.crypto_slippage_bps = max(0.0, float(args.crypto_slippage_bps))
+    RUN_OPTIONS.equity_commission_bps = max(0.0, float(args.equity_commission_bps))
+    RUN_OPTIONS.crypto_commission_bps = max(0.0, float(args.crypto_commission_bps))
+    apply_default_execution_costs()
+    RUN_OPTIONS.walk_forward_folds = max(0, int(args.walk_forward))
+    RUN_OPTIONS.full_accuracy = not RUN_OPTIONS.fast_mode
+    RUN_OPTIONS.parallel_arms = not args.no_parallel
+    RUN_OPTIONS.slippage_sensitivity = bool(args.slippage_sensitivity)
+    if args.report_html is not None:
+        RUN_OPTIONS.report_html = Path(args.report_html)
+    if args.export_json is not None:
+        RUN_OPTIONS.export_json = Path(args.export_json)
+    if args.export_csv is not None:
+        RUN_OPTIONS.export_csv = Path(args.export_csv)
+    if args.refresh:
+        reset_caches()
+    if RUN_OPTIONS.fast_mode:
+        print(
+            f"--- FAST MODE: ~{FAST_MODE_MAX_TICKERS} tickers, thinking/stat-arb/vol/options off "
+            "(use full run for final numbers) ---"
+        )
+    if RUN_OPTIONS.parallel_arms and args.compare_final:
+        print(f"--- Parallel compare arms (max {RUN_OPTIONS.max_workers} workers) ---")
     if args.compare_vti_core:
         run_vti_core_compare(
             days=args.days,

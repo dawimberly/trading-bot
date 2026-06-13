@@ -90,21 +90,20 @@ python scripts/account/preflight.py   # paper chase context
 
 Restart paper bot after changing thinking env: `python run_paper_bot.py`
 
-#### Backtest validation (365d, latest run 2026-06-12)
+#### Backtest validation (365d, fast compare + realistic costs 2026-06-13)
+
+Default execution model: **5 bps equity slippage**, **10 bps crypto slippage**, Alpaca crypto taker fee when fee-aware. Override with `--no-realistic-costs` or `--equity-slippage-bps N`.
 
 | Config | Return | Sharpe | Max DD | vs VTI |
 |--------|--------|--------|--------|--------|
-| **Best Paper Bot v2.1** | **+64.74%** | **2.69** | **−7.46%** | **+45.93 pp** |
-| Legacy paper (pre-sleeve) | +13.47% | 0.97 | −10.30% | −5.34 pp |
-| VTI buy & hold | +18.81% | — | — | — |
+| **Best Paper Bot v2.1** | **+43.4%** | **1.63** | **−8.6%** | **+9.9 pp** |
+| Best Paper (live vol parity) | +68.0% | 1.96 | −12.4% | +34.6 pp |
+| Legacy paper (pre-sleeve) | +27.7% | 1.24 | −13.1% | −5.8 pp |
+| VTI buy & hold | +33.5% | — | — | — |
 
-Run with unbuffered output for long compares:
+Quick compare: `python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode`
 
-```bash
-set PYTHONUNBUFFERED=1
-python backtester.py --days 365 --paper-aggressive --compare-final
-python backtester.py --paper-aggressive --compare-final --final-all-windows
-```
+Full accuracy: `python backtester.py --days 365 --paper-aggressive --compare-final`
 
 Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
 
@@ -926,7 +925,38 @@ Directional backtests remain useful for strategy design; the performance review 
 
 ## Backtesting
 
-**Hub:** `backtester.py` mirrors the live `run_all.py` pipeline (regime, sleeves, halt). **Satellites** (`backtester_wisdom.py`, `backtester_metals.py`, `backtester_macro_hedge.py`, `backtester_long_short.py`) share helpers in `modules/backtest_common.py` (`slice_data_by_year`, `normalize_yfinance_df`, common `--from` / `--to` args) — run them as standalone research CLIs unchanged.
+**Hub:** `backtester.py` mirrors the live `run_all.py` pipeline (regime, sleeves, halt). **Core engine:** `modules/backtester_core.py` (data cache, metrics, slippage, walk-forward). **Satellites** (`backtester_wisdom.py`, `backtester_metals.py`, `backtester_macro_hedge.py`, `backtester_long_short.py`) share helpers in `modules/backtest_common.py`.
+
+### Quick vs full runs
+
+| Mode | Command | Notes |
+|------|---------|--------|
+| **Quick smoke test** | `python backtester.py --days 365 --paper-aggressive --fast-mode` | ~22 tickers; stat-arb/vol off — ~2–5× faster |
+| **Realistic costs** | Default 5 bps equity + 10 bps crypto slippage | `--no-realistic-costs` to disable |
+| **Full accuracy** | `python backtester.py --days 365 --paper-aggressive` | Full universe + all sleeves |
+| **Final compare** | `python backtester.py --days 365 --paper-aggressive --compare-final` | Parallel arms; Profit Factor, Win%, Avg Trade, vs VTI |
+| **Fast compare** | `python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode` | Quick A/B table (~minutes vs ~hours) |
+| **Purged walk-forward** | `python backtester.py --days 365 --paper-aggressive --walk-forward 3` | 3-fold purged CV with embargo gap |
+| **HTML report** | `python backtester.py --days 365 --paper-aggressive --report-html` | Equity, rolling Sharpe, drawdown charts → `scripts/analysis/backtest_report.html` |
+
+Disk cache: daily close matrix cached under `data/cache/backtest/` (invalidates when `market_data.db` changes).
+
+### Common flags
+
+```powershell
+python backtester.py --days 365 --vti-core 0.80          # fixed 80% VTI anchor
+python backtester.py --days 365 --paper-aggressive --no-thinking
+python backtester.py --days 365 --equity-slippage-bps 5   # 5 bps equity slippage
+python backtester.py --days 365 --crypto-slippage-bps 10  # +10 bps crypto slippage
+python backtester.py --days 365 --fast-mode
+python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode
+python backtester.py --days 365 --paper-aggressive --compare-final --no-parallel
+python backtester.py --days 365 --paper-aggressive --walk-forward 3
+python backtester.py --days 365 --paper-aggressive --slippage-sensitivity
+python backtester.py --days 365 --paper-aggressive --report-html
+python backtester.py --days 365 --paper-aggressive --export-json --export-csv
+python backtester.py --days 365 --paper-aggressive --compare-final --final-all-windows
+```
 
 Uses **Profile A** flags by default; `--paper-aggressive` uses Profile B (`config.print_recommended_stack_flags(profile=...)` on startup).
 
@@ -978,7 +1008,8 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | **Hub** — integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
+| `backtester.py` | **Hub** — integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--fast-mode`, `--walk-forward`, `--report-html`, `--export-json`, `--export-csv`, `--slippage-sensitivity`, `--no-parallel` |
+| `modules/backtester_core.py` | Memory + disk cache, indicator precompute, parallel compare, purged walk-forward, slippage sweep, HTML/CSV/JSON export |
 | `modules/backtest_common.py` | Shared year slicing + yfinance normalize for satellite backtest scripts |
 | `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
 | `scripts/maintenance/sync_felix_transcripts.py` | Bulk-sync Felix YouTube transcripts for social sleeve |
@@ -1149,6 +1180,7 @@ PythonTrading/
 │   ├── market_context.py       # Regime / volatility / sentiment
 │   ├── logging_utils.py        # setup_project_logging(), log_event() → logs/
 │   ├── backtest_common.py      # Shared helpers for backtester hub + satellites
+│   ├── backtester_core.py      # Cache, metrics, costs, walk-forward reporting
 │   ├── alpaca_client.py        # Cached TradingClient + retry wrapper
 │   ├── alerts.py
 │   └── ...

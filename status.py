@@ -58,28 +58,22 @@ def _heartbeat_ts(hb: dict | None) -> str:
     return str(hb["timestamp"])[:19]
 
 
-def _alpaca_equity(*, paper: bool, credentials_fn=None) -> float | None:
-    try:
-        from modules.alpaca_client import call_with_retry, get_trading_client
+def _alpaca_equity(*, paper: bool, credentials_fn=None) -> tuple[float | None, str | None]:
+    from modules.alpaca_diagnostics import fetch_alpaca_equity
 
-        cred_fn = credentials_fn or config.get_alpaca_credentials
-        client = get_trading_client(paper=paper, credentials_fn=cred_fn)
-        account = call_with_retry(client.get_account, op_name="get_account")
-        return float(account.equity)
-    except Exception:
-        return None
+    return fetch_alpaca_equity(paper=paper, credentials_fn=credentials_fn)
 
 
-def _paper_research_equity() -> float | None:
+def _paper_research_equity() -> tuple[float | None, str | None]:
     try:
         from modules.social_sleeve import get_social_alpaca_credentials
 
         creds = get_social_alpaca_credentials()
         if not creds:
-            return None
+            return None, None
         return _alpaca_equity(paper=True, credentials_fn=lambda: creds)
-    except Exception:
-        return None
+    except Exception as exc:
+        return None, str(exc)
 
 
 def _has_alpaca_keys() -> bool:
@@ -92,7 +86,7 @@ def _has_alpaca_keys() -> bool:
 
 def _resolve_live_equity(hb: dict | None) -> tuple[float | None, str]:
     """Prefer Alpaca live equity; ignore stale heartbeat when keys are configured."""
-    acct_eq = _alpaca_equity(paper=False)
+    acct_eq, acct_err = _alpaca_equity(paper=False)
     if acct_eq is not None and acct_eq > 0:
         hb_eq = _heartbeat_equity(hb)
         if hb_eq is not None and abs(hb_eq - acct_eq) > 1.0:
@@ -101,22 +95,27 @@ def _resolve_live_equity(hb: dict | None) -> tuple[float | None, str]:
             )
         return acct_eq, "Alpaca live"
 
+    if acct_err:
+        return None, acct_err
+
     if _has_alpaca_keys():
         return None, "Alpaca live (fetch failed — check API keys / network)"
 
     hb_eq = _heartbeat_equity(hb)
     if hb_eq is not None:
-        return hb_eq, f"bot heartbeat @ {_heartbeat_ts(hb)} (no Alpaca keys)"
-    return None, "n/a"
+        return hb_eq, f"bot heartbeat @ {_heartbeat_ts(hb)} (no Alpaca keys in .env)"
+    return None, "n/a (no Alpaca keys; start bot or add APCA_* to .env)"
 
 
-def _resolve_equity(hb: dict | None, *, paper: bool, research: bool = False) -> float | None:
+def _resolve_equity(
+    hb: dict | None, *, paper: bool, research: bool = False
+) -> tuple[float | None, str | None]:
     if not paper and not research:
         eq, _src = _resolve_live_equity(hb)
-        return eq
+        return eq, None
     eq = _heartbeat_equity(hb)
     if eq is not None:
-        return eq
+        return eq, None
     if research:
         return _paper_research_equity()
     live_paper = paper or config.PAPER_TRADING
@@ -309,8 +308,7 @@ def _safety_table_lines() -> list[str]:
     return lines
 
 
-def _emit(line: str = "") -> None:
-    print(line)
+from modules.console_output import safe_print as _emit
 
 
 def main() -> None:
@@ -319,9 +317,9 @@ def main() -> None:
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
 
     live_eq, live_eq_src = _resolve_live_equity(live_hb)
-    paper_eq = _resolve_equity(paper_hb, paper=True)
+    paper_eq, paper_eq_err = _resolve_equity(paper_hb, paper=True)
     if paper_eq is None:
-        paper_eq = _paper_research_equity()
+        paper_eq, paper_eq_err = _paper_research_equity()
 
     live_regime = _heartbeat_regime(live_hb) or "n/a"
     paper_regime = _heartbeat_regime(paper_hb) or "n/a"
@@ -330,6 +328,13 @@ def main() -> None:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mode = "LIVE + PAPER" if _is_live_book_active() else "PAPER ONLY (.env)"
     _emit(f"PythonTrading status - {now} ({mode})")
+    _emit("=" * 72)
+    live_dl = _daily_loss_status(paper=False)
+    safety_tag = "CIRCUIT TRIPPED" if live_dl.get("tripped") else "OK"
+    _emit(
+        f"QUICK: Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
+        f"Regime {regime} | Daily breaker {safety_tag}"
+    )
     _emit("=" * 72)
 
     if _is_live_book_active():
@@ -347,6 +352,8 @@ def main() -> None:
 
     paper_on, paper_off = config.format_best_paper_status_lines()
     _emit(f"PAPER Profile B (Best Paper Bot v2.1)   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
+    if paper_eq_err:
+        _emit(f"      source: {paper_eq_err}")
     _emit(f"      ON:  {paper_on}")
     _emit(f"      OFF (locked): {paper_off}")
     _emit(f"      universe: {_universe_line()}")
