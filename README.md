@@ -16,7 +16,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 - **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
 - Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
 
-**Paper research** (`paper_aggressive`): **Best Paper Bot** stack — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** via Ollama. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
+**Paper research** (`paper_aggressive`): **Best Paper Bot v2.1** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -45,11 +45,11 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Best Paper Bot v2 (`paper_aggressive`)
+### Profile B: Best Paper Bot v2.1 (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
-**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` (auto on paper aggressive).
+**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` + `apply_best_paper_config()` (auto on paper chase).
 
 **Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) with a stable, simplified stack.
 
@@ -67,6 +67,8 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
 | **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
 
+Enable thinking in `.env`, then restart `run_paper_bot.py`. LLM runs in a **background thread** (main loop never blocks on Ollama). First cycle uses cached/heuristic tilt until refresh completes. Audit: `logs/thinking_engine.log`, snapshot: `thinking_engine_last.json`.
+
 #### Locked OFF (enforced by `enforce_best_paper_stack()`)
 
 Macro regime adaptor, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit. Do not enable these on paper without re-backtesting.
@@ -78,15 +80,28 @@ python status.py
 python scripts/account/preflight.py   # paper chase context
 ```
 
-#### Backtest validation (365d, latest)
+**Monitoring (daily):**
+
+1. `python status.py` — live + paper equity, safety banner, Profile B ON/OFF lines, thinking snapshot
+2. `paper_chase_heartbeat.json` — fresh timestamp if bot running
+3. `thinking_engine_last.json` — last narrative, validation score, suggested tilt
+4. `logs/thinking_engine.log` — background refresh + tilt apply/reject audit
+5. `trading_safety_state.json` — daily loss breaker status
+
+Restart paper bot after changing thinking env: `python run_paper_bot.py`
+
+#### Backtest validation (365d, latest run 2026-06-12)
 
 | Config | Return | Sharpe | Max DD | vs VTI |
 |--------|--------|--------|--------|--------|
-| **Best Paper Bot** | **+29.29%** | **1.63** | **−6.45%** | **+12.41 pp** |
-| Legacy paper (pre-sleeve) | +14.49% | 0.96 | −11.92% | −2.39 pp |
-| VTI buy & hold | +16.88% | — | — | — |
+| **Best Paper Bot v2.1** | **+64.74%** | **2.69** | **−7.46%** | **+45.93 pp** |
+| Legacy paper (pre-sleeve) | +13.47% | 0.97 | −10.30% | −5.34 pp |
+| VTI buy & hold | +18.81% | — | — | — |
+
+Run with unbuffered output for long compares:
 
 ```bash
+set PYTHONUNBUFFERED=1
 python backtester.py --days 365 --paper-aggressive --compare-final
 python backtester.py --paper-aggressive --compare-final --final-all-windows
 ```
@@ -96,6 +111,12 @@ Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/f
 #### Thinking engine (Ollama — paper opt-in, live guarded)
 
 Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default** on paper; **never auto-applies on live** without explicit approval.
+
+**Paper integration (v2.1):**
+
+- Non-blocking: `maybe_run_thinking()` spawns a daemon thread; trading cycle uses cache/heuristic until LLM completes
+- Reasonable tilts: ±6% per sleeve, max 3 sleeves moved, 12% total delta cap; skipped if confidence/narrative/validation fail
+- Audit log: `logs/thinking_engine.log` (JSON lines: refresh, apply, reject)
 
 **Production safety (always on — entries + thinking):**
 

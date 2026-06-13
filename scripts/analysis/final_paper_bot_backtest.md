@@ -1,6 +1,6 @@
 # Final Paper Bot — Comprehensive Backtest
 
-Generated: 2026-06-12 16:42
+Generated: 2026-06-12 20:52
 
 ## Stack tested (Best Paper Bot)
 
@@ -23,9 +23,9 @@ Generated: 2026-06-12 16:42
 
 Config                               Return  Sharpe    MaxDD   vs VTI  Pairs  AvgRisk
 ----------------------------------------------------------------------------------------
-Best Paper Bot (current)            +68.55%    2.81   -7.98%  +49.74pp    183    2.00%
-Best Paper (live vol parity)        +56.72%    2.76   -8.10%  +37.91pp    241    2.00%
-Legacy paper (pre-sleeve stack)     +17.06%    1.18   -9.76%   -1.75pp      0    2.00%
+Best Paper Bot (current)            +64.74%    2.69   -7.46%  +45.93pp    210    2.00%
+Best Paper (live vol parity)        +52.14%    2.73   -7.23%  +33.33pp    239    2.00%
+Legacy paper (pre-sleeve stack)     +13.47%    0.97  -10.30%   -5.34pp      0    2.00%
 Live small-account sim              +16.22%    1.26   -8.51%   -2.59pp      0        —
 VTI buy & hold                      +18.81%       —       —       —      —        —
 ----------------------------------------------------------------------------------------
@@ -33,13 +33,13 @@ Note: vol overlay PnL is synthetic in backtest; live/cloud logs only (see 'live 
 
 ## Verdict
 
-- **Sharpe vs legacy paper:** current stack improves Sharpe by **+1.63** on average across windows (365d 2.81 vs 1.18).
-- **365d return vs VTI:** +68.55% vs VTI +18.81% (+49.74 pp).
-- **365d risk:** Max DD -7.98% | Sortino 4.63 | avg risk 2.00%.
+- **Sharpe vs legacy paper:** current stack improves Sharpe by **+1.72** on average across windows (365d 2.69 vs 0.97).
+- **365d return vs VTI:** +64.74% vs VTI +18.81% (+45.93 pp).
+- **365d risk:** Max DD -7.46% | Sortino 4.40 | avg risk 2.00%.
 
 ### Ready as default Best Paper Bot?
 
-**Mutual-fund benchmark:** typical active funds ~0.4–0.7 Sharpe; Best Paper **365d Sharpe 2.81**.
+**Mutual-fund benchmark:** typical active funds ~0.4–0.7 Sharpe; Best Paper **365d Sharpe 2.69**.
 **Locked as default** — `config.get_best_paper_bot_stack()` matches this profile. Beats legacy on 365d; monitor 1000d Max DD. Keep **social/SPY-exit OFF**.
 
 **Laptop policy:** keep this profile; add only lightweight tweaks here. Heavy compute → `cloud_bot/` (see `README_CLOUD.md`).

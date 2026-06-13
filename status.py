@@ -79,7 +79,38 @@ def _paper_research_equity() -> float | None:
         return None
 
 
+def _has_alpaca_keys() -> bool:
+    try:
+        config.get_alpaca_credentials()
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_live_equity(hb: dict | None) -> tuple[float | None, str]:
+    """Prefer Alpaca live equity; ignore stale heartbeat when keys are configured."""
+    acct_eq = _alpaca_equity(paper=False)
+    if acct_eq is not None and acct_eq > 0:
+        hb_eq = _heartbeat_equity(hb)
+        if hb_eq is not None and abs(hb_eq - acct_eq) > 1.0:
+            return acct_eq, (
+                f"Alpaca live (bot heartbeat {_fmt_equity(hb_eq)} @ {_heartbeat_ts(hb)} is stale - restart bot to refresh)"
+            )
+        return acct_eq, "Alpaca live"
+
+    if _has_alpaca_keys():
+        return None, "Alpaca live (fetch failed — check API keys / network)"
+
+    hb_eq = _heartbeat_equity(hb)
+    if hb_eq is not None:
+        return hb_eq, f"bot heartbeat @ {_heartbeat_ts(hb)} (no Alpaca keys)"
+    return None, "n/a"
+
+
 def _resolve_equity(hb: dict | None, *, paper: bool, research: bool = False) -> float | None:
+    if not paper and not research:
+        eq, _src = _resolve_live_equity(hb)
+        return eq
     eq = _heartbeat_equity(hb)
     if eq is not None:
         return eq
@@ -174,6 +205,28 @@ def _safety_status_banner(*, live: bool) -> str:
     return f"SAFETY STATUS ({book}): {state} | {thinking_bit} | {breaker}"
 
 
+def _thinking_effective_label() -> str:
+    if not config.PAPER_THINKING_ENGINE_ENABLED:
+        return "OFF"
+    was_ctx = config.paper_aggressive_context()
+    was_bt = config.backtest_paper_sleeves_context()
+    config.set_paper_aggressive_context(True)
+    config.set_backtest_paper_sleeves_context(True)
+    try:
+        if config.effective_thinking_engine_enabled():
+            return "ON"
+    finally:
+        config.set_paper_aggressive_context(was_ctx)
+        config.set_backtest_paper_sleeves_context(was_bt)
+    if config.paper_chase_mode_enabled() or os.getenv("PAPER_CHASE_MODE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return "ON when paper bot runs (restart run_paper_bot.py)"
+    return "OFF (start paper bot with PAPER_CHASE_MODE)"
+
+
 def _thinking_status_lines() -> list[str]:
     try:
         from modules.thinking_engine import get_thinking_status_snapshot
@@ -183,7 +236,7 @@ def _thinking_status_lines() -> list[str]:
         return ["Thinking: unavailable (import error)"]
 
     env = "ON" if snap["env_enabled"] else "OFF (set PAPER_THINKING_ENGINE_ENABLED=true)"
-    eff = "ON" if snap["effective_enabled"] else "OFF"
+    eff = _thinking_effective_label()
     lines = [f"Engine: env {env} | effective {eff}"]
 
     ts = snap.get("last_timestamp")
@@ -199,6 +252,9 @@ def _thinking_status_lines() -> list[str]:
         snip = snap.get("narrative_snip")
         if snip:
             lines.append(f"  {snip}")
+        if snap.get("sector_view_snip"):
+            lines.append(f"  sector: {snap['sector_view_snip']}")
+        lines.append("  audit: logs/thinking_engine.log")
         if snap.get("manual_review_required") and _is_live_book_active():
             if snap.get("approved"):
                 lines.append("  Live tilt: APPROVED (approval file matches last decision)")
@@ -222,8 +278,9 @@ def _profile_table_lines() -> list[str]:
         f"| VTI core | {config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} (<$500) / 80% | dynamic 40-75% |",
         f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
         "| Stat arb / vol / options | off | on (locked stack) |",
-        "| Thinking engine | off (approval if enabled) | opt-in Ollama |",
+        "| Thinking engine | off (approval if enabled) | opt-in Ollama (non-blocking) |",
         "| Macro / social / risk parity | off | locked off |",
+        "| Best Paper Bot version | n/a | v2.1 locked |",
     ]
 
 
@@ -257,7 +314,7 @@ def main() -> None:
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
 
-    live_eq = _resolve_equity(live_hb, paper=False)
+    live_eq, live_eq_src = _resolve_live_equity(live_hb)
     paper_eq = _resolve_equity(paper_hb, paper=True)
     if paper_eq is None:
         paper_eq = _paper_research_equity()
@@ -278,13 +335,14 @@ def main() -> None:
     _emit("-" * 72)
 
     _emit(f"LIVE  Profile A (~$300)   equity {_fmt_equity(live_eq)}   regime {live_regime}")
+    _emit(f"      source: {live_eq_src}")
     _emit(f"      {_live_profile_line()}")
     _emit(f"      flags: {_live_flags()}")
     _emit(f"      heartbeat: {_heartbeat_ts(live_hb)}")
     _emit()
 
     paper_on, paper_off = config.format_best_paper_status_lines()
-    _emit(f"PAPER Profile B (Best Paper Bot v2)   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
+    _emit(f"PAPER Profile B (Best Paper Bot v2.1)   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
     _emit(f"      ON:  {paper_on}")
     _emit(f"      OFF (locked): {paper_off}")
     _emit(f"      universe: {_universe_line()}")
@@ -304,8 +362,16 @@ def main() -> None:
     _emit()
     _emit(
         "Monitor: bot_heartbeat.json | paper_chase_heartbeat.json | "
-        "thinking_engine_last.json | trading_safety_state.json"
+        "thinking_engine_last.json | trading_safety_state.json | logs/thinking_engine.log"
     )
+    _emit()
+    _emit("=== Tomorrow checklist ===")
+    _emit("1. python status.py - equity, regime, safety banner, paper stack ON/OFF")
+    _emit("2. paper_chase_heartbeat.json timestamp fresh (<30 min if bot running)")
+    _emit("3. thinking_engine_last.json - validation score, narrative, suggested_tilt")
+    _emit("4. logs/thinking_engine.log - background refresh + tilt apply audit")
+    _emit("5. trading_safety_state.json - daily loss breaker not tripped")
+    _emit("6. Restart paper bot if thinking env changed: python run_paper_bot.py")
 
 
 if __name__ == "__main__":

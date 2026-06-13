@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 
-BEST_PAPER_VERSION = "2.0"
+BEST_PAPER_VERSION = "2.1"
 BEST_PAPER_LOCKED = True  # stack enforced via enforce_best_paper_stack() on every paper path
 
 # Production safety — always on (see modules/trading_safety.py)
@@ -126,7 +126,12 @@ def apply_best_paper_config() -> None:
     config.PAPER_STAT_ARB_ENABLED = flags["stat_arb"]
     config.PAPER_VOL_TRADING_ENABLED = flags["vol_overlay"]
     config.PAPER_OPTIONS_SLEEVE_ENABLED = flags["options_income"]
-    config.PAPER_THINKING_ENGINE_ENABLED = flags["thinking_engine"]
+    # Opt-in: explicit PAPER_THINKING_ENGINE_ENABLED in .env wins over BEST_PAPER_THINKING_ENGINE default
+    explicit_te = os.getenv("PAPER_THINKING_ENGINE_ENABLED")
+    if explicit_te is not None:
+        config.PAPER_THINKING_ENGINE_ENABLED = explicit_te.lower() in ("1", "true", "yes")
+    else:
+        config.PAPER_THINKING_ENGINE_ENABLED = flags["thinking_engine"]
     config.PAPER_NYSE_OVERLAP_FILTER_ENABLED = flags["nyse_overlap"]
     config.PAPER_ADAPTIVE_CHUNK_ENABLED = flags["adaptive_chunk"]
     config.PAPER_COFIRE_BUDGET_ENABLED = flags["cofire_budget"]

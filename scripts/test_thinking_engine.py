@@ -100,6 +100,10 @@ def main() -> int:
         if result.get("validation_errors"):
             print(f"VALIDATION_ERRORS: {result.get('validation_errors')}")
         print(f"NARRATIVE: {result.get('narrative')}")
+        if result.get("sector_view"):
+            print(f"SECTOR_VIEW: {result.get('sector_view')}")
+        if result.get("ai_cycle_phase"):
+            print(f"AI_CYCLE_PHASE: {result.get('ai_cycle_phase')}")
         if result.get("asymmetry"):
             print(f"ASYMMETRY: {result.get('asymmetry')}")
         if result.get("tilt_rationale"):

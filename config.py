@@ -1529,7 +1529,12 @@ def init_paper_chase_if_enabled() -> list[str]:
         and paper_chase_mode_enabled()
         and PAPER_AGGRESSIVE_ENABLED
     ):
-        enforce_best_paper_stack()
+        try:
+            from config.best_paper_config import apply_best_paper_config
+
+            apply_best_paper_config()
+        except ImportError:
+            enforce_best_paper_stack()
         set_paper_aggressive_context(True)
         extras = apply_paper_chase_runtime_tuning()
         try:

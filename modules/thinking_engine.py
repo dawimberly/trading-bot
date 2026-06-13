@@ -23,6 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE_FILE = ROOT / config.THINKING_ENGINE_STATE_FILE
 OUTPUT_FILE = ROOT / config.THINKING_ENGINE_OUTPUT_FILE
 APPROVAL_FILE = ROOT / config.THINKING_APPROVAL_FILE
+AUDIT_LOG = ROOT / "logs" / "thinking_engine.log"
+THINKING_MAX_TOTAL_DELTA = 0.12
+THINKING_MAX_ACTIVE_SLEEVES = 3
 
 _TILT_KEYS = ("vti", "spy", "energy", "gold", "cash", "crypto", "bonds")
 _CAP_KEYS = ("vti_core", "spy", "crypto", "nyse", "metal", "cash_buffer")
@@ -43,6 +46,47 @@ _CAP_LABELS = {
     "metal": "Gold",
     "cash_buffer": "Cash",
 }
+def _audit_thinking(event: str, **fields: Any) -> None:
+    """Append JSON audit lines for paper thinking runs (non-blocking path safe)."""
+    try:
+        AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+            "event": event,
+            **fields,
+        }
+        with open(AUDIT_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, default=str) + "\n")
+    except OSError:
+        logger.debug("Thinking audit log write failed", exc_info=True)
+
+
+def _extract_labeled_block(text: str, label: str) -> str:
+    if not text:
+        return ""
+    m = re.search(
+        rf"{label}\s*:\s*(.+?)(?=(?:NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|"
+        rf"RECOMMENDED_TILT|TILT_RATIONALE|CONFIDENCE|RISKS|OPPORTUNITIES)\s*:|$)",
+        text,
+        re.I | re.S,
+    )
+    if not m:
+        m = re.search(rf"{label}\s*:\s*(.+)", text, re.I)
+    if not m:
+        return ""
+    return m.group(1).strip().splitlines()[0].strip()
+
+
+def _tilt_deltas_reasonable(deltas: dict[str, float]) -> tuple[bool, str]:
+    material = {k: v for k, v in deltas.items() if abs(float(v)) >= 0.005}
+    if len(material) > THINKING_MAX_ACTIVE_SLEEVES:
+        return False, f"too many sleeves moved ({len(material)} > {THINKING_MAX_ACTIVE_SLEEVES})"
+    total = sum(abs(float(v)) for v in deltas.values())
+    if total > THINKING_MAX_TOTAL_DELTA:
+        return False, f"total sleeve delta {total:.1%} exceeds {THINKING_MAX_TOTAL_DELTA:.0%} cap"
+    return True, ""
+
+
 _GEO_KEYWORDS = (
     "iran",
     "israel",
@@ -54,45 +98,100 @@ _GEO_KEYWORDS = (
     "missile",
 )
 
-_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM with real capital at risk. Your job is one decisive 3-7 day allocation call — not commentary.
+_TILT_ALIASES = {
+    "vti_core": "vti",
+    "xle": "energy",
+    "gld": "gold",
+    "treasury": "bonds",
+    "tlt": "bonds",
+    "tech": "spy",
+    "technology": "spy",
+    "software": "spy",
+    "semis": "spy",
+    "semiconductors": "spy",
+    "smh": "spy",
+    "nvda": "spy",
+    "ai": "spy",
+    "infrastructure": "spy",
+    "datacenter": "spy",
+    "robotics": "spy",
+    "defense": "energy",
+    "financials": "spy",
+    "financial": "spy",
+}
+_SECTOR_PROXIES = (
+    ("Tech (QQQ)", "QQQ"),
+    ("Semis (NVDA)", "NVDA"),
+    ("AI Infra (SMCI)", "SMCI"),
+    ("Broad (SPY)", "SPY"),
+    ("Energy (XOM)", "XOM"),
+    ("Gold (GLD)", "GLD"),
+    ("Defense (RTX)", "RTX"),
+)
+_AI_CYCLE_KEYWORDS = (
+    "ai",
+    "tech",
+    "semiconductor",
+    "semi",
+    "nvidia",
+    "datacenter",
+    "software",
+    "robotics",
+    "supercycle",
+    "bubble",
+    "rotation",
+    "late-cycle",
+    "mid-cycle",
+    "exhaustion",
+)
 
-CORE MANDATE:
-- Be bold when asymmetry is clear. Be defensive when uncertainty dominates.
-- Maintain consistency with yesterday's tilt unless STRONG NEW EVIDENCE appears (VIX spike, trend break, major headline, confirmed safe-haven bid).
-- If you change any sleeve by more than 5% vs yesterday, you MUST cite the new evidence in TILT_RATIONALE (production cap is ±6% per sleeve).
+_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM who has been successfully riding the AI/Tech supercycle since 2023.
 
-HARD RULES (non-negotiable):
-1. Do NOT overweight gold when Gold 5d change is negative (liquidity sell, not safe-haven). Default gold to 0% unless asymmetry explicitly argues a contrarian bounce.
-2. When VIX is rising and there is NO strong momentum continuation narrative, bias toward cash — do not run max equity.
-3. When SPY is below MA200 and VIX is elevated, prioritize capital preservation over chasing beta.
-4. RECOMMENDED_TILT values are decimal weights 0.00–1.00 (not strings) and must sum to ~1.0 across sleeves (vti, spy, energy, gold, cash, crypto, bonds).
-5. Per-sleeve change vs yesterday's tilt should stay within ±6% unless STRONG NEW EVIDENCE appears; cite that evidence in TILT_RATIONALE when you exceed ±5%.
-6. TILT_RATIONALE must explicitly justify EVERY sleeve you allocate above 5% with its exact percentage (e.g. "VTI 52% because...", "cash 18% because VIX rising...").
+Current context:
+- We are in a multi-year AI/Tech paradigm shift (Nvidia, data centers, semiconductors, software, robotics).
+- Tech has been the dominant leader, but leadership can rotate (e.g. from semiconductors to software, infrastructure, or energy).
+- Watch for signs of late-cycle behavior, bubble risk, or rotation into other sectors (Energy, Financials, Defense, Gold).
 
-DECISION FRAMEWORK:
-1. Dominant narrative — what is actually moving markets (ignore noise)?
-2. Asymmetry — where is crowd positioning wrong or forced to adjust?
-3. Risks (max 2) and opportunities (max 2) — highest signal only.
-4. Clear RECOMMENDED_TILT — decisive, not vague 50/50 blends unless truly uncertain.
+Given the latest data:
+- SPY vs MA200
+- VIX level & trend
+- Sector leadership (Tech, Semis, Energy, Gold, Defense, etc.)
+- Oil/Gold/TNX moves
+- Bot current exposure
+- Any major headline
+
+Think step-by-step (internally — do NOT output your steps):
+1. What phase of the AI/Tech boom are we in? (Early, mid-cycle, late-cycle, rotation, exhaustion?)
+2. What is the dominant narrative and where is the real asymmetry?
+3. Which sectors have the highest conviction edge for the next 3-7 days?
+4. Recommend a clear, decisive allocation tilt. Be bold when conviction is high.
+
+PRODUCTION HARD RULES (non-negotiable):
+- Maintain consistency with yesterday's tilt unless STRONG NEW EVIDENCE (VIX spike, trend break, headline, safe-haven bid).
+- Per-sleeve change vs yesterday: stay within +/-6% without new evidence; cite evidence in TILT_RATIONALE if you exceed +/-5%.
+- Do NOT overweight gold when Gold 5d is negative unless asymmetry explicitly cites a contrarian bounce.
+- When VIX is rising without strong momentum continuation, bias toward cash — do not run max equity.
+- When SPY is below MA200 and VIX is elevated, prioritize capital preservation.
+- RECOMMENDED_TILT uses decimal weights 0.00-1.00 (not strings) and must sum to ~1.0.
+- Map sleeves: vti=broad beta, spy=tech/growth tilt, energy=energy/defense, gold=metals, cash=cash, crypto=crypto, bonds=bonds/cash buffer.
+- You may use tech/semis keys in RECOMMENDED_TILT — they merge into spy/energy internally.
 
 Output format (strict — ENTIRE reply ONLY these lines, no preamble, no markdown headers):
-NARRATIVE: [One powerful sentence]
-ASYMMETRY: [Specific edge — name winners and losers]
-RISKS: [max 2 bullets, comma-separated or semicolon-separated]
-OPPORTUNITIES: [max 2 bullets]
-RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX, "bonds": 0.XX}
-TILT_RATIONALE: [Link asymmetry to EACH >5% sleeve with exact percentages — mandatory]
+NARRATIVE: [One powerful sentence about current regime + AI cycle phase]
+ASYMMETRY: [Where the crowd is wrong or forced to adjust]
+SECTOR_VIEW: [Tech, Semis, Energy, Defense, Gold — leaders/laggards and 3-7d view]
+RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "tech": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX, "bonds": 0.XX}
+TILT_RATIONALE: [Must link asymmetry + sector view to specific percentages]
 CONFIDENCE: 0.XX
-REASONING: [Concise link from narrative to tilt]
 
 Do not explain your process. Do not repeat the input. Start with NARRATIVE:"""
 
 _STRUCTURED_FIELD_RE = re.compile(
-    r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
+    r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
     re.I,
 )
 _TILT_PROSE_RE = re.compile(
-    r"\b(vti|spy|energy|gold|cash|crypto|bonds)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?",
+    r"\b(vti|spy|tech|semis|energy|gold|cash|crypto|bonds)\s*[:=]?\s*(\d{1,3}(?:\.\d+)?)\s*%?",
     re.I,
 )
 
@@ -169,6 +268,70 @@ def _format_bot_exposure(base_caps: dict[str, float] | None = None) -> str:
     return ", ".join(parts) if parts else "n/a"
 
 
+def _symbol_5d_pct(data, symbol: str, macro_cache: dict) -> float | None:
+    if data is not None and hasattr(data, "columns") and symbol in data.columns:
+        try:
+            return _pct_change(data[symbol])
+        except (TypeError, ValueError, IndexError):
+            pass
+    series = _load_macro_close(symbol, macro_cache)
+    if series is not None and not series.empty:
+        return _pct_change(series)
+    return None
+
+
+def _build_sector_leadership(data, macro_cache: dict | None = None) -> dict[str, Any]:
+    macro_cache = macro_cache or {}
+    rows: list[dict[str, Any]] = []
+    for label, sym in _SECTOR_PROXIES:
+        ch = _symbol_5d_pct(data, sym, macro_cache)
+        if ch is not None:
+            rows.append({"sector": label, "symbol": sym, "change_5d_pct": ch})
+    rows.sort(key=lambda r: float(r["change_5d_pct"]), reverse=True)
+    leaders = rows[:3]
+    laggards = list(reversed(rows[-2:])) if len(rows) >= 2 else []
+    return {
+        "sectors": rows,
+        "leaders": leaders,
+        "laggards": laggards,
+        "leadership_str": ", ".join(
+            f"{r['sector']} {float(r['change_5d_pct']):+.1f}%" for r in leaders
+        )
+        or "n/a",
+    }
+
+
+def _infer_ai_cycle_phase(summary: dict) -> str:
+    spy_trend = str(summary.get("spy_trend", ""))
+    vix = summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 18.0
+    vix_trend = str(summary.get("vix_trend", "")).lower()
+    leaders = summary.get("sector_leaders") or []
+
+    def _sector_name(row: dict) -> str:
+        return str(row.get("sector", ""))
+
+    tech_leading = any(
+        any(k in _sector_name(r) for k in ("Tech", "Semis", "AI"))
+        for r in leaders[:2]
+    )
+    energy_leading = any("Energy" in _sector_name(r) for r in leaders[:1])
+
+    if "below MA" in spy_trend and vix_f >= 22:
+        return "exhaustion / risk-off"
+    if "rising" in vix_trend and tech_leading and vix_f >= 18:
+        return "late-cycle / rotation risk"
+    if energy_leading and not tech_leading:
+        return "rotation (energy / real assets)"
+    if tech_leading and "above MA" in spy_trend:
+        if any("Semis" in _sector_name(r) or "AI" in _sector_name(r) for r in leaders[:1]):
+            return "mid-cycle AI leadership"
+        return "mid-cycle tech breadth"
+    if "above MA" in spy_trend:
+        return "early-cycle / broad risk-on"
+    return "range-bound / unclear phase"
+
+
 def build_market_summary(
     data,
     regime: str,
@@ -219,7 +382,8 @@ def build_market_summary(
         except Exception:
             pass
 
-    return {
+    sector = _build_sector_leadership(data, macro_cache)
+    summary = {
         "spy_trend": spy_trend,
         "vix": round(vix_val, 1) if vix_val is not None else "n/a",
         "vix_trend": vix_trend,
@@ -231,7 +395,13 @@ def build_market_summary(
         "regime": regime,
         "bot_exposure": bot_exposure,
         "bot_exposure_str": _format_bot_exposure(caps),
+        "sector_leadership": sector["leadership_str"],
+        "sector_leaders": sector["leaders"],
+        "sector_laggards": sector["laggards"],
+        "sector_detail": sector["sectors"],
     }
+    summary["ai_cycle_phase"] = _infer_ai_cycle_phase(summary)
+    return summary
 
 
 def _caps_to_tilt(caps: dict[str, float]) -> dict[str, float]:
@@ -387,6 +557,12 @@ def _infer_asymmetry(summary: dict | None) -> str:
     spy_trend = str(summary.get("spy_trend", ""))
     if "below MA" in spy_trend and vix_f >= 20:
         return "Crowd still long beta while trend breaks — asymmetric downside if vol persists"
+    leaders = summary.get("sector_leaders") or []
+    if leaders and any("Semis" in str(r.get("sector", "")) for r in leaders[:1]):
+        if "above MA" in spy_trend:
+            return "Semis/AI still leading — crowd under-allocates infra capex vs datacenter demand"
+    if any("Tech" in str(r.get("sector", "")) for r in leaders[:1]) and "above MA" in spy_trend:
+        return "AI/Tech leadership persists — laggards forced to chase beta on dips"
     if oil >= 4.0 and "above MA" in spy_trend:
         return "Equities complacent vs energy shock — crowd under-hedged to inflation tail"
     if gold >= 3.0 and vix_f >= config.MACRO_VIX_SAFE_HAVEN_MIN:
@@ -494,6 +670,8 @@ def get_thinking_status_snapshot() -> dict[str, object]:
         "last_confidence": cached.get("confidence"),
         "validation_score": cached.get("validation_score"),
         "narrative_snip": str(cached.get("narrative") or "")[:100],
+        "sector_view_snip": str(cached.get("sector_view") or "")[:120],
+        "ai_cycle_phase": cached.get("ai_cycle_phase"),
         "manual_review_required": bool(cached.get("manual_review_required")),
         "pending_decision_id": pending_id,
         "approved": approved,
@@ -510,6 +688,8 @@ def _load_previous_tilt_full() -> dict | None:
         "regime": cached.get("regime"),
         "timestamp": cached.get("timestamp"),
         "narrative": cached.get("narrative"),
+        "sector_view": cached.get("sector_view"),
+        "ai_cycle_phase": cached.get("ai_cycle_phase"),
         "tilt_rationale": cached.get("tilt_rationale"),
         "asymmetry": cached.get("asymmetry"),
     }
@@ -649,6 +829,43 @@ def _validate_thinking_quality(
     if _looks_like_meta_narrative(str(result.get("narrative") or "")):
         errors.append("meta/process narrative")
 
+    sector_view = str(result.get("sector_view") or "").lower()
+    ai_phase = str(
+        result.get("ai_cycle_phase") or market_summary.get("ai_cycle_phase") or ""
+    ).lower()
+    combined_text = f"{narrative} {asymmetry} {sector_view} {ai_phase}"
+    tech_tilt = float(tilt.get("spy", 0.0))
+    risk_on = float(tilt.get("vti", 0.0)) + tech_tilt
+
+    if not sector_view and not any(k in combined_text for k in _AI_CYCLE_KEYWORDS):
+        errors.append("missing sector/AI cycle awareness (SECTOR_VIEW or AI terms)")
+
+    if any(p in ai_phase for p in ("late-cycle", "exhaustion", "rotation risk")):
+        if tech_tilt > 0.38 and float(tilt.get("cash", 0.0)) < 0.10:
+            if "continuation" not in combined_text and "momentum" not in combined_text:
+                errors.append("late-cycle/rotation phase but aggressive tech tilt without cash buffer")
+
+    if "exhaustion" in ai_phase and risk_on > 0.78 and float(tilt.get("cash", 0.0)) < 0.15:
+        errors.append("exhaustion phase but equity-heavy tilt without defensive cash")
+
+    leaders = market_summary.get("sector_leaders") or []
+    tech_leading = any(
+        any(k in str(r.get("sector", "")) for k in ("Tech", "Semis", "AI"))
+        for r in leaders[:2]
+    )
+    if (
+        tech_leading
+        and "above MA" in str(market_summary.get("spy_trend", ""))
+        and "exhaustion" not in ai_phase
+        and "rotation" not in ai_phase
+        and tech_tilt < 0.06
+        and float(tilt.get("vti", 0.0)) < 0.45
+    ):
+        errors.append("tech/AI sector leading but growth sleeves underweight vs regime")
+
+    if sector_view and "underweight tech" in sector_view and tech_tilt > 0.30:
+        errors.append("SECTOR_VIEW underweights tech but RECOMMENDED_TILT is tech-heavy")
+
     rationale = str(result.get("tilt_rationale") or "")
     rq = _rationale_quality_score(result)
     if rq < 0.45:
@@ -732,9 +949,20 @@ def _finalize_thinking_result(
         out["source"] = out.get("source") or "force_decision"
 
     if not out.get("narrative") or _looks_like_meta_narrative(str(out.get("narrative"))):
-        out["narrative"] = _infer_narrative(market_summary)
+        from_reasoning = _extract_labeled_block(str(out.get("reasoning") or ""), "NARRATIVE")
+        if from_reasoning and not _looks_like_meta_narrative(from_reasoning):
+            out["narrative"] = from_reasoning
+        else:
+            out["narrative"] = _infer_narrative(market_summary)
     if not out.get("asymmetry"):
         out["asymmetry"] = _infer_asymmetry(market_summary)
+    if not out.get("sector_view"):
+        out["sector_view"] = (
+            f"Leaders: {market_summary.get('sector_leadership', 'n/a')} | "
+            f"phase: {market_summary.get('ai_cycle_phase', 'n/a')}"
+        )
+    if not out.get("ai_cycle_phase"):
+        out["ai_cycle_phase"] = market_summary.get("ai_cycle_phase")
     if force_decision and not out.get("risks"):
         out["risks"] = ["Vol spike / trend break", "Macro headline shock"]
     if force_decision and not out.get("opportunities"):
@@ -807,8 +1035,11 @@ def _infer_narrative(summary: dict | None) -> str:
             return "Elevated vol with gold falling — liquidity stress"
         return "Risk-off / safe-haven bid"
     if "below MA" in str(summary.get("spy_trend", "")):
-        return "Equity trend weakening"
-    return "Range-bound macro"
+        return "Equity trend weakening — AI beta vulnerable"
+    phase = str(summary.get("ai_cycle_phase") or "")
+    if "mid-cycle" in phase:
+        return "Mid-cycle AI leadership — stay with winners, trim laggards"
+    return "Range-bound chop — edge in selective sector tilts, not max risk"
 
 
 def _format_thinking_log(narrative: str, cap_deltas: dict[str, float]) -> str:
@@ -875,6 +1106,12 @@ def apply_thinking_tilt_to_caps(
     actual_deltas = {
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
+    ok, reason = _tilt_deltas_reasonable(actual_deltas)
+    if not ok:
+        logger.info("Thinking engine: tilt rejected (%s)", reason)
+        _audit_thinking("tilt_rejected", reason=reason, deltas=actual_deltas)
+        return dict(base_caps), {}, f"Thinking blocked: {reason}"
+
     log_line = _format_thinking_log(_infer_narrative(market_summary), actual_deltas)
     if any(v != 0 for v in actual_deltas.values()):
         log_event("thinking_tilt_applied", confidence=conf, deltas=actual_deltas, log_line=log_line)
@@ -899,13 +1136,21 @@ def apply_thinking_to_sleeve_caps(
 
 def derive_heuristic_tilt(summary: dict) -> dict[str, float]:
     """Normalized target weights for LLM nudge layer (backtest/live)."""
+    phase = str(summary.get("ai_cycle_phase") or "")
+    tech_leading = any(
+        any(k in str(r.get("sector", "")) for k in ("Tech", "Semis", "AI"))
+        for r in (summary.get("sector_leaders") or [])[:2]
+    )
+    spy_w = 0.18 if tech_leading and "rotation" not in phase else 0.12
+    vti_w = 0.48 if tech_leading else 0.55
+    cash_w = 0.14 if "late-cycle" in phase or "exhaustion" in phase else 0.10
     tilt = {
-        "vti": 0.55,
-        "spy": 0.12,
+        "vti": vti_w,
+        "spy": spy_w,
         "crypto": 0.08,
-        "energy": 0.05,
+        "energy": 0.06 if "rotation" in phase else 0.05,
         "gold": 0.05 if _gold_momentum_ok(summary) else 0.0,
-        "cash": 0.10,
+        "cash": cash_w,
         "bonds": 0.05 if _gold_momentum_ok(summary) else 0.10,
     }
     deltas = _rule_based_cap_deltas(summary, 0.7)
@@ -937,6 +1182,11 @@ def build_backtest_thinking_result(
         "reasoning": f"Force-decision proxy: {narrative}",
         "narrative": narrative,
         "asymmetry": asymmetry,
+        "sector_view": (
+            f"Leaders: {summary.get('sector_leadership', 'n/a')} | "
+            f"phase: {summary.get('ai_cycle_phase', 'n/a')}"
+        ),
+        "ai_cycle_phase": summary.get("ai_cycle_phase"),
         "risks": ["Regime shift", "Vol spike"],
         "opportunities": ["Sleeve tilt edge", "Macro hedge"],
         "justification": asymmetry,
@@ -1016,6 +1266,16 @@ def _record_thinking_run(regime: str, result: dict) -> None:
         },
     )
     persist_thinking_last(result, regime=regime)
+    _audit_thinking(
+        "reasoning_complete",
+        regime=regime,
+        source=result.get("source"),
+        model=result.get("model"),
+        confidence=result.get("confidence"),
+        validation_ok=result.get("validation_ok"),
+        validation_score=result.get("validation_score"),
+        narrative=(str(result.get("narrative") or "")[:160]),
+    )
 
 
 def ollama_available() -> bool:
@@ -1162,13 +1422,7 @@ def _normalize_tilt(raw: dict | None) -> dict[str, float]:
     if not raw:
         base.update({"vti": 0.80, "cash": 0.20})
         return base
-    alias = {
-        "vti_core": "vti",
-        "xle": "energy",
-        "gld": "gold",
-        "treasury": "bonds",
-        "tlt": "bonds",
-    }
+    alias = dict(_TILT_ALIASES)
     for key, val in raw.items():
         k = alias.get(str(key).lower(), str(key).lower())
         if k not in base:
@@ -1177,7 +1431,7 @@ def _normalize_tilt(raw: dict | None) -> dict[str, float]:
             val = float(val)
             if val > 1.0 and val <= 100.0:
                 val = val / 100.0
-            base[k] = val
+            base[k] += val
         except (TypeError, ValueError):
             continue
     total = sum(v for v in base.values() if v > 0)
@@ -1298,7 +1552,7 @@ def _extract_recommended_tilt(text: str) -> dict | None:
         if span:
             obj = _coerce_tilt_json(text[span[0] : span[1] + 1])
             if obj and any(
-                str(k).lower() in _TILT_KEYS or str(k).lower() in ("vti_core", "xle", "gld")
+                str(k).lower() in _TILT_KEYS or str(k).lower() in _TILT_ALIASES
                 for k in obj
             ):
                 return obj
@@ -1358,6 +1612,10 @@ def _parse_structured_reasoning(text: str) -> dict[str, Any]:
             result["narrative"] = raw.splitlines()[0] if raw else ""
         elif key == "asymmetry":
             result["asymmetry"] = raw.splitlines()[0] if raw else ""
+        elif key == "sector_view":
+            result["sector_view"] = raw.splitlines()[0] if raw else ""
+        elif key == "ai_cycle_phase":
+            result["ai_cycle_phase"] = raw.splitlines()[0] if raw else ""
         elif key == "paradigm_shift":
             result["paradigm_shift"] = raw.splitlines()[0] if raw else ""
         elif key == "risks":
@@ -1460,10 +1718,13 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
             f"{k} {v:.0%}" for k, v in sorted(prev.items(), key=lambda kv: kv[1], reverse=True)[:6]
         )
     if prev_full and prev_full.get("tilt"):
+        prev_sector = str(prev_full.get("sector_view") or "")[:120]
         prev_rationale = str(prev_full.get("tilt_rationale") or "")[:220]
         prev_context = (
             f"Previous decision ({str(prev_full.get('timestamp', 'unknown'))[:19]}):\n"
-            f"  regime={prev_full.get('regime')} | narrative={str(prev_full.get('narrative') or '')[:120]}\n"
+            f"  regime={prev_full.get('regime')} | phase={prev_full.get('ai_cycle_phase', 'n/a')}\n"
+            f"  narrative={str(prev_full.get('narrative') or '')[:120]}\n"
+            f"  sector_view={prev_sector or 'n/a'}\n"
             f"  tilt={prev_line}\n"
             f"  prior TILT_RATIONALE: {prev_rationale or 'n/a'}"
         )
@@ -1483,6 +1744,10 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
 
     return f"""Current market snapshot:
 
+AI/Tech cycle phase (heuristic): {market_summary.get('ai_cycle_phase', 'unknown')}
+Sector leadership (5d): {market_summary.get('sector_leadership', 'n/a')}
+Sector laggards: {', '.join(f"{r['sector']} {float(r['change_5d_pct']):+.1f}%" for r in (market_summary.get('sector_laggards') or [])) or 'n/a'}
+
 SPY vs MA200: {market_summary['spy_trend']}
 VIX: {market_summary['vix']} | {vix_note}
 Oil 5d: {market_summary['oil_change']}% | Gold 5d: {market_summary['gold_change']}%
@@ -1496,11 +1761,12 @@ Previous day tilt: {prev_line}
 {prev_context}
 
 {gold_note}
-Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline).
-Hard production cap: ±{config.effective_thinking_max_sleeve_delta():.0%} per sleeve vs prior day without new evidence (validator rejects larger swings).
+Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline, sector rotation).
+Hard production cap: +/-{config.effective_thinking_max_sleeve_delta():.0%} per sleeve vs prior day without new evidence.
 Use decimal weights in RECOMMENDED_TILT (e.g. 0.52 not "52%"); weights must sum to ~1.0.
-TILT_RATIONALE must justify every sleeve above 5% with its exact percentage and link to ASYMMETRY.
-Reply with ONLY the structured block (NARRATIVE through REASONING). Be decisive. Start with NARRATIVE:"""
+Include SECTOR_VIEW with Tech/Semis/Energy/Defense/Gold leaders and 3-7d view.
+TILT_RATIONALE must link ASYMMETRY + SECTOR_VIEW to each sleeve above 5%.
+Reply with ONLY the structured block (NARRATIVE through CONFIDENCE). Be decisive. Start with NARRATIVE:"""
 
 
 def _is_default_tilt(tilt: dict[str, float]) -> bool:
@@ -1523,6 +1789,8 @@ def _llm_parse_quality(
         score += 0.25
     if structured.get("asymmetry"):
         score += 0.15
+    if structured.get("sector_view"):
+        score += 0.12
     if structured.get("tilt_rationale"):
         score += 0.1
     if structured.get("risks"):
@@ -1586,6 +1854,13 @@ def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[s
         or []
     )
     asymmetry = structured.get("asymmetry") or parsed.get("asymmetry") or ""
+    sector_view = structured.get("sector_view") or parsed.get("sector_view") or ""
+    ai_cycle_phase = (
+        structured.get("ai_cycle_phase")
+        or parsed.get("ai_cycle_phase")
+        or market_summary.get("ai_cycle_phase")
+        or ""
+    )
     tilt_rationale = structured.get("tilt_rationale") or parsed.get("tilt_rationale") or ""
     justification = (
         structured.get("reasoning_excerpt")
@@ -1599,6 +1874,8 @@ def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[s
         "reasoning": _strip_chain_of_thought(full_text.strip()),
         "narrative": str(narrative).strip(),
         "asymmetry": str(asymmetry).strip() if asymmetry else "",
+        "sector_view": str(sector_view).strip() if sector_view else "",
+        "ai_cycle_phase": str(ai_cycle_phase).strip() if ai_cycle_phase else "",
         "tilt_rationale": str(tilt_rationale).strip() if tilt_rationale else "",
         "risks": risks if isinstance(risks, list) else [str(risks)],
         "opportunities": (
@@ -1765,6 +2042,7 @@ def maybe_run_thinking(
     def _bg_refresh():
         try:
             logger.info("Thinking engine: background refresh started for regime=%s", regime)
+            _audit_thinking("background_refresh_start", regime=regime)
             res = get_market_reasoning(summary)
             if res.get("source") == "heuristic":
                 logger.info("Thinking engine background: heuristic fallback (%s)", res.get("model"))
@@ -1772,6 +2050,12 @@ def maybe_run_thinking(
                 logger.info("Thinking engine background: low parse quality: %s", res.get("parse_quality"))
             _record_thinking_run(regime, res)
             logger.info("Thinking engine: background refresh completed for regime=%s", regime)
+            _audit_thinking(
+                "background_refresh_done",
+                regime=regime,
+                source=res.get("source"),
+                confidence=res.get("confidence"),
+            )
         except Exception:
             logger.exception("Thinking engine background refresh failed")
 
@@ -1893,6 +2177,12 @@ def maybe_apply_thinking_caps(
     thinking_result["adjusted_caps"] = merged
     thinking_result["apply_log"] = log_line
     if log_line:
+        _audit_thinking(
+            "tilt_applied",
+            log_line=log_line,
+            deltas=deltas,
+            confidence=thinking_result.get("confidence"),
+        )
         state = read_json_file(STATE_FILE)
         today = datetime.date.today().isoformat()
         if state.get("last_apply_log_date") != today:
