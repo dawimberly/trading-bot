@@ -196,7 +196,7 @@ Never commit `.env` — it is gitignored.
 - Live mode uses `https://api.alpaca.markets` (override with `APCA_API_BASE_URL` if needed).
 - A single cached `TradingClient` is reused (`modules/alpaca_client.py`); `run_all.py` reuses one `AlpacaExecutor` per cycle.
 - Alpaca API calls retry transient errors (429/5xx/network) up to 3 times with exponential backoff; auth failures exit cleanly.
-- Logs: stdout + `logs/run_all.log` (daily rotation).
+- Logs: stdout + `logs/run_all.log` and `logs/events.log` (daily rotation, 7 days). Entry points call `modules.logging_utils.setup_project_logging()` — `run_all.py`, `status.py`, `run_paper_bot.py`, `run_spy.py`, `backtester.py`, and satellite backtest scripts. Critical safety paths in `run_all.py` use `logger` / `log_event()` (halt, circuit breaker, auth failures).
 
 3. **Preflight & market data:**
 
@@ -926,6 +926,8 @@ Directional backtests remain useful for strategy design; the performance review 
 
 ## Backtesting
 
+**Hub:** `backtester.py` mirrors the live `run_all.py` pipeline (regime, sleeves, halt). **Satellites** (`backtester_wisdom.py`, `backtester_metals.py`, `backtester_macro_hedge.py`, `backtester_long_short.py`) share helpers in `modules/backtest_common.py` (`slice_data_by_year`, `normalize_yfinance_df`, common `--from` / `--to` args) — run them as standalone research CLIs unchanged.
+
 Uses **Profile A** flags by default; `--paper-aggressive` uses Profile B (`config.print_recommended_stack_flags(profile=...)` on startup).
 
 ```powershell
@@ -976,7 +978,8 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | Integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
+| `backtester.py` | **Hub** — integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
+| `modules/backtest_common.py` | Shared year slicing + yfinance normalize for satellite backtest scripts |
 | `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
 | `scripts/maintenance/sync_felix_transcripts.py` | Bulk-sync Felix YouTube transcripts for social sleeve |
 | `backtester_metals.py` | Game plan variants incl. `yield_gate_only` |
@@ -1144,6 +1147,9 @@ PythonTrading/
 │   ├── portal_bot.py           # Start/stop bot per portal user or @root slot
 │   ├── portal_paths.py         # Per-user data paths
 │   ├── market_context.py       # Regime / volatility / sentiment
+│   ├── logging_utils.py        # setup_project_logging(), log_event() → logs/
+│   ├── backtest_common.py      # Shared helpers for backtester hub + satellites
+│   ├── alpaca_client.py        # Cached TradingClient + retry wrapper
 │   ├── alerts.py
 │   └── ...
 └── scripts/
