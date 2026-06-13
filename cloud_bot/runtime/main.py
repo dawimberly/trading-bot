@@ -21,10 +21,14 @@ from cloud_bot.config.env_loader import (  # noqa: E402
     load_cloud_dotenv,
 )
 from cloud_bot.config.settings import CloudSettings, load_settings  # noqa: E402
-from cloud_bot.modules.stack import STACK_FEATURES_LOCKED_OFF, STACK_FEATURES_ON  # noqa: E402
+from cloud_bot.modules.stack import (  # noqa: E402
+    STACK_FEATURES_LOCKED_OFF,
+    STACK_FEATURES_ON,
+    STACK_SAFETY_GUARDS,
+)
 from cloud_bot.runtime.logging_setup import log_structured, setup_logging  # noqa: E402
 
-CLOUD_BOT_VERSION = "1.1"
+CLOUD_BOT_VERSION = "2.1"
 
 
 def _load_cloud_settings(args: argparse.Namespace) -> CloudSettings:
@@ -121,6 +125,9 @@ def _print_stack_flags(logger) -> None:
     logger.info("  LOCKED OFF:")
     for feature in STACK_FEATURES_LOCKED_OFF:
         logger.info("    - %s", feature)
+    logger.info("  SAFETY:")
+    for guard in STACK_SAFETY_GUARDS:
+        logger.info("    * %s", guard)
 
 
 def _print_status(settings: CloudSettings, logger) -> int:
@@ -202,6 +209,11 @@ Examples:
     parser.add_argument("--days", type=int, default=365, help="Backtest window (default 365)")
     parser.add_argument("--max", action="store_true", help="Use maximum available history")
     parser.add_argument("--refresh", action="store_true", help="Re-download daily data")
+    parser.add_argument(
+        "--fast-mode",
+        action="store_true",
+        help="With --backtest: skip heavy sleeves for faster validation",
+    )
     parser.add_argument("--profile", type=str, help="Override CLOUD_BOT_PROFILE")
     return parser.parse_args()
 
@@ -221,6 +233,10 @@ def main() -> int:
     runtime_env = build_runtime_env(settings)
     apply_runtime_env(runtime_env)
     logger = setup_logging(settings.log_dir)
+
+    from cloud_bot.config.profile import apply_to_config_module
+
+    apply_to_config_module()
 
     if env_path:
         logger.info("loaded env from %s", env_path)
@@ -253,8 +269,18 @@ def main() -> int:
         from cloud_bot.runtime.backtest import run_compare, run_single
 
         if args.compare:
-            return run_compare(days=args.days, use_max=args.max, refresh=args.refresh)
-        return run_single(days=args.days, use_max=args.max, refresh=args.refresh)
+            return run_compare(
+                days=args.days,
+                use_max=args.max,
+                refresh=args.refresh,
+                fast_mode=args.fast_mode,
+            )
+        return run_single(
+            days=args.days,
+            use_max=args.max,
+            refresh=args.refresh,
+            fast_mode=args.fast_mode,
+        )
 
     if args.dry_run:
         import config

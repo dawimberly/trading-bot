@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from logging import Logger
 from pathlib import Path
 
-from cloud_bot.config.profile import apply_best_paper_profile
+from cloud_bot.config.profile import apply_best_paper_profile, apply_to_config_module
 from cloud_bot.config.settings import CloudSettings
 from cloud_bot.runtime.logging_setup import log_structured
 
@@ -125,7 +125,11 @@ def run_forever(
     restart_delay = int(os.getenv("CLOUD_BOT_RESTART_SEC", "30"))
     max_failures = int(os.getenv("CLOUD_BOT_MAX_RESTARTS", "20"))
     consecutive_failures = 0
+    total_restarts = 0
+    loop_started = time.monotonic()
     subprocess_log = settings.log_dir / "run_all_subprocess.log"
+
+    apply_to_config_module()
 
     log_structured(
         logger,
@@ -159,9 +163,18 @@ def run_forever(
             if code == 0:
                 consecutive_failures = 0
                 delay = float(restart_delay)
-                log_structured(logger, "run_all_exit_ok", pid=proc.pid, exit_code=code)
+                total_restarts += 1
+                log_structured(
+                    logger,
+                    "run_all_exit_ok",
+                    pid=proc.pid,
+                    exit_code=code,
+                    total_restarts=total_restarts,
+                    uptime_sec=round(time.monotonic() - loop_started, 1),
+                )
             else:
                 consecutive_failures += 1
+                total_restarts += 1
                 delay = _backoff_delay(restart_delay, consecutive_failures)
                 log_structured(
                     logger,
@@ -170,7 +183,9 @@ def run_forever(
                     exit_code=code,
                     failures=consecutive_failures,
                     max_failures=max_failures,
+                    total_restarts=total_restarts,
                     restart_in_sec=round(delay, 1),
+                    uptime_sec=round(time.monotonic() - loop_started, 1),
                 )
             if shutdown_requested:
                 break
@@ -208,4 +223,12 @@ def run_forever(
             time.sleep(delay)
 
     settings.pid_file.unlink(missing_ok=True)
+    log_structured(
+        logger,
+        "loop_exit",
+        total_restarts=total_restarts,
+        consecutive_failures=consecutive_failures,
+        uptime_sec=round(time.monotonic() - loop_started, 1),
+        shutdown=shutdown_requested,
+    )
     return 1 if consecutive_failures >= max_failures else 0

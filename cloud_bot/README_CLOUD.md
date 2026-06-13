@@ -2,6 +2,45 @@
 
 Production entry point for **Best Paper Bot v2.1** on a $30–50/month Ubuntu VPS. The cloud bot is a thin **supervisor** around parent-repo `run_all.py` — no duplicate strategy code.
 
+---
+
+## Choose a VPS provider (beginner-friendly)
+
+Both **DigitalOcean** and **Hetzner** work well for a small Python trading bot. Pick one:
+
+| Provider | Typical plan | Notes |
+|----------|--------------|-------|
+| [DigitalOcean](https://www.digitalocean.com/) | Basic Droplet, 2 GB RAM, Ubuntu 24.04 | Simple UI, good docs, ~$12–18/mo |
+| [Hetzner](https://www.hetzner.com/cloud) | CX22 (2 vCPU, 4 GB), Ubuntu 24.04 | Strong price/performance in EU/US |
+
+**Steps (same for both):**
+
+1. Create an account and add SSH key (or use password login initially).
+2. Create a **Ubuntu 24.04 LTS** server in a region close to you (or US-East for Alpaca latency).
+3. Note the **public IP** — you will SSH as `root@YOUR_IP`.
+4. Optional: point a domain at the IP (not required for the bot).
+
+```bash
+# From your laptop (replace YOUR_IP)
+ssh root@YOUR_IP
+
+# Create a non-root user (recommended)
+adduser trader
+usermod -aG sudo trader
+rsync --archive --chown=trader:trader ~/.ssh /home/trader
+# Log in as trader from now on:
+ssh trader@YOUR_IP
+```
+
+Firewall (allow SSH only from your IP if possible):
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw enable
+```
+
+---
+
 ## Production entry point
 
 All modes go through `cloud_bot/runtime/main.py`:
@@ -9,7 +48,7 @@ All modes go through `cloud_bot/runtime/main.py`:
 | Flag | Purpose |
 |------|---------|
 | `--run` | Start 24/7 supervisor (spawns `run_all.py`, restarts with backoff) |
-| `--backtest` | Run backtest (`--days`, `--max`, `--refresh`, `--compare`) |
+| `--backtest` | Run backtest (`--days`, `--max`, `--refresh`, `--compare`, `--fast-mode`) |
 | `--status` | Health summary (supervisor PID, heartbeat age, equity) |
 | `--stop` | SIGTERM supervisor, remove PID file |
 | `--dry-run` | Validate config + Alpaca keys; do not trade |
@@ -19,6 +58,7 @@ cd cloud_bot
 
 python runtime/main.py --dry-run      # validate before go-live
 python runtime/main.py --backtest --days 365 --compare
+python runtime/main.py --backtest --days 365 --fast-mode   # quick validation
 python runtime/main.py --run          # foreground 24/7 loop
 python runtime/main.py --status       # health check
 python runtime/main.py --stop         # graceful stop
@@ -46,6 +86,14 @@ python runtime/main.py --status
 | Options income | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
 | NYSE overlap / chunk / co-fire | `PAPER_NYSE_*`, `PAPER_ADAPTIVE_*`, `PAPER_COFIRE_*` |
 | Dynamic universe | `PAPER_DYNAMIC_UNIVERSE=true` |
+| Thinking engine (opt-in) | `PAPER_THINKING_ENGINE_ENABLED=true` |
+
+### Safety guards (always on)
+
+- Paper only: `PAPER_TRADING=true`, `ALLOW_LIVE_TRADING=false` (forced in code)
+- Daily loss circuit breaker (4% paper)
+- Thinking tilt cap ±6% per sleeve when engine enabled
+- Live trading keys rejected on cloud profile
 
 ### Locked OFF (enforced in `config/profile.py`)
 
@@ -63,38 +111,56 @@ Thinking engine: off by default on cloud; opt-in via `PAPER_THINKING_ENGINE_ENAB
 
 ## Quickstart (Ubuntu 22.04 / 24.04)
 
+### First-time VPS setup
+
 ```bash
 # 1. System packages
-sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git python3 python3-venv python3-pip
 
-# 2. Deploy user + clone
-sudo useradd -m -s /bin/bash trader || true
+# 2. App directory (as trader user)
 sudo mkdir -p /opt/PythonTrading
 sudo chown trader:trader /opt/PythonTrading
-sudo -u trader git clone <your-repo-url> /opt/PythonTrading
 cd /opt/PythonTrading
 
-# 3. Python env
+# 3. Clone your repo (replace URL)
+git clone https://github.com/YOUR_USER/PythonTrading.git .
+# Or: git pull if already cloned
+
+# 4. Python env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 pip install -r cloud_bot/requirements.txt
 
-# 4. Configure secrets (paper keys only)
+# 5. Configure secrets (paper keys only)
 cp cloud_bot/.env.example cloud_bot/.env
 nano cloud_bot/.env   # APCA_* + CLOUD_BOT_DRY_RUN=true initially
 
-# 5. Validate
+# 6. Validate
 cd cloud_bot
 python runtime/main.py --dry-run
-python runtime/main.py --backtest --days 365 --compare
 python runtime/main.py --status
+python runtime/main.py --backtest --days 365 --fast-mode
+python runtime/main.py --backtest --days 365 --compare   # full compare (slower)
 
-# 6. Go live (paper)
+# 7. Go live (paper)
 # Set CLOUD_BOT_DRY_RUN=false in cloud_bot/.env, then:
 python runtime/main.py --run
 # Or install systemd unit (section below)
+```
+
+### Updating after `git pull` (routine deploy)
+
+```bash
+cd /opt/PythonTrading
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt -q
+pip install -r cloud_bot/requirements.txt -q
+sudo systemctl restart cloud-bot
+cd cloud_bot && python runtime/main.py --status
 ```
 
 ---
