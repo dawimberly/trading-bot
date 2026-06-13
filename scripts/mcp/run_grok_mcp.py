@@ -56,7 +56,10 @@ def main() -> int:
     _ensure_grok_api_key()
     _absolute_grok_cli()
     os.chdir(root)
-    return subprocess.call([sys.executable, "-m", "grok_cli_mcp"], env=os.environ, cwd=root)
+    mcp_dir = Path(__file__).resolve().parent
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(mcp_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    return subprocess.call([sys.executable, "-m", "grok_mcp"], env=env, cwd=root)
 
 
 if __name__ == "__main__":
