@@ -4,15 +4,20 @@ Run: python run_all.py
 Preflight: python scripts/account/preflight.py
 """
 
+from __future__ import annotations
+
 import datetime
 import logging
-from modules.logging_utils import setup_logging, log_event
 import os
+import sys
 import time
 import traceback
 
+from modules.logging_utils import setup_logging, log_event
+
 import config
 from modules.safe_io import install_safe_stdout, write_json_atomic
+from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
@@ -62,22 +67,41 @@ from modules.scan_schedule import (
 
 pair_cooldown = {}
 
+logger = logging.getLogger(__name__)
+
 
 def _warn_nonfatal(context: str, exc: BaseException) -> None:
-    logger = logging.getLogger(__name__)
     logger.warning("%s (non-fatal): %s", context, exc, exc_info=True)
 
 
-def _make_executor() -> AlpacaExecutor:
-    """Paper chase can use isolated PAPER_APCA_* research book when configured."""
+def _executor_cache_key() -> tuple:
     if (
         config.paper_chase_mode_enabled()
         and os.getenv("PAPER_CHASE_USE_RESEARCH_KEYS", "").lower() in ("1", "true", "yes")
     ):
         creds = get_social_alpaca_credentials()
         if creds:
-            return AlpacaExecutor(paper=True, credentials_fn=lambda: creds)
-    return AlpacaExecutor()
+            return ("research", creds[0][-8], True)
+    return ("main", config.PAPER_TRADING)
+
+
+_executor_singleton: AlpacaExecutor | None = None
+_executor_singleton_key: tuple | None = None
+
+
+def _make_executor() -> AlpacaExecutor:
+    """Paper chase can use isolated PAPER_APCA_* research book when configured."""
+    global _executor_singleton, _executor_singleton_key
+    key = _executor_cache_key()
+    if _executor_singleton is not None and _executor_singleton_key == key:
+        return _executor_singleton
+    if key[0] == "research":
+        creds = get_social_alpaca_credentials()
+        _executor_singleton = AlpacaExecutor(paper=True, credentials_fn=lambda: creds)
+    else:
+        _executor_singleton = AlpacaExecutor()
+    _executor_singleton_key = key
+    return _executor_singleton
 refresh_scheduler = RefreshScheduler()
 risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
 portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
@@ -403,6 +427,20 @@ def main():
     config.configure_account_profile(equity)
     _last_equity = equity
 
+    from modules.trading_safety import (
+        daily_loss_circuit_tripped,
+        set_entry_block_for_cycle,
+    )
+
+    dl_tripped, dl_reason, _ = daily_loss_circuit_tripped(equity)
+    set_entry_block_for_cycle(dl_reason if dl_tripped else None)
+    if dl_tripped:
+        logger.warning(
+            "DAILY LOSS CIRCUIT: %s — no new entries or thinking tilts today",
+            dl_reason,
+        )
+        log_event("daily_loss_circuit", reason=dl_reason, equity=equity)
+
     prev_halted = risk_manager.halted
     can_trade = risk_manager.check_drawdown(equity)
     if not can_trade:
@@ -413,9 +451,10 @@ def main():
             if cash < target:
                 trim_actions = _trim_long_sleeves_for_cash(executor, target - cash)
                 if trim_actions:
-                    print(
-                        f"--- Halt liquidation: {len(trim_actions)} trim(s) "
-                        f"toward {config.HALT_TARGET_CASH_PCT:.0%} cash ---"
+                    logger.warning(
+                        "Halt liquidation: %d trim(s) toward %.0f%% cash",
+                        len(trim_actions),
+                        config.HALT_TARGET_CASH_PCT * 100,
                     )
                     account = executor._get_account()
                     equity = float(account.equity)
@@ -424,7 +463,7 @@ def main():
         dd = risk_manager.current_drawdown(equity)
         if not prev_halted:
             log_event("risk_halt", equity=equity, peak=peak, drawdown=dd)
-            print("!!! RISK HALT: Max drawdown reached. Skipping cycle. !!!")
+            logger.warning("RISK HALT: Max drawdown reached. Skipping cycle.")
         trade_journal.log_event("halt", equity=equity, cash=cash, notes="drawdown limit")
         alerts.notify_halt(equity, peak, dd)
         try:
@@ -439,9 +478,10 @@ def main():
     if prev_halted and not risk_manager.halted:
         dd_resume = risk_manager.current_drawdown(equity)
         log_event("risk_resume", equity=equity, drawdown=dd_resume)
-        print(
-            f"--- RISK RESUME: drawdown {dd_resume:.1%} "
-            f"below {config.HALT_RESUME_DRAWDOWN_PCT:.0%} ---"
+        logger.info(
+            "RISK RESUME: drawdown %.1f%% below %.0f%%",
+            dd_resume * 100,
+            config.HALT_RESUME_DRAWDOWN_PCT * 100,
         )
     alerts.clear_halt_flag()
     _maybe_reconcile_startup(executor)
@@ -458,7 +498,7 @@ def main():
     data = load_close_matrix()
     if data.empty or len(data) < 20:
         log_event("cycle_skip", reason="insufficient_data", equity=equity)
-        print("Insufficient market data. Skipping cycle.")
+        logger.warning("Insufficient market data. Skipping cycle.")
         trade_journal.log_event("skip", equity=equity, notes="empty or short data")
         return
 
@@ -1287,8 +1327,14 @@ def _confirm_live_trading_startup(equity: float) -> None:
 
 if __name__ == "__main__":
     install_safe_stdout()
-    # initialize centralized logging for the main project
-    setup_logging()
+    from pathlib import Path
+
+    setup_logging(log_dir=Path("logs"))
+    try:
+        config.validate_alpaca_config()
+    except ValueError as exc:
+        logger.critical("[FATAL] %s", exc)
+        sys.exit(1)
     chase_extras = config.init_paper_chase_if_enabled()
     if chase_extras:
         print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
@@ -1306,12 +1352,20 @@ if __name__ == "__main__":
     while True:
         try:
             main()
+        except AlpacaAuthError as e:
+            log_event("alpaca_auth_failure", error=str(e))
+            logger.critical("Alpaca authentication failed: %s", e)
+            trade_journal.log_event("error", notes=f"Alpaca auth failure: {e}")
+            sys.exit(1)
+        except AlpacaCriticalError as e:
+            log_event("alpaca_critical", error=str(e))
+            logger.critical("Alpaca API failure: %s", e)
+            trade_journal.log_event("error", notes=f"Alpaca critical: {e}")
+            sys.exit(1)
         except Exception as e:
             tb = traceback.format_exc()
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
-            print("Cycle Error: " + str(e))
-            if tb.strip() and tb.strip() != f"{type(e).__name__}: {e}":
-                print(tb)
+            logger.exception("Cycle error: %s", e)
             notes = str(e)
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"

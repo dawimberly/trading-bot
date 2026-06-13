@@ -2,17 +2,20 @@
 
 import logging
 import time
+from typing import Callable, TypeVar
 
-from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 import config
 from modules import deployment_sizing
+from modules.alpaca_client import call_with_retry, get_trading_client
 from modules.cost_basis import underwater_sizing_scale
 from modules.logging_utils import log_event
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class AlpacaExecutor:
@@ -20,7 +23,7 @@ class AlpacaExecutor:
 
     def __init__(self, paper=None, credentials_fn=None):
         cred_fn = credentials_fn or config.get_alpaca_credentials
-        api_key, secret_key = cred_fn()
+        self._credentials_fn = cred_fn
         use_paper = config.PAPER_TRADING if paper is None else paper
         if not use_paper and not config.ALLOW_LIVE_TRADING:
             raise RuntimeError(
@@ -28,15 +31,21 @@ class AlpacaExecutor:
                 "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
             )
         self.paper = use_paper
-        self.client = TradingClient(api_key, secret_key, paper=use_paper)
+        self.client = get_trading_client(paper=use_paper, credentials_fn=cred_fn)
         self._equity_session_open = None  # None => check Alpaca clock per order
         self._account = None
         self._positions = None
         self._cofire_notionals = {}
-        """Fetch account + positions once per pipeline cycle."""
-        self._account = self.client.get_account()
-        self._positions = list(self.client.get_all_positions())
-        logger.info("AlpacaExecutor initialized", extra={"paper": self.paper})
+        self._account = self._api("get_account", self.client.get_account)
+        self._positions = list(self._api("get_all_positions", self.client.get_all_positions))
+        logger.info(
+            "AlpacaExecutor initialized",
+            extra={"paper": self.paper, "base_url": config.get_alpaca_base_url(paper=self.paper)},
+        )
+
+    def _api(self, op_name: str, func: Callable[..., T], /, *args, **kwargs) -> T:
+        """Alpaca SDK call with retry/backoff (does not change order logic)."""
+        return call_with_retry(func, *args, op_name=op_name, **kwargs)
 
     def begin_deployment_cycle(self):
         self._cofire_notionals = {}
@@ -133,9 +142,12 @@ class AlpacaExecutor:
         self._positions = None
 
     def refresh_cache(self):
-        self._account = self.client.get_account()
-        self._positions = list(self.client.get_all_positions())
-        logger.debug("AlpacaExecutor cache refreshed", extra={"equity": float(self._account.equity) if self._account else None})
+        self._account = self._api("get_account", self.client.get_account)
+        self._positions = list(self._api("get_all_positions", self.client.get_all_positions))
+        logger.debug(
+            "AlpacaExecutor cache refreshed",
+            extra={"equity": float(self._account.equity) if self._account else None},
+        )
 
     @property
     def equity_session_open(self):
@@ -218,7 +230,7 @@ class AlpacaExecutor:
         while time.time() < deadline:
             time.sleep(0.5)
             try:
-                order = self.client.get_order_by_id(oid)
+                order = self._api("get_order_by_id", self.client.get_order_by_id, oid)
             except Exception:
                 return latest
             latest = _details(order)
@@ -228,7 +240,9 @@ class AlpacaExecutor:
             if any(x in status for x in ("cancel", "reject", "expire", "fail")):
                 return latest
         try:
-            return _details(self.client.get_order_by_id(oid)) or latest
+            return _details(
+                self._api("get_order_by_id", self.client.get_order_by_id, oid)
+            ) or latest
         except Exception:
             return latest
 
@@ -246,25 +260,31 @@ class AlpacaExecutor:
     def _cancel_open_orders_for(self, symbol):
         target = config.normalize_symbol(symbol)
         request_params = GetOrdersRequest(status="open")
-        for o in self.client.get_orders(filter=request_params):
+        for o in self._api("get_orders", self.client.get_orders, filter=request_params):
             if config.normalize_symbol(o.symbol) == target:
-                self.client.cancel_order_by_id(o.id)
+                self._api("cancel_order_by_id", self.client.cancel_order_by_id, o.id)
                 time.sleep(0.5)
-                logger.info("cancelled open order", extra={"symbol": target, "order_id": o.id})
+                logger.info(
+                    "cancelled open order",
+                    extra={"symbol": target, "order_id": o.id},
+                )
 
     def cancel_open_equity_orders(self):
         """Cancel queued US equity orders (e.g. unfilled DAY orders after the close)."""
         canceled = 0
         request_params = GetOrdersRequest(status="open")
-        for o in self.client.get_orders(filter=request_params):
+        for o in self._api("get_orders", self.client.get_orders, filter=request_params):
             if config.is_crypto(o.symbol):
                 continue
-            self.client.cancel_order_by_id(o.id)
+            self._api("cancel_order_by_id", self.client.cancel_order_by_id, o.id)
             canceled += 1
             time.sleep(0.2)
         if canceled:
             self._invalidate_cache()
-            logger.info("cancel_open_equity_orders: cancelled", extra={"count": canceled})
+            logger.info(
+                "cancel_open_equity_orders: cancelled",
+                extra={"count": canceled},
+            )
         return canceled
 
     def get_order_params(self, symbol):
@@ -511,9 +531,12 @@ class AlpacaExecutor:
                     side=OrderSide.BUY,
                     time_in_force=tif,
                 )
-        submitted = self.client.submit_order(order_data=order)
+        submitted = self._api("submit_order", self.client.submit_order, order_data=order)
         self._invalidate_cache()
-        logger.info("execute_reduce_notional submitted", extra={"symbol": symbol, "order_id": getattr(submitted, 'id', None)})
+        logger.info(
+            "execute_reduce_notional submitted",
+            extra={"symbol": symbol, "order_id": getattr(submitted, "id", None)},
+        )
         return submitted
 
     def execute_full_exit(self, symbol):
@@ -559,9 +582,12 @@ class AlpacaExecutor:
                     side=OrderSide.BUY,
                     time_in_force=tif,
                 )
-        submitted = self.client.submit_order(order_data=order)
+        submitted = self._api("submit_order", self.client.submit_order, order_data=order)
         self._invalidate_cache()
-        logger.info("execute_full_exit submitted", extra={"symbol": symbol, "order_id": getattr(submitted, 'id', None)})
+        logger.info(
+            "execute_full_exit submitted",
+            extra={"symbol": symbol, "order_id": getattr(submitted, "id", None)},
+        )
         return submitted
 
     def execute_order(self, symbol, side, notional=None, reduce_only=False):
@@ -599,20 +625,30 @@ class AlpacaExecutor:
             side=order_side,
             time_in_force=tif,
         )
-        submitted = self.client.submit_order(order_data=order)
+        submitted = self._api("submit_order", self.client.submit_order, order_data=order)
         self._invalidate_cache()
-        order_id = getattr(submitted, 'id', None)
-        logger.info("order submitted", extra={"symbol": symbol, "side": side.lower(), "notional": target_notional, "order_id": order_id})
-        log_event("order_submitted", symbol=symbol, side=side.lower(), notional=target_notional, order_id=order_id)
+        order_id = getattr(submitted, "id", None)
+        logger.info(
+            "order submitted",
+            extra={
+                "symbol": symbol,
+                "side": side.lower(),
+                "notional": target_notional,
+                "order_id": order_id,
+            },
+        )
+        log_event(
+            "order_submitted",
+            symbol=symbol,
+            side=side.lower(),
+            notional=target_notional,
+            order_id=order_id,
+        )
         return submitted
 
 
-def get_trading_client(paper=None):
-    """Return a TradingClient using config credentials (for utility scripts)."""
-    api_key, secret_key = config.get_alpaca_credentials()
-    use_paper = config.PAPER_TRADING if paper is None else paper
-    if not use_paper and not config.ALLOW_LIVE_TRADING:
-        raise RuntimeError(
-            "Live trading is disabled. Set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
-        )
-    return TradingClient(api_key, secret_key, paper=use_paper)
+def get_trading_client(paper=None, credentials_fn=None):
+    """Return a cached TradingClient (utility scripts)."""
+    from modules.alpaca_client import get_trading_client as _get_client
+
+    return _get_client(paper=paper, credentials_fn=credentials_fn)

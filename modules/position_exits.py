@@ -1,6 +1,12 @@
 """Stop-loss and max-hold exits for open Alpaca positions."""
 
+from __future__ import annotations
+
+import logging
+
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def _position_symbol(raw_symbol):
@@ -20,6 +26,8 @@ def run_position_exits(
     except Exception as e:
         if journal:
             journal.log_event("exit_error", notes=str(e), journal_path=journal_path)
+        else:
+            logger.warning("position_exits: failed to get positions: %s", e)
         return 0
 
     account = executor._get_account()

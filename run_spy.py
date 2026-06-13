@@ -6,9 +6,11 @@ Use this file only if you want SPY running alone in a separate terminal.
 
 import datetime
 import json
+import logging
 import time
 
 import config
+from modules.logging_utils import setup_project_logging
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
@@ -205,6 +207,7 @@ def _print_startup_banner():
 
 
 if __name__ == "__main__":
+    setup_project_logging()
     _print_startup_banner()
     trade_journal.log_event("startup", notes="run_spy.py started", journal_path=SPY_JOURNAL)
     while True:

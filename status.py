@@ -1,4 +1,4 @@
-"""At-a-glance bot status: live + paper equity, regime, key flags.
+"""At-a-glance bot status: live + paper equity, regime, safety, thinking.
 
 Run: python status.py
 """
@@ -12,10 +12,10 @@ from datetime import datetime
 from pathlib import Path
 
 import config
-
-logger = logging.getLogger(__name__)
+from modules.logging_utils import setup_project_logging
 
 ROOT = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
 LIVE_HEARTBEAT = Path(os.getenv("HEARTBEAT_FILE", config.HEARTBEAT_FILE))
 PAPER_HEARTBEAT = Path(os.getenv("PAPER_CHASE_HEARTBEAT", "paper_chase_heartbeat.json"))
 
@@ -52,16 +52,21 @@ def _heartbeat_regime(hb: dict | None) -> str | None:
     return str(regime) if regime else None
 
 
+def _heartbeat_ts(hb: dict | None) -> str:
+    if not hb or not hb.get("timestamp"):
+        return "n/a"
+    return str(hb["timestamp"])[:19]
+
+
 def _alpaca_equity(*, paper: bool, credentials_fn=None) -> float | None:
     try:
-        from alpaca.trading.client import TradingClient
+        from modules.alpaca_client import call_with_retry, get_trading_client
 
         cred_fn = credentials_fn or config.get_alpaca_credentials
-        key, secret = cred_fn()
-        client = TradingClient(key, secret, paper=paper)
-        return float(client.get_account().equity)
+        client = get_trading_client(paper=paper, credentials_fn=cred_fn)
+        account = call_with_retry(client.get_account, op_name="get_account")
+        return float(account.equity)
     except Exception:
-        logger.debug("_alpaca_equity lookup failed", exc_info=True)
         return None
 
 
@@ -74,11 +79,41 @@ def _paper_research_equity() -> float | None:
             return None
         return _alpaca_equity(paper=True, credentials_fn=lambda: creds)
     except Exception:
-        logger.debug("_paper_research_equity failed", exc_info=True)
         return None
 
 
+def _has_alpaca_keys() -> bool:
+    try:
+        config.get_alpaca_credentials()
+        return True
+    except ValueError:
+        return False
+
+
+def _resolve_live_equity(hb: dict | None) -> tuple[float | None, str]:
+    """Prefer Alpaca live equity; ignore stale heartbeat when keys are configured."""
+    acct_eq = _alpaca_equity(paper=False)
+    if acct_eq is not None and acct_eq > 0:
+        hb_eq = _heartbeat_equity(hb)
+        if hb_eq is not None and abs(hb_eq - acct_eq) > 1.0:
+            return acct_eq, (
+                f"Alpaca live (bot heartbeat {_fmt_equity(hb_eq)} @ {_heartbeat_ts(hb)} is stale - restart bot to refresh)"
+            )
+        return acct_eq, "Alpaca live"
+
+    if _has_alpaca_keys():
+        return None, "Alpaca live (fetch failed — check API keys / network)"
+
+    hb_eq = _heartbeat_equity(hb)
+    if hb_eq is not None:
+        return hb_eq, f"bot heartbeat @ {_heartbeat_ts(hb)} (no Alpaca keys)"
+    return None, "n/a"
+
+
 def _resolve_equity(hb: dict | None, *, paper: bool, research: bool = False) -> float | None:
+    if not paper and not research:
+        eq, _src = _resolve_live_equity(hb)
+        return eq
     eq = _heartbeat_equity(hb)
     if eq is not None:
         return eq
@@ -92,10 +127,14 @@ def _flag(name: str, val: bool) -> str:
     return f"{name}={'on' if val else 'off'}"
 
 
+def _is_live_book_active() -> bool:
+    return not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING
+
+
 def _live_profile_line() -> str:
     vti = config.SMALL_ACCOUNT_VTI_CORE_PCT
     return (
-        f"Profile A (live) | VTI ~{vti:.0%} | risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
+        f"VTI ~{vti:.0%} | risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
         f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f}/order"
     )
 
@@ -109,34 +148,9 @@ def _live_flags() -> str:
         _flag("macro", config.MACRO_REGIME_ADAPTOR_ENABLED),
         _flag("social", config.SOCIAL_SLEEVE_ENABLED),
         _flag("spy_exit", config.SPY_EXIT_ON_MA_BREAK),
-        _flag("thinking", False),
+        "thinking=off (live locked)",
     ]
     return " | ".join(parts)
-
-
-def _thinking_safety_line() -> str:
-    s = config.get_thinking_safety_summary()
-    approval = "required" if s["manual_approval_live"] else "off"
-    return (
-        f"tilt_cap=±{s['max_sleeve_delta_pp']:.0f}% | "
-        f"daily_loss_live={s['daily_loss_limit_live_pct']:.0f}% | "
-        f"daily_loss_paper={s['daily_loss_limit_paper_pct']:.0f}% | "
-        f"live_approval={approval} | amplify={'on' if s['confidence_amplify'] else 'off'}"
-    )
-
-
-def _paper_thinking_safety_line() -> str:
-    s = config.get_thinking_safety_summary()
-    return (
-        f"thinking={'on' if s['paper_thinking_enabled'] else 'off (opt-in)'} | "
-        f"tilt_cap=±{s['max_sleeve_delta_pp']:.0f}% | "
-        f"daily_loss={s['daily_loss_limit_paper_pct']:.0f}%"
-    )
-
-
-def _paper_flags() -> tuple[str, str]:
-    on_line, off_line = config.format_best_paper_status_lines()
-    return on_line, off_line
 
 
 def _universe_line() -> str:
@@ -145,48 +159,224 @@ def _universe_line() -> str:
 
         meta = screener_universe_meta()
         if not meta.get("exists"):
-            return "universe: static (no screener file)"
+            return "static (no screener file)"
         age = meta.get("age_days")
         age_s = f"{age:.1f}d old" if age is not None else "unknown age"
-        return f"universe: {meta.get('count', 0)} tickers | screener {age_s}"
+        return f"{meta.get('count', 0)} tickers | screener {age_s}"
     except Exception:
-        return "universe: n/a"
+        return "n/a"
+
+
+def _daily_loss_status(*, paper: bool) -> dict:
+    try:
+        from modules.trading_safety import get_daily_loss_status
+
+        return get_daily_loss_status(paper=paper)
+    except Exception:
+        return {"tripped": False, "limit_pct": 0.0, "loss_pct": None}
+
+
+def _safety_status_banner(*, live: bool) -> str:
+    """One-line safety banner for live or paper book."""
+    s = config.get_production_safety_summary()
+    dl = _daily_loss_status(paper=not live)
+    book = "LIVE" if live else "PAPER"
+    limit = float(dl.get("limit_pct") or 0.0)
+
+    if dl.get("tripped"):
+        loss = dl.get("loss_pct")
+        loss_s = f"{loss:.2f}%" if loss is not None else "?"
+        state = f"CIRCUIT TRIPPED - loss {loss_s} >= {limit:.0f}% limit - entries blocked"
+    else:
+        loss = dl.get("loss_pct")
+        if loss is not None:
+            state = f"OK - daily breaker {limit:.0f}% (today {loss:+.2f}%, not tripped)"
+        else:
+            state = f"OK - daily breaker {limit:.0f}% (no session anchor yet)"
+
+    thinking = config.get_thinking_safety_summary()
+    if live:
+        thinking_bit = (
+            f"thinking off | tilt +/-{s['live_tilt_cap_pp']:.0f}% | "
+            f"approval {'required' if thinking['manual_approval_live'] else 'off'}"
+        )
+    else:
+        eng = "on" if thinking["paper_thinking_enabled"] else "off (opt-in)"
+        thinking_bit = f"thinking {eng} | tilt +/-{s['max_sleeve_delta_pp']:.0f}%"
+
+    breaker = "breaker on" if s["daily_loss_breaker_enabled"] else "breaker off"
+    return f"SAFETY STATUS ({book}): {state} | {thinking_bit} | {breaker}"
+
+
+def _thinking_effective_label() -> str:
+    if not config.PAPER_THINKING_ENGINE_ENABLED:
+        return "OFF"
+    was_ctx = config.paper_aggressive_context()
+    was_bt = config.backtest_paper_sleeves_context()
+    config.set_paper_aggressive_context(True)
+    config.set_backtest_paper_sleeves_context(True)
+    try:
+        if config.effective_thinking_engine_enabled():
+            return "ON"
+    finally:
+        config.set_paper_aggressive_context(was_ctx)
+        config.set_backtest_paper_sleeves_context(was_bt)
+    if config.paper_chase_mode_enabled() or os.getenv("PAPER_CHASE_MODE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return "ON when paper bot runs (restart run_paper_bot.py)"
+    return "OFF (start paper bot with PAPER_CHASE_MODE)"
+
+
+def _thinking_status_lines() -> list[str]:
+    try:
+        from modules.thinking_engine import get_thinking_status_snapshot
+
+        snap = get_thinking_status_snapshot()
+    except Exception:
+        return ["Thinking: unavailable (import error)"]
+
+    env = "ON" if snap["env_enabled"] else "OFF (set PAPER_THINKING_ENGINE_ENABLED=true)"
+    eff = _thinking_effective_label()
+    lines = [f"Engine: env {env} | effective {eff}"]
+
+    ts = snap.get("last_timestamp")
+    if ts:
+        conf = snap.get("last_confidence")
+        conf_s = f"{float(conf):.0%}" if conf is not None else "n/a"
+        val = snap.get("validation_score")
+        val_s = str(val) if val is not None else "n/a"
+        regime = snap.get("last_regime") or "n/a"
+        lines.append(
+            f"Last run: {str(ts)[:19]} | regime {regime} | conf {conf_s} | validation {val_s}"
+        )
+        snip = snap.get("narrative_snip")
+        if snip:
+            lines.append(f"  {snip}")
+        if snap.get("sector_view_snip"):
+            lines.append(f"  sector: {snap['sector_view_snip']}")
+        lines.append("  audit: logs/thinking_engine.log")
+        if snap.get("manual_review_required") and _is_live_book_active():
+            if snap.get("approved"):
+                lines.append("  Live tilt: APPROVED (approval file matches last decision)")
+            else:
+                did = snap.get("pending_decision_id") or "?"
+                lines.append(
+                    f"  Live tilt: PENDING approval (decision {did}) - "
+                    "run scripts/approve_thinking_tilt.py --show"
+                )
+    else:
+        lines.append("Last run: none (thinking_engine_last.json not found)")
+
+    return lines
+
+
+def _profile_table_lines() -> list[str]:
+    return [
+        "=== Profiles ===",
+        "| | Live Profile A (~$300) | Paper Profile B (Best v2) |",
+        "|--|------------------------|---------------------------|",
+        f"| VTI core | {config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} (<$500) / 80% | dynamic 40-75% |",
+        f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
+        "| Stat arb / vol / options | off | on (locked stack) |",
+        "| Thinking engine | off (approval if enabled) | opt-in Ollama (non-blocking) |",
+        "| Macro / social / risk parity | off | locked off |",
+        "| Best Paper Bot version | n/a | v2.1 locked |",
+    ]
+
+
+def _safety_table_lines() -> list[str]:
+    s = config.get_production_safety_summary()
+    live_dl = _daily_loss_status(paper=False)
+    paper_dl = _daily_loss_status(paper=True)
+    lines = [
+        "=== Production safety (always on) ===",
+        "| Guard | Live ($300) | Paper |",
+        "|-------|-------------|-------|",
+        f"| Daily loss circuit breaker | {s['daily_loss_limit_live_pct']:.0f}% -> pause entries + tilts | {s['daily_loss_limit_paper_pct']:.0f}% |",
+        f"| Thinking max tilt / sleeve | +/-{s['live_tilt_cap_pp']:.0f}% | +/-{s['max_sleeve_delta_pp']:.0f}% |",
+        f"| Thinking manual approval | {'required' if s['manual_approval_live'] else 'off'} | auto when engine on |",
+        f"| Thinking engine default | off | {'on' if s['paper_thinking_enabled'] else 'off (opt-in)'} |",
+        f"| Daily loss breaker enabled | {'yes' if s['daily_loss_breaker_enabled'] else 'no'} | same |",
+        f"| Today circuit (live) | "
+        f"{'TRIPPED' if live_dl.get('tripped') else 'ok'} "
+        f"(limit {live_dl.get('limit_pct', 0):.0f}%) | "
+        f"{'TRIPPED' if paper_dl.get('tripped') else 'ok'} "
+        f"(limit {paper_dl.get('limit_pct', 0):.0f}%) |",
+    ]
+    return lines
+
+
+def _emit(line: str = "") -> None:
+    print(line)
 
 
 def main() -> None:
+    setup_project_logging()
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
 
-    live_eq = _resolve_equity(live_hb, paper=False)
+    live_eq, live_eq_src = _resolve_live_equity(live_hb)
     paper_eq = _resolve_equity(paper_hb, paper=True)
     if paper_eq is None:
         paper_eq = _paper_research_equity()
 
-    regime = _heartbeat_regime(live_hb) or _heartbeat_regime(paper_hb) or "n/a"
+    live_regime = _heartbeat_regime(live_hb) or "n/a"
+    paper_regime = _heartbeat_regime(paper_hb) or "n/a"
+    regime = live_regime if live_regime != "n/a" else paper_regime
 
-    ts = ""
-    if live_hb and live_hb.get("timestamp"):
-        ts = f" @ {live_hb['timestamp'][:19]}"
-    elif paper_hb and paper_hb.get("timestamp"):
-        ts = f" @ {paper_hb['timestamp'][:19]}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    mode = "LIVE + PAPER" if _is_live_book_active() else "PAPER ONLY (.env)"
+    _emit(f"PythonTrading status - {now} ({mode})")
+    _emit("=" * 72)
+
+    if _is_live_book_active():
+        _emit(_safety_status_banner(live=True))
     else:
-        ts = f" @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        _emit(_safety_status_banner(live=False))
+    _emit("-" * 72)
 
-    logger.info(
-        f"Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
-        f"Regime {regime}{ts}"
+    _emit(f"LIVE  Profile A (~$300)   equity {_fmt_equity(live_eq)}   regime {live_regime}")
+    _emit(f"      source: {live_eq_src}")
+    _emit(f"      {_live_profile_line()}")
+    _emit(f"      flags: {_live_flags()}")
+    _emit(f"      heartbeat: {_heartbeat_ts(live_hb)}")
+    _emit()
+
+    paper_on, paper_off = config.format_best_paper_status_lines()
+    _emit(f"PAPER Profile B (Best Paper Bot v2.1)   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
+    _emit(f"      ON:  {paper_on}")
+    _emit(f"      OFF (locked): {paper_off}")
+    _emit(f"      universe: {_universe_line()}")
+    _emit(f"      heartbeat: {_heartbeat_ts(paper_hb)}")
+    _emit()
+
+    _emit("THINKING")
+    for line in _thinking_status_lines():
+        _emit(f"  {line}")
+    _emit()
+
+    for line in _profile_table_lines():
+        _emit(line)
+    _emit()
+    for line in _safety_table_lines():
+        _emit(line)
+    _emit()
+    _emit(
+        "Monitor: bot_heartbeat.json | paper_chase_heartbeat.json | "
+        "thinking_engine_last.json | trading_safety_state.json | logs/thinking_engine.log"
     )
-    logger.info(_live_profile_line())
-    logger.info(f"Live flags:  {_live_flags()}")
-    logger.info(f"Thinking safety: {_thinking_safety_line()}")
-    logger.info("Paper Profile B (Best Paper Bot v2)")
-    paper_on, paper_off = _paper_flags()
-    logger.info(f"Paper ON:  {paper_on}")
-    logger.info(f"Paper OFF (locked): {paper_off}")
-    logger.info(f"Paper thinking safety: {_paper_thinking_safety_line()}")
-    logger.info(_universe_line())
+    _emit()
+    _emit("=== Tomorrow checklist ===")
+    _emit("1. python status.py - equity, regime, safety banner, paper stack ON/OFF")
+    _emit("2. paper_chase_heartbeat.json timestamp fresh (<30 min if bot running)")
+    _emit("3. thinking_engine_last.json - validation score, narrative, suggested_tilt")
+    _emit("4. logs/thinking_engine.log - background refresh + tilt apply audit")
+    _emit("5. trading_safety_state.json - daily loss breaker not tripped")
+    _emit("6. Restart paper bot if thinking env changed: python run_paper_bot.py")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     main()

@@ -1,7 +1,7 @@
 # PyInstaller spec — PythonTrading desktop monitor
 #
 # Build (from project root, venv active):
-#   pip install pyinstaller pillow
+#   pip install pyinstaller pillow customtkinter
 #   python scripts/generate_dashboard_icon.py
 #   python -m PyInstaller dashboard.spec --noconfirm
 #
@@ -11,19 +11,43 @@
 import sys
 from pathlib import Path
 
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
+try:
+    from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+except ImportError:
+    collect_data_files = None
+    collect_submodules = None
+
 block_cipher = None
 root = Path(SPECPATH)
 icon_path = root / "assets" / "dashboard.ico"
 
 datas = []
+binaries = []
+if certifi is not None:
+    cacert = Path(certifi.where())
+    if cacert.is_file():
+        datas.append((str(cacert), "certifi"))
+if collect_data_files is not None:
+    try:
+        datas += collect_data_files("customtkinter")
+    except Exception:
+        pass
 icon_arg = str(icon_path) if icon_path.is_file() else None
 
 hiddenimports = [
     "customtkinter",
+    "customtkinter.windows",
+    "customtkinter.windows.widgets",
     "matplotlib.backends.backend_tkagg",
     "PIL",
     "PIL.Image",
     "pystray",
+    "certifi",
     "alpaca",
     "alpaca.trading",
     "dotenv",
@@ -32,11 +56,16 @@ hiddenimports = [
     "modules.portal_paths",
     "modules.trading_books",
 ]
+if collect_submodules is not None:
+    try:
+        hiddenimports += collect_submodules("customtkinter")
+    except Exception:
+        pass
 
 a = Analysis(
     ["dashboard_app.py"],
     pathex=[str(root)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

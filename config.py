@@ -12,10 +12,19 @@ if _env_override and os.path.isfile(_env_override):
 else:
     load_dotenv(find_dotenv())
 
+try:
+    from modules.ssl_certs import configure_ssl_certificates
+
+    configure_ssl_certificates()
+except ImportError:
+    pass
+
 # --- Alpaca (canonical: APCA_*; legacy ALPACA_* supported via get_alpaca_credentials) ---
 # Paper-only by default. Set ALLOW_LIVE_TRADING=yes in .env to override PAPER_TRADING=False.
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
 ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in ("1", "true", "yes")
+ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
+ALPACA_LIVE_BASE_URL = "https://api.alpaca.markets"
 
 # --- Universe (single source of truth) ---
 UNIVERSE = [
@@ -24,6 +33,7 @@ UNIVERSE = [
     "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
     "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
     "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "AMZN", "TSLA", "META",
+    "SPCX", "PLTR", "NFLX", "INTC", "MU", "SMCI", "COIN", "CRM", "SHOP",
     "VTI", "QQQ", "SPY", "IWM",
     "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX",
     "XOM", "CVX", "LNG",
@@ -111,11 +121,10 @@ PAPER_DYNAMIC_RISK_ENABLED = os.getenv("PAPER_DYNAMIC_RISK_ENABLED", "true").low
     "true",
     "yes",
 )
-PAPER_DYNAMIC_UNIVERSE_ENABLED = os.getenv("PAPER_DYNAMIC_UNIVERSE", "true").lower() in (
-    "1",
-    "true",
-    "yes",
+_paper_dyn_univ = os.getenv("PAPER_DYNAMIC_UNIVERSE_ENABLED") or os.getenv(
+    "PAPER_DYNAMIC_UNIVERSE", "true"
 )
+PAPER_DYNAMIC_UNIVERSE_ENABLED = _paper_dyn_univ.lower() in ("1", "true", "yes")
 PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
 PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
 PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.01"))
@@ -197,7 +206,11 @@ LIVE_THINKING_MAX_SLEEVE_DELTA = min(
     float(os.getenv("LIVE_THINKING_MAX_SLEEVE_DELTA", "0.06")),
     THINKING_PRODUCTION_MAX_SLEEVE_DELTA,
 )
-# Daily loss circuit breaker — blocks thinking tilt apply after intraday drawdown
+# Daily loss circuit breaker — blocks new entries + thinking tilts after intraday drawdown
+DAILY_LOSS_CIRCUIT_BREAKER_ENABLED = os.getenv(
+    "DAILY_LOSS_CIRCUIT_BREAKER_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+TRADING_SAFETY_STATE_FILE = os.getenv("TRADING_SAFETY_STATE_FILE", "trading_safety_state.json")
 THINKING_DAILY_LOSS_LIMIT_LIVE = float(os.getenv("THINKING_DAILY_LOSS_LIMIT_LIVE", "0.02"))
 THINKING_DAILY_LOSS_LIMIT_PAPER = float(os.getenv("THINKING_DAILY_LOSS_LIMIT_PAPER", "0.04"))
 # Live: require explicit approval file before applying tilts (see scripts/approve_thinking_tilt.py)
@@ -208,7 +221,7 @@ THINKING_MANUAL_APPROVAL_LIVE = os.getenv("THINKING_MANUAL_APPROVAL_LIVE", "true
 )
 # Disabled until live confidence calibration improves (see thinking engine accuracy analysis)
 THINKING_CONFIDENCE_AMPLIFY_ENABLED = os.getenv(
-    "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "false"
+    "THINKING_CONFIDENCE_AMPLIFY_ENABLED", "true"
 ).lower() in ("1", "true", "yes")
 # Risk parity / All Weather + pod drawdown limits — paper aggressive only
 PAPER_RISK_PARITY_ENABLED = os.getenv("PAPER_RISK_PARITY_ENABLED", "false").lower() in (
@@ -792,30 +805,79 @@ def reload_from_env(env_file: str | None = None) -> None:
         "true",
         "yes",
     )
+    try:
+        from modules.alpaca_client import reset_trading_client_cache
+
+        reset_trading_client_cache()
+    except ImportError:
+        pass
+
+
+def _strip_env(val: str | None) -> str:
+    return (val or "").strip()
+
+
+def get_alpaca_base_url(*, paper: bool | None = None) -> str:
+    """Return Alpaca REST base URL. Paper mode always uses the paper endpoint."""
+    use_paper = PAPER_TRADING if paper is None else bool(paper)
+    if use_paper:
+        return ALPACA_PAPER_BASE_URL
+    override = _strip_env(os.getenv("APCA_API_BASE_URL"))
+    if override:
+        return override.rstrip("/")
+    return ALPACA_LIVE_BASE_URL
 
 
 def get_alpaca_credentials():
     """Return (api_key, secret_key). Prefers APCA_*; falls back to legacy ALPACA_*."""
-    key = os.getenv("APCA_API_KEY_ID") or os.getenv("ALPACA_API_KEY")
-    secret = os.getenv("APCA_API_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY")
+    key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
+    secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+        os.getenv("ALPACA_SECRET_KEY")
+    )
     if not key or not secret:
         raise ValueError(
-            "Alpaca credentials missing. Set APCA_API_KEY_ID and APCA_API_SECRET_KEY in .env"
+            "Alpaca credentials missing. Add to your .env file (never commit .env):\n"
+            "  APCA_API_KEY_ID=your_key_id\n"
+            "  APCA_API_SECRET_KEY=your_secret_key\n"
+            "For paper trading also set PAPER_TRADING=true"
         )
     return key, secret
 
 
+def validate_alpaca_config(*, require_credentials: bool = True) -> None:
+    """Validate Alpaca env at startup; raise ValueError with setup instructions."""
+    if require_credentials:
+        get_alpaca_credentials()
+    use_paper = PAPER_TRADING
+    if not use_paper and not ALLOW_LIVE_TRADING:
+        raise ValueError(
+            "Live trading blocked. Set PAPER_TRADING=true for paper keys, "
+            "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
+        )
+    base_url = get_alpaca_base_url(paper=use_paper)
+    logging.getLogger(__name__).info(
+        "Alpaca config OK: paper=%s base_url=%s",
+        use_paper,
+        base_url,
+    )
+
+
 def get_spy_alpaca_credentials():
     """SPY bot keys: SPY_APCA_* if set, else main APCA_* (same paper account)."""
-    key = os.getenv("SPY_APCA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID") or os.getenv("ALPACA_API_KEY")
+    key = (
+        _strip_env(os.getenv("SPY_APCA_API_KEY_ID"))
+        or _strip_env(os.getenv("APCA_API_KEY_ID"))
+        or _strip_env(os.getenv("ALPACA_API_KEY"))
+    )
     secret = (
-        os.getenv("SPY_APCA_API_SECRET_KEY")
-        or os.getenv("APCA_API_SECRET_KEY")
-        or os.getenv("ALPACA_SECRET_KEY")
+        _strip_env(os.getenv("SPY_APCA_API_SECRET_KEY"))
+        or _strip_env(os.getenv("APCA_API_SECRET_KEY"))
+        or _strip_env(os.getenv("ALPACA_SECRET_KEY"))
     )
     if not key or not secret:
         raise ValueError(
-            "Alpaca credentials missing. Set SPY_APCA_* or APCA_* in .env"
+            "Alpaca credentials missing. Set SPY_APCA_* or APCA_* in .env "
+            "(see README; never commit .env)."
         )
     return key, secret
 
@@ -1035,37 +1097,44 @@ def _nyse_eligible_symbol(symbol: str) -> bool:
 
 
 def nyse_momentum_universe(data_columns) -> list[str]:
-    """NYSE sleeve candidates: dynamic screener list or static data columns."""
+    """Equity sleeve candidates: dynamic screener (NYSE+NASDAQ) or static columns."""
     global _screener_fallback_warned
-    cols = list(data_columns)
-    static = [c for c in cols if _nyse_eligible_symbol(c)]
+    from modules.dynamic_universe import equity_sleeve_universe
+
     use_dynamic = USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe()
     if not use_dynamic:
-        return static
+        return [c for c in data_columns if _nyse_eligible_symbol(c)]
 
-    screener = load_screener_universe_tickers()
-    if not screener:
+    dynamic = equity_sleeve_universe(data_columns)
+    static = [c for c in data_columns if _nyse_eligible_symbol(c)]
+    if dynamic == static and use_dynamic and load_screener_universe_tickers():
         if not _screener_fallback_warned:
             warnings.warn(
-                f"USE_DYNAMIC_UNIVERSE enabled but {SCREENER_UNIVERSE_PATH} "
-                "missing or invalid — using static universe",
+                f"Dynamic universe enabled but no screener tickers in price data — "
+                f"fetch daily history for {SCREENER_UNIVERSE_PATH} tickers",
                 stacklevel=2,
             )
             _screener_fallback_warned = True
-        return static
-
-    screener_set = frozenset(screener)
-    dynamic = [c for c in cols if c in screener_set and _nyse_eligible_symbol(c)]
-    if not dynamic:
-        if not _screener_fallback_warned:
-            warnings.warn(
-                f"USE_DYNAMIC_UNIVERSE: no screener tickers in price data — "
-                "using static universe",
-                stacklevel=2,
-            )
-            _screener_fallback_warned = True
-        return static
     return dynamic
+
+
+def backtest_fetch_tickers() -> list[str]:
+    """Tickers to load for daily backtests (static UNIVERSE + screener when dynamic)."""
+    tickers = list(UNIVERSE)
+    if USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe():
+        extra = load_screener_universe_tickers() or []
+        tickers = sorted(set(tickers) | set(extra))
+    return tickers
+
+
+def dynamic_equity_position_scale(symbol: str) -> float:
+    """Paper-only position scale for IPO / high-vol names from screener metadata."""
+    try:
+        from modules.dynamic_universe import position_scale_for_symbol
+
+        return position_scale_for_symbol(symbol)
+    except ImportError:
+        return 1.0
 
 
 def is_metal_symbol(symbol: str) -> bool:
@@ -1175,13 +1244,13 @@ def apply_best_paper_config_if_enabled() -> None:
     if _best_paper_applied or not use_best_paper_config():
         return
     
+    logger = logging.getLogger(__name__)
     try:
         from config.best_paper_config import apply_best_paper_config, validate_best_paper_config
         
         # Check for deprecated features
-        is_valid, warnings = validate_best_paper_config()
+        _, warnings = validate_best_paper_config()
         if warnings:
-            logger = logging.getLogger(__name__)
             for w in warnings:
                 logger.warning("best_paper_config: %s", w)
         
@@ -1189,10 +1258,8 @@ def apply_best_paper_config_if_enabled() -> None:
         apply_best_paper_config()
         _best_paper_applied = True
         
-        logger = logging.getLogger(__name__)
         logger.info("best_paper_config applied: simplified paper bot stack enabled")
     except ImportError as e:
-        logger = logging.getLogger(__name__)
         logger.warning("Failed to import best_paper_config: %s", e, exc_info=True)
 
 
@@ -1511,7 +1578,12 @@ def init_paper_chase_if_enabled() -> list[str]:
         and paper_chase_mode_enabled()
         and PAPER_AGGRESSIVE_ENABLED
     ):
-        enforce_best_paper_stack()
+        try:
+            from config.best_paper_config import apply_best_paper_config
+
+            apply_best_paper_config()
+        except ImportError:
+            enforce_best_paper_stack()
         set_paper_aggressive_context(True)
         extras = apply_paper_chase_runtime_tuning()
         try:
@@ -1542,6 +1614,7 @@ def get_paper_feature_flags() -> dict[str, bool]:
         return {}
     return {
         "dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
+        "dynamic_universe": PAPER_DYNAMIC_UNIVERSE_ENABLED,
         "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
         "stat_arb": effective_stat_arb_enabled(),
         "vol_overlay": effective_vol_trading_enabled(),
@@ -1673,10 +1746,21 @@ def get_thinking_safety_summary() -> dict[str, str | float | bool]:
         "max_sleeve_delta_pp": round(effective_thinking_max_sleeve_delta() * 100, 1),
         "daily_loss_limit_live_pct": round(THINKING_DAILY_LOSS_LIMIT_LIVE * 100, 1),
         "daily_loss_limit_paper_pct": round(THINKING_DAILY_LOSS_LIMIT_PAPER * 100, 1),
+        "daily_loss_breaker_enabled": DAILY_LOSS_CIRCUIT_BREAKER_ENABLED,
         "manual_approval_live": thinking_manual_approval_required(),
         "confidence_amplify": THINKING_CONFIDENCE_AMPLIFY_ENABLED,
         "paper_thinking_enabled": PAPER_THINKING_ENGINE_ENABLED,
     }
+
+
+def get_production_safety_summary() -> dict[str, str | float | bool]:
+    """Live vs paper production safety (entries + thinking)."""
+    s = get_thinking_safety_summary()
+    s["live_tilt_cap_pp"] = round(
+        min(LIVE_THINKING_MAX_SLEEVE_DELTA, THINKING_PRODUCTION_MAX_SLEEVE_DELTA) * 100, 1
+    )
+    s["production_tilt_cap_pp"] = round(THINKING_PRODUCTION_MAX_SLEEVE_DELTA * 100, 1)
+    return s
 
 
 def effective_risk_parity_enabled() -> bool:

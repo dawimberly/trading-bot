@@ -5,6 +5,7 @@ Run 365d daily hist:  python fetch_data.py --daily --days 365
 """
 
 import argparse
+import logging
 import sqlite3
 
 import pandas as pd
@@ -12,6 +13,8 @@ import yfinance as yf
 
 import config
 from modules.safe_io import safe_print
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_df(df):
@@ -43,6 +46,7 @@ def fetch_and_store(tickers=None):
             df.to_sql(ticker, conn, if_exists="replace", index=False)
             safe_print("Stored: " + ticker)
         except Exception as e:
+            logger.warning("fetch 5m failed for %s: %s", ticker, e)
             safe_print(f"Failed: {ticker} - {e}")
     conn.close()
     safe_print("Done. Database updated.")
@@ -51,7 +55,7 @@ def fetch_and_store(tickers=None):
 def fetch_daily_history(days=None, use_max=False):
     """Backtest pipeline: daily bars. use_max=True requests full yfinance history per ticker."""
     conn = sqlite3.connect(config.DB_PATH)
-    tickers = config.UNIVERSE
+    tickers = config.backtest_fetch_tickers()
     if use_max:
         print(f"Fetching max daily history for {len(tickers)} tickers...")
     else:
@@ -68,14 +72,55 @@ def fetch_daily_history(days=None, use_max=False):
             df = yf.download(ticker, **kwargs)
             df = _normalize_df(df)
             if df.empty:
-                print("No data for " + ticker)
+                safe_print("No data for " + ticker)
                 continue
             df.to_sql(table, conn, if_exists="replace", index=False)
-            print(f"Stored: {table} ({len(df)} rows)")
+            safe_print(f"Stored: {table} ({len(df)} rows)")
         except Exception as e:
-            print(f"Failed: {ticker} - {e}")
+            logger.warning("fetch daily failed for %s: %s", ticker, e)
+            safe_print(f"Failed: {ticker} - {e}")
     conn.close()
-    print("Done. Daily history updated.")
+    safe_print("Done. Daily history updated.")
+
+
+def fetch_daily_history_for_tickers(
+    tickers,
+    *,
+    days=None,
+    use_max=False,
+):
+    """Fetch daily bars for a subset (e.g. dynamic screener names not in static UNIVERSE)."""
+    tickers = [t for t in dict.fromkeys(tickers) if t]
+    if not tickers:
+        return
+    conn = sqlite3.connect(config.DB_PATH)
+    if use_max:
+        print(f"Fetching max daily history for {len(tickers)} screener tickers...")
+    else:
+        days = days or config.BACKTEST_DAYS
+        print(f"Fetching {days}-day daily data for {len(tickers)} screener tickers...")
+    for ticker in tickers:
+        table = f"{ticker}_daily"
+        try:
+            kwargs = dict(interval="1d", progress=False, auto_adjust=True)
+            if use_max:
+                kwargs["period"] = "max"
+            else:
+                kwargs["period"] = f"{days}d"
+            df = yf.download(ticker, **kwargs)
+            df = _normalize_df(df)
+            if df.empty:
+                safe_print("No data for " + ticker)
+                continue
+            df.to_sql(table, conn, if_exists="replace", index=False)
+            safe_print(f"Stored: {table} ({len(df)} rows)")
+        except Exception as e:
+            logger.warning("fetch daily (subset) failed for %s: %s", ticker, e)
+            safe_print(f"Failed: {ticker} - {e}")
+    conn.close()
+    from modules.data_loader import clear_close_matrix_cache
+
+    clear_close_matrix_cache()
 
 
 if __name__ == "__main__":

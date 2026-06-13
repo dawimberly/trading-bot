@@ -3,6 +3,12 @@
 Default: 365-day simulation on daily bars (fetch if missing).
 Live bot still uses 5m data via fetch_data.py without --daily.
 
+Satellite research scripts (shared helpers in modules/backtest_common.py):
+  backtester_wisdom.py      — wisdom / governor modes
+  backtester_macro_hedge.py — bond/yield stress overlays
+  backtester_metals.py      — metal sleeve variants
+  backtester_long_short.py  — short-sleeve grid
+
 Run:  python backtester.py
        python backtester.py --days 180
        python backtester.py --days 365 --small-account
@@ -19,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 import config
-from fetch_data import fetch_daily_history
+from fetch_data import fetch_daily_history, fetch_daily_history_for_tickers
 from modules import deployment_sizing
 from modules.data_loader import load_close_matrix
 from modules.market_context import (
@@ -559,6 +565,56 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
     return data
 
 
+def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
+    """Ensure screener tickers exist in SQLite for dynamic-universe backtests."""
+    from modules.dynamic_universe import maybe_refresh_screener_universe
+
+    maybe_refresh_screener_universe(force=refresh)
+    screener = config.load_screener_universe_tickers() or []
+    extra = [t for t in screener if t not in config.UNIVERSE]
+    if extra:
+        fetch_days = _calendar_days_to_fetch(days or config.BACKTEST_DAYS)
+        fetch_daily_history_for_tickers(
+            extra,
+            days=fetch_days if not use_max else None,
+            use_max=use_max,
+        )
+    return screener
+
+
+def _static_equity_universe(data_columns) -> list[str]:
+    return [c for c in data_columns if config._nyse_eligible_symbol(c)]
+
+
+def _dynamic_equity_universe(data_columns) -> list[str]:
+    return config.nyse_momentum_universe(data_columns)
+
+
+def _universe_sample_lines(data, screener: list[str]) -> list[str]:
+    """Highlight NASDAQ / IPO names present in the dynamic pool."""
+    from modules.dynamic_universe import load_screener_ticker_meta
+
+    meta = load_screener_ticker_meta()
+    watch = {"NVDA", "TSLA", "AMD", "AAPL", "SPCX", "META", "GOOGL", "AMZN", "MSFT"}
+    lines: list[str] = []
+    dyn = set(_dynamic_equity_universe(data.columns))
+    for sym in sorted(watch & dyn):
+        row = meta.get(sym, {})
+        ipo = " IPO" if row.get("is_ipo") else ""
+        exch = row.get("exchange") or "?"
+        lines.append(f"  {sym} ({exch}{ipo})")
+    ipo_in_pool = [
+        row["ticker"]
+        for row in meta.values()
+        if row.get("is_ipo") and row.get("ticker") in dyn
+    ]
+    if ipo_in_pool:
+        lines.append(f"  IPO slots in pool: {', '.join(sorted(ipo_in_pool)[:8])}")
+    if "SPCX" in watch and "SPCX" not in dyn and "SPCX" in screener:
+        lines.append("  SPCX in screener file but no price column in backtest window")
+    return lines
+
+
 def _paper_cap_scale_for_vti(vti_core_pct: float) -> float:
     """Paper aggressive sleeve scale for a given VTI core fraction."""
     active_fraction = max(0.0, 1.0 - vti_core_pct)
@@ -635,6 +691,7 @@ def run_backtest(
     paper_risk_parity: bool | None = None,
     paper_vol_trading: bool | None = None,
     paper_vol_live_parity: bool = False,
+    paper_dynamic_universe: bool | None = None,
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
@@ -657,6 +714,7 @@ def run_backtest(
     saved_paper_crypto_v2 = config.PAPER_CRYPTO_V2_ENABLED
     saved_paper_risk_parity = config.PAPER_RISK_PARITY_ENABLED
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
+    saved_paper_dynamic_univ = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     saved_live_thinking_ctx = config.live_thinking_sim_context()
     config.set_paper_aggressive_context(paper_aggressive)
@@ -700,6 +758,8 @@ def run_backtest(
         config.PAPER_RISK_PARITY_ENABLED = bool(paper_risk_parity)
     if paper_vol_trading is not None:
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
+    if paper_dynamic_universe is not None:
+        config.PAPER_DYNAMIC_UNIVERSE_ENABLED = bool(paper_dynamic_universe)
     if paper_aggressive and not any(
         flag is True
         for flag in (
@@ -1309,6 +1369,8 @@ def run_backtest(
         else round((1.0 - fixed_vti_core_pct) * 100, 2),
         "paper_aggressive": paper_aggressive,
         "paper_dynamic_vti": config.PAPER_DYNAMIC_VTI_ENABLED if paper_aggressive else False,
+        "paper_dynamic_universe": config.PAPER_DYNAMIC_UNIVERSE_ENABLED if paper_aggressive else False,
+        "equity_universe_size": len(config.nyse_momentum_universe(data.columns)),
         "paper_sleeve_features": config.get_paper_feature_flags() if paper_aggressive else {},
         "cofire_pct": round(100 * cofire_days / trade_days, 1) if trade_days else 0.0,
         "cofire_days": cofire_days,
@@ -1489,6 +1551,7 @@ def run_backtest(
     config.PAPER_CRYPTO_V2_ENABLED = saved_paper_crypto_v2
     config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_paper_dynamic_univ
     return result
 
 
@@ -2186,8 +2249,8 @@ def _volatile_thinking_samples(result: dict, *, max_samples: int = 5) -> list[di
 VTI_LEVELS_COMPARE = [
     (0.90, "90% VTI (live-like)"),
     (0.80, "80% VTI"),
+    (0.75, "75% VTI"),
     (0.70, "70% VTI"),
-    (0.60, "60% VTI (aggressive)"),
 ]
 
 
@@ -3103,6 +3166,103 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
     print("-" * 76)
 
 
+def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare static UNIVERSE vs exchange-agnostic dynamic screener (paper aggressive)."""
+    saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.set_paper_aggressive_context(True)
+    config.set_backtest_paper_sleeves_context(True)
+
+    sim_days = days or config.BACKTEST_DAYS
+    screener = _prefetch_screener_for_backtest(
+        sim_days, refresh=refresh, use_max=use_max
+    )
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
+
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    static_size = len(_static_equity_universe(data.columns))
+    dyn_size = len(_dynamic_equity_universe(data.columns))
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_stat_arb": True,
+        "track_active_exposure": True,
+    }
+    configs = [
+        (
+            f"Static equity ({static_size} names)",
+            {**base_kwargs, "paper_dynamic_universe": False},
+        ),
+        (
+            f"Dynamic screener ({dyn_size} names)",
+            {**base_kwargs, "paper_dynamic_universe": True},
+        ),
+    ]
+
+    print("--- PAPER DYNAMIC UNIVERSE A/B (NYSE+NASDAQ, paper only) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"Screener file: {len(screener)} tickers | "
+        f"static pool {static_size} | dynamic pool {dyn_size} | "
+        f"filter: price>$5, avg daily $vol>$50M"
+    )
+    samples = _universe_sample_lines(data, screener)
+    if samples:
+        print("Sample dynamic names in backtest window:")
+        for line in samples:
+            print(line)
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'NYSE':>6} {'Pairs':>6} {'Univ':>5}"
+    )
+    print("-" * 82)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, **kwargs)
+        results.append((label, result))
+        print(
+            f"{label:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>6} "
+            f"{result.get('pairs_traded', 0):>6} "
+            f"{result.get('equity_universe_size', 0):>5}"
+        )
+
+    print("-" * 82)
+    if len(results) == 2:
+        _, static_r = results[0]
+        _, dyn_r = results[1]
+        print(
+            f"Delta (dynamic - static): "
+            f"return {dyn_r['total_return_pct'] - static_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {dyn_r['sharpe'] - static_r['sharpe']:+.2f} | "
+            f"MaxDD {dyn_r['max_drawdown_pct'] - static_r['max_drawdown_pct']:+.2f}pp | "
+            f"NYSE signals {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d} | "
+            f"pairs {dyn_r.get('pairs_traded', 0) - static_r.get('pairs_traded', 0):+d}"
+        )
+    print("-" * 82)
+
+
 def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
     """Compare fixed 20% VTI vs dynamic 40-75% VTI on paper aggressive profile."""
     if use_max:
@@ -3426,6 +3586,9 @@ def run_performance_test(
 
 
 if __name__ == "__main__":
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     parser = argparse.ArgumentParser(description="Backtest run_all.py pipeline")
     parser.add_argument(
         "--days",
@@ -3472,6 +3635,11 @@ if __name__ == "__main__":
         "--compare-paper-aggressive",
         action="store_true",
         help="Compare live 80/20 vs paper aggressive vs active-only (table)",
+    )
+    parser.add_argument(
+        "--compare-dynamic-universe",
+        action="store_true",
+        help="Compare static UNIVERSE vs dynamic NYSE+NASDAQ screener (paper aggressive)",
     )
     parser.add_argument(
         "--compare-dynamic-vti",
@@ -3587,6 +3755,13 @@ if __name__ == "__main__":
         )
     elif args.compare_paper_aggressive:
         run_paper_aggressive_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_dynamic_universe:
+        if not args.paper_aggressive:
+            print("--compare-dynamic-universe requires --paper-aggressive")
+            sys.exit(1)
+        run_dynamic_universe_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_dynamic_vti:

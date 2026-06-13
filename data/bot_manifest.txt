@@ -31,14 +31,11 @@ modules/__init__.py|Shared trading library: execution, data, risk, and strategy 
 modules/advisor_ranker.py|Rank asset pairs by z-score mean-reversion potential.
 modules/alerts.py|Email and Telegram alerts for halts and daily paper-trading summaries.
 modules/alpaca_executor.py|Canonical Alpaca paper-trading executor (notional orders, crypto formatting).
-modules/backtest_engine.py|Multi-asset momentum backtest using the backtesting library. Run: python modules/backtest_engine.py
-modules/bridge.py|Load legacy *_5m tables from SQLite (older schema).
 modules/cost_basis.py|Cost-basis awareness from Alpaca positions (avg_entry_price).
 modules/crypto_vol_gate.py|Crypto sleeve vol gate + optional SpaceX IPO narrative override.
 modules/crypto_vol_sleeve.py|Crypto vol mean-reversion sleeve — paper-only, isolated PAPER_APCA book (v4 filters).
 modules/data_loader.py|Load close-price matrices from the SQLite market database.
 modules/data_refresh.py|Market-hours-aware refresh scheduling for live bots.
-modules/database.py|Sync daily yfinance bars into SQLite.
 modules/deployment_sizing.py|Shared sleeve deployment sizing (adaptive chunks + co-fire budget pooling).
 modules/felix_sentiment.py|YouTube creator transcripts (Felix, Andrei Jikh, …): sync, store, wisdom/social blend.
 modules/fund_config.py|Live + paper fund pair and dynamic fund allocation helpers.
@@ -52,7 +49,6 @@ modules/kraken_capabilities.py|Probe what Kraken API can trade with the configur
 modules/kraken_cleanup.py|Kraken portfolio cleanup (playbook rules): leverage, duplicate core, trim small names.
 modules/kraken_equity_monitor.py|Detect SpaceX (SPCX) on Kraken Pro: xStocks API + pair scan.
 modules/kraken_execute.py|Route Kraken orders: crypto spot, xStocks, legacy .EQ (not API-tradable).
-modules/kraken_executor.py|Fixed-notional crypto buy/sell helpers using an Alpaca TradingClient.
 modules/kraken_ipo_buy.py|Live Kraken Pro buy when SPCX / SPCXx becomes tradable on Kraken.
 modules/kraken_pairs.py|Map Alpaca / universe symbols to Kraken spot or Pro equity pair names.
 modules/kraken_portfolio.py|Kraken holdings snapshot: USD values for rebalance.
@@ -75,11 +71,9 @@ modules/portal_bot.py|Start/stop run_all.py with per-user / per-book environment
 modules/portal_paths.py|Per-user directories for portal (credentials, bot state, logs).
 modules/portfolio_manager.py|JSONL ledger for open and closed pair positions.
 modules/position_exits.py|Stop-loss and max-hold exits for open Alpaca positions.
-modules/regime_detector.py|Backward-compatible re-exports for market regime detection.
 modules/risk_management.py|Drawdown monitoring and position-size helpers.
 modules/safe_io.py|Windows-safe console and file writes (avoids OSError errno 22 on broken stdout).
 modules/scan_schedule.py|Equity scan windows: crypto-only overnight, SPY/NYSE around the US open.
-modules/scanner.py|Scan daily tables for price above 50-day moving average.
 modules/sentiment_keywords.py|Keyword sentiment scoring (shared by Wayback research and live web fetch).
 modules/social_sleeve.py|Social / creator macro sleeve (Felix & shared sources) — paper-first, optional live mirror.
 modules/social_sleeve_backtest.py|Social sleeve simulation on daily backtests (paper book parallel to main fund).
@@ -88,7 +82,7 @@ modules/spacex_ipo_listing_monitor.py|Monitor the real SpaceX IPO (Nasdaq SPCX):
 modules/spacex_ipo_monitor.py|SpaceX IPO ↔ crypto headline monitor (free RSS; no Tavily). SpaceX S-1 disclosed ~18,712 BTC on the balance sheet — cryp
 modules/trade_journal.py|Structured CSV journal for paper-trading data collection.
 modules/trading_books.py|Trading books — multiple platforms/accounts under one portal login.
-modules/universe_manager.py|Ticker universe access — delegates to config.UNIVERSE.
+
 modules/vti_core.py|Passive VTI core sleeve — index anchor; active bot runs on the remainder.
 modules/wayback_sentiment.py|Load monthly Wayback web sentiment and forward-fill to daily bars.
 modules/web_sentiment_live.py|Live web mood: daily cached headline sentiment (free, no Tavily).

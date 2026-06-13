@@ -83,6 +83,9 @@ def _run_crypto_vol_cycle() -> None:
 
 
 def main() -> None:
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     load_dotenv(find_dotenv())
     os.environ["PAPER_TRADING"] = "true"
     os.environ["PAPER_CHASE_MODE"] = "1"

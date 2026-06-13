@@ -407,7 +407,7 @@ def equity_stat_arb_intents(
     yield_gated: bool = False,
     notional=None,
 ):
-    if not config.effective_equity_pairs_enabled() or not config.effective_stat_arb_enabled():
+    if not config.effective_stat_arb_enabled():
         return []
     if regime_entries_paused(regime, data) or yield_gated:
         return []
@@ -415,6 +415,11 @@ def equity_stat_arb_intents(
     equity_cols = _nyse_equity_columns(data)
     if len(equity_cols) < 2:
         return []
+
+    try:
+        from modules.dynamic_universe import short_borrow_allowed
+    except ImportError:
+        short_borrow_allowed = lambda _s: True  # noqa: E731
 
     candidates = _scan_pair_candidates(
         data,
@@ -431,6 +436,15 @@ def equity_stat_arb_intents(
         pair_key = f"{long_sym}/{short_sym}"
         if _on_cooldown(pair_cooldown, pair_key, now, cooldown_bars=cooldown_bars):
             continue
+        if not short_borrow_allowed(short_sym):
+            continue
+        scale = min(
+            config.dynamic_equity_position_scale(long_sym),
+            config.dynamic_equity_position_scale(short_sym),
+        )
+        pair_notional = notional
+        if pair_notional is not None and scale < 1.0:
+            pair_notional = round(float(pair_notional) * scale, 2)
         intents.append(
             {
                 "long_symbol": long_sym,
@@ -440,7 +454,7 @@ def equity_stat_arb_intents(
                 "pair_key": pair_key,
                 "z_score": z,
                 "beta": beta,
-                "notional": notional,
+                "notional": pair_notional,
                 "phase": "stat_arb_equity",
             }
         )

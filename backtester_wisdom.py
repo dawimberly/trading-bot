@@ -34,16 +34,8 @@ from modules.pipeline_strategies import (
 )
 from modules.risk_management import RiskManager
 from modules.wayback_sentiment import load_monthly_web_sentiment
+from modules.backtest_common import add_year_range_args, slice_data_by_year as _slice_data
 from modules.wisdom_sentiment import MODES, PAUSE_REGIME, entries_paused, regime_sentiment
-
-
-def _slice_data(data: pd.DataFrame, year_from: int, year_to: int) -> pd.DataFrame:
-    start = pd.Timestamp(f"{year_from}-01-01")
-    end = pd.Timestamp(f"{year_to}-12-31")
-    if data.index.tz is not None:
-        start = start.tz_localize(data.index.tz)
-        end = end.tz_localize(data.index.tz)
-    return data.loc[(data.index >= start) & (data.index <= end)]
 
 
 def _attach_macro_columns(data: pd.DataFrame) -> pd.DataFrame:
@@ -264,11 +256,12 @@ def run_fund_backtest(
 
 
 def main() -> None:
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     parser = argparse.ArgumentParser(description="Fund backtest: wisdom vs baseline")
-    parser.add_argument("--from", dest="year_from", type=int, default=2017)
-    parser.add_argument("--to", dest="year_to", type=int, default=2023)
+    add_year_range_args(parser)
     parser.add_argument("--gap", type=float, default=0.25)
-    parser.add_argument("--refresh", action="store_true")
     args = parser.parse_args()
 
     monthly_web = load_monthly_web_sentiment()

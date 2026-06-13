@@ -36,7 +36,11 @@ from backtester import (
     _benchmark_return,
     _ensure_daily_data,
 )
-from backtester_wisdom import _slice_data
+from modules.backtest_common import (
+    add_year_range_args,
+    normalize_yfinance_df,
+    slice_data_by_year as _slice_data,
+)
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
 from modules.pipeline_strategies import (
     PAUSED_REGIMES,
@@ -65,19 +69,7 @@ STRESS_CASH_PCT = 0.25
 BEAR_REGIME = "RHYME_E: Steady_Bearish_Decline"
 PANIC_REGIME = "RHYME_B: Panic_Volatility"
 
-
-def _normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        return df
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-    close_col = next((c for c in df.columns if str(c).lower() == "close"), None)
-    if close_col is None:
-        return pd.DataFrame()
-    out = df[[close_col]].copy()
-    out.columns = ["Close"]
-    out.index.name = "Date"
-    return out.reset_index()
+_normalize_df = normalize_yfinance_df
 
 
 def fetch_macro_daily(refresh: bool = False) -> None:
@@ -400,10 +392,11 @@ def run_macro_backtest(
 
 
 def main() -> None:
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     parser = argparse.ArgumentParser(description="Macro hedge fund backtest comparison")
-    parser.add_argument("--from", dest="year_from", type=int, default=2017)
-    parser.add_argument("--to", dest="year_to", type=int, default=2023)
-    parser.add_argument("--refresh", action="store_true")
+    add_year_range_args(parser)
     parser.add_argument("--capital", type=float, default=10_000.0)
     parser.add_argument(
         "--game-plan",

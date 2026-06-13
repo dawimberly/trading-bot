@@ -16,7 +16,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 - **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
 - Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
 
-**Paper research** (`paper_aggressive`): **Best Paper Bot** stack — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** via Ollama. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
+**Paper research** (`paper_aggressive`): **Best Paper Bot v2.1** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -24,7 +24,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 ## Two deployment profiles
 
-The repo supports **two distinct stacks**. Live defaults stay conservative; paper research opts into aggressive layers via existing hooks (`PAPER_CHASE_MODE`, `configure_paper_chase()`). Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+The repo supports **three deployment targets**. Live defaults stay conservative; paper research opts into aggressive layers via `PAPER_CHASE_MODE`. VPS cloud uses the same Best Paper stack via `cloud_bot/`. Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
 
 ### Profile A: Live small account (`current_dynamic`)
 
@@ -45,11 +45,11 @@ The repo supports **two distinct stacks**. Live defaults stay conservative; pape
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Best Paper Bot v2 (`paper_aggressive`)
+### Profile B: Best Paper Bot v2.1 (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
-**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` (auto on paper aggressive).
+**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` + `apply_best_paper_config()` (auto on paper chase).
 
 **Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) with a stable, simplified stack.
 
@@ -67,6 +67,8 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
 | **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
 
+Enable thinking in `.env`, then restart `run_paper_bot.py`. LLM runs in a **background thread** (main loop never blocks on Ollama). First cycle uses cached/heuristic tilt until refresh completes. Audit: `logs/thinking_engine.log`, snapshot: `thinking_engine_last.json`.
+
 #### Locked OFF (enforced by `enforce_best_paper_stack()`)
 
 Macro regime adaptor, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit. Do not enable these on paper without re-backtesting.
@@ -78,15 +80,28 @@ python status.py
 python scripts/account/preflight.py   # paper chase context
 ```
 
-#### Backtest validation (365d, latest)
+**Monitoring (daily):**
+
+1. `python status.py` — live + paper equity, safety banner, Profile B ON/OFF lines, thinking snapshot
+2. `paper_chase_heartbeat.json` — fresh timestamp if bot running
+3. `thinking_engine_last.json` — last narrative, validation score, suggested tilt
+4. `logs/thinking_engine.log` — background refresh + tilt apply/reject audit
+5. `trading_safety_state.json` — daily loss breaker status
+
+Restart paper bot after changing thinking env: `python run_paper_bot.py`
+
+#### Backtest validation (365d, latest run 2026-06-12)
 
 | Config | Return | Sharpe | Max DD | vs VTI |
 |--------|--------|--------|--------|--------|
-| **Best Paper Bot** | **+29.29%** | **1.63** | **−6.45%** | **+12.41 pp** |
-| Legacy paper (pre-sleeve) | +14.49% | 0.96 | −11.92% | −2.39 pp |
-| VTI buy & hold | +16.88% | — | — | — |
+| **Best Paper Bot v2.1** | **+64.74%** | **2.69** | **−7.46%** | **+45.93 pp** |
+| Legacy paper (pre-sleeve) | +13.47% | 0.97 | −10.30% | −5.34 pp |
+| VTI buy & hold | +18.81% | — | — | — |
+
+Run with unbuffered output for long compares:
 
 ```bash
+set PYTHONUNBUFFERED=1
 python backtester.py --days 365 --paper-aggressive --compare-final
 python backtester.py --paper-aggressive --compare-final --final-all-windows
 ```
@@ -97,15 +112,24 @@ Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/f
 
 Local LLM market reasoning via Ollama (`modules/thinking_engine.py`). **Off by default** on paper; **never auto-applies on live** without explicit approval.
 
-**Production safety (always on when thinking runs):**
+**Paper integration (v2.1):**
+
+- Non-blocking: `maybe_run_thinking()` spawns a daemon thread; trading cycle uses cache/heuristic until LLM completes
+- Reasonable tilts: ±6% per sleeve, max 3 sleeves moved, 12% total delta cap; skipped if confidence/narrative/validation fail
+- Audit log: `logs/thinking_engine.log` (JSON lines: refresh, apply, reject)
+
+**Production safety (always on — entries + thinking):**
 
 | Guard | Live | Paper |
 |-------|------|-------|
-| Max sleeve tilt | **±6%** per sleeve (`THINKING_PRODUCTION_MAX_SLEEVE_DELTA`) | same |
-| Daily loss circuit breaker | **2%** intraday → block tilts | **4%** |
-| Manual approval | **Required** (`THINKING_MANUAL_APPROVAL_LIVE=true`) | auto (no approval file) |
-| Confidence amplification | **Off** | **Off** |
-| Post-apply validator | Rejects contradictory tilts; falls back to heuristic | same |
+| **Daily loss circuit breaker** | **2%** intraday → **no new entries or tilts** for the day | **4%** |
+| **Thinking max tilt** | **±6%** per sleeve (hard cap) | ±6% |
+| **Manual approval (thinking)** | **Required** before any live tilt apply | auto when engine on |
+| **Validator fallback** | heuristic tilt if LLM output fails checks | same |
+
+State files: `trading_safety_state.json` (daily anchor), `thinking_engine_last.json` (audit).
+
+**Live safety (always on when thinking enabled):** ±6% tilt cap · 2% daily loss breaker (all entries) · manual approval required · validator fallback to heuristic.
 
 Approve a pending live tilt after reviewing `thinking_engine_last.json`:
 
@@ -131,13 +155,12 @@ Every decision is persisted to `thinking_engine_last.json` (timestamp, full reas
 |-------|----------------|---------------|
 | Live + paper equity | `python status.py` | Investigate halt / Alpaca disconnect |
 | Regime + stack flags | `python status.py` | Confirm Profile A live, Profile B paper |
+| Daily loss circuit | `trading_safety_state.json` / `status.py` | Tripped → no new trades until next day |
 | Thinking audit | `thinking_engine_last.json` | Review before `scripts/approve_thinking_tilt.py` on live |
 | Risk events | `risk_events.log` | Check halt / resume / liquidations |
 | Paper heartbeat | `paper_chase_heartbeat.json` | Stale timestamp → restart paper bot |
 | Universe age | `status.py` universe line | >7d → `python scripts/analysis/universe_screener.py` |
 | Monthly scorecard | `wisdom_scorecard.json` | Review regime accuracy |
-
-**Live safety (always on when thinking enabled):** ±6% tilt cap · 2% daily loss breaker · manual approval required · validator fallback to heuristic.
 
 ---
 
@@ -165,6 +188,15 @@ ALLOW_LIVE_TRADING=yes
 ```
 
 Never commit `.env` — it is gitignored.
+
+**Alpaca production defaults (no strategy changes):**
+
+- Credentials load from `.env` via `python-dotenv` in `config.py`; startup raises `ValueError` if keys are missing.
+- Paper mode (`PAPER_TRADING=true`) always uses `https://paper-api.alpaca.markets`.
+- Live mode uses `https://api.alpaca.markets` (override with `APCA_API_BASE_URL` if needed).
+- A single cached `TradingClient` is reused (`modules/alpaca_client.py`); `run_all.py` reuses one `AlpacaExecutor` per cycle.
+- Alpaca API calls retry transient errors (429/5xx/network) up to 3 times with exponential backoff; auth failures exit cleanly.
+- Logs: stdout + `logs/run_all.log` and `logs/events.log` (daily rotation, 7 days). Entry points call `modules.logging_utils.setup_project_logging()` — `run_all.py`, `status.py`, `run_paper_bot.py`, `run_spy.py`, `backtester.py`, and satellite backtest scripts. Critical safety paths in `run_all.py` use `logger` / `log_event()` (halt, circuit breaker, auth failures).
 
 3. **Preflight & market data:**
 
@@ -656,15 +688,25 @@ Primary monitor for a small live account — dark theme, auto-refresh, calm layo
 
 ### One-click launch (recommended)
 
-Double-click **`launch.bat`** in the project root. It activates `.venv`, opens the **sign-in** screen (no console window), then starts the bot for the logged-in portal user:
+**Python source (dev / venv):** double-click **`launch.bat`** in the project root. It activates `.venv`, opens the **sign-in** screen (no console window), then starts the bot for the logged-in portal user:
 
 ```text
 launch.bat  →  pythonw dashboard_app.py --launch-bot
 ```
 
+**Frozen `.exe` (built monitor):** double-click **`launch_monitor.bat`** (or a desktop shortcut to it). It sets the project root as **Start in**, passes `--launch-bot`, and logs startup errors to `logs\monitor_*.log`:
+
+```text
+launch_monitor.bat  →  dist\PythonTradingMonitor\PythonTradingMonitor.exe --launch-bot
+```
+
+**If the shortcut says “already running” but no window appears:** run `stop_dashboard.bat`, then `launch_monitor.bat` again. Stale headless monitor processes are cleaned automatically after 45s with no window.
+
 **Sign in** with the same username/password as the web portal (`portal.py`). Use **Register** on first run, then **Account → Edit Alpaca keys…** to paste API keys (or connect keys in the portal **Settings** tab). **Remember username** is stored in `data/portal/desktop_prefs.json`.
 
 **Desktop shortcut (Windows):**
+
+*Option A — venv launcher:*
 
 1. Right-click `launch.bat` → **Show more options** → **Send to** → **Desktop (create shortcut)**.
 2. Right-click the new shortcut → **Properties**.
@@ -673,14 +715,23 @@ launch.bat  →  pythonw dashboard_app.py --launch-bot
 5. **Change Icon…** → Browse to `assets\dashboard.ico` (generate first: `python scripts/generate_dashboard_icon.py`).
 6. Rename the shortcut to e.g. **PythonTrading Live**.
 
-Portal users store keys under `data/portal/users/<username>/.env`. A project-root `.env` is still used for CLI (`run_all.py`, `@root` paper slot). Errors are appended to `logs\dashboard_launch.log`.
+*Option B — `.exe` launcher (recommended after `build_dashboard.bat`):*
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\create_monitor_shortcut.ps1
+```
+
+Creates a desktop shortcut to **`launch_monitor.bat`** with **Start in** = project root. Do **not** shortcut the raw `.exe` in `dist\` alone — the bot needs the project root for `.venv`, `run_all.py`, and portal paths.
+
+Portal users store keys under `data/portal/users/<username>/.env`. A project-root `.env` is still used for CLI (`run_all.py`, `@root` paper slot). Errors are appended to `logs\dashboard_launch.log` (venv) or `logs\monitor_*.log` (exe).
 
 **Troubleshooting:**
 
 | Issue | Fix |
 |-------|-----|
-| Dashboard window missing | Run `python dashboard_app.py --launch-bot` in a terminal to see errors |
-| Multiple bots running | **Stop Bot** in dashboard, or `_stop_bot_processes()` above, then `launch.bat` once |
+| Dashboard window missing after sign-in | Check `logs\dashboard_crash.log` or run `python dashboard_app.py --launch-bot` in a terminal |
+| Shortcut does nothing | Use **`launch_monitor.bat`** (not the raw `.exe`); run **`stop_dashboard.bat`** if already running in the tray |
+| Multiple bots running | **Stop Bot** in dashboard, or `_stop_bot_processes()` above, then `launch.bat` / `launch_monitor.bat` once |
 | `No run_all.py process found` | Normal after stop — run `launch.bat` to start again |
 | Stale heartbeat | Bot not running — relaunch with `launch.bat` |
 
@@ -692,7 +743,7 @@ python dashboard_app.py
 python dashboard_app.py --launch-bot   # also start run_all.py
 ```
 
-Tabs: **Overview**, **Positions**, **Trades**, **Wisdom**, **Charts** (VTI + SPY by default). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, equity sparkline, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Stop Bot** ends `run_all.py` (does not liquidate positions). Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
+Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Stop Bot** ends `run_all.py` (does not liquidate positions). Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
 
 Auto-refresh every **60 seconds**. Data sources: per-user `bot_heartbeat.json` (portal path or `data/fund/<slot>/`), Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
 
@@ -719,13 +770,15 @@ Use **`python -m PyInstaller`** (not bare `pyinstaller`) so you don't need PyIns
 
 Output: `dist\PythonTradingMonitor\PythonTradingMonitor.exe`
 
-**Deploy the .exe in the project root** next to `.env`, `run_all.py`, and `.venv` so `--launch-bot` can spawn the bot. Shortcut target example:
+**Daily use with the `.exe`:** double-click **`launch_monitor.bat`** (or a shortcut created by `scripts\create_monitor_shortcut.ps1`). **Start in** must be the project root so `--launch-bot` can spawn `run_all.py` via `.venv`.
+
+Manual shortcut target (if not using `create_monitor_shortcut.ps1`):
 
 ```text
-C:\Users\Owner\PythonTrading\dist\PythonTradingMonitor\PythonTradingMonitor.exe --launch-bot
+C:\Users\Owner\PythonTrading\launch_monitor.bat
 ```
 
-Or copy `PythonTradingMonitor.exe` to the project root and shortcut that with `--launch-bot`.
+Start in: `C:\Users\Owner\PythonTrading`
 
 **Streamlit backup** (browser UI):
 
@@ -873,6 +926,8 @@ Directional backtests remain useful for strategy design; the performance review 
 
 ## Backtesting
 
+**Hub:** `backtester.py` mirrors the live `run_all.py` pipeline (regime, sleeves, halt). **Satellites** (`backtester_wisdom.py`, `backtester_metals.py`, `backtester_macro_hedge.py`, `backtester_long_short.py`) share helpers in `modules/backtest_common.py` (`slice_data_by_year`, `normalize_yfinance_df`, common `--from` / `--to` args) — run them as standalone research CLIs unchanged.
+
 Uses **Profile A** flags by default; `--paper-aggressive` uses Profile B (`config.print_recommended_stack_flags(profile=...)` on startup).
 
 ```powershell
@@ -923,7 +978,8 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | Integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
+| `backtester.py` | **Hub** — integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--compare-thinking`, `--simulate-live-thinking`, `--compare-vti-core` |
+| `modules/backtest_common.py` | Shared year slicing + yfinance normalize for satellite backtest scripts |
 | `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
 | `scripts/maintenance/sync_felix_transcripts.py` | Bulk-sync Felix YouTube transcripts for social sleeve |
 | `backtester_metals.py` | Game plan variants incl. `yield_gate_only` |
@@ -1046,6 +1102,8 @@ PythonTrading/
 ├── friend_setup.sh         # Friends: same on Mac/Linux
 ├── portal.py               # Friends: login + Alpaca keys + bot (browser)
 ├── launch.bat              # One-click: sign in + dashboard + bot (pythonw)
+├── launch_monitor.bat      # One-click: sign in + frozen .exe + bot
+├── stop_dashboard.bat      # Stop pythonw / PythonTradingMonitor.exe for this project
 ├── launch_both.bat         # Start live + paper bots together
 ├── launch_bots.py          # Dual-bot launcher (--status, --stop, --init-pair)
 ├── run_paper_bot.py        # 24/7 paper Sharpe chase (root .env, isolated logs)
@@ -1089,6 +1147,9 @@ PythonTrading/
 │   ├── portal_bot.py           # Start/stop bot per portal user or @root slot
 │   ├── portal_paths.py         # Per-user data paths
 │   ├── market_context.py       # Regime / volatility / sentiment
+│   ├── logging_utils.py        # setup_project_logging(), log_event() → logs/
+│   ├── backtest_common.py      # Shared helpers for backtester hub + satellites
+│   ├── alpaca_client.py        # Cached TradingClient + retry wrapper
 │   ├── alerts.py
 │   └── ...
 └── scripts/
@@ -1098,6 +1159,8 @@ PythonTrading/
     ├── db/                 # SQLite utilities
     ├── account/            # Alpaca + alerts (preflight, preflight_spy, verify)
     ├── generate_dashboard_icon.py  # Icon for launch shortcut / PyInstaller
+    ├── create_monitor_shortcut.ps1 # Desktop shortcut → launch_monitor.bat
+    ├── dashboard_running.ps1       # Detect running monitor (venv or .exe)
     ├── exchange/           # Kraken checks
     └── dev/                # Tests and legacy loops
 ```
@@ -1107,6 +1170,7 @@ PythonTrading/
 ```powershell
 python status.py                             # Live + paper equity, regime, flags
 python scripts/generate_dashboard_icon.py    # assets/dashboard.ico for shortcuts
+powershell -File scripts/create_monitor_shortcut.ps1  # Desktop shortcut for .exe monitor
 python scripts/account/preflight.py          # Pre-flight before paper month
 python scripts/analysis/live_vs_backtest_snapshot.py --refresh-eval
 python scripts/maintenance/evaluate_wisdom.py --force
@@ -1141,6 +1205,11 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `paper_journal.csv` | Structured log for paper-month analysis (`game_plan` events when enabled) |
 | `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, game plan state, trades, halted |
 | `logs/dashboard_launch.log` | stderr from `launch.bat` / `pythonw` if dashboard fails silently |
+| `logs/monitor_*.log` | stderr from `launch_monitor.bat` / `.exe` startup |
+| `logs/run_all.log` | Main bot log (daily rotation, 7 days) |
+| `logs/events.log` | Structured `log_event()` output (daily rotation) |
+| `logs/thinking_engine.log` | Thinking engine audit (JSON lines) |
+| `logs/dashboard_crash.log` | traceback if dashboard fails after sign-in |
 | `wisdom_journal.csv` | Every cycle: wisdom config, web/price/gap, equity, shadow modes |
 | `wisdom_scorecard.json` | Latest daily self-evaluation (live vs sim modes) |
 | `wisdom_evaluations.jsonl` | Append-only history of daily scorecards (perpetual log) |
@@ -1155,16 +1224,35 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `spy_bot_heartbeat.json` | Standalone SPY bot heartbeat |
 | `alert_state.json` | Alert dedupe state (halt notified, last daily summary) |
 
-## Running on a server (later)
+## Cloud VPS (Profile C — 24/7 paper)
 
-The bot is lightweight (Python + API calls + SQLite). A **$5–12/mo Linux VPS** is enough for 24/7 uptime once you trust paper results. Copy the repo and `.env`; run `python run_all.py` under `systemd` or similar.
+Run **Best Paper Bot v2.1** on a Linux VPS without duplicating strategy code. The cloud bot supervises parent `run_all.py` with forced paper-only safety.
+
+**Full guide:** [`cloud_bot/README_CLOUD.md`](cloud_bot/README_CLOUD.md)
+
+```bash
+cd cloud_bot
+python runtime/main.py --dry-run      # validate config + keys
+python runtime/main.py --backtest --days 365 --compare
+python runtime/main.py --run          # 24/7 supervisor (or systemd)
+python runtime/main.py --status       # health check
+python runtime/main.py --stop         # graceful stop
+```
+
+| Item | Path |
+|------|------|
+| Supervisor log | `cloud_bot/data/logs/cloud_bot.log` (daily rotation) |
+| Heartbeat | `cloud_bot/data/cloud_bot_heartbeat.json` |
+| Parent bot log | `logs/run_all.log` + `logs/events.log` (daily rotation) |
+
+Forced on cloud: `PAPER_TRADING=true`, `ALLOW_LIVE_TRADING=false`, paper API endpoint only.
 
 ## Notes
 
 - **Single virtualenv:** Use `.venv` only. Reinstall with `pip install -r requirements.txt` after pulling changes.
 - **`write_bot.py`:** Regenerates `fetch_data.py` only. Does **not** overwrite `run_all.py`.
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
-- **Desktop launch:** `launch.bat` → sign in → `pythonw dashboard_app.py --launch-bot`. Shortcut **Start in** must be the project root.
+- **Desktop launch:** `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) → sign in → `--launch-bot`. Shortcut **Start in** must be the project root.
 - **Dual bots:** `launch_bots.py` / `launch_both.bat`; pair live + paper in `data/portal/fund_pair.json` (paper can be `@root`).
 - **Small account:** equity &lt; $500 triggers 1% risk, $10 max order, 90% VTI — see `config.configure_account_profile()`.
 - **Strategy sharing:** `run_all.py`, `backtester.py`, and `backtest_spy.py` share `modules/pipeline_strategies.py`.

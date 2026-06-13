@@ -59,7 +59,7 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
     tables = [t[0] for t in cursor.fetchall()]
 
     if interval == "1d":
-        allowed = {f"{ticker}_daily" for ticker in config.UNIVERSE}
+        allowed = {f"{ticker}_daily" for ticker in config.backtest_fetch_tickers()}
         tables = [t for t in tables if t.endswith("_daily") and t in allowed]
     else:
         tables = [t for t in tables if "_5m" not in t and "_daily" not in t]

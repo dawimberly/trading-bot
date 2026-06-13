@@ -36,13 +36,12 @@ from backtester_macro_hedge import (
     HedgeSleevePortfolio,
     _bond_stress,
     _load_macro_column,
-    _normalize_df,
     _trim_to_cash_target,
     _yield_gate,
     fund_columns,
     macro_stress,
 )
-from backtester_wisdom import _slice_data
+from modules.backtest_common import add_year_range_args, normalize_yfinance_df as _normalize_df, slice_data_by_year as _slice_data
 from modules.wayback_sentiment import load_monthly_web_sentiment
 from modules.wisdom_sentiment import resolve_backtest_regime
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
@@ -504,10 +503,11 @@ def run_fresh_capital_backtest(
 
 
 def main() -> None:
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     parser = argparse.ArgumentParser(description="Metal hedge sleeve backtest grid")
-    parser.add_argument("--from", dest="year_from", type=int, default=2017)
-    parser.add_argument("--to", dest="year_to", type=int, default=2023)
-    parser.add_argument("--refresh", action="store_true")
+    add_year_range_args(parser)
     parser.add_argument("--capital", type=float, default=10_000.0)
     args = parser.parse_args()
 

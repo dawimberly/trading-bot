@@ -1,6 +1,6 @@
 {
-  "last_rebalance_at": "2026-06-10",
-  "last_rebalance_profile": "calm",
+  "last_rebalance_at": "2026-06-12",
+  "last_rebalance_profile": "stress",
   "last_rebalance_auto_count": 0,
   "capabilities": {
     "crypto_ok": true,
