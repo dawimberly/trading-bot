@@ -23,6 +23,8 @@ except ImportError:
 # Paper-only by default. Set ALLOW_LIVE_TRADING=yes in .env to override PAPER_TRADING=False.
 PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
 ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in ("1", "true", "yes")
+ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
+ALPACA_LIVE_BASE_URL = "https://api.alpaca.markets"
 
 # --- Universe (single source of truth) ---
 UNIVERSE = [
@@ -803,30 +805,79 @@ def reload_from_env(env_file: str | None = None) -> None:
         "true",
         "yes",
     )
+    try:
+        from modules.alpaca_client import reset_trading_client_cache
+
+        reset_trading_client_cache()
+    except ImportError:
+        pass
+
+
+def _strip_env(val: str | None) -> str:
+    return (val or "").strip()
+
+
+def get_alpaca_base_url(*, paper: bool | None = None) -> str:
+    """Return Alpaca REST base URL. Paper mode always uses the paper endpoint."""
+    use_paper = PAPER_TRADING if paper is None else bool(paper)
+    if use_paper:
+        return ALPACA_PAPER_BASE_URL
+    override = _strip_env(os.getenv("APCA_API_BASE_URL"))
+    if override:
+        return override.rstrip("/")
+    return ALPACA_LIVE_BASE_URL
 
 
 def get_alpaca_credentials():
     """Return (api_key, secret_key). Prefers APCA_*; falls back to legacy ALPACA_*."""
-    key = os.getenv("APCA_API_KEY_ID") or os.getenv("ALPACA_API_KEY")
-    secret = os.getenv("APCA_API_SECRET_KEY") or os.getenv("ALPACA_SECRET_KEY")
+    key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
+    secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+        os.getenv("ALPACA_SECRET_KEY")
+    )
     if not key or not secret:
         raise ValueError(
-            "Alpaca credentials missing. Set APCA_API_KEY_ID and APCA_API_SECRET_KEY in .env"
+            "Alpaca credentials missing. Add to your .env file (never commit .env):\n"
+            "  APCA_API_KEY_ID=your_key_id\n"
+            "  APCA_API_SECRET_KEY=your_secret_key\n"
+            "For paper trading also set PAPER_TRADING=true"
         )
     return key, secret
 
 
+def validate_alpaca_config(*, require_credentials: bool = True) -> None:
+    """Validate Alpaca env at startup; raise ValueError with setup instructions."""
+    if require_credentials:
+        get_alpaca_credentials()
+    use_paper = PAPER_TRADING
+    if not use_paper and not ALLOW_LIVE_TRADING:
+        raise ValueError(
+            "Live trading blocked. Set PAPER_TRADING=true for paper keys, "
+            "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
+        )
+    base_url = get_alpaca_base_url(paper=use_paper)
+    logging.getLogger(__name__).info(
+        "Alpaca config OK: paper=%s base_url=%s",
+        use_paper,
+        base_url,
+    )
+
+
 def get_spy_alpaca_credentials():
     """SPY bot keys: SPY_APCA_* if set, else main APCA_* (same paper account)."""
-    key = os.getenv("SPY_APCA_API_KEY_ID") or os.getenv("APCA_API_KEY_ID") or os.getenv("ALPACA_API_KEY")
+    key = (
+        _strip_env(os.getenv("SPY_APCA_API_KEY_ID"))
+        or _strip_env(os.getenv("APCA_API_KEY_ID"))
+        or _strip_env(os.getenv("ALPACA_API_KEY"))
+    )
     secret = (
-        os.getenv("SPY_APCA_API_SECRET_KEY")
-        or os.getenv("APCA_API_SECRET_KEY")
-        or os.getenv("ALPACA_SECRET_KEY")
+        _strip_env(os.getenv("SPY_APCA_API_SECRET_KEY"))
+        or _strip_env(os.getenv("APCA_API_SECRET_KEY"))
+        or _strip_env(os.getenv("ALPACA_SECRET_KEY"))
     )
     if not key or not secret:
         raise ValueError(
-            "Alpaca credentials missing. Set SPY_APCA_* or APCA_* in .env"
+            "Alpaca credentials missing. Set SPY_APCA_* or APCA_* in .env "
+            "(see README; never commit .env)."
         )
     return key, secret
 

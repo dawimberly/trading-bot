@@ -57,12 +57,12 @@ def _heartbeat_ts(hb: dict | None) -> str:
 
 def _alpaca_equity(*, paper: bool, credentials_fn=None) -> float | None:
     try:
-        from alpaca.trading.client import TradingClient
+        from modules.alpaca_client import call_with_retry, get_trading_client
 
         cred_fn = credentials_fn or config.get_alpaca_credentials
-        key, secret = cred_fn()
-        client = TradingClient(key, secret, paper=paper)
-        return float(client.get_account().equity)
+        client = get_trading_client(paper=paper, credentials_fn=cred_fn)
+        account = call_with_retry(client.get_account, op_name="get_account")
+        return float(account.equity)
     except Exception:
         return None
 

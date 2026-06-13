@@ -8,11 +8,13 @@ import datetime
 import logging
 from modules.logging_utils import setup_logging, log_event
 import os
+import sys
 import time
 import traceback
 
 import config
 from modules.safe_io import install_safe_stdout, write_json_atomic
+from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
@@ -68,16 +70,34 @@ def _warn_nonfatal(context: str, exc: BaseException) -> None:
     logger.warning("%s (non-fatal): %s", context, exc, exc_info=True)
 
 
-def _make_executor() -> AlpacaExecutor:
-    """Paper chase can use isolated PAPER_APCA_* research book when configured."""
+def _executor_cache_key() -> tuple:
     if (
         config.paper_chase_mode_enabled()
         and os.getenv("PAPER_CHASE_USE_RESEARCH_KEYS", "").lower() in ("1", "true", "yes")
     ):
         creds = get_social_alpaca_credentials()
         if creds:
-            return AlpacaExecutor(paper=True, credentials_fn=lambda: creds)
-    return AlpacaExecutor()
+            return ("research", creds[0][-8], True)
+    return ("main", config.PAPER_TRADING)
+
+
+_executor_singleton: AlpacaExecutor | None = None
+_executor_singleton_key: tuple | None = None
+
+
+def _make_executor() -> AlpacaExecutor:
+    """Paper chase can use isolated PAPER_APCA_* research book when configured."""
+    global _executor_singleton, _executor_singleton_key
+    key = _executor_cache_key()
+    if _executor_singleton is not None and _executor_singleton_key == key:
+        return _executor_singleton
+    if key[0] == "research":
+        creds = get_social_alpaca_credentials()
+        _executor_singleton = AlpacaExecutor(paper=True, credentials_fn=lambda: creds)
+    else:
+        _executor_singleton = AlpacaExecutor()
+    _executor_singleton_key = key
+    return _executor_singleton
 refresh_scheduler = RefreshScheduler()
 risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
 portfolio_manager = PortfolioManager(ledger_file=config.LEDGER_PATH)
@@ -1298,8 +1318,14 @@ def _confirm_live_trading_startup(equity: float) -> None:
 
 if __name__ == "__main__":
     install_safe_stdout()
-    # initialize centralized logging for the main project
-    setup_logging()
+    from pathlib import Path
+
+    setup_logging(log_dir=Path("logs"))
+    try:
+        config.validate_alpaca_config()
+    except ValueError as exc:
+        print(f"[FATAL] {exc}")
+        sys.exit(1)
     chase_extras = config.init_paper_chase_if_enabled()
     if chase_extras:
         print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
@@ -1317,6 +1343,16 @@ if __name__ == "__main__":
     while True:
         try:
             main()
+        except AlpacaAuthError as e:
+            log_event("alpaca_auth_failure", error=str(e))
+            print(f"[FATAL] Alpaca authentication failed: {e}")
+            trade_journal.log_event("error", notes=f"Alpaca auth failure: {e}")
+            sys.exit(1)
+        except AlpacaCriticalError as e:
+            log_event("alpaca_critical", error=str(e))
+            print(f"[FATAL] Alpaca API failure: {e}")
+            trade_journal.log_event("error", notes=f"Alpaca critical: {e}")
+            sys.exit(1)
         except Exception as e:
             tb = traceback.format_exc()
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)

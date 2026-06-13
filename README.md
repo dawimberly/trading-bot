@@ -24,7 +24,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 ## Two deployment profiles
 
-The repo supports **two distinct stacks**. Live defaults stay conservative; paper research opts into aggressive layers via existing hooks (`PAPER_CHASE_MODE`, `configure_paper_chase()`). Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+The repo supports **three deployment targets**. Live defaults stay conservative; paper research opts into aggressive layers via `PAPER_CHASE_MODE`. VPS cloud uses the same Best Paper stack via `cloud_bot/`. Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
 
 ### Profile A: Live small account (`current_dynamic`)
 
@@ -188,6 +188,15 @@ ALLOW_LIVE_TRADING=yes
 ```
 
 Never commit `.env` — it is gitignored.
+
+**Alpaca production defaults (no strategy changes):**
+
+- Credentials load from `.env` via `python-dotenv` in `config.py`; startup raises `ValueError` if keys are missing.
+- Paper mode (`PAPER_TRADING=true`) always uses `https://paper-api.alpaca.markets`.
+- Live mode uses `https://api.alpaca.markets` (override with `APCA_API_BASE_URL` if needed).
+- A single cached `TradingClient` is reused (`modules/alpaca_client.py`); `run_all.py` reuses one `AlpacaExecutor` per cycle.
+- Alpaca API calls retry transient errors (429/5xx/network) up to 3 times with exponential backoff; auth failures exit cleanly.
+- Logs: stdout + `logs/run_all.log` (daily rotation).
 
 3. **Preflight & market data:**
 
@@ -691,6 +700,8 @@ launch.bat  →  pythonw dashboard_app.py --launch-bot
 launch_monitor.bat  →  dist\PythonTradingMonitor\PythonTradingMonitor.exe --launch-bot
 ```
 
+**If the shortcut says “already running” but no window appears:** run `stop_dashboard.bat`, then `launch_monitor.bat` again. Stale headless monitor processes are cleaned automatically after 45s with no window.
+
 **Sign in** with the same username/password as the web portal (`portal.py`). Use **Register** on first run, then **Account → Edit Alpaca keys…** to paste API keys (or connect keys in the portal **Settings** tab). **Remember username** is stored in `data/portal/desktop_prefs.json`.
 
 **Desktop shortcut (Windows):**
@@ -1189,6 +1200,9 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, game plan state, trades, halted |
 | `logs/dashboard_launch.log` | stderr from `launch.bat` / `pythonw` if dashboard fails silently |
 | `logs/monitor_*.log` | stderr from `launch_monitor.bat` / `.exe` startup |
+| `logs/run_all.log` | Main bot log (daily rotation, 7 days) |
+| `logs/events.log` | Structured `log_event()` output (daily rotation) |
+| `logs/thinking_engine.log` | Thinking engine audit (JSON lines) |
 | `logs/dashboard_crash.log` | traceback if dashboard fails after sign-in |
 | `wisdom_journal.csv` | Every cycle: wisdom config, web/price/gap, equity, shadow modes |
 | `wisdom_scorecard.json` | Latest daily self-evaluation (live vs sim modes) |
@@ -1204,9 +1218,28 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `spy_bot_heartbeat.json` | Standalone SPY bot heartbeat |
 | `alert_state.json` | Alert dedupe state (halt notified, last daily summary) |
 
-## Running on a server (later)
+## Cloud VPS (Profile C — 24/7 paper)
 
-The bot is lightweight (Python + API calls + SQLite). A **$5–12/mo Linux VPS** is enough for 24/7 uptime once you trust paper results. Copy the repo and `.env`; run `python run_all.py` under `systemd` or similar.
+Run **Best Paper Bot v2.1** on a Linux VPS without duplicating strategy code. The cloud bot supervises parent `run_all.py` with forced paper-only safety.
+
+**Full guide:** [`cloud_bot/README_CLOUD.md`](cloud_bot/README_CLOUD.md)
+
+```bash
+cd cloud_bot
+python runtime/main.py --dry-run      # validate config + keys
+python runtime/main.py --backtest --days 365 --compare
+python runtime/main.py --run          # 24/7 supervisor (or systemd)
+python runtime/main.py --status       # health check
+python runtime/main.py --stop         # graceful stop
+```
+
+| Item | Path |
+|------|------|
+| Supervisor log | `cloud_bot/data/logs/cloud_bot.log` (daily rotation) |
+| Heartbeat | `cloud_bot/data/cloud_bot_heartbeat.json` |
+| Parent bot log | `logs/run_all.log` + `logs/events.log` (daily rotation) |
+
+Forced on cloud: `PAPER_TRADING=true`, `ALLOW_LIVE_TRADING=false`, paper API endpoint only.
 
 ## Notes
 

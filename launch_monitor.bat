@@ -19,7 +19,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\dashboard_runn
 if errorlevel 1 (
     echo.
     echo Dashboard is already running. Check the taskbar or system tray ^(near the clock^).
-    echo To restart: run stop_dashboard.bat, then try again.
+    echo To force restart: run stop_dashboard.bat, then try again.
     pause
     exit /b 0
 )

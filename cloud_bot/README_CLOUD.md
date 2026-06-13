@@ -1,209 +1,176 @@
 ﻿# Cloud Bot — VPS Deployment Guide
 
-Production entry point for the **Best Paper Bot** stack on a $30–50/month Ubuntu VPS. The cloud bot is a thin supervisor around parent-repo `run_all.py` — no duplicate strategy code.
+Production entry point for **Best Paper Bot v2.1** on a $30–50/month Ubuntu VPS. The cloud bot is a thin **supervisor** around parent-repo `run_all.py` — no duplicate strategy code.
 
-## Stack (default ON)
+## Production entry point
+
+All modes go through `cloud_bot/runtime/main.py`:
+
+| Flag | Purpose |
+|------|---------|
+| `--run` | Start 24/7 supervisor (spawns `run_all.py`, restarts with backoff) |
+| `--backtest` | Run backtest (`--days`, `--max`, `--refresh`, `--compare`) |
+| `--status` | Health summary (supervisor PID, heartbeat age, equity) |
+| `--stop` | SIGTERM supervisor, remove PID file |
+| `--dry-run` | Validate config + Alpaca keys; do not trade |
+
+```bash
+cd cloud_bot
+
+python runtime/main.py --dry-run      # validate before go-live
+python runtime/main.py --backtest --days 365 --compare
+python runtime/main.py --run          # foreground 24/7 loop
+python runtime/main.py --status       # health check
+python runtime/main.py --stop         # graceful stop
+```
+
+Systemd (recommended on VPS):
+
+```bash
+sudo systemctl start cloud-bot    # runs: python -m cloud_bot.runtime.main --run
+python runtime/main.py --status
+```
+
+---
+
+## Stack (Best Paper Bot v2.1)
+
+### ON (default)
 
 | Feature | Env flag |
 |---------|----------|
 | Dynamic VTI (40–75%) | `PAPER_DYNAMIC_VTI=true` |
 | Dynamic risk (1–3%) | `PAPER_DYNAMIC_RISK_ENABLED=true` |
 | Statistical arbitrage | `PAPER_STAT_ARB_ENABLED=true` |
-| Volatility overlay (log-only live) | `PAPER_VOL_TRADING_ENABLED=true` |
+| Vol overlay (log-only PnL on cloud) | `PAPER_VOL_TRADING_ENABLED=true` |
 | Options income | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
-| Macro regime adaptor | `PAPER_MACRO_REGIME_ADAPTOR_ENABLED=true` |
-| NYSE overlap / adaptive chunk / co-fire | `PAPER_NYSE_*`, `PAPER_ADAPTIVE_*`, `PAPER_COFIRE_*` |
-| SPY exit on MA break | `PAPER_SPY_EXIT_ON_MA_BREAK=true` |
+| NYSE overlap / chunk / co-fire | `PAPER_NYSE_*`, `PAPER_ADAPTIVE_*`, `PAPER_COFIRE_*` |
+| Dynamic universe | `PAPER_DYNAMIC_UNIVERSE=true` |
 
-Forced safety: `PAPER_TRADING=true`, `ALLOW_LIVE_TRADING=false` (cannot be overridden by host `.env`).
+### Locked OFF (enforced in `config/profile.py`)
+
+Macro regime, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit.
+
+**Forced safety (cannot override via host `.env`):**
+
+- `PAPER_TRADING=true`
+- `ALLOW_LIVE_TRADING=false`
+- Paper REST endpoint: `https://paper-api.alpaca.markets`
+
+Thinking engine: off by default on cloud; opt-in via `PAPER_THINKING_ENGINE_ENABLED=true` in `cloud_bot/.env`.
 
 ---
 
-## Commands
-
-Run from `cloud_bot/` or repo root (`python -m cloud_bot.runtime.main`).
+## Quickstart (Ubuntu 22.04 / 24.04)
 
 ```bash
+# 1. System packages
+sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
+
+# 2. Deploy user + clone
+sudo useradd -m -s /bin/bash trader || true
+sudo mkdir -p /opt/PythonTrading
+sudo chown trader:trader /opt/PythonTrading
+sudo -u trader git clone <your-repo-url> /opt/PythonTrading
+cd /opt/PythonTrading
+
+# 3. Python env
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+pip install -r cloud_bot/requirements.txt
+
+# 4. Configure secrets (paper keys only)
+cp cloud_bot/.env.example cloud_bot/.env
+nano cloud_bot/.env   # APCA_* + CLOUD_BOT_DRY_RUN=true initially
+
+# 5. Validate
 cd cloud_bot
-
-# Validate config (no trading)
 python runtime/main.py --dry-run
-
-# Backtest — compare vs legacy + live vol parity + VTI
 python runtime/main.py --backtest --days 365 --compare
-
-# Production 24/7 loop (supervises run_all.py)
-python runtime/main.py --run
-
-# Health check
 python runtime/main.py --status
 
-# Graceful stop
-python runtime/main.py --stop
-```
-
----
-
-## Beginner Quickstart
-
-If you're new to deploying on a VPS, follow these minimal steps to get a working paper-bot quickly:
-
-1. Provision an Ubuntu 22.04 or 24.04 VPS (2 vCPU / 4 GB RAM recommended).
-2. SSH into the server and run the setup below as a non-root user (replace <your-repo-url>):
-
-```bash
-sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
-
-sudo useradd -m -s /bin/bash trader || true
-sudo mkdir -p /opt/PythonTrading
-sudo chown trader:trader /opt/PythonTrading
-sudo -u trader git clone <your-repo-url> /opt/PythonTrading
-cd /opt/PythonTrading
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r cloud_bot/requirements.txt
-```
-
-3. Copy the example env and set paper keys only:
-
-```bash
-cp cloud_bot/.env.example cloud_bot/.env
-# edit cloud_bot/.env and set CLOUD_BOT_DRY_RUN=true until keys are verified
-```
-
-4. Validate config (dry-run) and then run status:
-
-```bash
-cd cloud_bot
-python runtime/main.py --dry-run
-python runtime/main.py --status
-```
-
-5. When ready, set `CLOUD_BOT_DRY_RUN=false` and start the 24/7 loop:
-
-```bash
+# 6. Go live (paper)
+# Set CLOUD_BOT_DRY_RUN=false in cloud_bot/.env, then:
 python runtime/main.py --run
-```
-
-This quickstart intentionally keeps things simple; consult the full sections below for systemd, monitoring, and safety checklist.
-
-## 1. VPS sizing ($30–50/mo)
-
-| Provider tier | Spec | Notes |
-|---------------|------|-------|
-| Hetzner CX22 / DO Basic | 2 vCPU, 4 GB RAM | Comfortable for paper bot + SQLite |
-| Minimum | 1 vCPU, 2 GB RAM | OK with `DB_MATRIX_CACHE_SEC=180` |
-
-Disk: 20 GB+ (repo + `market_data.db` + logs).
-
----
-
-## 2. Initial setup (Ubuntu 22.04/24.04)
-
-```bash
-sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
-
-sudo useradd -m -s /bin/bash trader || true
-sudo usermod -aG sudo trader   # optional
-
-sudo mkdir -p /opt/PythonTrading
-sudo chown trader:trader /opt/PythonTrading
-sudo -u trader git clone <your-repo-url> /opt/PythonTrading
-cd /opt/PythonTrading
-
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install -r cloud_bot/requirements.txt
+# Or install systemd unit (section below)
 ```
 
 ---
 
-## 3. Configure environment
+## Environment files
 
-```bash
-cp cloud_bot/.env.example cloud_bot/.env
-nano cloud_bot/.env
-```
+Load order (`config/env_loader.py`):
 
-**Required:**
+1. Repo root `.env` — shared keys (optional on VPS)
+2. `cloud_bot/.env` — **cloud overrides** (required on VPS)
+
+**Required in `cloud_bot/.env`:**
 
 ```ini
 PAPER_TRADING=true
 ALLOW_LIVE_TRADING=false
-CLOUD_BOT_DRY_RUN=false          # true until keys verified
+CLOUD_BOT_DRY_RUN=false
 CLOUD_BOT_PROFILE=paper_aggressive
 
-APCA_API_KEY_ID=your_paper_key
-APCA_API_SECRET_KEY=your_paper_secret
+APCA_API_KEY_ID=your_paper_key_id
+APCA_API_SECRET_KEY=your_paper_secret_key
 ```
 
-Optional parent `.env` at repo root for shared keys; `cloud_bot/.env` overrides.
+**Supervisor tuning:**
 
-**Cloud-isolated paths** (auto-set by `runtime/main.py`):
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLOUD_BOT_RESTART_SEC` | 30 | Base delay between restarts |
+| `CLOUD_BOT_MAX_RESTARTS` | 20 | Stop supervisor after N consecutive failures |
+| `CLOUD_BOT_CYCLE_SEC` | 45 | Passed to parent bot sleep hint |
+| `DB_MATRIX_CACHE_SEC` | 120 | Reduce SQLite load on small VPS |
 
-| File | Purpose |
+---
+
+## Runtime paths
+
+| Path | Purpose |
 |------|---------|
-| `cloud_bot/data/cloud_bot_heartbeat.json` | Last cycle health |
+| `cloud_bot/data/cloud_bot_heartbeat.json` | Last trading cycle health |
 | `cloud_bot/data/cloud_bot_journal.csv` | Trade journal |
 | `cloud_bot/data/stat_arb_open_book.json` | Pair book persistence |
-| `cloud_bot/data/logs/cloud_bot.log` | Supervisor log |
-| `cloud_bot/data/cloud_bot.pid` | Loop PID for `--stop` |
-
-Shared: `market_data.db` at repo root (same as laptop).
-
----
-
-## 4. Pre-flight checks
-
-```bash
-source /opt/PythonTrading/.venv/bin/activate
-cd /opt/PythonTrading/cloud_bot
-
-python runtime/main.py --dry-run
-python runtime/main.py --backtest --days 365 --compare
-python runtime/main.py --status
-```
-
-Set `CLOUD_BOT_DRY_RUN=false` when ready.
+| `cloud_bot/data/logs/cloud_bot.log` | Supervisor log (daily rotation, 14 days) |
+| `cloud_bot/data/logs/run_all_subprocess.log` | Child `run_all.py` stdout/stderr |
+| `cloud_bot/data/cloud_bot.pid` | Supervisor PID for `--stop` |
+| `logs/run_all.log` | Parent bot log (repo root, daily rotation) |
+| `market_data.db` | Shared SQLite OHLCV (repo root) |
 
 ---
 
-## 5. systemd (24/7)
+## systemd (24/7 production)
 
 ```bash
 sudo cp /opt/PythonTrading/cloud_bot/deploy/systemd/cloud-bot.service /etc/systemd/system/
-```
-
-Edit the unit if paths differ:
-
-```ini
-User=trader
-WorkingDirectory=/opt/PythonTrading
-EnvironmentFile=-/opt/PythonTrading/cloud_bot/.env
-ExecStart=/opt/PythonTrading/.venv/bin/python -m cloud_bot.runtime.main --run
-```
-
-Enable:
-
-```bash
 sudo systemctl daemon-reload
 sudo systemctl enable cloud-bot
 sudo systemctl start cloud-bot
 sudo systemctl status cloud-bot
 ```
 
-Logs:
+Unit runs:
+
+```ini
+ExecStart=/opt/PythonTrading/.venv/bin/python -m cloud_bot.runtime.main --run
+EnvironmentFile=-/opt/PythonTrading/cloud_bot/.env
+WorkingDirectory=/opt/PythonTrading
+```
+
+**Logs:**
 
 ```bash
 sudo journalctl -u cloud-bot -f
 tail -f /opt/PythonTrading/cloud_bot/data/logs/cloud_bot.log
+tail -f /opt/PythonTrading/logs/run_all.log
 ```
 
-Stop without systemd:
+**Stop:**
 
 ```bash
 python runtime/main.py --stop
@@ -213,17 +180,54 @@ sudo systemctl stop cloud-bot
 
 ---
 
-## 6. Log rotation
+## Supervisor behavior (`runtime/loop.py`)
 
-Install logrotate snippet:
+- Spawns `run_all.py` with Best Paper profile env merged in
+- **Exponential backoff** on failures: 30s → 60s → … capped at 600s (+ jitter)
+- **Max restarts:** `CLOUD_BOT_MAX_RESTARTS` (default 20) then exit (systemd `Restart=always` relaunches unit)
+- **Graceful shutdown:** SIGTERM/SIGINT → terminate child → remove PID file
+- **Structured events:** grep `event=` in `cloud_bot.log`
+- **Single instance:** refuses `--run` if PID file points to live process
+
+---
+
+## Monitoring
+
+```bash
+cd /opt/PythonTrading/cloud_bot
+python runtime/main.py --status
+cat data/cloud_bot_heartbeat.json | python -m json.tool
+```
+
+Alert if `heartbeat_age` > **600s** (stale bot).
+
+Key heartbeat fields: `equity`, `cash`, `regime`, `halted`, `sleeve_exposure`, `sleeve_caps`.
+
+Optional cron (every 15 min):
+
+```cron
+*/15 * * * * cd /opt/PythonTrading/cloud_bot && /opt/PythonTrading/.venv/bin/python runtime/main.py --status >> /tmp/cloud-bot-status.log 2>&1
+```
+
+Telegram/email: set `TELEGRAM_*` or `SMTP_*` in `.env` (inherited by `run_all.py`).
+
+---
+
+## Log rotation
+
+| Log | Rotation |
+|-----|----------|
+| `cloud_bot/data/logs/cloud_bot.log` | Daily, 14 days (built-in `TimedRotatingFileHandler`) |
+| `logs/run_all.log` | Daily, 7 days (parent `logging_utils.setup_logging`) |
+| `logs/events.log` | Daily, 7 days (structured `log_event` output) |
+
+Optional system logrotate:
 
 ```bash
 sudo cp /opt/PythonTrading/cloud_bot/deploy/logrotate/cloud-bot /etc/logrotate.d/cloud-bot
 ```
 
-Default: rotate `cloud_bot.log` daily, keep 14 days, compress.
-
-Journald retention (optional):
+Journald size cap (optional):
 
 ```bash
 sudo mkdir -p /etc/systemd/journald.conf.d
@@ -233,91 +237,44 @@ sudo systemctl restart systemd-journald
 
 ---
 
-## 7. Monitoring
-
-### Heartbeat
-
-```bash
-python runtime/main.py --status
-cat data/cloud_bot_heartbeat.json | python -m json.tool
-```
-
-Alert if `heartbeat_age` > 600s (stale bot).
-
-### Key fields
-
-- `equity`, `cash`, `regime`, `halted`
-- `sleeve_exposure` — active sleeves
-- `dynamic_vol_score`, `sleeve_caps.vti_core`
-
-### Optional Telegram / email
-
-Set `TELEGRAM_*` or `SMTP_*` in `cloud_bot/.env` (inherited by `run_all.py`).
-
-### Cron health ping (example)
-
-```cron
-*/15 * * * * cd /opt/PythonTrading/cloud_bot && /opt/PythonTrading/.venv/bin/python runtime/main.py --status | mail -s "cloud-bot" you@example.com
-```
-
----
-
-## 8. Restart behavior
-
-The supervisor (`runtime/loop.py`) wraps `run_all.py`:
-
-| Setting | Default | Behavior |
-|---------|---------|----------|
-| `CLOUD_BOT_RESTART_SEC` | 30 | Base delay between restarts |
-| `CLOUD_BOT_MAX_RESTARTS` | 20 | Exit after consecutive failures (systemd restarts unit) |
-
-Exponential backoff: 30s → 60s → … up to 600s.
-
-Graceful shutdown: `SIGTERM` / `SIGINT` → terminate child → remove PID file.
-
----
-
-## 9. Sync laptop → VPS
+## Deploy updates (laptop → VPS)
 
 ```bash
 # Laptop
-git add -A && git commit -m "..." && git push
+git push
 
 # VPS
 cd /opt/PythonTrading && git pull
 source .venv/bin/activate
 pip install -r requirements.txt -q
+pip install -r cloud_bot/requirements.txt -q
 sudo systemctl restart cloud-bot
-```
-
-Rsync alternative:
-
-```bash
-rsync -avz --exclude .venv --exclude .git ./PythonTrading/ trader@vps:/opt/PythonTrading/
+python cloud_bot/runtime/main.py --status
 ```
 
 ---
 
-## 10. Safety checklist
+## Safety checklist
 
-- [ ] `ALLOW_LIVE_TRADING` stays `false` on cloud
-- [ ] Dedicated **paper** Alpaca keys (not live account)
+- [ ] Dedicated **paper** Alpaca keys on cloud (not live account)
+- [ ] `ALLOW_LIVE_TRADING=false` on VPS
 - [ ] `cloud_bot/.env` never committed
-- [ ] Laptop and cloud use **different** heartbeat paths
-- [ ] Backtest `--compare` run after profile changes
-- [ ] Vol overlay: live is log-only; compare table includes **live vol parity** row
+- [ ] Different heartbeat path than laptop (`cloud_bot_heartbeat.json` vs `bot_heartbeat.json`)
+- [ ] Run `--backtest --compare` after profile changes
+- [ ] Vol overlay: synthetic in backtest; live/cloud logs only
 
 ---
 
-## 11. Troubleshooting
+## Troubleshooting
 
 | Symptom | Action |
 |---------|--------|
-| `running: no` | `CLOUD_BOT_DRY_RUN=false`, check systemd |
-| `run_all.py exited code=1` | Check `cloud_bot.log`, Alpaca keys, `market_data.db` |
-| Stale heartbeat | `systemctl restart cloud-bot`; verify network |
+| `supervisor: no` | Set `CLOUD_BOT_DRY_RUN=false`; start with `--run` or systemd |
+| `Cloud bot already running` | `python runtime/main.py --stop` |
+| `run_all.py exited code=1` | Check `run_all_subprocess.log`, Alpaca keys, `market_data.db` |
+| Stale heartbeat (>600s) | `systemctl restart cloud-bot`; check network |
 | Max restarts exceeded | Fix root cause; `systemctl reset-failed cloud-bot` |
-| High CPU | Raise `DB_MATRIX_CACHE_SEC=300` in `.env` |
+| High CPU / disk I/O | Raise `DB_MATRIX_CACHE_SEC=300` |
 
 ---
 
@@ -326,18 +283,19 @@ rsync -avz --exclude .venv --exclude .git ./PythonTrading/ trader@vps:/opt/Pytho
 ```
 cloud_bot/
 ├── config/
-│   ├── env_loader.py    # .env load order + profile merge
-│   ├── profile.py       # Best paper stack defaults
-│   └── settings.py      # Paths, PID, heartbeat
+│   ├── env_loader.py      # .env load order + runtime env merge
+│   ├── profile.py         # Best Paper v2.1 defaults + forced safety
+│   └── settings.py        # Paths, PID, heartbeat
 ├── runtime/
-│   ├── main.py          # --run | --backtest | --status | --stop
-│   ├── loop.py          # Supervisor + backoff
+│   ├── main.py            # --run | --backtest | --status | --stop | --dry-run
+│   ├── loop.py            # Supervisor + exponential backoff
+│   ├── logging_setup.py   # Daily cloud_bot.log rotation
 │   └── backtest.py
 ├── deploy/
 │   ├── systemd/cloud-bot.service
 │   └── logrotate/cloud-bot
-├── data/                # Runtime (gitignored)
+├── data/                  # Runtime (gitignored)
 └── .env.example
 ```
 
-See also: [`README.md`](README.md) (quick start), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+See also: main repo [`README.md`](../README.md) (Profile B), [`scripts/analysis/final_paper_bot_backtest.md`](../scripts/analysis/final_paper_bot_backtest.md).

@@ -20,10 +20,11 @@ from cloud_bot.config.env_loader import (  # noqa: E402
     build_runtime_env,
     load_cloud_dotenv,
 )
-from cloud_bot.config.profile import BEST_PAPER_ENV  # noqa: E402
 from cloud_bot.config.settings import CloudSettings, load_settings  # noqa: E402
-from cloud_bot.modules.stack import STACK_FEATURES  # noqa: E402
-from cloud_bot.runtime.logging_setup import setup_logging  # noqa: E402
+from cloud_bot.modules.stack import STACK_FEATURES_LOCKED_OFF, STACK_FEATURES_ON  # noqa: E402
+from cloud_bot.runtime.logging_setup import log_structured, setup_logging  # noqa: E402
+
+CLOUD_BOT_VERSION = "1.1"
 
 
 def _load_cloud_settings(args: argparse.Namespace) -> CloudSettings:
@@ -112,52 +113,61 @@ def _stop_loop(settings: CloudSettings, logger) -> int:
     return 1
 
 
-def _print_stack_flags() -> None:
-    logger = __import__("logging").getLogger(__name__)
-    on = [k for k, v in BEST_PAPER_ENV.items() if v.lower() in ("1", "true", "yes")]
-    logger.info("best_paper_stack:")
-    for feature in STACK_FEATURES:
-        logger.info("  - %s", feature)
-    logger.info("env_flags_on: %s (see cloud_bot/config/profile.py)", len(on))
+def _print_stack_flags(logger) -> None:
+    logger.info("Best Paper Bot v2.1 stack:")
+    logger.info("  ON:")
+    for feature in STACK_FEATURES_ON:
+        logger.info("    + %s", feature)
+    logger.info("  LOCKED OFF:")
+    for feature in STACK_FEATURES_LOCKED_OFF:
+        logger.info("    - %s", feature)
 
 
-def _print_status(settings: CloudSettings) -> int:
-    logger = __import__("logging").getLogger(__name__)
-    logger.info("Cloud Bot status")
+def _print_status(settings: CloudSettings, logger) -> int:
+    running, pid = _check_running(settings.pid_file)
+    heartbeat = _load_heartbeat(settings.heartbeat_file)
+    hb_age = None
+    if settings.heartbeat_file.exists():
+        hb_age = int(time.time() - settings.heartbeat_file.stat().st_mtime)
+
+    logger.info("Cloud Bot status (v%s)", CLOUD_BOT_VERSION)
     logger.info("---------------")
     logger.info("profile:          %s", settings.profile)
     logger.info("dry_run:          %s", settings.dry_run)
-    logger.info("paper_trading:    %s", settings.paper_trading)
+    logger.info("paper_trading:    %s", os.getenv("PAPER_TRADING", "true"))
     logger.info("cycle_sec:        %s", settings.cycle_sec)
+    logger.info("repo_root:        %s", settings.repo_root)
+    logger.info("run_all:          %s (exists=%s)", settings.run_all_script, settings.run_all_script.is_file())
     logger.info("heartbeat_file:   %s", settings.heartbeat_file)
     logger.info("journal_csv:      %s", settings.journal_csv)
-    logger.info("repo_root:        %s", settings.repo_root)
-    logger.info("run_all_script:   %s", settings.run_all_script)
     logger.info("log_dir:          %s", settings.log_dir)
     logger.info("pid_file:         %s", settings.pid_file)
-    logger.info("run_all exists:   %s", settings.run_all_script.is_file())
-    _print_stack_flags()
-    heartbeat = _load_heartbeat(settings.heartbeat_file)
-    running, _ = _check_running(settings.pid_file)
-    logger.info("running:          %s", running)
+    logger.info("supervisor:       %s", running)
+    if pid:
+        logger.info("supervisor_pid:   %s", pid)
+    _print_stack_flags(logger)
     if heartbeat:
-        logger.info("last_heartbeat:   %s", heartbeat.get('timestamp'))
+        logger.info("last_heartbeat:   %s", heartbeat.get("timestamp"))
         logger.info("equity:           $%s", f"{float(heartbeat.get('equity', 0)):,.2f}")
         logger.info("cash:             $%s", f"{float(heartbeat.get('cash', 0)):,.2f}")
-        logger.info("regime:           %s", heartbeat.get('regime', '—'))
-        logger.info("halted:           %s", heartbeat.get('halted', False))
-        logger.info("paper:            %s", heartbeat.get('paper', False))
+        logger.info("regime:           %s", heartbeat.get("regime", "—"))
+        logger.info("halted:           %s", heartbeat.get("halted", False))
         logger.info("sleeves:          %s", ", ".join(_active_sleeves(heartbeat)) or "none")
-        if settings.heartbeat_file.exists():
-            logger.info(
-                "heartbeat_age:    %ss",
-                int(time.time() - settings.heartbeat_file.stat().st_mtime),
-            )
-        logger.info("dynamic_vol_score:%s", heartbeat.get('dynamic_vol_score', '—'))
+        if hb_age is not None:
+            logger.info("heartbeat_age:    %ss", hb_age)
+            if hb_age > 600:
+                logger.warning("heartbeat stale (>600s) — check supervisor or Alpaca")
         caps = heartbeat.get("sleeve_caps") or {}
         logger.info("vti_target_pct:   %s", f"{float(caps.get('vti_core', 0)):.2%}")
     else:
-        logger.info("heartbeat:        none")
+        logger.info("heartbeat:        none (bot may not have completed a cycle yet)")
+    log_structured(
+        logger,
+        "status_check",
+        running=running,
+        dry_run=settings.dry_run,
+        heartbeat_age=hb_age,
+    )
     return 0
 
 
@@ -224,8 +234,17 @@ def main() -> int:
         args.stop,
     )
 
+    if args.run:
+        import config
+
+        try:
+            config.validate_alpaca_config()
+        except ValueError as exc:
+            logger.error("Alpaca config invalid: %s", exc)
+            return 1
+
     if args.status:
-        return _print_status(settings)
+        return _print_status(settings, logger)
 
     if args.stop:
         return _stop_loop(settings, logger)
@@ -238,6 +257,13 @@ def main() -> int:
         return run_single(days=args.days, use_max=args.max, refresh=args.refresh)
 
     if args.dry_run:
+        import config
+
+        try:
+            config.validate_alpaca_config()
+            logger.info("Alpaca credentials: OK")
+        except ValueError as exc:
+            logger.warning("Alpaca credentials: %s", exc)
         logger.info("dry-run | config OK, not launching run_all.py")
         logger.info("Cloud bot config OK (dry-run). Best paper profile applied.")
         logger.info("  env file:    %s", env_path or "(none — using defaults)")
@@ -245,7 +271,7 @@ def main() -> int:
         logger.info("  heartbeat:   %s", settings.heartbeat_file)
         logger.info("  journal:     %s", settings.journal_csv)
         logger.info("  dry_run:     %s", settings.dry_run)
-        _print_stack_flags()
+        _print_stack_flags(logger)
         return 0
 
     if args.run:
