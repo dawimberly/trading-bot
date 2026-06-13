@@ -1,4 +1,9 @@
-"""Production safety: daily loss circuit breaker (blocks new entries + thinking tilts)."""
+"""Production safety: daily loss circuit breaker (blocks new entries + thinking tilts).
+
+Live book: 2% daily loss limit (config.THINKING_DAILY_LOSS_LIMIT_LIVE).
+Paper book: 4% daily loss limit (config.THINKING_DAILY_LOSS_LIMIT_PAPER).
+Thinking tilts: +/-6% per sleeve cap; live requires manual approval (config).
+"""
 
 from __future__ import annotations
 

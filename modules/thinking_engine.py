@@ -166,6 +166,11 @@ Think step-by-step (internally — do NOT output your steps):
 3. Which sectors have the highest conviction edge for the next 3-7 days?
 4. Recommend a clear, decisive allocation tilt. Be bold when conviction is high.
 
+DECISIVENESS (required):
+- NARRATIVE must pick ONE stance: risk-on, neutral, or defensive — not "bullish but cautious".
+- When evidence is mixed, default to cash/bonds over equal-weight sleeves.
+- RECOMMENDED_TILT must reflect that single stance; avoid 10-15% splits across every sleeve.
+
 PRODUCTION HARD RULES (non-negotiable):
 - Maintain consistency with yesterday's tilt unless STRONG NEW EVIDENCE (VIX spike, trend break, headline, safe-haven bid).
 - Per-sleeve change vs yesterday: stay within +/-6% without new evidence; cite evidence in TILT_RATIONALE if you exceed +/-5%.
@@ -2058,6 +2063,10 @@ def maybe_run_thinking(
             )
         except Exception:
             logger.exception("Thinking engine background refresh failed")
+            cached_err = read_json_file(OUTPUT_FILE)
+            if cached_err:
+                logger.info("Thinking engine: kept last cached snapshot after refresh failure")
+                _audit_thinking("background_refresh_failed_kept_cache", regime=regime)
 
     t = threading.Thread(target=_bg_refresh, daemon=True)
     t.start()
