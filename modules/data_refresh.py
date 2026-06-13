@@ -1,6 +1,9 @@
 """Market-hours-aware refresh scheduling for live bots."""
 
+from __future__ import annotations
+
 import config
+
 from fetch_data import fetch_and_store
 from modules.market_hours import is_equity_market_open
 from modules.safe_io import safe_print

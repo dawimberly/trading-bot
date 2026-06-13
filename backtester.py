@@ -3,6 +3,12 @@
 Default: 365-day simulation on daily bars (fetch if missing).
 Live bot still uses 5m data via fetch_data.py without --daily.
 
+Satellite research scripts (shared helpers in modules/backtest_common.py):
+  backtester_wisdom.py      — wisdom / governor modes
+  backtester_macro_hedge.py — bond/yield stress overlays
+  backtester_metals.py      — metal sleeve variants
+  backtester_long_short.py  — short-sleeve grid
+
 Run:  python backtester.py
        python backtester.py --days 180
        python backtester.py --days 365 --small-account
@@ -3580,6 +3586,9 @@ def run_performance_test(
 
 
 if __name__ == "__main__":
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     parser = argparse.ArgumentParser(description="Backtest run_all.py pipeline")
     parser.add_argument(
         "--days",

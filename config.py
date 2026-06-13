@@ -1244,13 +1244,13 @@ def apply_best_paper_config_if_enabled() -> None:
     if _best_paper_applied or not use_best_paper_config():
         return
     
+    logger = logging.getLogger(__name__)
     try:
         from config.best_paper_config import apply_best_paper_config, validate_best_paper_config
         
         # Check for deprecated features
-        is_valid, warnings = validate_best_paper_config()
+        _, warnings = validate_best_paper_config()
         if warnings:
-            logger = logging.getLogger(__name__)
             for w in warnings:
                 logger.warning("best_paper_config: %s", w)
         
@@ -1258,10 +1258,8 @@ def apply_best_paper_config_if_enabled() -> None:
         apply_best_paper_config()
         _best_paper_applied = True
         
-        logger = logging.getLogger(__name__)
         logger.info("best_paper_config applied: simplified paper bot stack enabled")
     except ImportError as e:
-        logger = logging.getLogger(__name__)
         logger.warning("Failed to import best_paper_config: %s", e, exc_info=True)
 
 

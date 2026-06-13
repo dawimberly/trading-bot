@@ -34,7 +34,8 @@ from backtester import (
     _benchmark_return,
     _ensure_daily_data,
 )
-from backtester_wisdom import _slice_data, run_fund_backtest
+from modules.backtest_common import add_year_range_args, slice_data_by_year as _slice_data
+from backtester_wisdom import run_fund_backtest
 from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
 from modules.pipeline_strategies import (
     PAUSED_REGIMES,
@@ -389,9 +390,11 @@ def _print_row(row: dict) -> None:
 
 
 def main() -> None:
+    from modules.logging_utils import setup_project_logging
+
+    setup_project_logging()
     parser = argparse.ArgumentParser(description="Long fund + SPY short sleeve backtest")
-    parser.add_argument("--from", dest="year_from", type=int, default=2017)
-    parser.add_argument("--to", dest="year_to", type=int, default=2023)
+    add_year_range_args(parser)
     parser.add_argument("--short-pct", type=float, default=DEFAULT_SHORT_PCT)
     parser.add_argument(
         "--compare-alloc",
@@ -405,7 +408,6 @@ def main() -> None:
         help="Use wisdom sentiment on long book (same as backtester_wisdom.py)",
     )
     parser.add_argument("--gap", type=float, default=0.25)
-    parser.add_argument("--refresh", action="store_true")
     parser.add_argument("--capital", type=float, default=10_000.0)
     args = parser.parse_args()
 

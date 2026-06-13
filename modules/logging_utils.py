@@ -71,6 +71,15 @@ def setup_logging(
     return root
 
 
+def setup_project_logging(
+    *,
+    level: int = logging.INFO,
+    backup_days: int = 7,
+) -> logging.Logger:
+    """Project default: stdout + logs/run_all.log and logs/events.log."""
+    return setup_logging(log_dir=Path("logs"), level=level, backup_days=backup_days)
+
+
 def log_event(name: str, /, **data: Any) -> None:
     """Emit a simple structured event to the `events` logger.
 

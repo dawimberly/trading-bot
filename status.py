@@ -6,13 +6,16 @@ Run: python status.py
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
 import config
+from modules.logging_utils import setup_project_logging
 
 ROOT = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
 LIVE_HEARTBEAT = Path(os.getenv("HEARTBEAT_FILE", config.HEARTBEAT_FILE))
 PAPER_HEARTBEAT = Path(os.getenv("PAPER_CHASE_HEARTBEAT", "paper_chase_heartbeat.json"))
 
@@ -311,6 +314,7 @@ def _emit(line: str = "") -> None:
 
 
 def main() -> None:
+    setup_project_logging()
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
 

@@ -7,8 +7,7 @@ pandas
 numpy
 ccxt
 
-# Backtesting — backtester.py, modules/backtest_engine.py
-backtesting
+# (backtesting lib was for removed modules/backtest_engine.py; main backtester uses native pandas/yf sim)
 
 # Kraken — scripts/exchange/
 python-kraken-sdk
