@@ -2712,6 +2712,8 @@ def _result_row(label: str, result: dict, *, bench: float | None = None) -> dict
     dr = result.get("dynamic_risk") or {}
     vs = result.get("vol_sleeve") or {}
     opt = result.get("options_sleeve") or {}
+    halt_raw = result.get("halt_events")
+    halt_n = halt_raw if isinstance(halt_raw, int) else len(halt_raw or [])
     return {
         "label": label,
         "return_pct": result["total_return_pct"],
@@ -2725,7 +2727,7 @@ def _result_row(label: str, result: dict, *, bench: float | None = None) -> dict
         "avg_trade_return_pct": result.get("avg_trade_return_pct"),
         "final_equity": result.get("final_equity"),
         "total_orders": result.get("total_orders"),
-        "halt_events": len(result.get("halt_events") or []),
+        "halt_events": halt_n,
         "execution_cost_pct": result.get("execution_cost_pct"),
         "pairs_traded": result.get("pairs_traded", 0),
         "avg_risk_pct": dr.get("avg_risk_pct"),
