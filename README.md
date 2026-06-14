@@ -811,7 +811,9 @@ Share this repo with programmer friends. Each person runs the bot **on their own
 
 **Repo:** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)
 
-### Windows (easiest)
+**Full guide (stock + UFC):** [FRIENDS.md](FRIENDS.md)
+
+### Stock trading bot
 
 1. **Install [Python 3.11+](https://www.python.org/downloads/)** (check “Add python.exe to PATH”).
 2. **Clone the repo:**
@@ -877,6 +879,18 @@ Share URL + invite code. For most friends, **clone + `friend_setup.bat` on their
 | `friend_setup.bat` / `friend_setup.sh` | One-click install + open portal |
 | `portal.py` | Login, Alpaca keys, dashboard, bot |
 | `launch.bat` | Owner’s local desktop monitor + bot (not required for friends) |
+
+### UFC betting bot (same repo)
+
+Separate stack under `ufc-predictor/` + `ufc_betting_bot/`. Dry-run / paper only — no auto-betting.
+
+```powershell
+git clone https://github.com/dawimberly/trading-bot.git
+cd trading-bot\ufc_betting_bot
+friend_setup.bat
+```
+
+First run downloads fight data and trains the model (~15–30 min). Dashboard opens on **http://localhost:8502**. Optional `THE_ODDS_API_KEY` in `ufc_betting_bot\.env` for live lines. See [FRIENDS.md](FRIENDS.md).
 
 ## How to review bot performance
 
