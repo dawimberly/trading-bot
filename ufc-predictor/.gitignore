@@ -1,0 +1,48 @@
+﻿# Secrets
+.env
+.env.local
+.env.*.local
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Data caches and large raw dumps
+data/cache/
+data/raw/
+data/processed/
+!data/.gitkeep
+
+# Trained models and artifacts
+models/
+*.joblib
+*.pkl
+
+# PyInstaller / local builds
+build/
+dist/
+
+# Runtime logs
+data/logs/
+*.log
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Windows console redirect artifact
+CONERR$

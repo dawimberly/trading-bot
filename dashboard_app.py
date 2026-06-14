@@ -13,6 +13,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,7 +89,14 @@ from matplotlib.figure import Figure  # noqa: E402
 import config  # noqa: E402
 from modules.alpaca_executor import get_trading_client  # noqa: E402
 from modules.portal_auth import authenticate, init_db, register_user  # noqa: E402
-from modules.portal_bot import bot_running, read_bot_log_tail, start_bot, stop_bot  # noqa: E402
+from modules.portal_bot import (  # noqa: E402
+    bot_running,
+    bot_status_label,
+    read_bot_log_tail,
+    restart_bot,
+    start_bot,
+    stop_bot,
+)
 
 REFRESH_SECONDS = 60
 CRYPTO_VOL_HEARTBEAT_FILE = "crypto_vol_heartbeat.json"
@@ -1413,6 +1421,17 @@ class TradingDashboardApp(ctk.CTk):
             hover_color=COLORS["live"],
             command=self._on_stop_bot,
         ).pack(side="left", padx=3)
+        ctk.CTkButton(
+            btn_row,
+            text="Restart Bot",
+            width=98,
+            height=32,
+            corner_radius=10,
+            fg_color=COLORS["small"],
+            hover_color=COLORS["small_bg"],
+            text_color=COLORS["text"],
+            command=self._on_restart_bot,
+        ).pack(side="left", padx=3)
 
         top_stack = ctk.CTkFrame(self, fg_color="transparent")
         top_stack.pack(fill="x", padx=14, pady=(0, 4))
@@ -1973,7 +1992,7 @@ class TradingDashboardApp(ctk.CTk):
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
 
         self._bot_badge.configure(
-            text=f"Bot: {'Running' if running else 'Stopped'}",
+            text=bot_status_label(self._username, self._book_id),
             text_color=COLORS["green"] if running else COLORS["amber"],
         )
 
@@ -2397,6 +2416,51 @@ class TradingDashboardApp(ctk.CTk):
         else:
             messagebox.showwarning("Stop Bot", msg)
         self.refresh_data()
+
+    def _on_restart_bot(self) -> None:
+        if not has_alpaca_config(self._username, self._book_id):
+            messagebox.showwarning(
+                "API keys",
+                f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
+            )
+            return
+        mode = "paper" if config.PAPER_TRADING else "live"
+        script = "run_paper_bot.py" if mode == "paper" else "run_all.py"
+        if not messagebox.askyesno(
+            "Restart Bot",
+            f"This will restart the trading bot ({mode} mode, {script}).\n\n"
+            "The bot loop stops cleanly, then starts again.\n"
+            "Open positions are not closed.\n\nContinue?",
+            icon="warning",
+        ):
+            return
+        self._bot_badge.configure(text="Bot: restarting…", text_color=COLORS["amber"])
+        self._pill_bot.configure(
+            text="Bot: restarting…",
+            fg_color=COLORS["small_bg"],
+            text_color=COLORS["amber"],
+        )
+        self._status_label.configure(text="Bot restarting…")
+        self.update_idletasks()
+
+        def _worker() -> None:
+            ok, msg = restart_bot(self._username, self._book_id)
+
+            def _finish() -> None:
+                if ok:
+                    messagebox.showinfo("Restart Bot", msg)
+                    self._status_label.configure(
+                        text=f"{'Paper' if config.PAPER_TRADING else 'Live'} · bot restarted"
+                    )
+                else:
+                    tail = read_bot_log_tail(self._username, self._book_id)
+                    detail = f"\n\n{tail}" if tail else ""
+                    messagebox.showerror("Restart Bot", msg + detail)
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _schedule_refresh(self) -> None:
         if self._refresh_job:

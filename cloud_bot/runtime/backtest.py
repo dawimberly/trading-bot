@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from cloud_bot.config.env_loader import apply_runtime_env, build_runtime_env, load_cloud_dotenv
-from cloud_bot.config.profile import BEST_PAPER_ENV, apply_to_config_module
+from cloud_bot.config.profile import BEST_PAPER_ENV, apply_to_config_module, final_paper_backtest_kwargs
 from cloud_bot.config.settings import REPO_ROOT, load_settings
-from cloud_bot.modules.stack import STACK_FEATURES
+from cloud_bot.modules.stack import STACK_FEATURES, STACK_SAFETY_GUARDS
 
 RESULTS_DIR = Path(__file__).resolve().parents[1] / "data" / "backtest_results"
 
@@ -21,13 +21,25 @@ def _ensure_repo_path() -> None:
         sys.path.insert(0, root)
 
 
-def prepare_backtest_env() -> Path | None:
+def prepare_backtest_env(*, fast_mode: bool = False) -> Path | None:
     """Load cloud_bot/.env, apply best-paper profile, sync config module."""
     env_path = load_cloud_dotenv()
     settings = load_settings()
     runtime_env = build_runtime_env(settings)
     apply_runtime_env(runtime_env)
     apply_to_config_module()
+
+    if fast_mode:
+        from modules.backtester_core import (
+            RUN_OPTIONS,
+            apply_default_execution_costs,
+            apply_run_options_to_config,
+        )
+
+        RUN_OPTIONS.fast_mode = True
+        apply_run_options_to_config()
+        apply_default_execution_costs()
+
     return env_path
 
 
@@ -54,6 +66,7 @@ def _save_window_result(window: dict, *, env_path: Path | None) -> Path:
         "vti_benchmark_pct": window.get("vti_benchmark_pct"),
         "env_file": str(env_path) if env_path else None,
         "stack": list(STACK_FEATURES),
+        "safety": list(STACK_SAFETY_GUARDS),
         "best_paper_env": dict(BEST_PAPER_ENV),
         "rows": window.get("rows", []),
         "final": window.get("final"),
@@ -69,7 +82,7 @@ def _save_window_result(window: dict, *, env_path: Path | None) -> Path:
         f"# Cloud Bot Backtest — {label}",
         "",
         f"Generated: {payload['generated_utc']}",
-        f"Window: {window.get('start')} → {window.get('end')} ({window.get('sim_bars')} bars)",
+        f"Window: {window.get('start')} -> {window.get('end')} ({window.get('sim_bars')} bars)",
         f"Env: {payload['env_file'] or '(defaults)'}",
         "",
         "## Stack",
@@ -108,10 +121,11 @@ def run_compare(
     use_max: bool = False,
     refresh: bool = False,
     save: bool = True,
+    fast_mode: bool = False,
 ) -> int:
     """Run final-style comparison for one window (best paper vs legacy vs VTI)."""
     _ensure_repo_path()
-    env_path = prepare_backtest_env()
+    env_path = prepare_backtest_env(fast_mode=fast_mode)
 
     from backtester import MIN_HISTORY, _ensure_daily_data, _format_final_table, _run_final_window
 
@@ -127,7 +141,8 @@ def run_compare(
         print(f"Need {MIN_HISTORY} bars; got {len(data)}.")
         return 1
 
-    print(f"--- CLOUD BOT BACKTEST ({label}) — Best Paper stack ---")
+    tag = " (fast-mode)" if fast_mode else ""
+    print(f"--- CLOUD BOT BACKTEST ({label}){tag} — Best Paper v2.1 ---")
     if env_path:
         print(f"--- Env: {env_path} ---")
     window = _run_final_window(data, window_label=label)
@@ -150,12 +165,20 @@ def run_compare(
     return 0
 
 
-def run_single(*, days: int | None = 365, use_max: bool = False, refresh: bool = False) -> int:
+def run_single(
+    *,
+    days: int | None = 365,
+    use_max: bool = False,
+    refresh: bool = False,
+    fast_mode: bool = False,
+) -> int:
     """Run best-paper backtest only (no compare table)."""
     _ensure_repo_path()
-    prepare_backtest_env()
+    prepare_backtest_env(fast_mode=fast_mode)
 
-    from backtester import FINAL_PAPER_BOT_KWARGS, MIN_HISTORY, _ensure_daily_data, run_backtest
+    from backtester import MIN_HISTORY, _ensure_daily_data, run_backtest
+
+    kwargs = final_paper_backtest_kwargs()
 
     if use_max:
         data = _ensure_daily_data(0, refresh=refresh, use_max=True)
@@ -166,13 +189,19 @@ def run_single(*, days: int | None = 365, use_max: bool = False, refresh: bool =
         print(f"Need {MIN_HISTORY} bars; got {len(data)}.")
         return 1
 
+    tag = " [fast-mode]" if fast_mode else ""
+    print(f"--- CLOUD BOT SINGLE BACKTEST{tag} — Best Paper v2.1 ---")
+
     result = run_backtest(
-        data, track_metrics=True, track_active_exposure=True, **FINAL_PAPER_BOT_KWARGS
+        data, track_metrics=True, track_active_exposure=True, **kwargs
     )
     print(
         f"Return {result['total_return_pct']:+.2f}% | "
         f"Sharpe {result['sharpe']:.2f} | "
         f"MaxDD {result['max_drawdown_pct']:.2f}% | "
-        f"Pairs {result.get('pairs_traded', 0)}"
+        f"Pairs {result.get('pairs_traded', 0)} | "
+        f"Orders {result.get('total_orders', 0)}"
     )
+    if result.get("execution_cost_pct") is not None:
+        print(f"Execution costs: {result['execution_cost_pct']:.3f}% of initial capital")
     return 0

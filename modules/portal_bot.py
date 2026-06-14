@@ -1,8 +1,9 @@
-"""Start/stop run_all.py with per-user / per-book environment."""
+"""Start/stop run_all.py / run_paper_bot.py with per-user / per-book environment."""
 
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -53,6 +54,136 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
         env["PAPER_CHASE_MODE"] = "1"
         env["PAPER_TRADING"] = "true"
     return env
+
+
+def _find_script_pids(script_name: str) -> list[int]:
+    """PIDs for python processes running script_name."""
+    pids: list[int] = []
+    try:
+        if sys.platform == "win32":
+            cmd = (
+                f"Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
+                f"Where-Object {{ $_.CommandLine -like '*{script_name}*' }} | "
+                "Select-Object -ExpandProperty ProcessId"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            pids = [int(x.strip()) for x in out.splitlines() if x.strip().isdigit()]
+        else:
+            out = subprocess.check_output(["pgrep", "-f", script_name], text=True)
+            pids = [int(x) for x in out.split() if x.strip().isdigit()]
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+        pass
+    return pids
+
+
+def _process_cmdline(pid: int) -> str | None:
+    try:
+        if sys.platform == "win32":
+            cmd = (
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return out.strip() or None
+        with open(f"/proc/{pid}/cmdline", encoding="utf-8", errors="replace") as f:
+            return f.read().replace("\0", " ").strip() or None
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+        return None
+
+
+def _graceful_stop_pid(pid: int, *, wait_sec: float = 6.0) -> tuple[bool, str]:
+    """Try graceful shutdown, then force-kill if needed."""
+    if not _pid_alive(pid):
+        return True, f"PID {pid} already stopped."
+    try:
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid)],
+                capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + wait_sec
+        while time.time() < deadline:
+            if not _pid_alive(pid):
+                return True, f"Stopped PID {pid}."
+            time.sleep(0.25)
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                check=True,
+                capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        else:
+            os.kill(pid, signal.SIGKILL)
+        return True, f"Force-stopped PID {pid}."
+    except subprocess.CalledProcessError as exc:
+        return False, f"Could not stop PID {pid}: {exc}"
+    except OSError as exc:
+        return False, f"Could not stop PID {pid}: {exc}"
+
+
+def stop_orphan_project_bots() -> tuple[int, str]:
+    """Stop stray run_paper_bot / run_all processes for this repo (no pid file)."""
+    stopped = 0
+    notes: list[str] = []
+    for script in ("run_paper_bot.py", "run_all.py"):
+        for pid in _find_script_pids(script):
+            ok, msg = _graceful_stop_pid(pid)
+            if ok:
+                stopped += 1
+            else:
+                notes.append(msg)
+    summary = f"Stopped {stopped} orphan bot process(es)." if stopped else "No orphan bot processes."
+    if notes:
+        summary += " " + "; ".join(notes)
+    return stopped, summary
+
+
+def _is_paper_book(username: str, book_id: str) -> bool:
+    spec = BOOKS.get(book_id) or {}
+    prefs = read_user_env_prefs(username, book_id)
+    return bool(spec.get("paper_chase") or prefs.get("paper"))
+
+
+def _bot_entry_script(username: str, book_id: str) -> Path:
+    """Paper chase books use run_paper_bot supervisor; live uses run_all."""
+    pid = bot_pid(username, book_id)
+    if pid:
+        cmd = _process_cmdline(pid) or ""
+        if "run_paper_bot" in cmd:
+            return PROJECT_ROOT / "run_paper_bot.py"
+    if _find_script_pids("run_paper_bot.py"):
+        return PROJECT_ROOT / "run_paper_bot.py"
+    if _is_paper_book(username, book_id):
+        return PROJECT_ROOT / "run_paper_bot.py"
+    return PROJECT_ROOT / "run_all.py"
+
+
+def bot_status_label(username: str, book_id: str = "alpaca_paper") -> str:
+    """Short status for dashboard header: Running (PID n) · script · mode."""
+    pid = bot_pid(username, book_id)
+    if pid is None:
+        orphans = _find_script_pids("run_all.py") + _find_script_pids("run_paper_bot.py")
+        if orphans:
+            pid = orphans[0]
+        else:
+            return "Bot: Stopped"
+    cmd = _process_cmdline(pid) or ""
+    script = "run_paper_bot" if "run_paper_bot" in cmd else "run_all"
+    mode = "paper" if _is_paper_book(username, book_id) else "live"
+    return f"Bot: Running · PID {pid} · {script} ({mode})"
 
 
 def _pid_alive(pid: int) -> bool:
@@ -207,17 +338,20 @@ def bot_env_running(slot: str) -> bool:
 def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     if bot_running(username, book_id):
         return False, f"Bot is already running for {book_id}."
-    run_all = PROJECT_ROOT / "run_all.py"
-    if not run_all.is_file():
-        return False, "run_all.py not found in project root."
+    bot_script = _bot_entry_script(username, book_id)
+    if not bot_script.is_file():
+        return False, f"{bot_script.name} not found in project root."
     log_path = book_bot_log_path(username, book_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = open(log_path, "a", encoding="utf-8")  # noqa: SIM115
-    log_file.write(f"\n--- bot start {book_id} {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    log_file.write(
+        f"\n--- bot start {book_id} {bot_script.name} "
+        f"{time.strftime('%Y-%m-%d %H:%M:%S')} ---\n"
+    )
     log_file.flush()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     proc = subprocess.Popen(
-        [_python(), "-u", str(run_all)],
+        [_python(), "-u", str(bot_script)],
         cwd=str(PROJECT_ROOT),
         env=user_bot_env(username, book_id),
         stdout=log_file,
@@ -233,24 +367,40 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
         tail = read_bot_log_tail(username, book_id)
         detail = f"\n\n{tail}" if tail else ""
         return False, f"Bot exited immediately (code {proc.returncode}).{detail}"
-    return True, f"Bot started for {book_id} (PID {proc.pid}). First heartbeat may take up to 60s."
+    mode = "paper" if _is_paper_book(username, book_id) else "live"
+    return True, (
+        f"{mode} bot started via {bot_script.name} (PID {proc.pid}). "
+        "First heartbeat may take up to 60s."
+    )
 
 
 def stop_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     pid = bot_pid(username, book_id)
     if pid is None:
         return False, f"No bot running for {book_id}."
-    try:
-        if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F"],
-                check=True,
-                capture_output=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        else:
-            subprocess.run(["kill", "-TERM", str(pid)], check=True, capture_output=True)
-    except subprocess.CalledProcessError as exc:
-        return False, f"Could not stop PID {pid}: {exc}"
+    ok, msg = _graceful_stop_pid(pid)
     book_pid_path(username, book_id).unlink(missing_ok=True)
-    return True, f"Bot stopped for {book_id} (PID {pid})."
+    if not ok:
+        return False, msg
+    # run_paper_bot.py supervises a child run_all.py — clean up stragglers
+    stop_orphan_project_bots()
+    return True, f"Bot stopped for {book_id} ({msg})"
+
+
+def restart_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
+    """Gracefully stop then start the book bot (or start if not running)."""
+    mode = "paper" if _is_paper_book(username, book_id) else "live"
+    was_running = bot_running(username, book_id)
+    if was_running:
+        ok, stop_msg = stop_bot(username, book_id)
+        if not ok:
+            return False, stop_msg
+    else:
+        stop_msg = "Bot was not running."
+        stop_orphan_project_bots()
+    time.sleep(1.5)
+    ok, start_msg = start_bot(username, book_id)
+    if not ok:
+        return False, start_msg
+    prefix = "Bot restarted successfully" if was_running else "Bot started successfully"
+    return True, f"{prefix} ({mode} mode).\n{stop_msg}\n{start_msg}"
