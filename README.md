@@ -413,26 +413,46 @@ Preflight prints macro signals (`stress`, `yield_gate`, `bond_stress`) when game
 
 ## VTI passive core (Profile A live)
 
-Backtests showed **80/20 VTI + active bot** beat active-only on Sharpe (+28% vs +16% over 365d in a recent window). Live applies **90% VTI** automatically when equity &lt; $500.
+Live applies **90% VTI** when equity &lt; $500; **80%** at ≥ $500 (`config.configure_account_profile()`). Thinking engine adjusts **active sleeve caps only** on live (±6% tilt cap); it does not replace the VTI anchor unless you explicitly change `SMALL_ACCOUNT_VTI_CORE_PCT` / `VTI_CORE_PCT`.
 
-| Layer | Setting (equity ≥ $500) | Small account (&lt; $500) |
-|-------|-------------------------|---------------------------|
-| **VTI core** | `VTI_CORE_PCT=0.80` | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) |
-| **Rebalance** | `modules/vti_core.py` — drift threshold 2% | same |
-| **Active sleeves** | ~20% of equity | ~10% of equity |
-| **Protection** | VTI excluded from halt liquidation, stop-loss, and NYSE momentum picks |
+### Fixed VTI + Best Paper v2.1 + Thinking (365d, 2025-03 → 2026-06)
+
+Command: `python backtester.py --days 365 --paper-aggressive --compare-vti-levels`
+
+Stack: stat arb + vol overlay + options + overlap/chunk/co-fire + **upgraded Thinking Engine** (VTI-beat heuristic; ±6% tilt cap). VTI buy & hold benchmark: **+33.5%**.
+
+| VTI level | Return | Sharpe | Max DD | Avg active | vs VTI |
+|-----------|--------|--------|--------|------------|--------|
+| **90% (live-like)** | +61.4% | 1.80 | **−9.5%** | 10% | +27.9 pp |
+| **80%** | **+75.6%** | **1.90** | −9.6% | 20% | **+42.1 pp** |
+| 75% | +73.2% | 1.90 | −11.2% | 25% | +39.7 pp |
+| 70% | +76.2% | 1.90 | −11.4% | 30% | +42.8 pp |
+
+**Risk-adjusted winner:** **80% VTI** — ties best Sharpe (1.90) with shallow drawdown (−9.6%), +75.6% return (+42 pp vs VTI). **90%** is best for capital preservation (shallowest MaxDD). **70%** adds ~0.6 pp return vs 80% but ~1.8 pp deeper drawdown — poor trade-off.
+
+### Recommendations ($300–$1000 live)
+
+| Equity | Best VTI % | Why |
+|--------|------------|-----|
+| **$300–$499** | **90%** | Matches small-account guardrails; best MaxDD in test; active stack still adds +28 pp vs passive VTI |
+| **$500–$1000** | **80%** | Step down at $500 threshold; best Sharpe/return balance with full stat-arb/vol/options stack on paper |
+| **Paper research** | **Dynamic 40–75%** | `PAPER_DYNAMIC_VTI=true` — do not use fixed 70% live; paper can hunt alpha, live stays anchored |
+
+**Thinking Engine (paper):** opt-in via `PAPER_THINKING_ENGINE_ENABLED=true`. Tuned prompt focuses on **beating VTI on Sharpe**, avoiding crowded AI/tech chase, and coordinating **stat arb** (crypto pairs) + **vol overlay** (trim beta when VIX elevated). Live: thinking stays **off by default**; if enabled later, tilts are ±6% on active sleeves only — keep **90%/80% VTI anchor**.
 
 ```env
 VTI_CORE_ENABLED=true
 VTI_CORE_PCT=0.80
+SMALL_ACCOUNT_VTI_CORE_PCT=0.90
 VTI_CORE_REBALANCE_DRIFT_PCT=0.02
 ```
 
-Backtest compare:
+Backtest commands:
 
 ```powershell
+python backtester.py --days 365 --paper-aggressive --compare-vti-levels
 python backtester.py --days 365 --compare-vti-core
-python backtester.py --days 365 --vti-core 0.8
+python scripts/analysis/print_thinking_demo_samples.py   # sample PM outputs
 ```
 
 ## Social / Felix sleeve (legacy — off by default)

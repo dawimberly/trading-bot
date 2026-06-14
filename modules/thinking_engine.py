@@ -145,51 +145,61 @@ _AI_CYCLE_KEYWORDS = (
     "exhaustion",
 )
 
-_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM who has been successfully riding the AI/Tech supercycle since 2023.
+_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM optimizing to BEAT VTI on a risk-adjusted basis (Sharpe first, then return vs passive beta).
+
+Primary objective: outperform buy-and-hold VTI without taking unnecessary drawdown. Every tilt must earn its risk budget.
 
 Current context:
-- We are in a multi-year AI/Tech paradigm shift (Nvidia, data centers, semiconductors, software, robotics).
-- Tech has been the dominant leader, but leadership can rotate (e.g. from semiconductors to software, infrastructure, or energy).
-- Watch for signs of late-cycle behavior, bubble risk, or rotation into other sectors (Energy, Financials, Defense, Gold).
+- Multi-year AI/Tech paradigm shift (Nvidia, datacenters, semis, software, robotics) — but leadership rotates (semis -> software -> infra -> energy).
+- Crowded trades (consensus long tech, passive 60/40, meme momentum) are where edge dies — seek forced flows and mispriced hedges.
+- Stat arb sleeve: mean-reverting pairs add alpha when spreads are wide and vol is moderate; reduce active tilt when spreads compress or vol spikes.
+- Vol overlay sleeve: earns in elevated VIX (hedge/income); when VIX is high, DO NOT double-down on directional beta — let vol sleeve work, trim SPY/NYSE.
+- Options income sleeve: harvest premium in calm vol; avoid max equity when VIX is rising.
 
 Given the latest data:
-- SPY vs MA200
-- VIX level & trend
-- Sector leadership (Tech, Semis, Energy, Gold, Defense, etc.)
-- Oil/Gold/TNX moves
+- SPY vs MA200, VIX level & trend
+- Sector leadership (Tech, Semis, Energy, Gold, Defense)
+- Oil/Gold/TNX, stat-arb-friendly vol regime, vol-overlay regime
 - Bot current exposure
-- Any major headline
+- Major headline
 
 Think step-by-step (internally — do NOT output your steps):
-1. What phase of the AI/Tech boom are we in? (Early, mid-cycle, late-cycle, rotation, exhaustion?)
-2. What is the dominant narrative and where is the real asymmetry?
-3. Which sectors have the highest conviction edge for the next 3-7 days?
-4. Recommend a clear, decisive allocation tilt. Be bold when conviction is high.
+1. AI/Tech cycle phase? (Early, mid-cycle, late-cycle, rotation, exhaustion?)
+2. Where is the crowd wrong or forced to adjust (asymmetry vs VTI)?
+3. Stat arb + vol overlay: supportive or hostile for adding active risk today?
+4. Highest conviction 3-7d edge without crowded positioning?
+5. Decisive tilt that improves Sharpe vs passive VTI — not max return at any cost.
 
 DECISIVENESS (required):
-- NARRATIVE must pick ONE stance: risk-on, neutral, or defensive — not "bullish but cautious".
-- When evidence is mixed, default to cash/bonds over equal-weight sleeves.
-- RECOMMENDED_TILT must reflect that single stance; avoid 10-15% splits across every sleeve.
+- NARRATIVE: ONE stance — risk-on, neutral, or defensive (not "bullish but cautious").
+- Mixed evidence → cash/bonds over equal-weight sleeves; do not spray 10-15% across everything.
+- RECOMMENDED_TILT reflects that single stance.
+
+VTI-BEAT RULES:
+- Default passive anchor is high VTI; only LOWER vti when active sleeves have clear asymmetry AND vol/stat-arb context supports it.
+- Avoid crowded trades: if Tech/Semis already led 5d and VIX rising, do NOT add more growth — trim toward cash/vol hedge.
+- When VIX >= 22 or rising sharply: bias cash; stat arb + vol overlay carry the hedge — do not stack directional beta on top.
+- When VIX <= 16, SPY above MA200, Semis/AI leading: modest spy/tech tilt OK; keep vti >= 0.45 unless confidence >= 0.80.
+- Beat VTI by selective tilts, not by going 100% active.
 
 PRODUCTION HARD RULES (non-negotiable):
-- Maintain consistency with yesterday's tilt unless STRONG NEW EVIDENCE (VIX spike, trend break, headline, safe-haven bid).
-- Per-sleeve change vs yesterday: stay within +/-6% without new evidence; cite evidence in TILT_RATIONALE if you exceed +/-5%.
-- Do NOT overweight gold when Gold 5d is negative unless asymmetry explicitly cites a contrarian bounce.
-- When VIX is rising without strong momentum continuation, bias toward cash — do not run max equity.
-- When SPY is below MA200 and VIX is elevated, prioritize capital preservation.
-- RECOMMENDED_TILT uses decimal weights 0.00-1.00 (not strings) and must sum to ~1.0.
-- Map sleeves: vti=broad beta, spy=tech/growth tilt, energy=energy/defense, gold=metals, cash=cash, crypto=crypto, bonds=bonds/cash buffer.
-- You may use tech/semis keys in RECOMMENDED_TILT — they merge into spy/energy internally.
+- Consistency with yesterday's tilt unless STRONG NEW EVIDENCE (VIX spike, trend break, headline, rotation).
+- Per-sleeve change vs yesterday: +/-6% without new evidence; cite evidence in TILT_RATIONALE if exceeding +/-5%.
+- Do NOT overweight gold when Gold 5d is negative unless asymmetry cites contrarian bounce.
+- SPY below MA200 + elevated VIX → capital preservation.
+- RECOMMENDED_TILT: decimal weights 0.00-1.00, sum ~1.0.
+- Map sleeves: vti=broad beta, spy=tech/growth, energy=energy/defense, gold=metals, cash=cash, crypto=crypto (stat-arb pairs), bonds=bonds/cash buffer.
+- tech/semis keys merge into spy/energy internally.
 
-Output format (strict — ENTIRE reply ONLY these lines, no preamble, no markdown headers):
-NARRATIVE: [One powerful sentence about current regime + AI cycle phase]
-ASYMMETRY: [Where the crowd is wrong or forced to adjust]
-SECTOR_VIEW: [Tech, Semis, Energy, Defense, Gold — leaders/laggards and 3-7d view]
+Output format (strict — ENTIRE reply ONLY these lines, no preamble, no markdown):
+NARRATIVE: [Regime + AI cycle + VTI-beat thesis in one sentence]
+ASYMMETRY: [Crowd positioning error or forced flow — why VTI passive is wrong/right today]
+SECTOR_VIEW: [Tech/Semis/Energy/Defense/Gold leaders/laggards; stat-arb & vol-overlay read; 3-7d view]
 RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "tech": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX, "bonds": 0.XX}
-TILT_RATIONALE: [Must link asymmetry + sector view to specific percentages]
+TILT_RATIONALE: [Link asymmetry + sector/stat-arb/vol view to each sleeve >5%; mention VTI vs active trade-off]
 CONFIDENCE: 0.XX
 
-Do not explain your process. Do not repeat the input. Start with NARRATIVE:"""
+Do not explain your process. Start with NARRATIVE:"""
 
 _STRUCTURED_FIELD_RE = re.compile(
     r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
@@ -306,6 +316,60 @@ def _build_sector_leadership(data, macro_cache: dict | None = None) -> dict[str,
     }
 
 
+def _vol_overlay_regime(summary: dict | None) -> str:
+    """Classify vol overlay environment for prompt + heuristic tilts."""
+    if not summary:
+        return "unknown"
+    vix = summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 18.0
+    vix_trend = str(summary.get("vix_trend", "")).lower()
+    if vix_f >= 28 or (vix_f >= 22 and "rising" in vix_trend):
+        return "elevated — vol overlay active; trim directional beta"
+    if vix_f >= 20:
+        return "elevated — hedge/income favorable; cautious on growth adds"
+    if vix_f <= 14 and "falling" in vix_trend:
+        return "calm — options income friendly; selective growth tilt OK"
+    if vix_f <= 16:
+        return "normal-low — modest active risk if asymmetry clear"
+    return "normal — balance VTI anchor with selective sleeves"
+
+
+def _stat_arb_regime(summary: dict | None) -> str:
+    """Heuristic stat-arb environment from vol + trend."""
+    if not summary:
+        return "unknown"
+    vix = summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 18.0
+    spy_trend = str(summary.get("spy_trend", ""))
+    if vix_f >= 26:
+        return "hostile — spreads gappy; favor cash over new pair risk"
+    if "below MA" in spy_trend and vix_f >= 20:
+        return "cautious — mean-revert only on high-confidence pairs"
+    if 14 <= vix_f <= 22 and "above MA" in spy_trend:
+        return "supportive — pairs + crypto stat-arb can add alpha vs VTI"
+    if vix_f <= 14:
+        return "compressed — lower pair edge; don't over-allocate crypto for arb"
+    return "mixed — small crypto/stat-arb sleeve only"
+
+
+def _crowded_trade_warning(summary: dict | None) -> str:
+    """Flag consensus overcrowding to avoid bad tilts."""
+    if not summary:
+        return ""
+    leaders = summary.get("sector_leaders") or []
+    tech_hot = any(
+        float(r.get("change_5d_pct", 0)) > 8.0
+        and any(k in str(r.get("sector", "")) for k in ("Tech", "Semis", "AI"))
+        for r in leaders[:2]
+    )
+    vix_rising = "rising" in str(summary.get("vix_trend", "")).lower()
+    if tech_hot and vix_rising:
+        return "CROWDED: Tech/Semis extended 5d + VIX rising — avoid chasing; VTI+cash beats adding beta."
+    if tech_hot:
+        return "CROWDED: Tech leadership extended — new longs are late; favor VTI anchor + selective hedges."
+    return "No extreme crowding flag — selective active tilts allowed if asymmetry clear."
+
+
 def _infer_ai_cycle_phase(summary: dict) -> str:
     spy_trend = str(summary.get("spy_trend", ""))
     vix = summary.get("vix")
@@ -406,6 +470,9 @@ def build_market_summary(
         "sector_detail": sector["sectors"],
     }
     summary["ai_cycle_phase"] = _infer_ai_cycle_phase(summary)
+    summary["vol_overlay_regime"] = _vol_overlay_regime(summary)
+    summary["stat_arb_regime"] = _stat_arb_regime(summary)
+    summary["crowded_trade_warning"] = _crowded_trade_warning(summary)
     return summary
 
 
@@ -507,6 +574,38 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
         deltas["cash_buffer"] += 0.03 * conf
         deltas["spy"] -= 0.04 * conf
 
+    vol_regime = str(summary.get("vol_overlay_regime") or _vol_overlay_regime(summary))
+    stat_regime = str(summary.get("stat_arb_regime") or _stat_arb_regime(summary))
+    crowded = str(summary.get("crowded_trade_warning") or "")
+
+    if "elevated" in vol_regime.lower() or vix_f >= 22:
+        deltas["spy"] -= 0.05 * conf
+        deltas["nyse"] -= 0.03 * conf
+        deltas["cash_buffer"] += 0.06 * conf
+        deltas["vti_core"] += 0.02 * conf
+
+    if "supportive" in stat_regime.lower() and vix_f <= 22:
+        deltas["crypto"] += 0.04 * conf
+        deltas["cash_buffer"] -= 0.02 * conf
+
+    if "hostile" in stat_regime.lower() or "compressed" in stat_regime.lower():
+        deltas["crypto"] -= 0.03 * conf
+        deltas["vti_core"] += 0.02 * conf
+
+    if crowded.startswith("CROWDED"):
+        deltas["spy"] -= 0.04 * conf
+        deltas["vti_core"] += 0.03 * conf
+        deltas["cash_buffer"] += 0.02 * conf
+
+    if "calm" in vol_regime.lower() and "above MA" in str(summary.get("spy_trend", "")):
+        tech_leading = any(
+            any(k in str(r.get("sector", "")) for k in ("Tech", "Semis", "AI"))
+            for r in (summary.get("sector_leaders") or [])[:2]
+        )
+        if tech_leading and not crowded.startswith("CROWDED"):
+            deltas["spy"] += 0.04 * conf
+            deltas["vti_core"] -= 0.03 * conf
+
     max_delta = config.effective_thinking_max_sleeve_delta()
     return {k: round(max(-max_delta, min(max_delta, v)), 6) for k, v in deltas.items()}
 
@@ -575,8 +674,14 @@ def _infer_asymmetry(summary: dict | None) -> str:
     if "rising" in str(summary.get("vix_trend", "")) and "above MA" in spy_trend:
         if gold < 0.0:
             return "Vol rising into strength with gold falling — liquidity stress, not safe-haven bid"
-        return "Vol rising into strength — complacency gap before de-grossing"
-    return "Range-bound chop — edge in selective tilts, not max risk"
+        return "Vol rising into strength — complacency gap; VTI passive misses vol-overlay hedge alpha"
+    crowded = str(summary.get("crowded_trade_warning") or _crowded_trade_warning(summary))
+    if crowded.startswith("CROWDED"):
+        return crowded.replace("CROWDED: ", "")
+    stat_regime = str(summary.get("stat_arb_regime") or _stat_arb_regime(summary))
+    if "supportive" in stat_regime.lower():
+        return "Stat-arb spreads favorable vs passive VTI — active pairs add uncorrelated alpha"
+    return "Range-bound chop — edge in selective tilts vs VTI, not max beta"
 
 
 def _infer_tilt_rationale(
@@ -1140,23 +1245,42 @@ def apply_thinking_to_sleeve_caps(
 
 
 def derive_heuristic_tilt(summary: dict) -> dict[str, float]:
-    """Normalized target weights for LLM nudge layer (backtest/live)."""
+    """Normalized target weights for LLM nudge layer (backtest/live). VTI-beat aware."""
     phase = str(summary.get("ai_cycle_phase") or "")
+    vol_regime = str(summary.get("vol_overlay_regime") or _vol_overlay_regime(summary))
+    stat_regime = str(summary.get("stat_arb_regime") or _stat_arb_regime(summary))
+    crowded = str(summary.get("crowded_trade_warning") or "")
     tech_leading = any(
         any(k in str(r.get("sector", "")) for k in ("Tech", "Semis", "AI"))
         for r in (summary.get("sector_leaders") or [])[:2]
     )
-    spy_w = 0.18 if tech_leading and "rotation" not in phase else 0.12
-    vti_w = 0.48 if tech_leading else 0.55
-    cash_w = 0.14 if "late-cycle" in phase or "exhaustion" in phase else 0.10
+    vix = summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 18.0
+
+    vti_w = 0.52
+    if crowded.startswith("CROWDED") or "elevated" in vol_regime.lower() or vix_f >= 22:
+        vti_w = 0.58
+    elif tech_leading and "rotation" not in phase and vix_f <= 18:
+        if "supportive" in stat_regime.lower() and "calm" in vol_regime.lower():
+            vti_w = 0.46
+        else:
+            vti_w = 0.50
+
+    spy_w = 0.16 if tech_leading and not crowded.startswith("CROWDED") else 0.10
+    if "late-cycle" in phase or "exhaustion" in phase:
+        spy_w = max(0.08, spy_w - 0.04)
+
+    cash_w = 0.12 if vix_f >= 20 or "elevated" in vol_regime.lower() else 0.08
+    crypto_w = 0.10 if "supportive" in stat_regime.lower() and vix_f <= 22 else 0.06
+
     tilt = {
         "vti": vti_w,
         "spy": spy_w,
-        "crypto": 0.08,
+        "crypto": crypto_w,
         "energy": 0.06 if "rotation" in phase else 0.05,
         "gold": 0.05 if _gold_momentum_ok(summary) else 0.0,
         "cash": cash_w,
-        "bonds": 0.05 if _gold_momentum_ok(summary) else 0.10,
+        "bonds": 0.05 if _gold_momentum_ok(summary) else 0.08,
     }
     deltas = _rule_based_cap_deltas(summary, 0.7)
     if deltas.get("nyse", 0) > 0.03:
@@ -1189,7 +1313,9 @@ def build_backtest_thinking_result(
         "asymmetry": asymmetry,
         "sector_view": (
             f"Leaders: {summary.get('sector_leadership', 'n/a')} | "
-            f"phase: {summary.get('ai_cycle_phase', 'n/a')}"
+            f"phase: {summary.get('ai_cycle_phase', 'n/a')} | "
+            f"vol: {summary.get('vol_overlay_regime', 'n/a')} | "
+            f"stat-arb: {summary.get('stat_arb_regime', 'n/a')}"
         ),
         "ai_cycle_phase": summary.get("ai_cycle_phase"),
         "risks": ["Regime shift", "Vol spike"],
@@ -1749,9 +1875,15 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
 
     return f"""Current market snapshot:
 
+Objective: beat VTI on risk-adjusted basis (Sharpe first). Passive VTI is the benchmark — every active sleeve must justify its risk.
+
 AI/Tech cycle phase (heuristic): {market_summary.get('ai_cycle_phase', 'unknown')}
 Sector leadership (5d): {market_summary.get('sector_leadership', 'n/a')}
 Sector laggards: {', '.join(f"{r['sector']} {float(r['change_5d_pct']):+.1f}%" for r in (market_summary.get('sector_laggards') or [])) or 'n/a'}
+
+Vol overlay regime: {market_summary.get('vol_overlay_regime', _vol_overlay_regime(market_summary))}
+Stat arb regime: {market_summary.get('stat_arb_regime', _stat_arb_regime(market_summary))}
+Crowding check: {market_summary.get('crowded_trade_warning', _crowded_trade_warning(market_summary))}
 
 SPY vs MA200: {market_summary['spy_trend']}
 VIX: {market_summary['vix']} | {vix_note}
@@ -1768,9 +1900,11 @@ Previous day tilt: {prev_line}
 {gold_note}
 Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline, sector rotation).
 Hard production cap: +/-{config.effective_thinking_max_sleeve_delta():.0%} per sleeve vs prior day without new evidence.
+When vol overlay is elevated, trim SPY/NYSE — do not stack beta on top of vol sleeve.
+When stat arb is supportive, modest crypto tilt OK; when hostile, raise VTI/cash.
 Use decimal weights in RECOMMENDED_TILT (e.g. 0.52 not "52%"); weights must sum to ~1.0.
-Include SECTOR_VIEW with Tech/Semis/Energy/Defense/Gold leaders and 3-7d view.
-TILT_RATIONALE must link ASYMMETRY + SECTOR_VIEW to each sleeve above 5%.
+SECTOR_VIEW must include stat-arb + vol-overlay read and 3-7d sector leaders/laggards.
+TILT_RATIONALE must link ASYMMETRY + SECTOR_VIEW to each sleeve above 5% and state VTI vs active trade-off.
 Reply with ONLY the structured block (NARRATIVE through CONFIDENCE). Be decisive. Start with NARRATIVE:"""
 
 
@@ -1999,6 +2133,128 @@ def _parse_fallback_fields(text: str) -> dict[str, Any]:
     if tilt:
         out["suggested_tilt"] = tilt
     return out
+
+
+def build_demo_reasoning_samples() -> list[dict[str, Any]]:
+    """Three illustrative PM outputs (heuristic) for docs — VTI-beat tuned scenarios."""
+    scenarios: list[dict[str, Any]] = []
+
+    def _scenario(
+        label: str,
+        summary: dict[str, Any],
+        *,
+        conf: float = 0.82,
+    ) -> dict[str, Any]:
+        base = {
+            "label": label,
+            "reasoning": f"Demo scenario: {label}",
+            "narrative": _infer_narrative(summary),
+            "asymmetry": _infer_asymmetry(summary),
+            "sector_view": (
+                f"Leaders: {summary.get('sector_leadership', 'n/a')} | "
+                f"vol: {summary.get('vol_overlay_regime')} | "
+                f"stat-arb: {summary.get('stat_arb_regime')}"
+            ),
+            "ai_cycle_phase": summary.get("ai_cycle_phase"),
+            "suggested_tilt": derive_heuristic_tilt(summary),
+            "confidence": conf,
+            "model": "heuristic-demo",
+            "source": "demo",
+            "market_summary": summary,
+        }
+        tilt = base["suggested_tilt"]
+        base["tilt_rationale"] = _infer_tilt_rationale(
+            summary, tilt, str(base["asymmetry"])
+        )
+        return _finalize_thinking_result(base, summary, force_decision=True)
+
+    mid_cycle = {
+        "spy_trend": "above MA200 (+4.2%)",
+        "vix": 15.2,
+        "vix_trend": "stable (-1.2% 5d)",
+        "oil_change": 1.5,
+        "gold_change": 0.8,
+        "regime": "risk_on",
+        "sector_leaders": [
+            {"sector": "Semis (NVDA)", "change_5d_pct": 6.2},
+            {"sector": "Tech (QQQ)", "change_5d_pct": 4.1},
+        ],
+        "sector_laggards": [{"sector": "Gold (GLD)", "change_5d_pct": -0.5}],
+        "sector_leadership": "Semis (NVDA) +6.2%, Tech (QQQ) +4.1%",
+        "ai_cycle_phase": "mid-cycle AI leadership",
+        "vol_overlay_regime": _vol_overlay_regime({"vix": 15.2, "vix_trend": "stable"}),
+        "stat_arb_regime": _stat_arb_regime(
+            {"vix": 15.2, "spy_trend": "above MA200", "vix_trend": "stable"}
+        ),
+        "crowded_trade_warning": _crowded_trade_warning(
+            {"sector_leaders": [{"sector": "Semis (NVDA)", "change_5d_pct": 6.2}]}
+        ),
+    }
+    scenarios.append(_scenario("Mid-cycle AI + supportive stat arb", mid_cycle, conf=0.84))
+
+    crowded_vol = {
+        "spy_trend": "above MA200 (+1.1%)",
+        "vix": 21.5,
+        "vix_trend": "rising (+12.3% 5d)",
+        "oil_change": 2.0,
+        "gold_change": -1.2,
+        "regime": "neutral",
+        "sector_leaders": [
+            {"sector": "Tech (QQQ)", "change_5d_pct": 9.5},
+            {"sector": "Semis (NVDA)", "change_5d_pct": 11.2},
+        ],
+        "sector_laggards": [{"sector": "Energy (XOM)", "change_5d_pct": -2.1}],
+        "sector_leadership": "Semis (NVDA) +11.2%, Tech (QQQ) +9.5%",
+        "ai_cycle_phase": "late-cycle / rotation risk",
+        "vol_overlay_regime": _vol_overlay_regime({"vix": 21.5, "vix_trend": "rising (+12.3% 5d)"}),
+        "stat_arb_regime": _stat_arb_regime(
+            {"vix": 21.5, "spy_trend": "above MA200", "vix_trend": "rising"}
+        ),
+        "crowded_trade_warning": _crowded_trade_warning(
+            {
+                "sector_leaders": [
+                    {"sector": "Tech (QQQ)", "change_5d_pct": 9.5},
+                    {"sector": "Semis (NVDA)", "change_5d_pct": 11.2},
+                ],
+                "vix_trend": "rising (+12.3% 5d)",
+            }
+        ),
+    }
+    crowded_result = _scenario("Crowded tech + rising VIX", crowded_vol, conf=0.79)
+    crowded_result["narrative"] = (
+        "Late-cycle AI chase into rising vol — defensive neutral; VTI anchor beats adding beta"
+    )
+    crowded_result["asymmetry"] = crowded_vol["crowded_trade_warning"].replace("CROWDED: ", "")
+    crowded_result["tilt_rationale"] = _infer_tilt_rationale(
+        crowded_vol,
+        crowded_result["suggested_tilt"],
+        crowded_result["asymmetry"],
+    )
+    scenarios.append(crowded_result)
+
+    defensive = {
+        "spy_trend": "below MA200",
+        "vix": 24.8,
+        "vix_trend": "rising (+8.0% 5d)",
+        "oil_change": 5.5,
+        "gold_change": 2.5,
+        "regime": "risk_off",
+        "top_headline": "Geopolitical tension in Middle East",
+        "sector_leaders": [
+            {"sector": "Energy (XOM)", "change_5d_pct": 4.8},
+            {"sector": "Gold (GLD)", "change_5d_pct": 3.2},
+        ],
+        "sector_laggards": [{"sector": "Tech (QQQ)", "change_5d_pct": -3.5}],
+        "sector_leadership": "Energy (XOM) +4.8%, Gold (GLD) +3.2%",
+        "ai_cycle_phase": "rotation (energy / real assets)",
+        "vol_overlay_regime": _vol_overlay_regime({"vix": 24.8, "vix_trend": "rising"}),
+        "stat_arb_regime": _stat_arb_regime(
+            {"vix": 24.8, "spy_trend": "below MA200", "vix_trend": "rising"}
+        ),
+        "crowded_trade_warning": _crowded_trade_warning({"sector_leaders": []}),
+    }
+    scenarios.append(_scenario("Risk-off rotation + vol overlay", defensive, conf=0.86))
+    return scenarios
 
 
 def maybe_run_thinking(
