@@ -1,0 +1,10 @@
+{
+  "last_sync_at": "2026-06-14T20:09:50+00:00",
+  "ok": true,
+  "channel_id": "felix_and_friends",
+  "channel_name": "Felix & Friends",
+  "added": 0,
+  "skipped": 15,
+  "manifest": "sentiment\\sources\\youtube\\felix_and_friends\\manifest.jsonl",
+  "errors": []
+}

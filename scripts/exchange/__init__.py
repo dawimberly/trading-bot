@@ -1,1 +1,0 @@
-"""Exchange connectivity checks (Kraken)."""

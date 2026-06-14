@@ -1,5 +1,3 @@
 @echo off
-cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\stop_dashboard.ps1"
-echo.
-pause
+cd /d "%~dp0stock-bot"
+call "%~dp0stock-bot\stop_dashboard.bat"

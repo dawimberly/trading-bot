@@ -1,11 +1,11 @@
 {
   "mcpServers": {
     "grok": {
-      "command": "C:\\Users\\Owner\\PythonTrading\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\Users\\Owner\\PythonTrading\\scripts\\mcp\\run_grok_mcp.py"],
-      "cwd": "C:\\Users\\Owner\\PythonTrading",
+      "command": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\mcp\\run_grok_mcp.py"],
+      "cwd": "C:\\Users\\Owner\\PythonTrading\\stock-bot",
       "env": {
-        "GROK_CLI_PATH": "C:\\Users\\Owner\\PythonTrading\\scripts\\mcp\\grok_cli.cmd",
+        "GROK_CLI_PATH": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\mcp\\grok_cli.cmd",
         "PYTHONUTF8": "1"
       }
     }

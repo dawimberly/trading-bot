@@ -1,0 +1,10 @@
+{
+  "last_sync_at": "2026-06-14T20:10:05+00:00",
+  "ok": true,
+  "channel_id": "andrei_jikh",
+  "channel_name": "Andrei Jikh",
+  "added": 0,
+  "skipped": 15,
+  "manifest": "sentiment\\sources\\youtube\\andrei_jikh\\manifest.jsonl",
+  "errors": []
+}

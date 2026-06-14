@@ -1,4 +1,0 @@
-# Cloud bot dependencies — extend when modules are ported.
-# Parent repo: pip install -r ../requirements.txt for shared libs.
-
--r ../requirements.txt

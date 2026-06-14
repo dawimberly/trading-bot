@@ -1,0 +1,14 @@
+timestamp,account,action,symbol,notional,target,score,felix_video_id,ok,notes
+2026-06-08T13:33:32+00:00,paper,buy,GLD,15327.17,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:33:33+00:00,live_mirror,buy,GLD,1.5,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:34:41+00:00,paper,buy,GLD,15322.94,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:35:48+00:00,paper,buy,GLD,15321.23,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:36:56+00:00,paper,buy,GLD,15319.1,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:44:47+00:00,paper,buy,GLD,22.94,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:45:54+00:00,paper,buy,GLD,11.13,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:50:30+00:00,paper,buy,GLD,13.08,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T13:58:19+00:00,paper,buy,GLD,11.69,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T14:00:35+00:00,paper,buy,GLD,12.6,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T14:05:12+00:00,paper,buy,GLD,17.31,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-08T14:10:47+00:00,paper,buy,GLD,11.66,GLD,-0.1952,pXeHdlIiyVQ,True,
+2026-06-09T17:27:27+00:00,paper,sell,GLD,19421.36,cash,-0.0191,20Y1OG5SFfo,True,rotate out

@@ -1,7 +1,0 @@
-{
-  "name": "Felix & Friends / Goat Academy",
-  "channel_url": "https://www.youtube.com/@FelixFriends/videos",
-  "purpose": "Macro overlay transcripts — sync via scripts/maintenance/sync_felix_transcripts.py",
-  "manifest": "sentiment/sources/youtube/felix_and_friends/manifest.jsonl",
-  "transcripts_dir": "sentiment/sources/youtube/felix_and_friends/transcripts"
-}

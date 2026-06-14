@@ -1,0 +1,18 @@
+{
+  "description": "Stock USD estimates for rebalance (.EQ not priced in REST). Updated for autopilot run.",
+  "positions": [
+    {"ticker": "NASA", "usd": 43.55},
+    {"ticker": "VOO", "usd": 41.58},
+    {"ticker": "QQQ", "usd": 24.70},
+    {"ticker": "WFC", "usd": 21.19},
+    {"ticker": "RTX", "usd": 20.10},
+    {"ticker": "MKSI", "usd": 10.94},
+    {"ticker": "CMPS", "usd": 10.58},
+    {"ticker": "SLV", "usd": 10.25},
+    {"ticker": "XOP", "usd": 10.23},
+    {"ticker": "LMT", "usd": 9.99},
+    {"ticker": "CVX", "usd": 9.90},
+    {"ticker": "KTOS", "usd": 9.16},
+    {"ticker": "CPER", "usd": 4.98}
+  ]
+}

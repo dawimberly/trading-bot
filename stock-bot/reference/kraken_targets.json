@@ -1,0 +1,31 @@
+{
+  "description": "Standard Kraken targets (game-plan stress/calm). No personal hold list.",
+  "max_equity_names": 5,
+  "core_ticker": "VOO",
+  "banned_tickers": ["GUSH", "QQQ", "TQQQ", "SQQQ", "SPXL", "SPXS"],
+  "profiles": {
+    "stress": {
+      "cash_pct": 55,
+      "crypto": {
+        "ETH": 5
+      },
+      "equities": {
+        "VOO": 30,
+        "SLV": 10
+      }
+    },
+    "calm": {
+      "cash_pct": 25,
+      "crypto": {
+        "RENDER": 5,
+        "ETH": 5
+      },
+      "equities": {
+        "VOO": 30,
+        "NASA": 15,
+        "SLV": 10,
+        "WFC": 10
+      }
+    }
+  }
+}
