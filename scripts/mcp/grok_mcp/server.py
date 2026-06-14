@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server.fastmcp.server import Context, FastMCP
 
@@ -26,6 +26,13 @@ server = FastMCP(
 )
 
 
+def _tool_result(result: str | dict[str, Any], *, raw_output: bool) -> str | dict:
+    """Normalize router output for MCP tool return type."""
+    if raw_output:
+        return result if isinstance(result, dict) else {"text": result}
+    return result if isinstance(result, str) else str(result.get("text", ""))
+
+
 @server.tool(
     name="grok_query",
     title="Grok Query",
@@ -41,7 +48,7 @@ async def grok_query(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     ctx: Optional[Context] = None,
 ) -> str | dict:
-    return await router.route(
+    result = await router.route(
         prompt,
         "grok_query",
         model=model,
@@ -49,6 +56,7 @@ async def grok_query(
         ctx=ctx,
         raw_output=raw_output,
     )
+    return _tool_result(result, raw_output=raw_output)
 
 
 @server.tool(
@@ -68,16 +76,15 @@ async def grok_chat(
 ) -> str | dict:
     prompt_lines: list[str] = []
     for message in messages:
-        if isinstance(message.content, str):
-            content_str = message.content
-        else:
+        content = message.content
+        if not isinstance(content, str):
             try:
-                content_str = json.dumps(message.content, ensure_ascii=False)
+                content = json.dumps(content, ensure_ascii=False)
             except Exception:
-                content_str = str(message.content)
-        prompt_lines.append(f"{message.role.capitalize()}: {content_str}")
+                content = str(content)
+        prompt_lines.append(f"{message.role}: {content}")
 
-    return await router.route(
+    result = await router.route(
         "\n".join(prompt_lines),
         "grok_chat",
         model=model,
@@ -85,6 +92,7 @@ async def grok_chat(
         ctx=ctx,
         raw_output=raw_output,
     )
+    return _tool_result(result, raw_output=raw_output)
 
 
 @server.tool(
@@ -115,7 +123,7 @@ async def grok_code(
         sys_instructions.append("Context:\n" + context.strip())
 
     prompt = "\n\n".join(["\n".join(sys_instructions), "Task:", task.strip()])
-    return await router.route(
+    result = await router.route(
         prompt,
         "grok_code",
         model=model,
@@ -123,6 +131,7 @@ async def grok_code(
         ctx=ctx,
         raw_output=raw_output,
     )
+    return _tool_result(result, raw_output=raw_output)
 
 
 def main() -> None:
