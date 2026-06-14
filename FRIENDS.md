@@ -13,10 +13,10 @@ Paper trading first. No manual `.env` editing — use the browser portal.
 ### Windows
 
 1. Install [Python 3.11+](https://www.python.org/downloads/) (check **Add python.exe to PATH**).
-2. Clone and enter the repo:
+2. Clone and enter the stock bot folder:
    ```powershell
    git clone https://github.com/dawimberly/trading-bot.git
-   cd trading-bot
+   cd trading-bot\stock-bot
    ```
 3. Double-click **`friend_setup.bat`** — creates `.venv`, installs deps, opens the portal.
 4. In the portal:
@@ -28,15 +28,17 @@ Paper trading first. No manual `.env` editing — use the browser portal.
 
 ```bash
 git clone https://github.com/dawimberly/trading-bot.git
-cd trading-bot
+cd trading-bot/stock-bot
 chmod +x friend_setup.sh
 ./friend_setup.sh
 ```
 
 | File | Purpose |
 |------|---------|
-| `friend_setup.bat` / `friend_setup.sh` | Install + open portal |
-| `portal.py` | Login, Alpaca keys, dashboard, bot control |
+| `stock-bot/friend_setup.bat` / `.sh` | Install + open portal |
+| `stock-bot/portal.py` | Login, Alpaca keys, dashboard, bot control |
+
+Root `friend_setup.bat` forwards into `stock-bot/` if they clone to the repo root.
 
 ---
 
@@ -91,7 +93,7 @@ streamlit run ufc_betting_bot\dashboard\app.py --server.port 8502
 Never commit or share:
 
 - `.env` files (API keys)
-- `data/portal/users/` (stock bot portal accounts)
+- `stock-bot/data/portal/users/` (portal accounts)
 - Alpaca live keys until they explicitly opt in
 
 ---

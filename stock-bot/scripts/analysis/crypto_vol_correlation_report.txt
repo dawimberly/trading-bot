@@ -1,0 +1,132 @@
+Crypto Vol Correlation Analysis
+Source: C:\Users\Owner\PythonTrading\crypto_vol_backtest_results.csv
+Generated: 2026-06-09T18:23:04
+
+Loaded 276 trades from 2025-12-15 15:00:00+00:00 to 2026-06-09 23:00:00+00:00.
+Coins: ARB/USD, AVAX/USD, BONK/USD, RENDER/USD, SOL/USD, WIF/USD
+RSI: not present in CSV — attempting Alpaca hourly recompute (backtest logic).
+RSI: enriched 276/276 trades from Alpaca hourly bars.
+
+========================================================================
+ANALYSIS 1 — Win vs Loss profile
+========================================================================
+
+Trades: 276 total | 147 wins | 129 losses
+Overall win rate: 53.26%
+
+--- Hold time (hours) ---
+  Wins avg:   7.40h
+  Losses avg: 7.98h
+
+--- Entry hour UTC (mean / median) ---
+  Wins:   mean 11.8, median 14
+  Losses: mean 11.6, median 13
+
+--- Day of week distribution (count) ---
+  Wins: Mon=27, Tue=13, Wed=20, Thu=29, Fri=27, Sat=24, Sun=7
+  Losses: Mon=5, Tue=16, Wed=13, Thu=38, Fri=28, Sat=15, Sun=14
+
+--- Win rate by coin (sorted best to worst) ---
+            trades  win_rate  avg_pnl
+coin                                 
+SOL/USD         49     61.22    0.592
+RENDER/USD      61     60.66    0.615
+BONK/USD        41     51.22    0.022
+WIF/USD         64     48.44   -0.139
+AVAX/USD        34     47.06   -0.177
+ARB/USD         27     44.44   -0.333
+
+Highest win-rate coin: SOL/USD (61.22%)
+
+--- RSI at entry (RSI-14, backtest method) ---
+  Wins avg RSI:   42.94
+  Losses avg RSI: 28.84
+
+========================================================================
+ANALYSIS 2 — Market condition correlation (SPY daily return on entry date)
+========================================================================
+
+Warning: 63 trades have no matching SPY daily bar for entry date.
+
+Win rate by SPY day return bucket:
+                  trades  win_rate  avg_pnl
+market_condition                           
+strong_up (>1%)        9     77.78    1.657
+mild_up (0-1%)        89     56.18    0.355
+flat (-1% to 0%)      63     61.90    0.536
+down (<-1%)           52     36.54   -0.805
+unknown               63     50.79    0.081
+
+========================================================================
+ANALYSIS 3 — Time of day edge (UTC hour 0–23)
+========================================================================
+
+                trades  win_rate  avg_pnl
+entry_hour_utc                           
+0                   11     45.45   -0.273
+1                   12     58.33    0.496
+2                   10     20.00   -1.792
+3                   12     50.00   -0.001
+4                   11     72.73    1.356
+5                   12     75.00    1.491
+6                   11     63.64    0.627
+7                    6     50.00   -0.001
+8                    4     50.00   -0.001
+9                   14     50.00   -0.001
+10                   4     25.00   -1.494
+11                  10     20.00   -1.792
+12                  10     70.00    1.047
+13                  17     41.18   -0.400
+14                  23     78.26    1.686
+15                  24     41.67   -0.545
+16                  14     64.29    0.852
+17                  10     40.00   -0.598
+18                  14     42.86   -0.428
+19                  13     53.85    0.228
+20                   9     66.67    0.994
+21                   7     71.43    1.278
+22                   6     33.33   -0.996
+23                  12     58.33   -0.125
+
+Best hour (win rate, n>=1): 14:00 UTC (78.26%, n=23)
+Worst hour: 02:00 UTC (20.00%, n=10)
+
+========================================================================
+ANALYSIS 4 — Drawdown clustering (losses in time)
+========================================================================
+
+--- Losses by ISO week (top 10) ---
+entry_week
+2026-06-01/2026-06-07    31
+2026-03-16/2026-03-22    11
+2026-05-11/2026-05-17     9
+2026-02-23/2026-03-01     8
+2026-02-02/2026-02-08     8
+2026-01-26/2026-02-01     7
+2026-03-02/2026-03-08     7
+2025-12-15/2025-12-21     6
+2026-01-19/2026-01-25     6
+2026-02-16/2026-02-22     5
+
+--- Loss rate by week (% of all trades that week) ---
+entry_week
+2026-01-19/2026-01-25    85.7
+2026-03-16/2026-03-22    84.6
+2026-02-16/2026-02-22    71.4
+2026-01-12/2026-01-18    66.7
+2025-12-15/2025-12-21    66.7
+2026-04-06/2026-04-12    66.7
+2026-03-30/2026-04-05    60.0
+2026-06-01/2026-06-07    58.5
+2026-03-02/2026-03-08    53.8
+2026-01-05/2026-01-11    50.0
+
+Losses within 48h of prior loss: 99 / 129 (76.7%)
+
+--- Loss count by SPY market condition ---
+market_condition
+mild_up (0-1%)      39
+down (<-1%)         33
+unknown             31
+flat (-1% to 0%)    24
+strong_up (>1%)      2

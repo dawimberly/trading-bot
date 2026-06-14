@@ -2,13 +2,14 @@
 .env
 .env.local
 .env.*.local
-data/portal/users/
+**/data/portal/users/
 .venv/
+stock-bot/.venv/
 venv/
 
 # Python
 __pycache__/
-modules/__pycache__/
+**/modules/__pycache__/
 *.py[cod]
 *.egg-info/
 
@@ -21,7 +22,7 @@ stat_arb_open_book.json
 thinking_engine_state.json
 thinking_engine_last.json
 trading_safety_state.json
-scripts/thinking_engine_analysis_output.json
+**/thinking_engine_analysis_output.json
 
 # PyInstaller one-dir output (use build/ or rebuild locally)
 dist/

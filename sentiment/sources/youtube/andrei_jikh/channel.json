@@ -1,8 +1,0 @@
-{
-  "name": "Andrei Jikh",
-  "channel_id": "UCGy7SkBjcIAgTiwkXEtPnYg",
-  "channel_url": "https://www.youtube.com/channel/UCGy7SkBjcIAgTiwkXEtPnYg/videos",
-  "purpose": "Personal finance / macro transcripts — sync via scripts/maintenance/sync_felix_transcripts.py --channel andrei_jikh",
-  "manifest": "sentiment/sources/youtube/andrei_jikh/manifest.jsonl",
-  "transcripts_dir": "sentiment/sources/youtube/andrei_jikh/transcripts"
-}

@@ -1,4 +1,0 @@
-avg_crypto_exposure_pct,avg_exposure_pct,benchmark_return_pct,calmar,cofire_pct,crypto_contribution_pct,crypto_signals,end_date,final_equity,halt_events,halt_liquidations,max_drawdown_pct,nyse_signals,pause_days,resume_events,sharpe,sim_days,sortino,spy_signals,start_date,total_orders,total_return_pct,variant,variant_label,window,wisdom_mode
-0.0,64.3,46.73,3.61,0.0,0.0,0,2026-06-05,15212.59,1,0,-14.45,12,0,0,1.14,800,1.14,43,2024-03-27,55,52.13,old,"Pre-recent stack (governor, full game plan, no overlap/sizing exits)",1000d,governor
-0.0,71.4,46.73,3.69,0.0,0.0,0,2026-06-05,15608.15,1,1,-15.2,17,67,1,1.13,800,1.14,62,2024-03-27,79,56.08,current_dynamic,"WISDOM_MODE=dynamic, yield-gate-only, halt resume; optimizations partial",1000d,dynamic
-0.0,72.3,46.73,3.75,0.6,0.0,0,2026-06-05,15729.84,1,1,-15.3,13,67,1,1.14,800,1.16,49,2024-03-27,62,57.3,new_optimized,Dynamic + yield-gate + overlap + adaptive/cofire + SPY MA exit + NYSE beta,1000d,dynamic

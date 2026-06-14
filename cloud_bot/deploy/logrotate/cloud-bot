@@ -1,9 +1,0 @@
-/opt/PythonTrading/cloud_bot/data/logs/cloud_bot.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    copytruncate
-}

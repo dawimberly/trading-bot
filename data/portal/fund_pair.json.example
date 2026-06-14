@@ -1,5 +1,0 @@
-{
-  "live_user": "yourname-live",
-  "paper_user": "@root",
-  "_comment": "live_user = portal login with LIVE keys. paper_user @root = paper keys in project .env (PAPER_TRADING=true). Or use yourname-paper portal user instead of @root."
-}
