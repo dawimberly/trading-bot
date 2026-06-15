@@ -1190,7 +1190,6 @@ stock-bot/
 ├── backtester_macro_hedge.py  # Yield gate, GLD, stress cash variants
 ├── backtest_spy.py         # SPY sleeve backtest + grid search
 ├── backtester_wisdom.py    # Wisdom sentiment modes + game plan backtest
-├── simulate.py             # Mean-reversion research
 ├── modules/
 │   ├── pipeline_strategies.py  # SPY, crypto, NYSE strategies
 │   ├── vti_core.py             # Passive VTI rebalance (live + paper)

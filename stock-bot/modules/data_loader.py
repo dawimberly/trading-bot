@@ -31,6 +31,29 @@ def clear_close_matrix_cache() -> None:
     _matrix_cache.clear()
 
 
+def _close_column(conn: sqlite3.Connection, table: str) -> str | None:
+    safe_table = safe_sql_table(table)
+    rows = conn.execute(f'PRAGMA table_info("{safe_table}")').fetchall()
+    for _cid, name, *_rest in rows:
+        if "close" in name.lower():
+            return name
+    return None
+
+
+def _load_table_close(conn: sqlite3.Connection, table: str) -> pd.Series | None:
+    close_col = _close_column(conn, table)
+    if not close_col:
+        return None
+    safe_table = safe_sql_table(table)
+    df = pd.read_sql(
+        f'SELECT Date, "{close_col}" AS Close FROM "{safe_table}"',
+        conn,
+    )
+    if df.empty or "Date" not in df.columns:
+        return None
+    return pd.to_numeric(df.set_index("Date")["Close"], errors="coerce")
+
+
 def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=False):
     """
     Read ticker tables into a wide DataFrame of close prices.
@@ -64,22 +87,21 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
     else:
         tables = [t for t in tables if "_5m" not in t and "_daily" not in t]
 
-    data = pd.DataFrame()
+    columns: dict[str, pd.Series] = {}
     for table in tables:
-        safe_table = safe_sql_table(table)
-        df = pd.read_sql(f'SELECT * FROM "{safe_table}"', conn)
-        target_col = next((c for c in df.columns if "close" in c.lower()), None)
-        if not target_col:
+        series = _load_table_close(conn, table)
+        if series is None:
             continue
         col = table.removesuffix("_daily") if interval == "1d" else table
-        series = df.set_index("Date")[target_col]
-        data[col] = pd.to_numeric(series, errors="coerce")
+        columns[col] = series
 
     conn.close()
-    data.index = pd.to_datetime(data.index, errors="coerce")
-    if data.index.duplicated().any():
-        data = data[~data.index.duplicated(keep="last")]
-    data = data.sort_index().ffill().dropna(how="all")
+    data = pd.DataFrame(columns) if columns else pd.DataFrame()
+    if not data.empty:
+        data.index = pd.to_datetime(data.index, errors="coerce")
+        if data.index.duplicated().any():
+            data = data[~data.index.duplicated(keep="last")]
+        data = data.sort_index().ffill().dropna(how="all")
     if days is not None and len(data) > days:
         data = data.iloc[-days:]
 

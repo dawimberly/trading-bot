@@ -21,15 +21,15 @@ from tkinter import messagebox, ttk
 
 
 def _app_root() -> Path:
-    """Project root — walk up from dist/ exe to folder with run_all.py (incl. stock-bot/)."""
+    """Project root — walk up from dist/ exe to folder with run_all.py (prefers stock-bot/)."""
     if getattr(sys, "frozen", False):
         candidate = Path(sys.executable).resolve().parent
         for _ in range(8):
-            if (candidate / "run_all.py").is_file():
-                return candidate
             nested = candidate / "stock-bot"
             if (nested / "run_all.py").is_file():
                 return nested
+            if (candidate / "run_all.py").is_file():
+                return candidate
             parent = candidate.parent
             if parent == candidate:
                 break
@@ -376,10 +376,31 @@ def _load_scorecard(username: str, book_id: str) -> tuple[dict | None, str]:
     return None, ""
 
 
-def _read_trade_journal_csv(path: Path) -> pd.DataFrame:
+def _read_csv_tail(path: Path, max_rows: int) -> pd.DataFrame:
+    """Read the last max_rows data rows (plus header) without loading the full file."""
+    import csv
+    from collections import deque
+
+    try:
+        with path.open(newline="", encoding="utf-8", errors="replace") as handle:
+            reader = csv.reader(handle)
+            header = next(reader, None)
+            if not header:
+                return pd.DataFrame()
+            rows = deque(reader, maxlen=max_rows)
+    except OSError:
+        return pd.DataFrame()
+    if not rows:
+        return pd.DataFrame(columns=header)
+    return pd.DataFrame(list(rows), columns=header)
+
+
+def _read_trade_journal_csv(path: Path, *, tail_rows: int | None = None) -> pd.DataFrame:
     if not path.is_file():
         return pd.DataFrame()
     try:
+        if tail_rows is not None and tail_rows > 0:
+            return _read_csv_tail(path, tail_rows)
         return pd.read_csv(path)
     except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
         return pd.DataFrame()
@@ -444,7 +465,11 @@ def _load_trade_history(
     """Journal signals/exits for this book, plus Alpaca fills when journal is thin."""
     journal_parts: list[pd.DataFrame] = []
     for path in _journal_search_paths(username, book_id):
-        part = _filter_journal_for_book(path, _read_trade_journal_csv(path), book_id)
+        part = _filter_journal_for_book(
+            path,
+            _read_trade_journal_csv(path, tail_rows=max(limit * 4, 200)),
+            book_id,
+        )
         if not part.empty:
             journal_parts.append(part)
 
@@ -504,8 +529,9 @@ def _load_equity_sparkline(
     max_points: int = SPARKLINE_POINTS,
 ) -> pd.DataFrame | None:
     parts: list[pd.DataFrame] = []
+    tail_rows = max(max_points * 8, 256)
     for path in _journal_search_paths(username, book_id):
-        raw = _read_trade_journal_csv(path)
+        raw = _read_trade_journal_csv(path, tail_rows=tail_rows)
         part = _filter_equity_journal(path, raw, book_id)
         if not part.empty:
             parts.append(part[["timestamp", "equity"]])
