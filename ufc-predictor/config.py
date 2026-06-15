@@ -7,9 +7,11 @@ from typing import Any
 from dotenv import load_dotenv
 
 # Standalone layout: .env at project root or ufc_betting_bot/.env
+# Frozen EXE: defer to project_paths.bootstrap() — config.py may live in _MEIPASS.
 ROOT_DIR = Path(__file__).resolve().parent
-load_dotenv(ROOT_DIR / ".env", override=False)
-load_dotenv(ROOT_DIR / "ufc_betting_bot" / ".env", override=False)
+if not getattr(__import__("sys"), "frozen", False):
+    load_dotenv(ROOT_DIR / ".env", override=False)
+    load_dotenv(ROOT_DIR / "ufc_betting_bot" / ".env", override=False)
 
 # --- Paths ---
 DATA_DIR = ROOT_DIR / "data"
@@ -177,7 +179,12 @@ FEATURE_COLUMNS = [
     "sig_strikes_per_min_diff",
     "td_defense_diff",
     "control_time_diff",
-    "age_diff",
+    "wc_age_advantage_diff",
+    "similar_opp_win_rate_diff",
+    "short_notice_perf_diff",
+    "long_layoff_perf_diff",
+    "short_notice_flag_diff",
+    "long_layoff_flag_diff",
     "height_diff",
     "reach_diff",
     "stance_matchup",
@@ -195,6 +202,14 @@ FEATURE_COLUMNS = [
     "is_main_event",
     "scheduled_rounds",
 ]
+
+# --- Interaction feature discovery (candidates generated in feature_engineering) ---
+INTERACTION_DISCOVERY_ENABLED = os.getenv(
+    "INTERACTION_DISCOVERY_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+INTERACTION_MIN_FEATURES = int(os.getenv("INTERACTION_MIN_FEATURES", "8"))
+INTERACTION_MAX_FEATURES = int(os.getenv("INTERACTION_MAX_FEATURES", "12"))
+DISCOVERED_INTERACTIONS_PATH = MODELS_DIR / "discovered_interactions.json"
 
 TARGET_COLUMN = "f1_win"
 DATE_COLUMN = "event_date"
@@ -260,8 +275,8 @@ ATTACH_SENTIMENT_ON_INFERENCE = os.getenv(
     "ATTACH_SENTIMENT_ON_INFERENCE", "true"
 ).lower() in ("1", "true", "yes")
 
-# --- Backtest ---
-INITIAL_BANKROLL = float(os.getenv("INITIAL_BANKROLL", "1000"))
+# --- Backtest / bankroll ---
+INITIAL_BANKROLL = float(os.getenv("INITIAL_BANKROLL", "75"))
 FLAT_STAKE = float(os.getenv("FLAT_STAKE", "10"))
 MIN_EDGE = float(os.getenv("MIN_EDGE", "0.03"))  # model prob minus implied prob
 EDGE_THRESHOLDS = [
@@ -333,33 +348,63 @@ CIRCUIT_BREAKER_STATE_PATH = CACHE_DIR / "circuit_breaker_state.json"
 DRAWDOWN_STATE_PATH = CACHE_DIR / "drawdown_state.json"
 RISK_EVENTS_LOG = LOG_DIR / "risk_events.log"
 
-# --- Profile: live (conservative) vs research (default) ---
-UFC_PROFILE = os.getenv("UFC_PROFILE", "research").strip().lower()
+# --- Profile: paper (simulation) vs live (real money) ---
 
-_PROFILE_LIVE = {
-    "max_card_risk_fraction": float(os.getenv("LIVE_MAX_CARD_RISK", "0.05")),
-    "max_bet_fraction": float(os.getenv("LIVE_MAX_BET_FRACTION", "0.015")),
-    "daily_loss_limit_fraction": float(os.getenv("LIVE_DAILY_LOSS_LIMIT", "0.02")),
-    "max_drawdown_fraction": float(os.getenv("LIVE_MAX_DRAWDOWN", "0.10")),
-    "resume_drawdown_fraction": float(os.getenv("LIVE_RESUME_DRAWDOWN", "0.08")),
-    "alert_min_edge": float(os.getenv("LIVE_ALERT_MIN_EDGE", "0.08")),
-    "parlay_min_edge": float(os.getenv("LIVE_PARLAY_MIN_EDGE", "0.07")),
-    "parlay_min_combined_prob": float(os.getenv("LIVE_PARLAY_MIN_COMBINED_PROB", "0.35")),
-    "parlay_min_ev": float(os.getenv("LIVE_PARLAY_MIN_EV", "0.15")),
-    "kelly_fraction": float(os.getenv("LIVE_KELLY_FRACTION", "0.20")),
+def normalize_profile(name: str | None) -> str:
+    """Map legacy 'research' → 'paper'; default paper."""
+    n = (name or "paper").strip().lower()
+    if n in ("research", "paper", "sim", "simulation"):
+        return "paper"
+    if n == "live":
+        return "live"
+    return "paper"
+
+
+UFC_PROFILE = normalize_profile(os.getenv("UFC_PROFILE", "paper"))
+
+_PROFILE_PAPER = {
+    "max_card_risk_fraction": float(os.getenv("PAPER_MAX_CARD_RISK", "0.55")),
+    "max_bet_fraction": float(os.getenv("PAPER_MAX_BET_FRACTION", "0.10")),
+    "max_card_stake_usd": float(os.getenv("PAPER_MAX_CARD_STAKE_USD", "0")) or None,
+    "daily_loss_limit_fraction": float(os.getenv("PAPER_DAILY_LOSS_LIMIT", "0.08")),
+    "max_drawdown_fraction": float(os.getenv("PAPER_MAX_DRAWDOWN", "0.22")),
+    "resume_drawdown_fraction": float(os.getenv("PAPER_RESUME_DRAWDOWN", "0.16")),
+    "alert_min_edge": float(os.getenv("PAPER_ALERT_MIN_EDGE", "0.035")),
+    "parlay_min_edge": float(os.getenv("PAPER_PARLAY_MIN_EDGE", "0.02")),
+    "parlay_min_combined_prob": float(os.getenv("PAPER_PARLAY_MIN_COMBINED_PROB", "0.18")),
+    "parlay_min_ev": float(os.getenv("PAPER_PARLAY_MIN_EV", "0.05")),
+    "kelly_fraction": float(os.getenv("PAPER_KELLY_FRACTION", "0.35")),
+    "prop_min_model_prob": float(os.getenv("PAPER_PROP_MIN_MODEL_PROB", "0.21")),
+    "prop_min_edge": float(os.getenv("PAPER_PROP_MIN_EDGE", "0.04")),
+    "prop_max_results": int(os.getenv("PAPER_PROP_MAX_RESULTS", "36")),
+    "max_singles_show": int(os.getenv("PAPER_MAX_SINGLES_SHOW", "15")),
+    "max_parlays_show": int(os.getenv("PAPER_MAX_PARLAYS_SHOW", "8")),
+    "alert_max_parlays": int(os.getenv("PAPER_ALERT_MAX_PARLAYS", "8")),
+    "parlay_max_legs": int(os.getenv("PAPER_PARLAY_MAX_LEGS", "5")),
 }
 
-_PROFILE_RESEARCH = {
-    "max_card_risk_fraction": MC_MAX_CARD_RISK_FRACTION,
-    "max_bet_fraction": MC_MAX_BET_FRACTION,
-    "daily_loss_limit_fraction": float(os.getenv("RESEARCH_DAILY_LOSS_LIMIT", "0.04")),
-    "max_drawdown_fraction": float(os.getenv("RESEARCH_MAX_DRAWDOWN", "0.15")),
-    "resume_drawdown_fraction": float(os.getenv("RESEARCH_RESUME_DRAWDOWN", "0.12")),
-    "alert_min_edge": float(os.getenv("RESEARCH_ALERT_MIN_EDGE", "0.04")),
-    "parlay_min_edge": float(os.getenv("RESEARCH_PARLAY_MIN_EDGE", "0.03")),
-    "parlay_min_combined_prob": float(os.getenv("RESEARCH_PARLAY_MIN_COMBINED_PROB", "0.25")),
-    "parlay_min_ev": float(os.getenv("RESEARCH_PARLAY_MIN_EV", "0.08")),
-    "kelly_fraction": float(os.getenv("RESEARCH_KELLY_FRACTION", "0.25")),
+# Legacy alias (old env vars / cached manifests)
+_PROFILE_RESEARCH = _PROFILE_PAPER
+
+_PROFILE_LIVE = {
+    "max_card_risk_fraction": float(os.getenv("LIVE_MAX_CARD_RISK", "0.18")),
+    "max_bet_fraction": float(os.getenv("LIVE_MAX_BET_FRACTION", "0.05")),
+    "max_card_stake_usd": float(os.getenv("LIVE_MAX_CARD_STAKE_USD", "12")),
+    "daily_loss_limit_fraction": float(os.getenv("LIVE_DAILY_LOSS_LIMIT", "0.012")),
+    "max_drawdown_fraction": float(os.getenv("LIVE_MAX_DRAWDOWN", "0.06")),
+    "resume_drawdown_fraction": float(os.getenv("LIVE_RESUME_DRAWDOWN", "0.05")),
+    "alert_min_edge": float(os.getenv("LIVE_ALERT_MIN_EDGE", "0.08")),
+    "parlay_min_edge": float(os.getenv("LIVE_PARLAY_MIN_EDGE", "0.07")),
+    "parlay_min_combined_prob": float(os.getenv("LIVE_PARLAY_MIN_COMBINED_PROB", "0.42")),
+    "parlay_min_ev": float(os.getenv("LIVE_PARLAY_MIN_EV", "0.20")),
+    "kelly_fraction": float(os.getenv("LIVE_KELLY_FRACTION", "0.12")),
+    "prop_min_model_prob": float(os.getenv("LIVE_PROP_MIN_MODEL_PROB", "0.34")),
+    "prop_min_edge": float(os.getenv("LIVE_PROP_MIN_EDGE", "0.08")),
+    "prop_max_results": int(os.getenv("LIVE_PROP_MAX_RESULTS", "8")),
+    "max_singles_show": int(os.getenv("LIVE_MAX_SINGLES_SHOW", "5")),
+    "max_parlays_show": int(os.getenv("LIVE_MAX_PARLAYS_SHOW", "2")),
+    "alert_max_parlays": int(os.getenv("LIVE_ALERT_MAX_PARLAYS", "2")),
+    "parlay_max_legs": int(os.getenv("LIVE_PARLAY_MAX_LEGS", "2")),
 }
 
 CIRCUIT_BREAKER_ENABLED = os.getenv("CIRCUIT_BREAKER_ENABLED", "true").lower() in ("1", "true", "yes")
@@ -378,8 +423,10 @@ DASHBOARD_CARD_CHECK_MINUTES = int(os.getenv("UFC_DASHBOARD_CARD_CHECK_MINUTES",
 
 # --- Prop betting (method, rounds, decision) ---
 ENABLE_PROPS = os.getenv("ENABLE_PROPS", "false").lower() in ("1", "true", "yes")
-PROP_MIN_EDGE = float(os.getenv("PROP_MIN_EDGE", "0.05"))
-PROP_MIN_MODEL_PROB = float(os.getenv("PROP_MIN_MODEL_PROB", "0.30"))
+PROP_MIN_EDGE = float(os.getenv("PROP_MIN_EDGE", "0.04"))
+PROP_MIN_MODEL_PROB = float(os.getenv("PROP_MIN_MODEL_PROB", "0.21"))
+PROP_SHOW_ALL_MIN_PROB = float(os.getenv("PROP_SHOW_ALL_MIN_PROB", "0.12"))
+PROP_MAX_RESULTS = int(os.getenv("PROP_MAX_RESULTS", "24"))
 PROP_SYNTHETIC_VIG = float(os.getenv("PROP_SYNTHETIC_VIG", "0.08"))
 PROP_PARLAY_MIN_EV = float(os.getenv("PROP_PARLAY_MIN_EV", "0.08"))
 PROP_PARLAY_MIN_COMBINED_PROB = float(os.getenv("PROP_PARLAY_MIN_COMBINED_PROB", "0.20"))
@@ -389,7 +436,8 @@ PROP_MARKETS = [
     x.strip()
     for x in os.getenv(
         "PROP_MARKETS",
-        "goes_to_decision,finish,ko_tko,submission,round_1_finish,over_1_5_rounds,fighter_ko,fighter_sub",
+        "goes_to_decision,finish,ko_tko,submission,round_1_finish,round_2_finish,round_3_finish,"
+        "over_1_5_rounds,under_1_5_rounds,fighter_ko,fighter_sub,fighter_decision",
     ).split(",")
     if x.strip()
 ]
@@ -412,27 +460,247 @@ BOOK_PROP_RULES: dict[str, dict[str, Any]] = {
 }
 
 
+def refresh_runtime_env() -> None:
+    """Re-read env-backed flags after bootstrap load_dotenv (required for frozen EXE)."""
+    global ENABLE_PROPS, MYBOOKIE_ENABLED, ODDS_API_KEY, BETNOW_COOKIE, MYBOOKIE_COOKIE
+    global PROP_MIN_EDGE, PROP_MIN_MODEL_PROB, PROP_MAX_RESULTS, UFC_PROFILE
+
+    ENABLE_PROPS = os.getenv("ENABLE_PROPS", "false").lower() in ("1", "true", "yes")
+    MYBOOKIE_ENABLED = os.getenv("MYBOOKIE_ENABLED", "true").lower() in ("1", "true", "yes")
+    ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY") or os.getenv("ODDS_API_KEY", "")
+    BETNOW_COOKIE = os.getenv("BETNOW_COOKIE", "")
+    MYBOOKIE_COOKIE = os.getenv("MYBOOKIE_COOKIE", "")
+    PROP_MIN_EDGE = float(os.getenv("PROP_MIN_EDGE", "0.04"))
+    PROP_MIN_MODEL_PROB = float(os.getenv("PROP_MIN_MODEL_PROB", "0.21"))
+    PROP_MAX_RESULTS = int(os.getenv("PROP_MAX_RESULTS", "24"))
+    UFC_PROFILE = normalize_profile(os.getenv("UFC_PROFILE", "paper"))
+
+
 def is_live_profile() -> bool:
     return UFC_PROFILE == "live"
 
 
+def is_paper_profile() -> bool:
+    return not is_live_profile()
+
+
+def profile_label() -> str:
+    return "LIVE" if is_live_profile() else "PAPER"
+
+
 def profile_settings() -> dict[str, float]:
-    return dict(_PROFILE_LIVE if is_live_profile() else _PROFILE_RESEARCH)
+    return dict(_PROFILE_LIVE if is_live_profile() else _PROFILE_PAPER)
 
 
 def profile_value(key: str) -> float:
     return profile_settings()[key]
 
 
+def max_card_stake_cap(bankroll: float | None = None) -> float:
+    """Max dollars to risk on one card (fraction cap + live USD hard cap)."""
+    br = max(float(bankroll if bankroll is not None else INITIAL_BANKROLL), 1.0)
+    ps = profile_settings()
+    cap = br * float(ps["max_card_risk_fraction"])
+    usd_cap = ps.get("max_card_stake_usd")
+    if is_live_profile() and usd_cap:
+        cap = min(cap, float(usd_cap))
+    return cap
+
+
+def effective_max_card_risk_fraction(bankroll: float | None = None) -> float:
+    br = max(float(bankroll if bankroll is not None else INITIAL_BANKROLL), 1.0)
+    return max_card_stake_cap(br) / br
+
+
+def profile_int(key: str) -> int:
+    return int(profile_settings()[key])
+
+
+def estimated_card_stake_usd(alerts: dict[str, Any]) -> float:
+    """Sum suggested stakes from alert singles + parlays."""
+    total = 0.0
+    for s in alerts.get("singles") or []:
+        total += float(s.get("suggested_stake") or 0)
+    for p in alerts.get("parlays") or []:
+        total += float(p.get("suggested_stake") or 0)
+    return total
+
+
+def live_card_risk_warning(alerts: dict[str, Any], bankroll: float | None = None) -> str | None:
+    """Live-only warning when suggested card exposure exceeds the profile cap."""
+    if not is_live_profile():
+        return None
+    br = float(bankroll if bankroll is not None else INITIAL_BANKROLL)
+    cap = max_card_stake_cap(br)
+    stake = estimated_card_stake_usd(alerts)
+    if stake <= cap:
+        return None
+    return (
+        f"HIGH CARD RISK: suggested stakes ${stake:,.2f} exceed live cap "
+        f"${cap:,.2f} (${br:,.0f} bankroll). Reduce exposure before betting."
+    )
+
+
 def apply_profile_overrides() -> None:
     """Apply profile caps to module-level defaults (call at startup)."""
     global ALERT_MIN_EDGE, MC_MAX_CARD_RISK_FRACTION, MC_MAX_BET_FRACTION
     global ALERT_MIN_PARLAY_EV, ALERT_PARLAY_MIN_EDGE, ALERT_PARLAY_MIN_COMBINED_PROB
+    global PROP_MIN_EDGE, PROP_MIN_MODEL_PROB, PROP_MAX_RESULTS
+    global ALERT_MAX_PARLAYS, ALERT_PARLAY_MAX_LEGS
     ps = profile_settings()
     ALERT_MIN_EDGE = ps["alert_min_edge"]
     ALERT_PARLAY_MIN_EDGE = ps["parlay_min_edge"]
     ALERT_PARLAY_MIN_COMBINED_PROB = ps["parlay_min_combined_prob"]
     ALERT_MIN_PARLAY_EV = ps["parlay_min_ev"]
-    MC_MAX_CARD_RISK_FRACTION = ps["max_card_risk_fraction"]
+    MC_MAX_CARD_RISK_FRACTION = effective_max_card_risk_fraction(INITIAL_BANKROLL)
     MC_MAX_BET_FRACTION = ps["max_bet_fraction"]
+    PROP_MIN_EDGE = ps["prop_min_edge"]
+    PROP_MIN_MODEL_PROB = ps["prop_min_model_prob"]
+    PROP_MAX_RESULTS = int(ps["prop_max_results"])
+    ALERT_MAX_PARLAYS = int(ps["alert_max_parlays"])
+    ALERT_PARLAY_MAX_LEGS = int(ps["parlay_max_legs"])
+
+
+# --- Budget manager (dashboard) ---
+BUDGET_JSON_PATH = DATA_DIR / "budget.json"
+DEFAULT_TOTAL_BANKROLL = 75.0
+DEFAULT_CARD_BUDGET = 12.0
+LIVE_SMALL_BANKROLL_USD = 100.0
+
+BUDGET_BOOKS: tuple[str, ...] = ("BetNow.eu", "DraftKings", "MyBookie")
+BUDGET_BALANCE_KEYS: dict[str, str] = {
+    "BetNow.eu": "betnow_balance",
+    "DraftKings": "draftkings_balance",
+    "MyBookie": "mybookie_balance",
+}
+BUDGET_USE_KEYS: dict[str, str] = {
+    "BetNow.eu": "use_betnow",
+    "DraftKings": "use_draftkings",
+    "MyBookie": "use_mybookie",
+}
+
+
+def default_budget_state() -> dict[str, Any]:
+    return {
+        "total_bankroll": DEFAULT_TOTAL_BANKROLL,
+        "card_budget": DEFAULT_CARD_BUDGET,
+        "betnow_balance": 0.0,
+        "draftkings_balance": 0.0,
+        "mybookie_balance": 0.0,
+        "use_betnow": True,
+        "use_draftkings": True,
+        "use_mybookie": True,
+    }
+
+
+def normalize_budget_state(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Merge persisted budget with defaults and coerce types."""
+    base = default_budget_state()
+    if not raw:
+        return base
+    for key in base:
+        if key not in raw:
+            continue
+        val = raw[key]
+        if key.startswith("use_"):
+            base[key] = bool(val)
+        else:
+            try:
+                base[key] = float(val)
+            except (TypeError, ValueError):
+                pass
+    base["use_betnow"] = bool(base["use_betnow"])
+    base["use_draftkings"] = bool(base["use_draftkings"])
+    base["use_mybookie"] = bool(base["use_mybookie"])
+    base["total_bankroll"] = max(float(base["total_bankroll"]), 0.0)
+    base["card_budget"] = max(float(base["card_budget"]), 0.0)
+    for bal_key in ("betnow_balance", "draftkings_balance", "mybookie_balance"):
+        base[bal_key] = max(float(base[bal_key]), 0.0)
+    return base
+
+
+def load_budget() -> dict[str, Any]:
+    """Load budget from data/budget.json; fall back to defaults."""
+    try:
+        if BUDGET_JSON_PATH.is_file():
+            import json
+
+            raw = json.loads(BUDGET_JSON_PATH.read_text(encoding="utf-8"))
+            return normalize_budget_state(raw if isinstance(raw, dict) else None)
+    except Exception:
+        pass
+    state = default_budget_state()
+    if INITIAL_BANKROLL != DEFAULT_TOTAL_BANKROLL:
+        state["total_bankroll"] = float(INITIAL_BANKROLL)
+    return state
+
+
+def _sync_env_bankroll(bankroll: float) -> None:
+    """Mirror total bankroll into .env INITIAL_BANKROLL when the file exists."""
+    env_path = ROOT_DIR / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        import re
+
+        text = env_path.read_text(encoding="utf-8")
+        line = f"INITIAL_BANKROLL={bankroll:g}"
+        if re.search(r"^INITIAL_BANKROLL=", text, flags=re.MULTILINE):
+            text = re.sub(r"^INITIAL_BANKROLL=.*$", line, text, flags=re.MULTILINE)
+        else:
+            text = text.rstrip() + f"\n{line}\n"
+        env_path.write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def save_budget(state: dict[str, Any]) -> dict[str, Any]:
+    """Persist budget to data/budget.json and sync INITIAL_BANKROLL."""
+    import json
+
+    normalized = normalize_budget_state(state)
+    BUDGET_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+    BUDGET_JSON_PATH.write_text(json.dumps(normalized, indent=2) + "\n", encoding="utf-8")
+    apply_budget_state(normalized)
+    _sync_env_bankroll(normalized["total_bankroll"])
+    return normalized
+
+
+def apply_budget_state(state: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Apply budget bankroll to module-level INITIAL_BANKROLL."""
+    global INITIAL_BANKROLL
+    normalized = normalize_budget_state(state) if state else load_budget()
+    INITIAL_BANKROLL = float(normalized["total_bankroll"])
+    return normalized
+
+
+def live_card_budget_cap_usd(bankroll: float | None = None) -> float:
+    """Hard USD cap for card budget in Live profile (default $12)."""
+    br = max(float(bankroll if bankroll is not None else INITIAL_BANKROLL), 1.0)
+    if is_live_profile():
+        return float(profile_settings().get("max_card_stake_usd") or DEFAULT_CARD_BUDGET)
+    return max_card_stake_cap(br)
+
+
+def live_small_bankroll_warnings(bankroll: float | None = None) -> list[str]:
+    """Live-mode warnings when bankroll is small relative to card caps."""
+    if not is_live_profile():
+        return []
+    br = max(float(bankroll if bankroll is not None else INITIAL_BANKROLL), 0.0)
+    if br <= 0:
+        return ["Bankroll is $0 — set a bankroll before placing live bets."]
+    cap = live_card_budget_cap_usd(br)
+    pct = cap / br * 100.0
+    warnings: list[str] = []
+    if br <= LIVE_SMALL_BANKROLL_USD:
+        warnings.append(
+            f"LIVE + ${br:,.0f} bankroll: one max card (${cap:,.0f}) risks {pct:.0f}% of your roll. "
+            "Use 1–2 small bets only."
+        )
+    if br <= 50:
+        warnings.append(
+            f"CRITICAL: ${br:,.0f} bankroll is extremely thin for Live — "
+            f"${cap:,.0f}/card is {pct:.0f}% exposure. Paper mode recommended until roll grows."
+        )
+    return warnings
 

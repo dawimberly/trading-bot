@@ -22,7 +22,7 @@ from src.ensemble import (
     ensemble_disagreement,
     prediction_interval,
 )
-from src.feature_engineering import apply_imputer, build_feature_matrix
+from src.feature_engineering import apply_imputer, apply_interaction_specs, build_feature_matrix
 from src.explainability import (
     build_reasoning_text,
     explain_fight_row,
@@ -383,6 +383,7 @@ class FightPredictor:
         self.metrics: dict[str, float] = artifact.get("metrics", {})
         self.calibration_method: str = artifact.get("calibration_method", "isotonic")
         self.imputer = artifact.get("imputer")
+        self.interaction_specs = artifact.get("interaction_specs") or []
         self.conformal_q = float(artifact.get("conformal_q", 0.15))
         self.ensemble_weights = artifact.get("ensemble_weights")
         self.model_type = artifact.get("model_type", "lgbm")
@@ -395,6 +396,8 @@ class FightPredictor:
         if missing:
             raise ValueError(f"Feature matrix missing columns: {missing}")
         frame = X.copy()
+        if self.interaction_specs:
+            frame = apply_interaction_specs(frame, self.interaction_specs)
         if self.imputer is not None:
             frame = apply_imputer(frame, self.imputer)
         elif frame[self.feature_columns].isna().any().any():

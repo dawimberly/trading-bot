@@ -13,6 +13,8 @@ from src.data_loader import _add_pipeline_aliases
 from src.feature_engineering import (
     _canonicalize_fighter_slots,
     _encode_f1_win_target,
+    _layoff_context_flags,
+    _opponent_profiles_similar,
     apply_imputer,
     assert_target_encoding,
     build_feature_matrix,
@@ -20,6 +22,7 @@ from src.feature_engineering import (
     decimal_odds_to_implied,
     ensure_pipeline_columns,
     fit_imputer,
+    weight_class_age_sensitivity,
 )
 
 
@@ -48,6 +51,64 @@ def test_build_matchup_features_diff_sign():
     assert diff["elo_diff"] == pytest.approx(100.0)
     assert diff["win_rate_diff"] == pytest.approx(0.2)
     assert diff["experience_diff"] == pytest.approx(5.0)
+
+
+def test_weight_class_age_sensitivity_heavier_higher():
+    assert weight_class_age_sensitivity("Heavyweight") > weight_class_age_sensitivity("Flyweight")
+    assert weight_class_age_sensitivity("Women's Strawweight") == pytest.approx(0.90)
+
+
+def test_layoff_context_flags():
+    assert _layoff_context_flags(5) == (1.0, 0.0)
+    assert _layoff_context_flags(200) == (0.0, 1.0)
+    assert _layoff_context_flags(60) == (0.0, 0.0)
+
+
+def test_opponent_profiles_similar_requires_overlap():
+    target = {"sig_strike_acc": 0.45, "td_defense": 0.70, "reach_in": 72.0, "age": 30.0}
+    close = {"sig_strike_acc": 0.50, "td_defense": 0.65, "reach_in": 74.0, "age": 32.0}
+    far = {"sig_strike_acc": 0.20, "td_defense": 0.30, "reach_in": 60.0, "age": 22.0}
+    assert _opponent_profiles_similar(target, close) is True
+    assert _opponent_profiles_similar(target, far) is False
+
+
+def test_wc_age_advantage_scales_by_division():
+    f1 = {"age": 35, "elo": 1500, "win_rate": 0.5, "fight_count": 5}
+    f2 = {"age": 28, "elo": 1500, "win_rate": 0.5, "fight_count": 5}
+    hw = build_matchup_features(f1, f2, weight_class="Heavyweight")
+    fw = build_matchup_features(f1, f2, weight_class="Flyweight")
+    assert hw["age_diff"] == pytest.approx(7.0)
+    assert hw["wc_age_advantage_diff"] == pytest.approx(-7.0 * 1.25)
+    assert abs(hw["wc_age_advantage_diff"]) > abs(fw["wc_age_advantage_diff"])
+
+
+def test_contextual_diff_features_present():
+    f1 = {
+        "similar_opp_win_rate": 0.6,
+        "short_notice_flag": 1.0,
+        "long_layoff_flag": 0.0,
+        "short_notice_win_rate": 0.7,
+        "long_layoff_win_rate": 0.4,
+        "elo": 1500,
+        "win_rate": 0.5,
+        "fight_count": 3,
+    }
+    f2 = {
+        "similar_opp_win_rate": 0.4,
+        "short_notice_flag": 0.0,
+        "long_layoff_flag": 1.0,
+        "short_notice_win_rate": 0.5,
+        "long_layoff_win_rate": 0.6,
+        "elo": 1500,
+        "win_rate": 0.5,
+        "fight_count": 3,
+    }
+    diff = build_matchup_features(f1, f2)
+    assert diff["similar_opp_win_rate_diff"] == pytest.approx(0.2)
+    assert diff["short_notice_flag_diff"] == pytest.approx(1.0)
+    assert diff["long_layoff_flag_diff"] == pytest.approx(-1.0)
+    assert diff["short_notice_perf_diff"] == pytest.approx(0.2)
+    assert diff["long_layoff_perf_diff"] == pytest.approx(-0.2)
 
 
 def test_decimal_odds_to_implied_devig():

@@ -87,7 +87,9 @@ def walk_forward_events(
     target_year: int,
 ) -> pd.DataFrame:
     """Imputer fit on fights before event N; predict event N with frozen model."""
-    from src.feature_engineering import apply_imputer, fit_imputer
+    from src.feature_engineering import apply_imputer, apply_interaction_specs, fit_imputer
+
+    interaction_specs = getattr(predictor, "interaction_specs", None) or []
 
     df = _attach_event_names(features)
     df[DATE_COLUMN] = pd.to_datetime(df[DATE_COLUMN], errors="coerce")
@@ -116,6 +118,10 @@ def walk_forward_events(
         test = df[(df["event_key"] == ev_key) & year_mask]
         if train.empty or test.empty:
             continue
+
+        if interaction_specs:
+            train = apply_interaction_specs(train, interaction_specs)
+            test = apply_interaction_specs(test, interaction_specs)
 
         imputer = fit_imputer(train)
         prepared = apply_imputer(test, imputer).dropna(subset=feature_cols)
