@@ -87,6 +87,22 @@ def _tilt_deltas_reasonable(deltas: dict[str, float]) -> tuple[bool, str]:
     return True, ""
 
 
+def _consolidate_news_deltas(
+    deltas: dict[str, float],
+    market_summary: dict | None,
+    *,
+    max_per_sleeve: float,
+) -> dict[str, float]:
+    """Merge news-driven multi-sleeve deltas to <=3 before safety guard."""
+    from modules.thinking_news import consolidate_news_deltas
+
+    return consolidate_news_deltas(
+        deltas,
+        market_summary,
+        max_per_sleeve=max_per_sleeve,
+    )
+
+
 _GEO_KEYWORDS = (
     "iran",
     "israel",
@@ -1444,6 +1460,29 @@ def apply_thinking_tilt_to_caps(
             else config.effective_thinking_max_sleeve_delta()
         ),
     )
+    max_delta = (
+        float(max_sleeve_delta)
+        if max_sleeve_delta is not None
+        else config.effective_thinking_max_sleeve_delta()
+    )
+    if market_summary and (
+        _news_impact(market_summary) >= 0.25
+        or market_summary.get("news_headlines")
+        or len([v for v in cap_deltas.values() if abs(v) >= 0.005]) > THINKING_MAX_ACTIVE_SLEEVES
+    ):
+        before = dict(cap_deltas)
+        cap_deltas = _consolidate_news_deltas(
+            cap_deltas,
+            market_summary,
+            max_per_sleeve=max_delta,
+        )
+        if cap_deltas != before:
+            _audit_thinking(
+                "news_deltas_consolidated",
+                news_impact_score=_news_impact(market_summary),
+                before={k: round(v, 4) for k, v in before.items() if abs(v) > 0.001},
+                after={k: round(v, 4) for k, v in cap_deltas.items() if abs(v) > 0.001},
+            )
 
     merged = dict(base)
     for key, delta in cap_deltas.items():
@@ -1552,14 +1591,25 @@ def build_backtest_thinking_result(
     regime: str,
     vol: str,
     *,
+    news_headlines: str | list | None = None,
+    news_slot: str | None = None,
     force_decision: bool = True,
 ) -> dict:
     """Decisive thinking proxy for historical backtests (always produces a tilt)."""
-    summary = build_market_summary(data, regime, vol)
+    summary = build_market_summary(
+        data,
+        regime,
+        vol,
+        news_headlines=news_headlines,
+        news_slot=news_slot,
+    )
     tilt = derive_heuristic_tilt(summary)
     narrative = _infer_narrative(summary)
     asymmetry = _infer_asymmetry(summary)
+    news_impact = _news_impact(summary)
     conf = 0.78 if force_decision else 0.70
+    if news_impact >= 0.35:
+        conf = round(min(0.88, conf + 0.10 * news_impact), 2)
     base = {
         "reasoning": f"Force-decision proxy: {narrative}",
         "narrative": narrative,
@@ -1580,6 +1630,7 @@ def build_backtest_thinking_result(
         "source": "force_decision",
         "market_summary": summary,
         "tilt_rationale": _infer_tilt_rationale(summary, tilt, asymmetry),
+        "news_impact_score": news_impact,
     }
     return _finalize_thinking_result(base, summary, force_decision=force_decision)
 
@@ -2170,6 +2221,12 @@ Top headline: {market_summary['top_headline']}
     + "\nUse news_impact_score="
     + f"{float(market_summary.get('news_impact_score') or 0.0):.2f}"
     + " to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
+    + (
+        "When news_impact_score >= 0.35, move at most 3 sleeves vs prior day — "
+        "merge energy into NYSE sleeve, gold into cash, liquidity into SPY/VTI barbell.\n"
+        if float(market_summary.get("news_impact_score") or 0.0) >= 0.35
+        else ""
+    )
     + "AI/tech boom context: "
     + str(market_summary.get("news_ai_tech_context") or market_summary.get("ai_cycle_phase", "n/a"))
     + "\n"
@@ -2184,6 +2241,7 @@ Previous day tilt: {prev_line}
 {gold_note}
 Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline, sector rotation).
 Hard production cap: +/-{config.effective_thinking_max_sleeve_delta():.0%} per sleeve vs prior day without new evidence.
+Max 3 sleeves may move per refresh (strict on live); when news_impact_score >= 0.35 prefer exactly 3 custodian sleeves: VTI/cash barbell, SPY liquidity, or NYSE energy.
 When vol overlay is elevated, trim SPY/NYSE — do not stack beta on top of vol sleeve.
 When stat arb is supportive, modest crypto tilt OK; when hostile, raise VTI/cash.
 Use decimal weights in RECOMMENDED_TILT (e.g. 0.52 not "52%"); weights must sum to ~1.0.

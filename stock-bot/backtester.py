@@ -788,6 +788,7 @@ def run_backtest(
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
+    with_news: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
     apply_run_options_to_config()
@@ -999,6 +1000,7 @@ def run_backtest(
     sample_rp_meta: dict | None = None
     thinking_cache = {
         "regime": None,
+        "last_news_date": None,
         "scales": {"spy_scale": 1.0, "nyse_scale": 1.0, "crypto_scale": 1.0},
         "vti_pct": None,
         "events": [],
@@ -1114,9 +1116,32 @@ def run_backtest(
                 config.LIVE_THINKING_MAX_SLEEVE_DELTA if live_thinking else None
             )
             refresh = thinking_cache["regime"] != regime
+            bar_date = data.index[i].date()
+            news_digest: dict | None = None
+            if with_news:
+                if thinking_cache.get("last_news_date") != bar_date:
+                    thinking_cache["last_news_date"] = bar_date
+                    refresh = True
             if refresh:
                 vti_before = vti_core_pct
-                thinking = build_backtest_thinking_result(window, regime, vol)
+                if with_news:
+                    from modules.thinking_news import synthesize_backtest_news
+
+                    news_digest = synthesize_backtest_news(
+                        window,
+                        regime,
+                        vol,
+                        slot="premarket",
+                    )
+                    thinking = build_backtest_thinking_result(
+                        window,
+                        regime,
+                        vol,
+                        news_headlines=news_digest.get("headlines"),
+                        news_slot="premarket",
+                    )
+                else:
+                    thinking = build_backtest_thinking_result(window, regime, vol)
                 base_caps = dict(config.fund_allocation_pct())
                 base_caps["vti_core"] = vti_core_pct
                 merged, deltas, log_line = apply_thinking_tilt_to_caps(
@@ -1144,20 +1169,26 @@ def run_backtest(
                 if any(abs(v) > 0.001 for v in deltas.values()):
                     summary = thinking.get("market_summary") or {}
                     vix = summary.get("vix")
-                    thinking_cache["events"].append(
-                        {
-                            "date": str(data.index[i].date()),
-                            "regime": regime,
-                            "vol": vol,
-                            "vix": vix,
-                            "narrative": thinking.get("narrative"),
-                            "tilt": thinking.get("suggested_tilt"),
-                            "deltas": deltas,
-                            "vti_before": round(vti_before, 4),
-                            "vti_after": round(float(merged["vti_core"]), 4),
-                            "log": log_line,
-                        }
-                    )
+                    event: dict = {
+                        "date": str(data.index[i].date()),
+                        "regime": regime,
+                        "vol": vol,
+                        "vix": vix,
+                        "narrative": thinking.get("narrative"),
+                        "tilt": thinking.get("suggested_tilt"),
+                        "deltas": deltas,
+                        "vti_before": round(vti_before, 4),
+                        "vti_after": round(float(merged["vti_core"]), 4),
+                        "log": log_line,
+                    }
+                    if news_digest:
+                        event["news_slot"] = news_digest.get("slot")
+                        event["news_impact_score"] = news_digest.get("news_impact_score")
+                        event["news_theme_summary"] = news_digest.get("theme_summary")
+                    elif with_news:
+                        event["news_impact_score"] = thinking.get("news_impact_score")
+                        event["news_theme_summary"] = summary.get("news_theme_summary")
+                    thinking_cache["events"].append(event)
             if thinking_cache["vti_pct"] is not None:
                 vti_core_pct = float(thinking_cache["vti_pct"])
             thinking_scales = dict(thinking_cache["scales"])
@@ -2486,6 +2517,28 @@ def run_compare_vti_levels(days=None, refresh=False, use_max=False) -> None:
     )
 
 
+def _avg_tilt_magnitude(result: dict) -> float:
+    events = (result.get("live_thinking_sim") or result.get("thinking_tilt") or {}).get(
+        "events"
+    ) or []
+    if not events:
+        return 0.0
+    mags = [sum(abs(float(v)) for v in (e.get("deltas") or {}).values()) for e in events]
+    return round(sum(mags) / len(mags), 4)
+
+
+def _high_impact_news_samples(result: dict, *, max_samples: int = 5) -> list[dict]:
+    events = (result.get("live_thinking_sim") or {}).get("events") or []
+    ranked = sorted(
+        events,
+        key=lambda e: float(e.get("news_impact_score") or 0.0),
+        reverse=True,
+    )
+    return [e for e in ranked if float(e.get("news_impact_score") or 0.0) >= 0.35][
+        :max_samples
+    ]
+
+
 def run_simulate_live_thinking_compare(
     days=None,
     refresh=False,
@@ -2493,6 +2546,7 @@ def run_simulate_live_thinking_compare(
     *,
     start_equity: float | None = None,
     vti_levels: bool = False,
+    with_news: bool = False,
 ) -> None:
     """Small-account live profile + capped thinking tilts (heuristic proxy, not Ollama per bar)."""
     if use_max:
@@ -2506,7 +2560,9 @@ def run_simulate_live_thinking_compare(
         print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
         return
 
-    eq_start = start_equity or config.SMALL_ACCOUNT_BACKTEST_EQUITY
+    eq_start = start_equity or (
+        300.0 if with_news else config.SMALL_ACCOUNT_BACKTEST_EQUITY
+    )
     cap_pp = round(config.LIVE_THINKING_MAX_SLEEVE_DELTA * 100, 0)
 
     if vti_levels:
@@ -2555,26 +2611,50 @@ def run_simulate_live_thinking_compare(
         "simulate_live_thinking": True,
         "track_metrics": True,
     }
-    configs = [
-        ("Small account (no thinking)", {**base_kwargs, "paper_thinking": False}),
-        ("Small account (+ thinking tilts)", {**base_kwargs, "paper_thinking": True}),
-    ]
+    if with_news:
+        configs = [
+            ("No thinking / no news", {**base_kwargs, "paper_thinking": False, "with_news": False}),
+            (
+                "Thinking + news (8 AM digest)",
+                {**base_kwargs, "paper_thinking": True, "with_news": True},
+            ),
+        ]
+        title = "--- LIVE $300 SIM: NO THINKING vs THINKING + NEWS ---"
+    else:
+        configs = [
+            ("Small account (no thinking)", {**base_kwargs, "paper_thinking": False}),
+            ("Small account (+ thinking tilts)", {**base_kwargs, "paper_thinking": True}),
+        ]
+        title = "--- LIVE SMALL-ACCOUNT + THINKING SIM ---"
 
+    print(title)
     print(
-        "--- LIVE SMALL-ACCOUNT + THINKING SIM "
-        f"(90% VTI base, 1% risk, ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max order, "
-        f"±{config.LIVE_THINKING_MAX_SLEEVE_DELTA:.0%} tilt cap) ---"
+        f"Profile: 90% VTI core | 1% risk/trade | ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max order | "
+        f"±{cap_pp:.0f}% sleeve cap | max 3 sleeves | daily loss breaker ON"
     )
     print(
         f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars) | start equity ${eq_start:,.0f}"
     )
-    print(
-        "Note: uses heuristic thinking proxy on regime change (same as paper backtest), "
-        "not live Ollama per bar."
-    )
-    print(f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
-    print("-" * 62)
+    if with_news:
+        print(
+            "News: synthetic 8 AM premarket digest per bar (theme + news_impact_score); "
+            "heuristic proxy (not Ollama per bar)."
+        )
+    else:
+        print(
+            "Note: uses heuristic thinking proxy on regime change (same as paper backtest), "
+            "not live Ollama per bar."
+        )
+    if with_news:
+        print(
+            f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'Tilts':>6} {'AvgTilt':>8} {'PostDD':>7}"
+        )
+        print("-" * 86)
+    else:
+        print(f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
+        print("-" * 62)
 
     baseline = None
     with_thinking = None
@@ -2584,13 +2664,27 @@ def run_simulate_live_thinking_compare(
             with_thinking = result
         else:
             baseline = result
-        print(
-            f"{label_cfg:<34} "
-            f"{result['total_return_pct']:>+7.2f}% "
-            f"{result['sharpe']:>7.2f} "
-            f"{result['max_drawdown_pct']:>7.2f}%"
-        )
-    print("-" * 62)
+        if with_news:
+            print(
+                f"{label_cfg:<32} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{_thinking_tilt_event_count(result):>6d} "
+                f"{_avg_tilt_magnitude(result):>7.3f} "
+                f"{_post_tilt_drawdown_pp(result):>6.2f}pp"
+            )
+        else:
+            print(
+                f"{label_cfg:<34} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}%"
+            )
+    if with_news:
+        print("-" * 86)
+    else:
+        print("-" * 62)
 
     if baseline and with_thinking:
         under = _equity_underperformance_stats(baseline, with_thinking)
@@ -2609,25 +2703,48 @@ def run_simulate_live_thinking_compare(
         print(
             f"Max VTI core cut on tilt refresh: {sim.get('max_vti_drop_pp', 0):.2f}pp | "
             f"tilt events: {sim.get('tilt_event_count', 0)} | "
+            f"avg tilt magnitude: {_avg_tilt_magnitude(with_thinking):.3f} | "
             f"max {post_dd:.2f}pp forward DD within 5d after a tilt"
         )
 
-        samples = _volatile_thinking_samples(with_thinking, max_samples=5)
-        if samples:
-            print("\nSample tilts during volatile periods:")
-            for ev in samples:
-                deltas = {
-                    k: round(v, 4)
-                    for k, v in (ev.get("deltas") or {}).items()
-                    if abs(v) > 0.001
-                }
-                print(
-                    f"  {ev.get('date')} | VIX {ev.get('vix')} | {ev.get('vol')} | "
-                    f"VTI {ev.get('vti_before', 0):.0%}->{ev.get('vti_after', 0):.0%}"
-                )
-                print(f"    {ev.get('narrative', '')[:120]}")
-                if deltas:
-                    print(f"    deltas: {deltas}")
+        if with_news:
+            samples = _high_impact_news_samples(with_thinking, max_samples=5)
+            if samples:
+                print("\nSample high-impact news reactions (news_impact_score >= 0.35):")
+                for ev in samples:
+                    deltas = {
+                        k: round(v, 4)
+                        for k, v in (ev.get("deltas") or {}).items()
+                        if abs(v) > 0.001
+                    }
+                    impact = float(ev.get("news_impact_score") or 0.0)
+                    print(
+                        f"  {ev.get('date')} | impact {impact:.2f} | VIX {ev.get('vix')} | "
+                        f"VTI {ev.get('vti_before', 0):.0%}->{ev.get('vti_after', 0):.0%}"
+                    )
+                    theme = str(ev.get("news_theme_summary") or "")[:100]
+                    if theme:
+                        print(f"    themes: {theme}")
+                    print(f"    {ev.get('narrative', '')[:120]}")
+                    if deltas:
+                        print(f"    deltas: {deltas}")
+        else:
+            samples = _volatile_thinking_samples(with_thinking, max_samples=5)
+            if samples:
+                print("\nSample tilts during volatile periods:")
+                for ev in samples:
+                    deltas = {
+                        k: round(v, 4)
+                        for k, v in (ev.get("deltas") or {}).items()
+                        if abs(v) > 0.001
+                    }
+                    print(
+                        f"  {ev.get('date')} | VIX {ev.get('vix')} | {ev.get('vol')} | "
+                        f"VTI {ev.get('vti_before', 0):.0%}->{ev.get('vti_after', 0):.0%}"
+                    )
+                    print(f"    {ev.get('narrative', '')[:120]}")
+                    if deltas:
+                        print(f"    deltas: {deltas}")
 
         print("\n--- Risk summary if enabled on live ~$300 ---")
         scale = 300.0 / eq_start if eq_start > 0 else 3.0
@@ -2638,6 +2755,38 @@ def run_simulate_live_thinking_compare(
             f"±{config.LIVE_THINKING_MAX_SLEEVE_DELTA:.0%} per sleeve (~±${300 * config.LIVE_THINKING_MAX_SLEEVE_DELTA:.0f} "
             f"notional shift on a single sleeve at full deploy)."
         )
+        if with_news:
+            print("\n--- Live $300 recommendation ---")
+            ret_delta = with_thinking["total_return_pct"] - baseline["total_return_pct"]
+            sharpe_delta = with_thinking["sharpe"] - baseline["sharpe"]
+            dd_delta = with_thinking["max_drawdown_pct"] - baseline["max_drawdown_pct"]
+            enable = (
+                sharpe_delta >= -0.05
+                and ret_delta >= -2.0
+                and worst_usd_300 >= -15.0
+            )
+            if enable and sharpe_delta > 0.05:
+                verdict = (
+                    "ENABLE Thinking + News on live $300 — news-aware tilts improve or match "
+                    "risk-adjusted returns with acceptable drag."
+                )
+            elif enable:
+                verdict = (
+                    "OPTIONAL — marginal benefit; keep news ON in paper, monitor 2 weeks before live."
+                )
+            else:
+                verdict = (
+                    "DO NOT enable on live $300 yet — news tilts hurt Sharpe/return or drag exceeds "
+                    "comfort on this 365d window. Keep paper-only scheduled news."
+                )
+            print(verdict)
+            print(
+                f"  Return {ret_delta:+.2f}pp | Sharpe {sharpe_delta:+.2f} | "
+                f"MaxDD {dd_delta:+.2f}pp | tilts {sim.get('tilt_event_count', 0)} | "
+                f"worst drag ~${worst_usd_300:.2f}"
+            )
+            return
+
         if with_thinking["max_drawdown_pct"] > baseline["max_drawdown_pct"]:
             print(
                 "In this window thinking slightly improved MaxDD — still heuristic-only; "
@@ -3895,7 +4044,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--simulate-live-thinking",
         action="store_true",
-        help="Compare small-account live sim with vs without capped thinking tilts (±8%%)",
+        help="Compare small-account live sim with vs without capped thinking tilts (±6%%)",
+    )
+    parser.add_argument(
+        "--with-news",
+        action="store_true",
+        help=(
+            "With --simulate-live-thinking: compare no-thinking vs thinking+news "
+            "(synthetic 8 AM digest per bar)"
+        ),
+    )
+    parser.add_argument(
+        "--start-equity",
+        type=float,
+        default=None,
+        metavar="USD",
+        help="Starting equity for small-account / live-thinking sim (default: SMALL_ACCOUNT_BACKTEST_EQUITY or 300 with --with-news)",
     )
     parser.add_argument(
         "--compare-stat-arb",
@@ -4135,11 +4299,16 @@ if __name__ == "__main__":
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.simulate_live_thinking:
+        eq = args.start_equity
+        if eq is None and args.with_news:
+            eq = 300.0
         run_simulate_live_thinking_compare(
             days=args.days,
             refresh=args.refresh,
             use_max=args.max,
             vti_levels=args.vti_levels,
+            with_news=bool(args.with_news),
+            start_equity=eq,
         )
     elif args.compare_final:
         run_final_compare(

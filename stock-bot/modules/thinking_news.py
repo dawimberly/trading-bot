@@ -241,6 +241,155 @@ def _ai_tech_boom_context(phase: str, themes: dict, combined: str) -> str:
     return f"Cycle phase {phase} — weigh headlines against VTI benchmark, avoid crowded chase"
 
 
+_CAP_KEYS = ("vti_core", "spy", "crypto", "nyse", "metal", "cash_buffer")
+_THINKING_MAX_ACTIVE_SLEEVES = 3
+_THINKING_MAX_TOTAL_DELTA = 0.12
+
+
+def _theme_active(themes: dict, key: str) -> bool:
+    block = themes.get(key) if isinstance(themes.get(key), dict) else {}
+    return bool(block.get("active"))
+
+
+def _news_priority_sleeves(summary: dict) -> tuple[str, str, str]:
+    """Top-3 custodian sleeves for theme-driven consolidation."""
+    themes = summary.get("news_themes") or {}
+    geo = _theme_active(themes, "geopolitics")
+    energy = _theme_active(themes, "sector_energy")
+    liq = _theme_active(themes, "liquidity")
+    policy = _theme_active(themes, "policy")
+    tech = _theme_active(themes, "sector_tech")
+    vix = summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 18.0
+    oil = float(summary.get("oil_change") or 0.0)
+
+    if geo and (liq or policy) or (oil >= 3.5 and (geo or energy)):
+        return ("vti_core", "cash_buffer", "nyse")
+    if geo or energy or oil >= 3.0:
+        return ("nyse", "vti_core", "cash_buffer")
+    if liq and policy and tech:
+        return ("spy", "vti_core", "cash_buffer")
+    if liq and policy:
+        return ("spy", "vti_core", "cash_buffer")
+    if vix_f >= 22 or "below MA" in str(summary.get("spy_trend", "")):
+        return ("vti_core", "cash_buffer", "nyse")
+    return ("vti_core", "spy", "cash_buffer")
+
+
+def _redirect_cap_to_priority(key: str, top3: tuple[str, ...], summary: dict) -> str:
+    if key in top3:
+        return key
+    themes = summary.get("news_themes") or {}
+    geo = _theme_active(themes, "geopolitics")
+    liq = _theme_active(themes, "liquidity")
+    if key == "metal":
+        return "cash_buffer" if "cash_buffer" in top3 else top3[0]
+    if key == "crypto":
+        if geo and "cash_buffer" in top3:
+            return "cash_buffer"
+        if "spy" in top3:
+            return "spy"
+        return top3[0]
+    if key == "nyse":
+        return "nyse" if "nyse" in top3 else top3[0]
+    if key == "spy":
+        if liq and "spy" in top3:
+            return "spy"
+        return "vti_core" if "vti_core" in top3 else top3[0]
+    return top3[0]
+
+
+def _sleeve_rank_score(
+    key: str,
+    delta: float,
+    summary: dict,
+    *,
+    impact: float,
+    top3: tuple[str, ...],
+) -> float:
+    """Rank sleeves by |delta| scaled by news_impact and theme priority."""
+    themes = summary.get("news_themes") or {}
+    boost = 1.0
+    if key in top3:
+        boost += 0.35 * (3 - top3.index(key))
+    if key == "nyse" and (_theme_active(themes, "geopolitics") or _theme_active(themes, "sector_energy")):
+        boost += 0.45
+    if key == "spy" and (_theme_active(themes, "liquidity") or _theme_active(themes, "policy")):
+        boost += 0.40
+    if key in ("vti_core", "cash_buffer") and (
+        _theme_active(themes, "geopolitics") or float(summary.get("vix") or 0) >= 20
+    ):
+        boost += 0.35
+    return abs(float(delta)) * boost * (1.0 + 0.5 * impact)
+
+
+def _clamp_cap_deltas(
+    deltas: dict[str, float],
+    *,
+    max_per_sleeve: float,
+    max_total: float = _THINKING_MAX_TOTAL_DELTA,
+) -> dict[str, float]:
+    clamped = {
+        k: round(max(-max_per_sleeve, min(max_per_sleeve, float(deltas.get(k, 0.0)))), 6)
+        for k in _CAP_KEYS
+    }
+    total = sum(abs(v) for v in clamped.values())
+    if total > max_total and total > 0:
+        scale = max_total / total
+        clamped = {k: round(v * scale, 6) for k, v in clamped.items()}
+    return clamped
+
+
+def consolidate_news_deltas(
+    deltas: dict[str, float],
+    market_summary: dict | None,
+    *,
+    max_per_sleeve: float,
+    max_sleeves: int = _THINKING_MAX_ACTIVE_SLEEVES,
+) -> dict[str, float]:
+    """Merge multi-sleeve news tilts into <=3 custodians before live safety guard."""
+    if not market_summary:
+        return _clamp_cap_deltas(deltas, max_per_sleeve=max_per_sleeve)
+
+    impact = float(market_summary.get("news_impact_score") or 0.0)
+    has_news = bool(
+        market_summary.get("news_headlines")
+        or market_summary.get("news_digest")
+        or market_summary.get("news_theme_summary")
+    )
+    raw = {k: float(deltas.get(k, 0.0)) for k in _CAP_KEYS}
+    material = {k: v for k, v in raw.items() if abs(v) >= 0.005}
+
+    if len(material) <= max_sleeves and not (has_news and impact >= 0.25):
+        return _clamp_cap_deltas(raw, max_per_sleeve=max_per_sleeve)
+
+    top3 = _news_priority_sleeves(market_summary)
+    keep_list = list(top3)
+    consolidated = {k: 0.0 for k in _CAP_KEYS}
+
+    for key, val in raw.items():
+        if abs(val) < 1e-9:
+            continue
+        target = key if key in keep_list else _redirect_cap_to_priority(key, tuple(keep_list), market_summary)
+        consolidated[target] += val
+
+    for key in _CAP_KEYS:
+        if key not in keep_list:
+            consolidated[key] = 0.0
+
+    return _clamp_cap_deltas(consolidated, max_per_sleeve=max_per_sleeve)
+
+
+def _consolidate_news_deltas(
+    deltas: dict[str, float],
+    market_summary: dict | None,
+    *,
+    max_per_sleeve: float,
+) -> dict[str, float]:
+    """Alias for thinking_engine integration."""
+    return consolidate_news_deltas(deltas, market_summary, max_per_sleeve=max_per_sleeve)
+
+
 def build_news_digest(
     news_headlines: str | list | None,
     *,
@@ -371,6 +520,68 @@ def format_news_summary(news_text: str, *, slot: str | None = None) -> str:
 
 def format_news_digest(digest: dict[str, Any]) -> str:
     return str(digest.get("formatted") or format_news_summary("", slot=digest.get("slot")))
+
+
+def synthesize_backtest_news(
+    data,
+    regime: str,
+    vol: str,
+    *,
+    slot: str = "premarket",
+) -> dict[str, Any]:
+    """Historical headline proxy for backtest (simulates 8 AM / 6 PM digest from macro tape)."""
+    from modules.thinking_engine import build_market_summary
+
+    summary = build_market_summary(data, regime, vol)
+    oil = float(summary.get("oil_change") or 0.0)
+    gold = float(summary.get("gold_change") or 0.0)
+    vix = summary.get("vix")
+    vix_f = float(vix) if vix not in (None, "n/a") else 18.0
+    spy_trend = str(summary.get("spy_trend", ""))
+    headlines: list[str] = []
+
+    if oil >= 3.0:
+        headlines.append(
+            f"Oil jumps {oil:.1f}% on Middle East / Hormuz shipping risk; gold "
+            f"{'firm' if gold >= 0 else 'soft'}"
+        )
+    if oil >= 3.5 and vix_f >= 18:
+        headlines.append(
+            "Trump admin may flood the market with strategic oil reserves amid geopolitical tensions"
+        )
+    if gold >= 2.0 and vix_f >= 18:
+        headlines.append("Safe-haven bid lifts gold as equity vol rises")
+    if "below MA" in spy_trend and vix_f >= 20:
+        headlines.append("Equity trend breaks MA200 — risk-off rotation into VTI and cash")
+    leaders = summary.get("sector_leaders") or []
+    tech_leading = any(
+        any(k in str(r.get("sector", "")) for k in ("Tech", "Semis", "AI"))
+        for r in leaders[:2]
+    )
+    if tech_leading:
+        headlines.append(
+            "Analysts warn tariff headlines may whipsaw small-cap beta before Fed speak; "
+            "AI/datacenter demand still supports semis"
+        )
+    if str(regime).startswith("RHYME") and vix_f <= 16 and tech_leading:
+        headlines.append("Mid-cycle AI leadership persists — selective SPY tilt vs passive VTI")
+    crowded = str(summary.get("crowded_trade_warning") or "")
+    if crowded.startswith("CROWDED"):
+        headlines.append(f"Crowded trade alert: {crowded.replace('CROWDED: ', '')[:120]}")
+    if not headlines:
+        top = str(summary.get("top_headline") or "").strip()
+        if top and top != "n/a":
+            headlines.append(top[:240])
+        else:
+            headlines.append(
+                f"Macro tape: regime {regime}, vol {vol}, VIX {vix_f:.0f} — no dominant headline"
+            )
+
+    return build_news_digest(
+        headlines[:6],
+        slot=slot,
+        ai_cycle_phase=str(summary.get("ai_cycle_phase") or ""),
+    )
 
 
 def _schedule_state() -> dict:
