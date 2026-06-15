@@ -481,6 +481,20 @@ def build_market_summary(
     summary["vol_overlay_regime"] = _vol_overlay_regime(summary)
     summary["stat_arb_regime"] = _stat_arb_regime(summary)
     summary["crowded_trade_warning"] = _crowded_trade_warning(summary)
+    if news_text:
+        from modules.thinking_news import analyze_news_headlines
+
+        news_analysis = analyze_news_headlines(
+            news_text,
+            ai_cycle_phase=str(summary.get("ai_cycle_phase") or ""),
+        )
+        summary["news_themes"] = news_analysis.get("themes")
+        summary["news_theme_summary"] = news_analysis.get("theme_summary")
+        summary["news_impact_score"] = news_analysis.get("news_impact_score")
+        summary["news_ai_tech_context"] = news_analysis.get("ai_tech_context")
+        summary["news_digest"] = news_analysis.get("digest_text")
+    else:
+        summary["news_impact_score"] = 0.0
     return summary
 
 
@@ -540,6 +554,59 @@ def _clamp_gold_in_tilt(
     return _normalize_tilt(out)
 
 
+def _news_theme_active(summary: dict, key: str) -> bool:
+    themes = summary.get("news_themes") or {}
+    block = themes.get(key) if isinstance(themes.get(key), dict) else {}
+    return bool(block.get("active"))
+
+
+def _news_impact(summary: dict) -> float:
+    return float(summary.get("news_impact_score") or 0.0)
+
+
+def _news_text_blob(summary: dict) -> str:
+    parts = [
+        summary.get("news_headlines"),
+        summary.get("news_theme_summary"),
+        summary.get("top_headline"),
+    ]
+    return " ".join(str(p or "") for p in parts).lower()
+
+
+def _apply_news_cap_deltas(deltas: dict[str, float], summary: dict, conf: float) -> None:
+    """Headline themes scaled by news_impact_score (0-1)."""
+    impact = _news_impact(summary)
+    if impact < 0.25:
+        return
+    scale = impact * conf
+    geo = _news_theme_active(summary, "geopolitics")
+    energy = _news_theme_active(summary, "sector_energy")
+    liq = _news_theme_active(summary, "liquidity")
+    policy = _news_theme_active(summary, "policy")
+    tech = _news_theme_active(summary, "sector_tech")
+    phase = str(summary.get("ai_cycle_phase") or "")
+
+    if geo or energy:
+        deltas["nyse"] += 0.05 * scale
+        deltas["spy"] -= 0.03 * scale
+        if float(summary.get("gold_change") or 0.0) >= 0.0:
+            deltas["metal"] += 0.02 * scale
+    if liq and policy and geo:
+        deltas["vti_core"] += 0.03 * scale
+        deltas["cash_buffer"] += 0.02 * scale
+    elif liq and policy and not geo:
+        deltas["vti_core"] += 0.03 * scale
+        deltas["cash_buffer"] -= 0.02 * scale
+    if tech and ("mid-cycle" in phase or "ai" in phase.lower()):
+        if policy and geo:
+            deltas["vti_core"] += 0.03 * scale
+            deltas["cash_buffer"] += 0.02 * scale
+            deltas["spy"] -= 0.02 * scale
+        elif policy and not geo:
+            deltas["spy"] += 0.02 * scale
+            deltas["vti_core"] -= 0.02 * scale
+
+
 def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]:
     """Direct sleeve cap deltas from macro signals (matches PM tilt intent)."""
     deltas = {k: 0.0 for k in _CAP_KEYS}
@@ -548,8 +615,8 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
     gold = float(summary.get("gold_change") or 0.0)
     vix = summary.get("vix")
     vix_f = float(vix) if vix not in (None, "n/a") else 18.0
-    headline = str(summary.get("top_headline", "")).lower()
-    geo = any(k in headline for k in _GEO_KEYWORDS)
+    headline = _news_text_blob(summary) or str(summary.get("top_headline", "")).lower()
+    geo = any(k in headline for k in _GEO_KEYWORDS) or _news_theme_active(summary, "geopolitics")
 
     if oil >= 4.0 or (geo and oil > 0):
         deltas["nyse"] += 0.08 * conf
@@ -614,6 +681,8 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
             deltas["spy"] += 0.04 * conf
             deltas["vti_core"] -= 0.03 * conf
 
+    _apply_news_cap_deltas(deltas, summary, conf)
+
     max_delta = config.effective_thinking_max_sleeve_delta()
     return {k: round(max(-max_delta, min(max_delta, v)), 6) for k, v in deltas.items()}
 
@@ -662,6 +731,19 @@ def compute_cap_deltas(
 def _infer_asymmetry(summary: dict | None) -> str:
     if not summary:
         return "Macro reassessment — wait for clearer edge"
+    impact = _news_impact(summary)
+    if impact >= 0.4:
+        geo = _news_theme_active(summary, "geopolitics")
+        liq = _news_theme_active(summary, "liquidity")
+        tech = _news_theme_active(summary, "sector_tech")
+        if geo and liq:
+            return (
+                "Oil supply shock meets policy liquidity rhetoric — crowd split on risk-on vs hedges"
+            )
+        if geo and tech:
+            return (
+                "AI beta still crowded while geopolitical headlines rise — asymmetric de-risk vs chase"
+            )
     oil = float(summary.get("oil_change") or 0.0)
     gold = float(summary.get("gold_change") or 0.0)
     vix = summary.get("vix")
@@ -707,6 +789,11 @@ def _infer_tilt_rationale(
     alloc = "; ".join(parts) if parts else "balanced"
     if asymmetry:
         return f"Asymmetry ({asymmetry[:100]}) -> {alloc}"
+    impact = _news_impact(summary) if summary else 0.0
+    if impact >= 0.25 and summary:
+        theme = str(summary.get("news_theme_summary") or "")[:100]
+        narrative = _infer_narrative(summary)
+        return f"news_impact={impact:.2f} | {theme} | {narrative} -> {alloc}"
     narrative = _infer_narrative(summary)
     return f"{narrative} -> {alloc}"
 
@@ -839,6 +926,7 @@ def evaluate_live_apply_status(
         "approval_status": approval_status,
         "news_slot": cached.get("news_slot"),
         "news_summary": cached.get("news_summary"),
+        "news_impact_score": cached.get("news_impact_score"),
         "would_apply": False,
         "would_apply_label": "No",
         "block_reason": "",
@@ -1252,10 +1340,42 @@ def _finalize_thinking_result(
     return out
 
 
+def _infer_narrative_from_news(summary: dict) -> str:
+    impact = _news_impact(summary)
+    if impact < 0.35:
+        return ""
+    themes = summary.get("news_themes") or {}
+    phase = str(summary.get("ai_cycle_phase") or "")
+    geo = _news_theme_active(summary, "geopolitics")
+    liq = _news_theme_active(summary, "liquidity")
+    policy = _news_theme_active(summary, "policy")
+    energy = _news_theme_active(summary, "sector_energy")
+    tech = _news_theme_active(summary, "sector_tech")
+
+    if geo and (liq or policy):
+        return (
+            "Policy liquidity push into a geopolitical oil shock — barbell VTI/cash with energy overlay, trim beta"
+        )
+    if geo and energy:
+        return "Middle East supply risk dominates — energy up, AI beta vulnerable until vol clears"
+    if policy and tech and ("mid-cycle" in phase or "ai" in phase.lower()):
+        return (
+            "Policy/tariff headlines whipsaw AI boom — stay long winners but cut crowded beta size"
+        )
+    if liq and not geo:
+        return "Liquidity-friendly policy headline — modest risk-on but respect VTI core"
+    if geo:
+        return "Geopolitical headline risk — raise cash/VTI, add energy/metal hedges"
+    return ""
+
+
 def _infer_narrative(summary: dict | None) -> str:
     if not summary:
         return "Macro reassessment"
-    headline = str(summary.get("top_headline", "")).lower()
+    news_narrative = _infer_narrative_from_news(summary)
+    if news_narrative:
+        return news_narrative
+    headline = _news_text_blob(summary) or str(summary.get("top_headline", "")).lower()
     oil = float(summary.get("oil_change") or 0.0)
     gold = float(summary.get("gold_change") or 0.0)
     vix = summary.get("vix")
@@ -1419,6 +1539,11 @@ def derive_heuristic_tilt(summary: dict) -> dict[str, float]:
         tilt["spy"] -= 0.03
     if deltas.get("vti_core", 0) > 0.02:
         tilt["vti"] += 0.04
+    if _news_impact(summary) >= 0.35:
+        tilt["cash"] += 0.02
+        if _news_theme_active(summary, "geopolitics"):
+            tilt["energy"] += 0.03
+            tilt["spy"] = max(0.06, float(tilt.get("spy", 0.0)) - 0.03)
     return _normalize_tilt(tilt)
 
 
@@ -1495,6 +1620,8 @@ def build_heuristic_reasoning_result(
     reason: str = "heuristic-fallback",
 ) -> dict[str, Any]:
     """Rule-based tilt when Ollama is unavailable or all LLM attempts fail."""
+    news_impact = _news_impact(market_summary)
+    confidence = round(min(0.88, 0.70 + 0.18 * news_impact), 2) if news_impact >= 0.35 else 0.70
     base = {
         "reasoning": f"Rule-based fallback ({reason}): {_infer_narrative(market_summary)}",
         "narrative": _infer_narrative(market_summary),
@@ -1503,11 +1630,12 @@ def build_heuristic_reasoning_result(
         "opportunities": [],
         "justification": reason,
         "suggested_tilt": derive_heuristic_tilt(market_summary),
-        "confidence": 0.70,
+        "confidence": confidence,
         "model": reason,
         "source": "heuristic",
         "parse_quality": 0.0,
         "market_summary": market_summary,
+        "news_impact_score": news_impact,
     }
     return _finalize_thinking_result(base, market_summary, force_decision=True)
 
@@ -1546,6 +1674,8 @@ def _record_thinking_run(
         audit_fields["news_slot"] = news_slot
     if news_summary:
         audit_fields["news_summary"] = news_summary[:800]
+    if result.get("news_impact_score") is not None:
+        audit_fields["news_impact_score"] = result.get("news_impact_score")
     _audit_thinking("reasoning_complete", **audit_fields)
 
 
@@ -2036,7 +2166,12 @@ Top headline: {market_summary['top_headline']}
     "Scheduled news digest ("
     + str(market_summary.get("news_slot") or "scheduled")
     + "):\n"
-    + str(market_summary.get("news_headlines") or "")
+    + str(market_summary.get("news_digest") or market_summary.get("news_headlines") or "")
+    + "\nUse news_impact_score="
+    + f"{float(market_summary.get('news_impact_score') or 0.0):.2f}"
+    + " to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
+    + "AI/tech boom context: "
+    + str(market_summary.get("news_ai_tech_context") or market_summary.get("ai_cycle_phase", "n/a"))
     + "\n"
     if market_summary.get("news_headlines")
     else ""
@@ -2414,24 +2549,32 @@ def run_thinking_with_news(
     *,
     news_headlines: str | list,
     slot: str | None = None,
+    news_digest: dict | None = None,
     background: bool = False,
 ) -> dict | None:
     """Forced thinking refresh with scheduled news digest (paper only)."""
     if not config.effective_thinking_engine_enabled():
         return None
-    from modules.thinking_news import format_news_summary, normalize_news_headlines
+    from modules.thinking_news import format_news_digest, format_news_summary, normalize_news_headlines
 
     news_text = normalize_news_headlines(news_headlines)
-    news_summary = format_news_summary(news_text, slot=slot)
+    if news_digest:
+        news_summary = format_news_digest(news_digest)
+        news_impact = float(news_digest.get("news_impact_score") or 0.0)
+    else:
+        news_summary = format_news_summary(news_text, slot=slot)
+        news_impact = 0.0
     logger.info(
-        "Thinking engine: scheduled news run slot=%s headlines=%d",
+        "Thinking engine: scheduled news run slot=%s headlines=%d impact=%.2f",
         slot or "manual",
         len(news_text.splitlines()) if news_text else 0,
+        news_impact,
     )
     _audit_thinking(
         "scheduled_news_start",
         news_slot=slot,
         news_summary=news_summary[:800],
+        news_impact_score=news_impact,
     )
 
     summary = build_market_summary(
@@ -2454,6 +2597,9 @@ def run_thinking_with_news(
             result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-no-ollama")
         result["news_slot"] = slot
         result["news_summary"] = news_summary
+        result["news_impact_score"] = float(
+            news_digest.get("news_impact_score") if news_digest else summary.get("news_impact_score") or 0.0
+        )
         _record_thinking_run(
             regime,
             result,
@@ -2468,6 +2614,7 @@ def run_thinking_with_news(
             confidence=result.get("confidence"),
             narrative=(str(result.get("narrative") or "")[:160]),
             suggested_tilt=result.get("suggested_tilt"),
+            news_impact_score=result.get("news_impact_score"),
         )
         return result
 

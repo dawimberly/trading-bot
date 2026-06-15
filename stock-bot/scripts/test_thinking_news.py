@@ -8,7 +8,6 @@ Run:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -27,7 +26,7 @@ from modules.thinking_engine import (
     get_market_reasoning,
     ollama_available,
 )
-from modules.thinking_news import format_news_summary, get_news_for_thinking
+from modules.thinking_news import analyze_news_headlines, build_news_digest, format_news_digest
 
 SAMPLE_HEADLINES = [
     "Trump to flood the market with strategic oil reserves amid Middle East tensions",
@@ -44,6 +43,12 @@ def _latest_window(data):
     return window, regime, vol
 
 
+def _print_news_analysis(digest: dict) -> None:
+    print(f"news_impact_score: {float(digest.get('news_impact_score') or 0.0):.2f}")
+    print(f"Themes:         {digest.get('theme_summary', 'n/a')}")
+    print(f"AI/tech lens:   {digest.get('ai_tech_context', 'n/a')}")
+
+
 def _print_tilt_comparison(label: str, base_caps: dict, result: dict) -> None:
     merged, deltas, log_line = apply_thinking_tilt_to_caps(
         base_caps,
@@ -53,14 +58,18 @@ def _print_tilt_comparison(label: str, base_caps: dict, result: dict) -> None:
     )
     material = {k: round(v, 4) for k, v in deltas.items() if abs(v) > 0.001}
     print(f"\n--- {label} ---")
-    print(f"Narrative:   {result.get('narrative', 'n/a')}")
-    print(f"Asymmetry:   {result.get('asymmetry', 'n/a')}")
-    print(f"Tilt:        {format_recommended_tilt(result.get('suggested_tilt'))}")
-    print(f"Confidence:  {float(result.get('confidence', 0)):.0%}")
+    print(f"Narrative:       {result.get('narrative', 'n/a')}")
+    print(f"Asymmetry:       {result.get('asymmetry', 'n/a')}")
+    print(f"Tilt rationale:  {result.get('tilt_rationale', 'n/a')}")
+    print(f"Tilt:            {format_recommended_tilt(result.get('suggested_tilt'))}")
+    print(f"Confidence:      {float(result.get('confidence', 0)):.0%}")
+    impact = result.get("news_impact_score")
+    if impact is not None:
+        print(f"News impact:     {float(impact):.2f}")
     if material:
-        print(f"Cap deltas:  {material}")
+        print(f"Cap deltas:      {material}")
     else:
-        print(f"Apply log:   {log_line or 'no material change'}")
+        print(f"Apply log:       {log_line or 'no material change'}")
 
 
 def main() -> int:
@@ -94,15 +103,16 @@ def main() -> int:
     window, regime, vol = _latest_window(data)
     base_caps = dict(config.fund_allocation_pct())
 
-    if args.sample_trump:
-        news_text = "\n".join(SAMPLE_HEADLINES)
-    elif args.live_rss:
-        news_text = get_news_for_thinking()
+    if args.live_rss:
+        from modules.thinking_news import get_news_digest_for_thinking
+
+        digest = get_news_digest_for_thinking(slot="premarket")
     else:
-        news_text = "\n".join(SAMPLE_HEADLINES)
+        digest = build_news_digest(SAMPLE_HEADLINES, slot="premarket")
 
     print("=== THINKING NEWS TEST (paper only) ===", flush=True)
-    print(format_news_summary(news_text, slot="premarket"))
+    print(format_news_digest(digest))
+    _print_news_analysis(digest)
     print(f"Regime: {regime} | Vol: {vol}")
 
     baseline_summary = build_market_summary(window, regime, vol)
@@ -113,7 +123,7 @@ def main() -> int:
         window,
         regime,
         vol,
-        news_headlines=news_text,
+        news_headlines=digest.get("headlines") or SAMPLE_HEADLINES,
         news_slot="premarket",
     )
     with_news = build_heuristic_reasoning_result(news_summary_obj, reason="news-heuristic")

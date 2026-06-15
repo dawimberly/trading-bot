@@ -261,6 +261,9 @@ def _thinking_engine_monitor_lines(live_equity: float | None = None) -> list[str
     news_slot = mon.get("news_slot")
     if news_slot:
         lines.append(f"News slot:          {news_slot}")
+        impact = mon.get("news_impact_score")
+        if impact is not None:
+            lines.append(f"News impact:        {float(impact):.2f}")
         ns = str(mon.get("news_summary") or "")[:140]
         if ns:
             lines.append(f"News digest:        {ns}")

@@ -70,6 +70,213 @@ def normalize_news_headlines(news_headlines: str | list | None) -> str:
     return "\n".join(lines[:12])
 
 
+_THEME_PATTERNS: dict[str, tuple[str, ...]] = {
+    "policy": (
+        "trump",
+        "tariff",
+        "fed",
+        "federal reserve",
+        "fomc",
+        "fiscal",
+        "policy",
+        "white house",
+        "treasury",
+        "rate cut",
+        "rate hike",
+        "inflation",
+    ),
+    "liquidity": (
+        "flood the market",
+        "flood market",
+        "liquidity",
+        "stimulus",
+        "injection",
+        "ease",
+        "easing",
+        "dovish",
+        "strategic petroleum",
+        "spr release",
+        "reserve release",
+        "qe",
+    ),
+    "geopolitics": (
+        "iran",
+        "israel",
+        "middle east",
+        "hormuz",
+        "war",
+        "sanctions",
+        "geopolitical",
+        "missile",
+        "ukraine",
+        "taiwan",
+    ),
+    "sector_energy": (
+        "oil",
+        "energy",
+        "opec",
+        "gasoline",
+        "crude",
+        "hormuz",
+        "xle",
+    ),
+    "sector_tech": (
+        "ai",
+        "nvidia",
+        "semiconductor",
+        "tech",
+        "software",
+        "datacenter",
+        "cloud",
+        "small-cap",
+        "qqq",
+        "magnificent",
+    ),
+    "sector_financials": (
+        "bank",
+        "financial",
+        "credit",
+        "yields",
+        "bond",
+        "treasury yield",
+    ),
+}
+
+
+def _headline_lines(news_headlines: str | list | None) -> list[str]:
+    text = normalize_news_headlines(news_headlines)
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def analyze_news_headlines(
+    news_headlines: str | list | None,
+    *,
+    ai_cycle_phase: str | None = None,
+) -> dict[str, Any]:
+    """Extract themes + news_impact_score (0-1) from headline text."""
+    lines = _headline_lines(news_headlines)
+    combined = " ".join(lines).lower()
+    themes: dict[str, dict[str, Any]] = {}
+    for key, patterns in _THEME_PATTERNS.items():
+        matched = [p for p in patterns if p in combined]
+        themes[key] = {
+            "active": bool(matched),
+            "signals": matched[:4],
+            "weight": min(1.0, len(matched) * 0.25),
+        }
+
+    impact = 0.0
+    if lines:
+        impact += min(0.25, 0.08 * len(lines))
+    for key in ("geopolitics", "policy", "liquidity"):
+        if themes[key]["active"]:
+            impact += 0.18 * float(themes[key]["weight"])
+    for key in ("sector_energy", "sector_tech", "sector_financials"):
+        if themes[key]["active"]:
+            impact += 0.10 * float(themes[key]["weight"])
+    if themes["geopolitics"]["active"] and themes["liquidity"]["active"]:
+        impact += 0.12
+    if themes["policy"]["active"] and themes["sector_tech"]["active"]:
+        impact += 0.08
+    impact = round(min(1.0, impact), 2)
+
+    theme_labels = {
+        "policy": "Policy / rates / tariffs",
+        "liquidity": "Liquidity / stimulus rhetoric",
+        "geopolitics": "Geopolitics / supply shock",
+        "sector_energy": "Energy / oil sector",
+        "sector_tech": "AI / tech / semis",
+        "sector_financials": "Financials / rates channel",
+    }
+    active_bits = [
+        f"{theme_labels[k]} ({', '.join(themes[k]['signals'][:2])})"
+        for k in theme_labels
+        if themes[k]["active"]
+    ]
+    theme_summary = " | ".join(active_bits) if active_bits else "No dominant headline theme"
+
+    phase = str(ai_cycle_phase or "unknown")
+    ai_tech_context = _ai_tech_boom_context(phase, themes, combined)
+
+    digest_lines = [
+        f"news_impact_score: {impact:.2f} (0=ignore, 1=strong tilt evidence)",
+        f"Themes: {theme_summary}",
+        f"AI/tech boom lens: {ai_tech_context}",
+        "Headlines:",
+    ]
+    digest_lines.extend(f"- {ln}" for ln in lines[:8])
+    digest_text = "\n".join(digest_lines)
+
+    return {
+        "headlines": lines,
+        "themes": themes,
+        "theme_summary": theme_summary,
+        "news_impact_score": impact,
+        "ai_tech_context": ai_tech_context,
+        "digest_text": digest_text,
+    }
+
+
+def _ai_tech_boom_context(phase: str, themes: dict, combined: str) -> str:
+    tech_news = themes.get("sector_tech", {}).get("active")
+    geo = themes.get("geopolitics", {}).get("active")
+    policy = themes.get("policy", {}).get("active")
+    if "mid-cycle" in phase or "ai" in phase.lower():
+        if tech_news and policy:
+            return (
+                "AI/datacenter cycle still leading index gains, but policy/tariff headlines "
+                "can whipsaw crowded semis — favor winners, don't chase laggards"
+            )
+        if tech_news and geo:
+            return (
+                "AI boom intact in price action, but geopolitical/oil shock threatens "
+                "multiple expansion — trim beta, keep VTI core"
+            )
+        if tech_news:
+            return "AI/tech leadership phase — headline flow supports selective SPY/semi tilt vs passive VTI"
+    if geo and "small-cap" in combined:
+        return "Risk-off geopolitics + small-cap beta warnings — de-risk crowded AI laggards"
+    if policy and "tariff" in combined:
+        return "Tariff/policy overhang on global supply chains — balance VTI anchor vs active sleeves"
+    return f"Cycle phase {phase} — weigh headlines against VTI benchmark, avoid crowded chase"
+
+
+def build_news_digest(
+    news_headlines: str | list | None,
+    *,
+    slot: str | None = None,
+    ai_cycle_phase: str | None = None,
+) -> dict[str, Any]:
+    analysis = analyze_news_headlines(news_headlines, ai_cycle_phase=ai_cycle_phase)
+    label = SLOT_LABELS.get(slot or "", slot or "manual")
+    analysis["slot"] = slot
+    analysis["formatted"] = f"[{label}]\n{analysis['digest_text']}"
+    return analysis
+
+
+def get_news_digest_for_thinking(
+    *,
+    max_items: int = 8,
+    ai_cycle_phase: str | None = None,
+    slot: str | None = None,
+) -> dict[str, Any]:
+    """RSS + manual headlines with theme analysis for Thinking Engine."""
+    manual = _manual_headlines()
+    fetched = fetch_market_headlines(max_items=max_items)
+    lines: list[str] = []
+    seen: set[str] = set()
+    for item in manual + fetched:
+        title = str(item.get("title") if isinstance(item, dict) else item).strip()
+        key = title.lower()
+        if not title or key in seen:
+            continue
+        seen.add(key)
+        lines.append(title)
+        if len(lines) >= max_items:
+            break
+    return build_news_digest(lines, slot=slot, ai_cycle_phase=ai_cycle_phase)
+
+
 def _manual_headlines() -> list[str]:
     env = os.getenv("THINKING_NEWS_MANUAL", "").strip()
     if env:
@@ -151,30 +358,19 @@ def fetch_market_headlines(*, max_items: int = 8, timeout: float = 8.0) -> list[
 
 
 def get_news_for_thinking(*, max_items: int = 8) -> str:
-    """RSS headlines + optional manual lines for the thinking prompt."""
-    manual = _manual_headlines()
-    fetched = fetch_market_headlines(max_items=max_items)
-    lines: list[str] = []
-    seen: set[str] = set()
-    for item in manual + fetched:
-        if isinstance(item, dict):
-            title = str(item.get("title") or "").strip()
-        else:
-            title = str(item).strip()
-        key = title.lower()
-        if not title or key in seen:
-            continue
-        seen.add(key)
-        lines.append(title)
-        if len(lines) >= max_items:
-            break
-    return normalize_news_headlines(lines)
+    """RSS headlines + optional manual lines (plain text)."""
+    digest = get_news_digest_for_thinking(max_items=max_items)
+    return normalize_news_headlines(digest.get("headlines"))
 
 
 def format_news_summary(news_text: str, *, slot: str | None = None) -> str:
     label = SLOT_LABELS.get(slot or "", slot or "manual")
     body = news_text.strip() or "(no headlines fetched — add thinking_news_manual.txt or THINKING_NEWS_MANUAL)"
     return f"[{label}]\n{body}"
+
+
+def format_news_digest(digest: dict[str, Any]) -> str:
+    return str(digest.get("formatted") or format_news_summary("", slot=digest.get("slot")))
 
 
 def _schedule_state() -> dict:
@@ -264,13 +460,14 @@ def maybe_run_scheduled_news_thinking(
         try:
             from modules.thinking_engine import run_thinking_with_news
 
-            news_text = get_news_for_thinking()
+            digest = get_news_digest_for_thinking(slot=slot)
             run_thinking_with_news(
                 data,
                 regime,
                 vol,
                 wisdom=wisdom,
-                news_headlines=news_text,
+                news_headlines=digest.get("headlines") or [],
+                news_digest=digest,
                 slot=slot,
                 background=False,
             )
