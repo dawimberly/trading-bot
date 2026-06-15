@@ -789,6 +789,122 @@ def get_thinking_status_snapshot() -> dict[str, object]:
     }
 
 
+def format_recommended_tilt(tilt: dict | None) -> str:
+    """One-line summary of suggested_tilt weights."""
+    if not tilt:
+        return "n/a"
+    items = sorted((tilt or {}).items(), key=lambda kv: float(kv[1]), reverse=True)
+    return " | ".join(f"{k} {float(v):.0%}" for k, v in items[:6])
+
+
+def evaluate_live_apply_status(
+    thinking_result: dict | None = None,
+    *,
+    equity: float | None = None,
+) -> dict[str, object]:
+    """Preview whether the latest decision would apply on live under production safety rules."""
+    cached = dict(thinking_result or read_json_file(OUTPUT_FILE) or {})
+    conf_raw = cached.get("confidence")
+    conf = float(conf_raw) if conf_raw is not None else None
+    val_score = cached.get("validation_score")
+
+    if config.thinking_manual_approval_required():
+        if cached and is_thinking_tilt_approved(cached):
+            approval_status = "APPROVED"
+        elif cached.get("decision_id"):
+            approval_status = f"PENDING (decision {cached.get('decision_id')})"
+        else:
+            approval_status = "PENDING (no decision_id)"
+    else:
+        approval_status = "Not required"
+
+    out: dict[str, object] = {
+        "timestamp": cached.get("timestamp"),
+        "regime": cached.get("regime"),
+        "narrative": str(cached.get("narrative") or "n/a").strip() or "n/a",
+        "asymmetry": str(cached.get("asymmetry") or "n/a").strip() or "n/a",
+        "recommended_tilt": format_recommended_tilt(cached.get("suggested_tilt")),
+        "confidence": conf,
+        "confidence_pct": f"{conf:.0%}" if conf is not None else "n/a",
+        "validation_score": val_score,
+        "validation_label": str(val_score) if val_score is not None else "n/a",
+        "approval_status": approval_status,
+        "would_apply": False,
+        "would_apply_label": "No",
+        "block_reason": "",
+    }
+
+    if not cached.get("timestamp"):
+        out["block_reason"] = "No thinking_engine_last.json decision yet"
+        return out
+
+    blockers: list[str] = []
+
+    live_book = not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING
+    if live_book or (not config.PAPER_TRADING and not config.paper_only_sleeves_active()):
+        blockers.append("thinking engine disabled on live profile (locked off)")
+
+    tripped, trip_reason = thinking_daily_loss_tripped(equity)
+    if tripped:
+        blockers.append(trip_reason)
+
+    if config.thinking_manual_approval_required() and not is_thinking_tilt_approved(cached):
+        blockers.append("manual approval required")
+
+    narrative = str(cached.get("narrative") or "").strip()
+    asymmetry = str(cached.get("asymmetry") or "").strip()
+    min_conf = 0.60 if asymmetry else 0.65
+    narrative_ok = (
+        len(narrative) >= 15
+        and (
+            (conf or 0) >= 0.75
+            or bool(asymmetry)
+            or (len(narrative) >= 20 and "range-bound" not in narrative.lower())
+        )
+    )
+    if conf is None or conf < min_conf or not narrative_ok:
+        blockers.append("insufficient confidence or weak narrative")
+
+    if cached.get("validation_ok") is False and not cached.get("validation_recovered"):
+        errs = cached.get("validation_errors") or []
+        detail = f": {errs[0]}" if errs else ""
+        blockers.append(f"validation failed{detail}")
+
+    base_caps = dict(config.fund_allocation_pct())
+    if equity is not None:
+        if float(equity) < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
+            base_caps["vti_core"] = config.SMALL_ACCOUNT_VTI_CORE_PCT
+        else:
+            base_caps["vti_core"] = config.vti_core_allocation_pct(float(equity))
+
+    _merged, deltas, log_line = apply_thinking_tilt_to_caps(
+        base_caps,
+        cached.get("suggested_tilt") or {},
+        confidence=float(conf or 0.65),
+        market_summary=cached.get("market_summary"),
+        equity=equity,
+        max_sleeve_delta=config.LIVE_THINKING_MAX_SLEEVE_DELTA,
+        allow_small_account=True,
+    )
+    material = {k: v for k, v in deltas.items() if abs(float(v)) >= 0.001}
+    if not material:
+        if log_line:
+            blockers.append(log_line.replace("Thinking blocked: ", "").strip())
+        else:
+            blockers.append("tilt produced no material cap change")
+
+    if blockers:
+        out["would_apply"] = False
+        out["would_apply_label"] = "No"
+        out["block_reason"] = blockers[0] if len(blockers) == 1 else "; ".join(blockers[:4])
+    else:
+        out["would_apply"] = True
+        out["would_apply_label"] = "Yes"
+        out["block_reason"] = "Passes all live safety checks"
+
+    return out
+
+
 def _load_previous_tilt_full() -> dict | None:
     cached = read_json_file(OUTPUT_FILE)
     if not cached:

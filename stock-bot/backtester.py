@@ -372,16 +372,18 @@ class BacktestExecutor:
                 return _Pos(sym, qty, float(price) if price is not None else 0.0)
         return None
 
-    def execute_full_exit(self, symbol):
+    def execute_full_exit(self, symbol, **kwargs):
         pos = self._find_position(symbol)
         if pos is None or pos.qty <= 0:
             return None
         price = self.prices.get(pos.symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None
-        return self.execute_order(pos.symbol, "sell", notional=round(pos.qty * price, 2))
+        return self.execute_order(
+            pos.symbol, "sell", notional=round(pos.qty * price, 2), **kwargs
+        )
 
-    def execute_order(self, symbol, side, notional=None, reduce_only=False):
+    def execute_order(self, symbol, side, notional=None, reduce_only=False, **kwargs):
         price = self.prices.get(symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None

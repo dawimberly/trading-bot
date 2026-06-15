@@ -36,6 +36,27 @@ def main():
     tg_ok = alerts.send_telegram(f"{subject}\n\n{body}") if tg else None
     email_ok = alerts.send_email(subject, body) if smtp.get("host") and smtp.get("to") else None
 
+    trade_ok = None
+    if tg:
+        from modules.trade_notifier import send_trade_notification
+
+        trade_ok = send_trade_notification(
+            {
+                "symbol": "SPY",
+                "side": "Buy",
+                "quantity": 0.01,
+                "price": 550.25,
+                "notional": 5.50,
+                "sleeve": "SPY",
+                "reason": "test_alert",
+                "account_type": "Paper" if config.PAPER_TRADING else "Live",
+            }
+        )
+        if trade_ok:
+            print("[OK] Trade fill notification test sent")
+        else:
+            print("[!!] Trade fill notification test failed")
+
     if tg and not tg_ok:
         print("\nTelegram failed. Fix TELEGRAM_CHAT_ID (see get_telegram_chat_id.py).")
         sys.exit(1)

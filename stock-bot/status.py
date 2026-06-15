@@ -229,6 +229,45 @@ def _thinking_effective_label() -> str:
     return "OFF (start paper bot with PAPER_CHASE_MODE)"
 
 
+def _thinking_engine_monitor_lines(live_equity: float | None = None) -> list[str]:
+    """Latest Thinking Engine decision + live apply preview."""
+    try:
+        from modules.thinking_engine import evaluate_live_apply_status
+
+        mon = evaluate_live_apply_status(equity=live_equity)
+    except Exception as exc:
+        return [f"Thinking Engine Monitor: unavailable ({exc})"]
+
+    lines = ["=== Thinking Engine Monitor ==="]
+    ts = mon.get("timestamp")
+    regime = mon.get("regime") or "n/a"
+    if ts:
+        lines.append(f"Last decision: {str(ts)[:19]} | regime {regime}")
+    else:
+        lines.append("Last decision: none (run paper bot or scripts/test_thinking_engine.py)")
+        lines.append("Would apply on live: No — no decision on file")
+        return lines
+
+    narrative = str(mon.get("narrative") or "n/a")
+    asymmetry = str(mon.get("asymmetry") or "n/a")
+    lines.append(f"Narrative:          {narrative[:140]}")
+    lines.append(f"Asymmetry:          {asymmetry[:140]}")
+    lines.append(f"Recommended tilt:   {mon.get('recommended_tilt', 'n/a')}")
+    lines.append(
+        f"Confidence:         {mon.get('confidence_pct', 'n/a')} | "
+        f"Validation: {mon.get('validation_label', 'n/a')}"
+    )
+    lines.append(f"Approval status:    {mon.get('approval_status', 'n/a')}")
+    apply_label = mon.get("would_apply_label", "No")
+    reason = str(mon.get("block_reason") or "").strip()
+    if apply_label == "Yes":
+        lines.append(f"Would apply on live: Yes — {reason}")
+    else:
+        lines.append(f"Would apply on live: No — {reason}")
+    lines.append("Audit: thinking_engine_last.json | logs/thinking_engine.log")
+    return lines
+
+
 def _thinking_status_lines() -> list[str]:
     try:
         from modules.thinking_engine import get_thinking_status_snapshot
@@ -360,7 +399,11 @@ def main() -> None:
     _emit(f"      heartbeat: {_heartbeat_ts(paper_hb)}")
     _emit()
 
-    _emit("THINKING")
+    for line in _thinking_engine_monitor_lines(live_eq):
+        _emit(line)
+    _emit()
+
+    _emit("THINKING (engine env)")
     for line in _thinking_status_lines():
         _emit(f"  {line}")
     _emit()

@@ -535,7 +535,9 @@ def run_crypto_strategy(
         trade_notional = intent.get("notional")
         if side == "buy" and trade_notional is None:
             continue
-        order = executor.execute_order(t1, side, notional=trade_notional)
+        order = executor.execute_order(
+            t1, side, notional=trade_notional, reason=pair_key, sleeve="Crypto"
+        )
         if not _count_if_filled(executor, order, max_wait=3.0):
             continue
         pair_cooldown[pair_key] = now
@@ -910,13 +912,15 @@ def run_spy_exits(
         if position_below_cost(executor, symbol):
             return 0
 
+    pair_key = f"{symbol}/MA{ma_window}"
     if hasattr(executor, "execute_full_exit"):
-        order = executor.execute_full_exit(symbol)
+        order = executor.execute_full_exit(symbol, reason=pair_key, sleeve="SPY")
     else:
-        order = executor.execute_order(symbol, "sell", reduce_only=True)
+        order = executor.execute_order(
+            symbol, "sell", reduce_only=True, reason=pair_key, sleeve="SPY"
+        )
     if not _count_if_filled(executor, order):
         return 0
-    pair_key = f"{symbol}/MA{ma_window}"
     if log_fn:
         notional = ""
         if isinstance(order, dict):
@@ -966,7 +970,9 @@ def run_spy_strategy(
         notional = executor.compute_spy_notional()
         if notional is None:
             return 0
-    order = executor.execute_order(symbol, "buy", notional=notional)
+    order = executor.execute_order(
+        symbol, "buy", notional=notional, reason=pair_key, sleeve="SPY"
+    )
     if not _count_if_filled(executor, order):
         return 0
     pair_cooldown[pair_key] = now
@@ -1033,7 +1039,9 @@ def run_equity_strategy(
                 notional = round(float(notional) * vol_scale, 2)
                 if notional < min_n:
                     continue
-        order = executor.execute_order(symbol, "buy", notional=notional)
+        order = executor.execute_order(
+            symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
+        )
         if not _count_if_filled(executor, order):
             continue
         pair_cooldown[pair_key] = now
