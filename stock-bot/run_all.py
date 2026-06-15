@@ -1331,10 +1331,22 @@ def _confirm_live_trading_startup(equity: float) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="24/7 integrated fund trading loop")
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=0,
+        help="Exit after N main-loop cycles (0 = run forever)",
+    )
+    cli_args = parser.parse_args()
+
     install_safe_stdout()
     from pathlib import Path
 
     setup_logging(log_dir=Path("logs"))
+    config.ensure_sentiment_dirs()
     try:
         config.validate_alpaca_config()
     except ValueError as exc:
@@ -1354,12 +1366,17 @@ if __name__ == "__main__":
     if startup_equity is not None:
         _confirm_live_trading_startup(startup_equity)
     trade_journal.log_event("startup", notes="run_all.py started")
+    cycle_count = 0
     while True:
         try:
             main()
         except AlpacaAuthError as e:
             log_event("alpaca_auth_failure", error=str(e))
-            logger.critical("Alpaca authentication failed: %s", e)
+            logger.critical(
+                "Alpaca authentication failed: %s — verify APCA_API_KEY_ID / "
+                "APCA_API_SECRET_KEY in .env (paper keys when PAPER_TRADING=true)",
+                e,
+            )
             trade_journal.log_event("error", notes=f"Alpaca auth failure: {e}")
             sys.exit(1)
         except AlpacaCriticalError as e:
@@ -1375,4 +1392,8 @@ if __name__ == "__main__":
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
+        cycle_count += 1
+        if cli_args.cycles and cycle_count >= cli_args.cycles:
+            logger.info("Completed %s cycle(s); exiting (--cycles)", cli_args.cycles)
+            break
         time.sleep(cycle_sleep_seconds(_last_cycle_schedule))

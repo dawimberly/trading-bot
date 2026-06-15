@@ -51,7 +51,11 @@ def _load_table_close(conn: sqlite3.Connection, table: str) -> pd.Series | None:
     )
     if df.empty or "Date" not in df.columns:
         return None
-    return pd.to_numeric(df.set_index("Date")["Close"], errors="coerce")
+    series = pd.to_numeric(df.set_index("Date")["Close"], errors="coerce")
+    series.index = pd.to_datetime(series.index, utc=True, errors="coerce")
+    if getattr(series.index, "tz", None) is not None:
+        series.index = series.index.tz_convert(None)
+    return series
 
 
 def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=False):
@@ -98,7 +102,9 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
     conn.close()
     data = pd.DataFrame(columns) if columns else pd.DataFrame()
     if not data.empty:
-        data.index = pd.to_datetime(data.index, errors="coerce")
+        data.index = pd.to_datetime(data.index, utc=True, errors="coerce")
+        if getattr(data.index, "tz", None) is not None:
+            data.index = data.index.tz_convert(None)
         if data.index.duplicated().any():
             data = data[~data.index.duplicated(keep="last")]
         data = data.sort_index().ffill().dropna(how="all")
