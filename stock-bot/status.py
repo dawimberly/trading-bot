@@ -258,6 +258,12 @@ def _thinking_engine_monitor_lines(live_equity: float | None = None) -> list[str
         f"Validation: {mon.get('validation_label', 'n/a')}"
     )
     lines.append(f"Approval status:    {mon.get('approval_status', 'n/a')}")
+    news_slot = mon.get("news_slot")
+    if news_slot:
+        lines.append(f"News slot:          {news_slot}")
+        ns = str(mon.get("news_summary") or "")[:140]
+        if ns:
+            lines.append(f"News digest:        {ns}")
     apply_label = mon.get("would_apply_label", "No")
     reason = str(mon.get("block_reason") or "").strip()
     if apply_label == "Yes":
@@ -305,6 +311,12 @@ def _thinking_status_lines() -> list[str]:
                     f"  Live tilt: PENDING approval (decision {did}) - "
                     "run scripts/approve_thinking_tilt.py --show"
                 )
+        cached = _load_json(ROOT / config.THINKING_ENGINE_OUTPUT_FILE)
+        if cached and cached.get("news_slot"):
+            lines.append(f"  Last news slot: {cached.get('news_slot')}")
+            ns = str(cached.get("news_summary") or "")[:120]
+            if ns:
+                lines.append(f"  News digest: {ns}")
     else:
         lines.append("Last run: none (thinking_engine_last.json not found)")
 

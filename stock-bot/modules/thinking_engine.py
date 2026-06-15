@@ -408,10 +408,13 @@ def build_market_summary(
     *,
     wisdom: dict | None = None,
     top_headline: str | None = None,
+    news_headlines: str | list | None = None,
+    news_slot: str | None = None,
     base_caps: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Assemble context for the PM-style reasoning prompt."""
     from modules.pipeline_strategies import _spy_market_up_signal
+    from modules.thinking_news import normalize_news_headlines
 
     macro_cache: dict = {}
     spy_sym = config.SPY_BOT_SYMBOL
@@ -442,7 +445,10 @@ def build_market_summary(
         macro_sentiment += f", price={price:+.2f}"
 
     headline = top_headline or (wisdom or {}).get("felix_video_title") or "n/a"
-    if headline == "n/a":
+    news_text = normalize_news_headlines(news_headlines)
+    if news_text:
+        headline = news_text.split("\n", 1)[0][:240]
+    elif headline == "n/a":
         try:
             from modules.web_sentiment_live import get_live_web_sentiment
 
@@ -461,6 +467,8 @@ def build_market_summary(
         "gold_change": _pct_change(gold_series) if not gold_series.empty else 0.0,
         "macro_sentiment": macro_sentiment,
         "top_headline": str(headline)[:240],
+        "news_headlines": news_text,
+        "news_slot": news_slot,
         "regime": regime,
         "bot_exposure": bot_exposure,
         "bot_exposure_str": _format_bot_exposure(caps),
@@ -829,6 +837,8 @@ def evaluate_live_apply_status(
         "validation_score": val_score,
         "validation_label": str(val_score) if val_score is not None else "n/a",
         "approval_status": approval_status,
+        "news_slot": cached.get("news_slot"),
+        "news_summary": cached.get("news_summary"),
         "would_apply": False,
         "would_apply_label": "No",
         "block_reason": "",
@@ -1252,6 +1262,8 @@ def _infer_narrative(summary: dict | None) -> str:
     vix_f = float(vix) if vix not in (None, "n/a") else 0.0
     if any(k in headline for k in _GEO_KEYWORDS):
         return "Geopolitical tension / Middle East risk"
+    if "flood" in headline and "market" in headline:
+        return "Policy liquidity headline — reassess risk-on vs supply shock"
     if oil >= config.MACRO_OIL_SURGE_PCT * 100 * 0.5:
         return "Oil shock / energy stress"
     if gold >= config.MACRO_GLD_SURGE_PCT * 100:
@@ -1500,7 +1512,13 @@ def build_heuristic_reasoning_result(
     return _finalize_thinking_result(base, market_summary, force_decision=True)
 
 
-def _record_thinking_run(regime: str, result: dict) -> None:
+def _record_thinking_run(
+    regime: str,
+    result: dict,
+    *,
+    news_summary: str | None = None,
+    news_slot: str | None = None,
+) -> None:
     now = datetime.datetime.now().isoformat()
     write_json_file(
         STATE_FILE,
@@ -1510,19 +1528,25 @@ def _record_thinking_run(regime: str, result: dict) -> None:
             "last_run_at": now,
             "model": result.get("model", config.OLLAMA_MODEL),
             "source": result.get("source", "llm"),
+            "last_news_slot": news_slot,
         },
     )
     persist_thinking_last(result, regime=regime)
-    _audit_thinking(
-        "reasoning_complete",
-        regime=regime,
-        source=result.get("source"),
-        model=result.get("model"),
-        confidence=result.get("confidence"),
-        validation_ok=result.get("validation_ok"),
-        validation_score=result.get("validation_score"),
-        narrative=(str(result.get("narrative") or "")[:160]),
-    )
+    audit_fields: dict[str, Any] = {
+        "regime": regime,
+        "source": result.get("source"),
+        "model": result.get("model"),
+        "confidence": result.get("confidence"),
+        "validation_ok": result.get("validation_ok"),
+        "validation_score": result.get("validation_score"),
+        "narrative": (str(result.get("narrative") or "")[:160]),
+        "suggested_tilt": result.get("suggested_tilt"),
+    }
+    if news_slot:
+        audit_fields["news_slot"] = news_slot
+    if news_summary:
+        audit_fields["news_summary"] = news_summary[:800]
+    _audit_thinking("reasoning_complete", **audit_fields)
 
 
 def ollama_available() -> bool:
@@ -2008,6 +2032,15 @@ Yield curve / rates: {market_summary.get('yield_curve', 'n/a')}
 Regime: {market_summary.get('regime', 'unknown')}
 Macro sentiment: {market_summary['macro_sentiment']}
 Top headline: {market_summary['top_headline']}
+{(
+    "Scheduled news digest ("
+    + str(market_summary.get("news_slot") or "scheduled")
+    + "):\n"
+    + str(market_summary.get("news_headlines") or "")
+    + "\n"
+    if market_summary.get("news_headlines")
+    else ""
+)}
 Bot exposure: {market_summary.get('bot_exposure_str', 'n/a')}
 
 Previous day tilt: {prev_line}
@@ -2373,6 +2406,83 @@ def build_demo_reasoning_samples() -> list[dict[str, Any]]:
     return scenarios
 
 
+def run_thinking_with_news(
+    data,
+    regime: str,
+    vol: str,
+    wisdom: dict | None = None,
+    *,
+    news_headlines: str | list,
+    slot: str | None = None,
+    background: bool = False,
+) -> dict | None:
+    """Forced thinking refresh with scheduled news digest (paper only)."""
+    if not config.effective_thinking_engine_enabled():
+        return None
+    from modules.thinking_news import format_news_summary, normalize_news_headlines
+
+    news_text = normalize_news_headlines(news_headlines)
+    news_summary = format_news_summary(news_text, slot=slot)
+    logger.info(
+        "Thinking engine: scheduled news run slot=%s headlines=%d",
+        slot or "manual",
+        len(news_text.splitlines()) if news_text else 0,
+    )
+    _audit_thinking(
+        "scheduled_news_start",
+        news_slot=slot,
+        news_summary=news_summary[:800],
+    )
+
+    summary = build_market_summary(
+        data,
+        regime,
+        vol,
+        wisdom=wisdom,
+        news_headlines=news_text,
+        news_slot=slot,
+    )
+
+    def _execute() -> dict:
+        if ollama_available():
+            try:
+                result = get_market_reasoning(summary)
+            except Exception:
+                logger.exception("Thinking engine: scheduled news LLM failed; heuristic fallback")
+                result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-llm-error")
+        else:
+            result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-no-ollama")
+        result["news_slot"] = slot
+        result["news_summary"] = news_summary
+        _record_thinking_run(
+            regime,
+            result,
+            news_summary=news_summary,
+            news_slot=slot,
+        )
+        log_thinking_result(result)
+        _audit_thinking(
+            "scheduled_news_complete",
+            news_slot=slot,
+            source=result.get("source"),
+            confidence=result.get("confidence"),
+            narrative=(str(result.get("narrative") or "")[:160]),
+            suggested_tilt=result.get("suggested_tilt"),
+        )
+        return result
+
+    if background:
+        threading.Thread(
+            target=_execute,
+            name=f"thinking-news-sync-{slot or 'manual'}",
+            daemon=True,
+        ).start()
+        cached = read_json_file(OUTPUT_FILE)
+        return cached
+
+    return _execute()
+
+
 def maybe_run_thinking(
     data,
     regime: str,
@@ -2380,6 +2490,8 @@ def maybe_run_thinking(
     wisdom: dict | None = None,
     *,
     top_headline: str | None = None,
+    news_headlines: str | list | None = None,
+    news_slot: str | None = None,
     force: bool = False,
 ) -> dict | None:
     """Paper-only hook: run LLM reasoning at most once per THINKING_CACHE_HOURS or on regime change."""
@@ -2391,7 +2503,13 @@ def maybe_run_thinking(
             return cached
         return None
     summary = build_market_summary(
-        data, regime, vol, wisdom=wisdom, top_headline=top_headline
+        data,
+        regime,
+        vol,
+        wisdom=wisdom,
+        top_headline=top_headline,
+        news_headlines=news_headlines,
+        news_slot=news_slot,
     )
     if not ollama_available():
         logger.info("Thinking engine: Ollama not reachable, using rule-based tilt")

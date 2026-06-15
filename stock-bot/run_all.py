@@ -696,6 +696,11 @@ def main():
             maybe_apply_thinking_caps,
             maybe_run_thinking,
         )
+        from modules.thinking_news import maybe_run_scheduled_news_thinking
+
+        news_slot = maybe_run_scheduled_news_thinking(data, regime, vol, wisdom)
+        if news_slot:
+            print(f"--- Thinking news scheduled run started ({news_slot}) ---")
 
         thinking_result = maybe_run_thinking(
             data,
