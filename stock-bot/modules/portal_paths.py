@@ -11,20 +11,35 @@ from pathlib import Path
 from modules.trading_books import BOOKS, DEFAULT_BOOK_ID
 
 
+def _has_run_all(path: Path) -> bool:
+    return (path / "run_all.py").is_file()
+
+
+def _find_run_all_root(start: Path, *, max_depth: int = 8) -> Path | None:
+    """Walk parents from start until run_all.py or stock-bot/run_all.py is found."""
+    candidate = start.resolve()
+    for _ in range(max_depth):
+        if _has_run_all(candidate):
+            return candidate
+        nested = candidate / "stock-bot"
+        if _has_run_all(nested):
+            return nested
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
+    return None
+
+
 def resolve_project_root() -> Path:
     """Project root for writable data (users.db, desktop_prefs, per-user .env)."""
     override = os.getenv("PYTHONTRADING_ROOT", "").strip()
     if override:
         return Path(override).resolve()
     if getattr(sys, "frozen", False):
-        candidate = Path(sys.executable).resolve().parent
-        for _ in range(6):
-            if (candidate / "run_all.py").is_file():
-                return candidate
-            parent = candidate.parent
-            if parent == candidate:
-                break
-            candidate = parent
+        found = _find_run_all_root(Path(sys.executable).resolve().parent)
+        if found is not None:
+            return found
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 

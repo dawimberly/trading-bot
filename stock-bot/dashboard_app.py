@@ -21,12 +21,15 @@ from tkinter import messagebox, ttk
 
 
 def _app_root() -> Path:
-    """Project root — walk up from dist/ exe to folder with run_all.py when frozen."""
+    """Project root — walk up from dist/ exe to folder with run_all.py (incl. stock-bot/)."""
     if getattr(sys, "frozen", False):
         candidate = Path(sys.executable).resolve().parent
-        for _ in range(6):
+        for _ in range(8):
             if (candidate / "run_all.py").is_file():
                 return candidate
+            nested = candidate / "stock-bot"
+            if (nested / "run_all.py").is_file():
+                return nested
             parent = candidate.parent
             if parent == candidate:
                 break

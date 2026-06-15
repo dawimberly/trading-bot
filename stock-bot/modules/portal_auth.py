@@ -5,15 +5,72 @@ from __future__ import annotations
 import hashlib
 import os
 import secrets
+import shutil
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from modules.portal_paths import PORTAL_ROOT
+from modules.portal_paths import PORTAL_ROOT, resolve_project_root
 
 
 def db_path() -> Path:
     return PORTAL_ROOT / "users.db"
+
+
+def _legacy_user_db_paths() -> list[Path]:
+    """Older layouts before run_all.py moved under stock-bot/."""
+    roots: list[Path] = []
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        roots.append(exe_dir / "data" / "portal" / "users.db")
+    root = resolve_project_root()
+    roots.extend(
+        [
+            root.parent / "data" / "portal" / "users.db",
+            root.parent / "stock-bot" / "data" / "portal" / "users.db",
+        ]
+    )
+    seen: set[Path] = set()
+    out: list[Path] = []
+    for path in roots:
+        resolved = path.resolve()
+        if resolved not in seen and resolved.is_file():
+            seen.add(resolved)
+            out.append(resolved)
+    return out
+
+
+def _user_count(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.Error:
+        return 0
+
+
+def _maybe_migrate_users_db() -> None:
+    """If current users.db is empty, copy from a legacy portal database."""
+    target = db_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file():
+        try:
+            with _connect() as conn:
+                if _user_count(conn) > 0:
+                    return
+        except sqlite3.Error:
+            pass
+    for legacy in _legacy_user_db_paths():
+        if legacy.resolve() == target.resolve():
+            continue
+        try:
+            with sqlite3.connect(legacy) as conn:
+                if _user_count(conn) <= 0:
+                    continue
+        except sqlite3.Error:
+            continue
+        shutil.copy2(legacy, target)
+        return
 
 
 def _connect() -> sqlite3.Connection:
@@ -24,6 +81,7 @@ def _connect() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    _maybe_migrate_users_db()
     with _connect() as conn:
         conn.execute(
             """
