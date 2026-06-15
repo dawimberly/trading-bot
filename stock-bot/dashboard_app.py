@@ -214,9 +214,9 @@ def _path_for_resolve(path: Path) -> str:
 def _apply_user_paths(username: str, book_id: str) -> None:
     """Load book API keys and point dashboard at isolated bot files."""
     migrate_user_to_books(username)
-    from modules.portal_paths import book_env_path
+    from modules.portal_paths import ensure_book_env
 
-    env_file = book_env_path(username, book_id)
+    env_file = ensure_book_env(username, book_id)
     config.reload_from_env(str(env_file))
     bd = env_file.parent
     hb = book_heartbeat_path(username, book_id)
@@ -641,11 +641,14 @@ def _find_run_all_pids() -> list[int]:
 
 
 def _bot_python() -> str:
-    """Interpreter for run_all.py (venv python when dashboard is a frozen .exe)."""
-    if getattr(sys, "frozen", False):
-        venv_py = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    """Interpreter for run_all.py (venv or PATH python when dashboard is frozen)."""
+    for venv_py in (
+        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
+    ):
         if venv_py.is_file():
             return str(venv_py)
+    if getattr(sys, "frozen", False):
         import shutil
 
         for name in ("python", "python3", "python.exe"):

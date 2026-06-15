@@ -14,10 +14,10 @@ from modules.portal_paths import (
     PROJECT_ROOT,
     book_bot_log_path,
     book_dir,
-    book_env_path,
     book_heartbeat_path,
     book_journal_path,
     book_pid_path,
+    ensure_book_env,
     migrate_user_to_books,
     read_user_env_prefs,
     user_bot_log_path,
@@ -32,9 +32,20 @@ WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
 
 
 def _python() -> str:
-    venv = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
-    if venv.is_file():
-        return str(venv)
+    """Interpreter for run_all.py (venv or PATH python when dashboard is frozen)."""
+    for venv in (
+        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
+    ):
+        if venv.is_file():
+            return str(venv)
+    if getattr(sys, "frozen", False):
+        import shutil
+
+        for name in ("python", "python3", "python.exe"):
+            found = shutil.which(name)
+            if found:
+                return found
     return sys.executable
 
 
@@ -43,7 +54,8 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env = os.environ.copy()
     bd = book_dir(username, book_id)
     env["PYTHONUNBUFFERED"] = "1"
-    env["PYTHONTRADING_ENV_FILE"] = str(book_env_path(username, book_id))
+    env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
+    env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
     env["WISDOM_SCORECARD_FILE"] = str(bd / "wisdom_scorecard.json")
@@ -260,6 +272,7 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(env_file)
     env["HEARTBEAT_FILE"] = str(slot_dir / "bot_heartbeat.json")
     env["PAPER_JOURNAL_CSV"] = str(slot_dir / "paper_journal.csv")

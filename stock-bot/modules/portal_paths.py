@@ -92,6 +92,82 @@ def _legacy_env_prefs(path: Path) -> dict[str, bool]:
     return {"paper": paper, "allow_live": allow_live}
 
 
+def _safe_username(username: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in username.lower())
+
+
+def _env_has_alpaca_keys(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return "APCA_API_KEY_ID=" in text and "APCA_API_SECRET_KEY=" in text
+
+
+def _portal_root_candidates() -> list[Path]:
+    """Portal data dirs to search when exe layout differs from stock-bot source tree."""
+    seen: set[Path] = set()
+    out: list[Path] = []
+    candidates: list[Path] = [PORTAL_ROOT]
+
+    if getattr(sys, "frozen", False):
+        exe_parent = Path(sys.executable).resolve().parent
+        candidates.append(exe_parent / "data" / "portal")
+        run_all_root = _find_run_all_root(exe_parent)
+        if run_all_root is not None:
+            candidates.append(run_all_root / "data" / "portal")
+
+    candidates.extend(
+        (
+            PROJECT_ROOT.parent / "stock-bot" / "data" / "portal",
+            PROJECT_ROOT.parent / "data" / "portal",
+            PROJECT_ROOT.parent.parent / "stock-bot" / "data" / "portal",
+        )
+    )
+    for path in candidates:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not resolved.is_dir():
+            continue
+        seen.add(resolved)
+        out.append(resolved)
+    return out
+
+
+def _find_legacy_book_env(username: str, book_id: str) -> Path | None:
+    safe = _safe_username(username)
+    for portal in _portal_root_candidates():
+        book_env = portal / "users" / safe / "books" / book_id / ".env"
+        if _env_has_alpaca_keys(book_env):
+            return book_env
+    for portal in _portal_root_candidates():
+        flat = portal / "users" / safe / ".env"
+        if not _env_has_alpaca_keys(flat):
+            continue
+        prefs = _legacy_env_prefs(flat)
+        expected = "alpaca_paper" if prefs["paper"] else "alpaca_live"
+        if expected == book_id:
+            return flat
+    return None
+
+
+def ensure_book_env(username: str, book_id: str) -> Path:
+    """Ensure per-book .env exists under PORTAL_ROOT; copy from stock-bot/legacy if missing."""
+    migrate_user_to_books(username)
+    target = book_env_path(username, book_id)
+    if _env_has_alpaca_keys(target):
+        return target
+    legacy = _find_legacy_book_env(username, book_id)
+    if legacy is not None and legacy.resolve() != target.resolve():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(legacy, target)
+    return target
+
+
 def migrate_user_to_books(username: str) -> None:
     """Move legacy flat user files into books/alpaca_live or books/alpaca_paper."""
     ud = user_dir(username)
@@ -188,19 +264,12 @@ def user_bot_log_path(username: str) -> Path:
 def has_alpaca_config(username: str, book_id: str | None = None) -> bool:
     migrate_user_to_books(username)
     if book_id:
-        path = book_env_path(username, book_id)
-        if not path.is_file():
-            return False
-        text = path.read_text(encoding="utf-8")
-        return "APCA_API_KEY_ID=" in text and "APCA_API_SECRET_KEY=" in text
+        return _env_has_alpaca_keys(ensure_book_env(username, book_id))
     for bid in BOOKS:
         if BOOKS[bid].get("enabled") and has_alpaca_config(username, bid):
             return True
     legacy = user_dir(username) / ".env"
-    if legacy.is_file():
-        text = legacy.read_text(encoding="utf-8")
-        return "APCA_API_KEY_ID=" in text and "APCA_API_SECRET_KEY=" in text
-    return False
+    return _env_has_alpaca_keys(legacy)
 
 
 def read_desktop_prefs() -> dict:
