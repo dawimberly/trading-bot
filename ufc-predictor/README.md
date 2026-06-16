@@ -104,6 +104,32 @@ data_loader → feature_engineering → model_trainer (LGBM+XGB ensemble)
 | Explain | `explainability`, `fight_brief` | SHAP + rule-based briefs |
 | Production | `alerts`, `scheduler`, `circuit_breaker` | Discord/Telegram, watch loop |
 | Dashboard | `ufc_dashboard`, `dashboard_service` | GUI + quick odds + auto watch |
+| Grok (optional) | `grok_analysis` | Narrative edge on top picks; Kelly multiplier (non-blocking) |
+
+## Grok analysis (optional)
+
+Optional xAI/Grok layer for the **dashboard only** — never blocks refresh, watch, or alerts.
+
+1. Set in `.env`:
+   ```env
+   GROK_ENABLED=true
+   GROK_API_KEY=...          # or XAI_API_KEY
+   GROK_MODEL=grok-3-mini    # optional
+   ```
+2. **Refresh Next Two** to load the card.
+3. Click **Grok Analysis** (toolbar or **Grok Analysis** tab).
+
+Grok reviews top moneyline singles and prop lines, returning per-pick **narrative edge**, **crowd positioning**, **invalidation risks**, and a **Kelly adjustment** (default clamp `0.70`–`1.15`). Overview top bets show adjusted Kelly when analysis has run. Results cache under `data/cache/grok_analysis/` for 12h.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `GROK_ENABLED` | false | Master switch |
+| `GROK_API_KEY` / `XAI_API_KEY` | — | xAI API key |
+| `GROK_MODEL` | grok-3-mini | Chat model |
+| `GROK_MAX_FIGHTS` | 6 | Max ML picks sent |
+| `GROK_MAX_PROPS` | 6 | Max prop lines sent |
+| `GROK_KELLY_ADJ_MIN` | 0.70 | Min Kelly multiplier |
+| `GROK_KELLY_ADJ_MAX` | 1.15 | Max Kelly multiplier |
 
 ## Profiles (`UFC_PROFILE`)
 
@@ -148,7 +174,7 @@ Key `.env` variables:
 ## Design notes
 
 - **Leakage-safe features**: rolling stats use only prior fights.
-- **No LLM in hot paths**: `fight_brief` composes SHAP + edge + MC heuristically.
+- **No LLM in hot paths**: `fight_brief` composes SHAP + edge + MC heuristically; optional Grok runs only on explicit dashboard click.
 - **Separate from PythonTrading**: no merge with Alpaca bot; patterns only.
 - **Sibling `ufc_betting_bot`**: shared edge math for backtest reports.
 

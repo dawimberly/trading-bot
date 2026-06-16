@@ -275,8 +275,21 @@ ATTACH_SENTIMENT_ON_INFERENCE = os.getenv(
     "ATTACH_SENTIMENT_ON_INFERENCE", "true"
 ).lower() in ("1", "true", "yes")
 
+# --- Grok narrative analysis (optional, non-blocking) ---
+GROK_ENABLED = os.getenv("GROK_ENABLED", "false").lower() in ("1", "true", "yes")
+GROK_API_KEY = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY", "")
+GROK_MODEL = os.getenv("GROK_MODEL", "grok-3-mini")
+GROK_API_BASE = os.getenv("GROK_API_BASE", "https://api.x.ai/v1")
+GROK_MAX_FIGHTS = int(os.getenv("GROK_MAX_FIGHTS", "6"))
+GROK_MAX_PROPS = int(os.getenv("GROK_MAX_PROPS", "6"))
+GROK_TIMEOUT_SEC = int(os.getenv("GROK_TIMEOUT_SEC", "90"))
+GROK_KELLY_ADJ_MIN = float(os.getenv("GROK_KELLY_ADJ_MIN", "0.70"))
+GROK_KELLY_ADJ_MAX = float(os.getenv("GROK_KELLY_ADJ_MAX", "1.15"))
+GROK_CACHE_TTL_HOURS = int(os.getenv("GROK_CACHE_TTL_HOURS", "12"))
+
 # --- Backtest / bankroll ---
 INITIAL_BANKROLL = float(os.getenv("INITIAL_BANKROLL", "75"))
+CARD_BUDGET = float(os.getenv("CARD_BUDGET", "12"))
 FLAT_STAKE = float(os.getenv("FLAT_STAKE", "10"))
 MIN_EDGE = float(os.getenv("MIN_EDGE", "0.03"))  # model prob minus implied prob
 EDGE_THRESHOLDS = [
@@ -376,7 +389,7 @@ _PROFILE_PAPER = {
     "kelly_fraction": float(os.getenv("PAPER_KELLY_FRACTION", "0.35")),
     "prop_min_model_prob": float(os.getenv("PAPER_PROP_MIN_MODEL_PROB", "0.21")),
     "prop_min_edge": float(os.getenv("PAPER_PROP_MIN_EDGE", "0.04")),
-    "prop_max_results": int(os.getenv("PAPER_PROP_MAX_RESULTS", "40")),
+    "prop_max_results": int(os.getenv("PAPER_PROP_MAX_RESULTS", "36")),
     "max_singles_show": int(os.getenv("PAPER_MAX_SINGLES_SHOW", "15")),
     "max_parlays_show": int(os.getenv("PAPER_MAX_PARLAYS_SHOW", "8")),
     "alert_max_parlays": int(os.getenv("PAPER_ALERT_MAX_PARLAYS", "8")),
@@ -563,8 +576,8 @@ def apply_profile_overrides() -> None:
 
 # --- Budget manager (dashboard) ---
 BUDGET_JSON_PATH = DATA_DIR / "budget.json"
-DEFAULT_TOTAL_BANKROLL = 75.0
-DEFAULT_CARD_BUDGET = 12.0
+DEFAULT_TOTAL_BANKROLL = INITIAL_BANKROLL
+DEFAULT_CARD_BUDGET = CARD_BUDGET
 LIVE_SMALL_BANKROLL_USD = 100.0
 
 BUDGET_BOOKS: tuple[str, ...] = ("BetNow.eu", "DraftKings", "MyBookie")
@@ -630,28 +643,44 @@ def load_budget() -> dict[str, Any]:
     except Exception:
         pass
     state = default_budget_state()
-    if INITIAL_BANKROLL != DEFAULT_TOTAL_BANKROLL:
-        state["total_bankroll"] = float(INITIAL_BANKROLL)
+    state["total_bankroll"] = float(INITIAL_BANKROLL)
+    state["card_budget"] = float(CARD_BUDGET)
     return state
 
 
-def _sync_env_bankroll(bankroll: float) -> None:
-    """Mirror total bankroll into .env INITIAL_BANKROLL when the file exists."""
+def _sync_env_var(env_path: Path, key: str, value: float | str) -> None:
+    import re
+
+    text = env_path.read_text(encoding="utf-8")
+    line = f"{key}={value}"
+    if re.search(rf"^{re.escape(key)}=", text, flags=re.MULTILINE):
+        text = re.sub(rf"^{re.escape(key)}=.*$", line, text, flags=re.MULTILINE)
+    else:
+        text = text.rstrip() + f"\n{line}\n"
+    env_path.write_text(text, encoding="utf-8")
+
+
+def _sync_env_budget(state: dict[str, Any]) -> None:
+    """Mirror bankroll and card budget into .env when the file exists."""
     env_path = ROOT_DIR / ".env"
     if not env_path.is_file():
         return
     try:
-        import re
-
-        text = env_path.read_text(encoding="utf-8")
-        line = f"INITIAL_BANKROLL={bankroll:g}"
-        if re.search(r"^INITIAL_BANKROLL=", text, flags=re.MULTILINE):
-            text = re.sub(r"^INITIAL_BANKROLL=.*$", line, text, flags=re.MULTILINE)
-        else:
-            text = text.rstrip() + f"\n{line}\n"
-        env_path.write_text(text, encoding="utf-8")
+        _sync_env_var(env_path, "INITIAL_BANKROLL", state["total_bankroll"])
+        _sync_env_var(env_path, "CARD_BUDGET", state["card_budget"])
     except Exception:
         pass
+
+
+def enabled_books_from_budget(budget_state: dict[str, Any] | None) -> set[str]:
+    """Books selected in Budget Manager (defaults to all)."""
+    state = normalize_budget_state(budget_state)
+    enabled = {
+        book
+        for book in BUDGET_BOOKS
+        if state.get(BUDGET_USE_KEYS[book], True)
+    }
+    return enabled or set(BUDGET_BOOKS)
 
 
 def save_budget(state: dict[str, Any]) -> dict[str, Any]:
@@ -662,15 +691,16 @@ def save_budget(state: dict[str, Any]) -> dict[str, Any]:
     BUDGET_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     BUDGET_JSON_PATH.write_text(json.dumps(normalized, indent=2) + "\n", encoding="utf-8")
     apply_budget_state(normalized)
-    _sync_env_bankroll(normalized["total_bankroll"])
+    _sync_env_budget(normalized)
     return normalized
 
 
 def apply_budget_state(state: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Apply budget bankroll to module-level INITIAL_BANKROLL."""
-    global INITIAL_BANKROLL
+    """Apply budget bankroll/card cap to module-level defaults."""
+    global INITIAL_BANKROLL, CARD_BUDGET
     normalized = normalize_budget_state(state) if state else load_budget()
     INITIAL_BANKROLL = float(normalized["total_bankroll"])
+    CARD_BUDGET = float(normalized["card_budget"])
     return normalized
 
 

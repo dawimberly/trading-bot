@@ -853,6 +853,9 @@ class TopRecommendedBetsPanel(_CTK_FRAME):
             kelly_pct = bet.get("kelly_pct")
             confidence = str(bet.get("confidence") or "—")
             kelly_txt = f"Kelly {float(kelly_pct):.2f}%" if kelly_pct is not None else "Kelly —"
+            grok_factor = bet.get("grok_kelly_factor")
+            if grok_factor is not None and float(grok_factor) != 1.0:
+                kelly_txt += f"  (Grok ×{float(grok_factor):.2f})"
             ctk.CTkLabel(
                 body,
                 text=f"{kelly_txt}  ·  Confidence {confidence}",
@@ -860,6 +863,17 @@ class TopRecommendedBetsPanel(_CTK_FRAME):
                 text_color="#cbd5e1",
                 anchor="w",
             ).pack(fill="x", pady=(4, 0))
+            grok_note = str(bet.get("grok_narrative") or "").strip()
+            if grok_note:
+                ctk.CTkLabel(
+                    body,
+                    text=grok_note[:120] + ("…" if len(grok_note) > 120 else ""),
+                    font=ctk.CTkFont(size=10),
+                    text_color="#a78bfa",
+                    anchor="w",
+                    wraplength=wrap,
+                    justify="left",
+                ).pack(fill="x", pady=(2, 0))
 
         stake = float(bet.get("suggested_stake") or 0)
         stake_row = ctk.CTkFrame(body, fg_color="transparent")
@@ -944,6 +958,182 @@ class TopRecommendedBetsPanel(_CTK_FRAME):
             self._render_bet_card(self.parlay_frame, highlight_parlay, highlight=True)
         else:
             self.parlay_frame.pack_forget()
+
+
+class GrokAnalysisPanel(_CTK_FRAME):
+    """Optional Grok narrative read on top fights/props (runs in background thread)."""
+
+    def __init__(self, master, *, on_run: Callable[[], None] | None = None, **kwargs) -> None:
+        super().__init__(master, fg_color="#111827", corner_radius=10, **kwargs)
+        self._on_run = on_run
+
+        hdr = ctk.CTkFrame(self, fg_color="transparent")
+        hdr.pack(fill="x", padx=12, pady=(12, 6))
+        ctk.CTkLabel(
+            hdr,
+            text="Grok Analysis",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#f8fafc",
+        ).pack(side="left")
+        self.status_label = ctk.CTkLabel(
+            hdr,
+            text="",
+            font=ctk.CTkFont(size=11),
+            text_color="#94a3b8",
+            anchor="e",
+        )
+        self.status_label.pack(side="right", fill="x", expand=True, padx=(8, 0))
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(fill="x", padx=12, pady=(0, 6))
+        self.run_btn = ctk.CTkButton(
+            btn_row,
+            text="Run Grok Analysis",
+            width=160,
+            fg_color="#4c1d95",
+            hover_color="#6d28d9",
+            command=on_run,
+        )
+        self.run_btn.pack(side="left")
+        self.hint_label = ctk.CTkLabel(
+            btn_row,
+            text="Optional — does not block refresh. Adjusts Kelly sizing when complete.",
+            font=ctk.CTkFont(size=11),
+            text_color="#64748b",
+            anchor="w",
+        )
+        self.hint_label.pack(side="left", padx=(12, 0))
+
+        self.scroll = ctk.CTkScrollableFrame(self, label_text="Narrative edges")
+        self.scroll.pack(fill="both", expand=True, padx=10, pady=(4, 12))
+
+    def set_busy(self, busy: bool, message: str = "") -> None:
+        state = "disabled" if busy else "normal"
+        try:
+            self.run_btn.configure(state=state)
+        except Exception:
+            pass
+        if message:
+            self.status_label.configure(text=message)
+
+    def render(self, result: dict[str, Any] | None, *, available: bool) -> None:
+        for w in self.scroll.winfo_children():
+            w.destroy()
+
+        if not available:
+            self.status_label.configure(text="Disabled — set GROK_ENABLED=true + API key in .env")
+            self._pack_message(
+                "Grok integration is off",
+                "Add GROK_ENABLED=true and GROK_API_KEY (or XAI_API_KEY) to .env, then restart.",
+                color="#fbbf24",
+            )
+            return
+
+        if not result:
+            self.status_label.configure(text="Not run yet")
+            self._pack_message(
+                "No Grok analysis yet",
+                "Click Run Grok Analysis after Refresh Next Two loads top fights and props.",
+            )
+            return
+
+        if not result.get("ok"):
+            self.status_label.configure(text="Last run failed")
+            self._pack_message("Grok error", str(result.get("error") or "Unknown error"), color="#f87171")
+            return
+
+        cache_note = " (cached)" if result.get("from_cache") else ""
+        self.status_label.configure(
+            text=f"{result.get('generated_at', '—')}{cache_note}  |  model {result.get('model', config.GROK_MODEL)}"
+        )
+        summary = str(result.get("summary") or "").strip()
+        if summary:
+            self._pack_message("Card summary", summary, color="#e2e8f0", title_size=13)
+
+        picks = result.get("picks") or []
+        if not picks:
+            self._pack_message("No picks returned", "Grok did not return per-pick analysis.")
+            return
+
+        for pick in picks:
+            self._render_pick_card(pick)
+
+    def _pack_message(
+        self,
+        title: str,
+        body: str,
+        *,
+        color: str = "#94a3b8",
+        title_size: int = 14,
+    ) -> None:
+        frame = ctk.CTkFrame(self.scroll, fg_color="#1e293b", corner_radius=8)
+        frame.pack(fill="x", padx=4, pady=6)
+        ctk.CTkLabel(
+            frame,
+            text=title,
+            font=ctk.CTkFont(size=title_size, weight="bold"),
+            text_color="#f1f5f9",
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            frame,
+            text=body,
+            font=ctk.CTkFont(size=12),
+            text_color=color,
+            anchor="w",
+            justify="left",
+            wraplength=1000,
+        ).pack(fill="x", padx=12, pady=(0, 10))
+
+    def _render_pick_card(self, pick: dict[str, Any]) -> None:
+        factor = pick.get("kelly_adjustment", 1.0)
+        factor_color = "#34d399" if float(factor) >= 1.0 else "#fbbf24"
+        frame = ctk.CTkFrame(self.scroll, fg_color="#0f172a", corner_radius=8, border_width=1, border_color="#334155")
+        frame.pack(fill="x", padx=4, pady=5)
+        hdr = ctk.CTkFrame(frame, fg_color="transparent")
+        hdr.pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            hdr,
+            text=str(pick.get("id") or "Pick"),
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#f8fafc",
+            anchor="w",
+        ).pack(side="left")
+        ctk.CTkLabel(
+            hdr,
+            text=f"Kelly ×{float(factor):.2f}  ·  {pick.get('conviction', 'medium')}",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=factor_color,
+        ).pack(side="right")
+
+        for label, key in (
+            ("Narrative edge", "narrative_edge"),
+            ("Crowd positioning", "crowd_positioning"),
+        ):
+            text = str(pick.get(key) or "").strip()
+            if text:
+                ctk.CTkLabel(
+                    frame,
+                    text=f"{label}: {text}",
+                    font=ctk.CTkFont(size=11),
+                    text_color="#cbd5e1",
+                    anchor="w",
+                    justify="left",
+                    wraplength=980,
+                ).pack(fill="x", padx=12, pady=(0, 4))
+
+        risks = pick.get("invalidation_risks") or []
+        if risks:
+            risk_txt = "Invalidation: " + "; ".join(str(r) for r in risks[:4])
+            ctk.CTkLabel(
+                frame,
+                text=risk_txt,
+                font=ctk.CTkFont(size=10),
+                text_color="#f87171",
+                anchor="w",
+                justify="left",
+                wraplength=980,
+            ).pack(fill="x", padx=12, pady=(0, 10))
 
 
 class BookTab(_CTK_FRAME):
@@ -2058,6 +2248,8 @@ class UFCDashboardApp(_CTK_BASE):
         self._render_token = 0
         self._busy_watchdog_id: str | None = None
         self._rendered_sections: set[str] = set()
+        self._grok_result: dict[str, Any] | None = None
+        self._grok_busy = False
 
         config.UFC_PROFILE = "paper"
         config.apply_profile_overrides()
@@ -2347,6 +2539,19 @@ class UFCDashboardApp(_CTK_BASE):
         )
         self.new_card_btn.pack(side="left", padx=4)
 
+        from src.grok_analysis import grok_available
+
+        self.grok_btn = ctk.CTkButton(
+            bar,
+            text="Grok Analysis",
+            width=130,
+            state="normal",
+            fg_color="#4c1d95" if grok_available() else "#374151",
+            hover_color="#6d28d9" if grok_available() else "#4b5563",
+            command=self._wrap_button_click("Grok Analysis", self._on_grok_analysis),
+        )
+        self.grok_btn.pack(side="left", padx=4)
+
         self.auto_watch_var = ctk.BooleanVar(value=False)
         self.auto_watch_switch = ctk.CTkSwitch(
             bar,
@@ -2372,6 +2577,7 @@ class UFCDashboardApp(_CTK_BASE):
         self.tab_props_dk = self.tabs.add("Props - DraftKings")
         self.tab_props_mybookie = self.tabs.add("Props - MyBookie")
         self.tab_risk = self.tabs.add("Risk Analysis")
+        self.tab_grok = self.tabs.add("Grok Analysis")
 
         self.top_bets_panel = TopRecommendedBetsPanel(self.tab_overview)
         self.top_bets_panel.pack(fill="x", padx=8, pady=(8, 8))
@@ -2406,6 +2612,12 @@ class UFCDashboardApp(_CTK_BASE):
         ).pack(fill="x", padx=12, pady=(4, 2))
         self.overview_table = DataTable(self.tab_overview, compact=True, height=10)
         self.overview_table.pack(fill="both", expand=True, padx=10, pady=6)
+
+        self.grok_panel = GrokAnalysisPanel(
+            self.tab_grok,
+            on_run=self._wrap_button_click("Grok Analysis Tab", self._on_grok_analysis),
+        )
+        self.grok_panel.pack(fill="both", expand=True, padx=8, pady=8)
 
         self.betnow_tab = BookTab(self.tab_betnow, "BetNow.eu")
         self.betnow_tab.pack(fill="both", expand=True)
@@ -2803,6 +3015,74 @@ class UFCDashboardApp(_CTK_BASE):
         elif tab_name == "Risk Analysis" and "risk" not in self._rendered_sections:
             self._render_risk_section(payload)
             self._rendered_sections.add("risk")
+        elif tab_name == "Grok Analysis" and "grok" not in self._rendered_sections:
+            self._render_grok_section()
+            self._rendered_sections.add("grok")
+
+    def _render_grok_section(self) -> None:
+        from src.grok_analysis import grok_available
+
+        self.grok_panel.render(self._grok_result, available=grok_available())
+
+    def _on_grok_analysis(self) -> None:
+        if self._grok_busy:
+            self.status.configure(text="Grok analysis already running…")
+            return
+        if self._payload is None or not self._payload.books:
+            self.status.configure(text="Run Refresh Next Two first — need card data for Grok.")
+            return
+        self._run_grok_analysis_async()
+
+    def _run_grok_analysis_async(self) -> None:
+        from src.grok_analysis import analyze_card_with_grok, grok_available
+
+        if not grok_available():
+            self.status.configure(text="Grok disabled — set GROK_ENABLED=true and API key in .env")
+            self._render_grok_section()
+            return
+
+        self._grok_busy = True
+        self.grok_panel.set_busy(True, "Running Grok analysis…")
+        self.grok_btn.configure(state="disabled")
+        self.status.configure(text="Grok analysis running (non-blocking)…")
+        payload = self._payload
+        budget = self._current_budget_state()
+        event_label = payload.event_label if payload else ""
+
+        def worker() -> None:
+            try:
+                result = analyze_card_with_grok(
+                    payload.books if payload else {},
+                    budget,
+                    event_label=event_label,
+                )
+                self.after(0, lambda: self._apply_grok_result(result))
+            except Exception as exc:
+                self.after(0, lambda: self._apply_grok_result({"ok": False, "error": str(exc), "picks": []}))
+            finally:
+                self.after(0, self._finish_grok_busy)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_grok_result(self, result: dict[str, Any]) -> None:
+        self._grok_result = result
+        self._render_grok_section()
+        if result.get("ok"):
+            n = len(result.get("picks") or [])
+            cache = " (cached)" if result.get("from_cache") else ""
+            self.status.configure(text=f"Grok complete — {n} picks analyzed{cache}. Kelly sizing updated on Overview.")
+            if self._payload is not None:
+                self._render_overview_section(self._payload)
+        else:
+            self.status.configure(text=f"Grok failed: {str(result.get('error') or 'unknown')[:180]}")
+
+    def _finish_grok_busy(self) -> None:
+        self._grok_busy = False
+        self.grok_panel.set_busy(False)
+        try:
+            self.grok_btn.configure(state="normal")
+        except Exception:
+            pass
 
     def _schedule_render_all_tabs(self, payload: DashboardPayload) -> None:
         """Render overview + books immediately; defer heavy tabs until visited."""
@@ -2858,9 +3138,13 @@ class UFCDashboardApp(_CTK_BASE):
             collect_dashboard_risk_warnings,
             format_risk_warnings,
         )
+        from src.grok_analysis import apply_grok_kelly_adjustments
 
         self.top_bets_panel.render(
-            aggregate_top_recommended_bets(payload.books, bs, limit=3),
+            apply_grok_kelly_adjustments(
+                aggregate_top_recommended_bets(payload.books, bs, limit=3),
+                self._grok_result,
+            ),
             highlight_parlay=aggregate_best_parlay(payload.books, bs),
         )
 
