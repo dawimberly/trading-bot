@@ -91,3 +91,33 @@ def log_event(name: str, /, **data: Any) -> None:
         logger.info("event=%s %s", name, parts)
     else:
         logger.info("event=%s", name)
+
+
+def log_subsystem_warning(
+    subsystem: str,
+    message: str,
+    exc: BaseException | None = None,
+) -> None:
+    """Non-fatal subsystem warning with optional exception + structured event."""
+    log = logging.getLogger(subsystem)
+    if exc is not None:
+        log.warning("%s: %s", message, exc, exc_info=True)
+        log_event(f"{subsystem}_warn", message=message, error=str(exc))
+    else:
+        log.warning(message)
+        log_event(f"{subsystem}_warn", message=message)
+
+
+def log_subsystem_error(
+    subsystem: str,
+    message: str,
+    exc: BaseException | None = None,
+) -> None:
+    """Subsystem error with optional exception + structured event."""
+    log = logging.getLogger(subsystem)
+    if exc is not None:
+        log.error("%s: %s", message, exc, exc_info=True)
+        log_event(f"{subsystem}_error", message=message, error=str(exc))
+    else:
+        log.error(message)
+        log_event(f"{subsystem}_error", message=message)

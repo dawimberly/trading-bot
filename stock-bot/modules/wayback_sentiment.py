@@ -1,5 +1,8 @@
 """Load monthly Wayback web sentiment and forward-fill to daily bars."""
 
+from __future__ import annotations
+
+import time
 from pathlib import Path
 
 import numpy as np
@@ -8,6 +11,8 @@ import pandas as pd
 import config
 
 ROOT = Path(__file__).resolve().parents[1]
+_WAYBACK_SERIES_CACHE: tuple[float, Path, pd.Series] | None = None
+_WAYBACK_CACHE_TTL_SEC = 3600.0
 
 
 def wayback_sentiment_path() -> Path:
@@ -16,16 +21,38 @@ def wayback_sentiment_path() -> Path:
     return primary if primary.exists() or not legacy.exists() else legacy
 
 
-def load_monthly_web_sentiment(path: Path | None = None) -> pd.Series:
+def clear_wayback_sentiment_cache() -> None:
+    """Drop in-process Wayback CSV cache (e.g. after sentiment file refresh)."""
+    global _WAYBACK_SERIES_CACHE
+    _WAYBACK_SERIES_CACHE = None
+
+
+def load_monthly_web_sentiment(
+    path: Path | None = None,
+    *,
+    force_refresh: bool = False,
+) -> pd.Series:
     """Average archive sources per month -> Series indexed by month-start Timestamp."""
-    cache = path or wayback_sentiment_path()
-    if not cache.exists():
-        return pd.Series(dtype=float, name="web_sentiment")
-    df = pd.read_csv(cache, parse_dates=["month"])
-    if df.empty:
-        return pd.Series(dtype=float, name="web_sentiment")
-    monthly = df.groupby("month")["sentiment"].mean().sort_index()
-    monthly.name = "web_sentiment"
+    global _WAYBACK_SERIES_CACHE
+    cache_path = path or wayback_sentiment_path()
+    now = time.monotonic()
+    if (
+        not force_refresh
+        and _WAYBACK_SERIES_CACHE is not None
+        and _WAYBACK_SERIES_CACHE[1] == cache_path
+        and now - _WAYBACK_SERIES_CACHE[0] < _WAYBACK_CACHE_TTL_SEC
+    ):
+        return _WAYBACK_SERIES_CACHE[2]
+    if not cache_path.exists():
+        monthly = pd.Series(dtype=float, name="web_sentiment")
+    else:
+        df = pd.read_csv(cache_path, parse_dates=["month"])
+        if df.empty:
+            monthly = pd.Series(dtype=float, name="web_sentiment")
+        else:
+            monthly = df.groupby("month")["sentiment"].mean().sort_index()
+            monthly.name = "web_sentiment"
+    _WAYBACK_SERIES_CACHE = (now, cache_path, monthly)
     return monthly
 
 

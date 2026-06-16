@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -15,7 +16,7 @@ import threading
 
 import config
 from modules.safe_io import read_json_file, write_json_file
-from modules.logging_utils import log_event
+from modules.logging_utils import log_event, log_subsystem_error, log_subsystem_warning
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +162,23 @@ _AI_CYCLE_KEYWORDS = (
     "exhaustion",
 )
 
-_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM optimizing to BEAT VTI on a risk-adjusted basis (Sharpe first, then return vs passive beta).
+_PM_SYSTEM_PROMPT: str | None = None
+_MACRO_SERIES_CACHE: dict[str, tuple[float, object]] = {}
+_MACRO_CACHE_TTL_SEC = 3600.0
+_MACRO_CACHE_MAX = 24
+_VALIDATION_RESULT_CACHE: dict[str, tuple[float, bool, tuple[str, ...]]] = {}
+_VALIDATION_CACHE_TTL_SEC = 600.0
+_VALIDATION_CACHE_MAX = 32
+_OLLAMA_RESPONSE_CACHE: dict[str, tuple[float, tuple[str, str]]] = {}
+_OLLAMA_CACHE_TTL_SEC = 1800.0
+_OLLAMA_CACHE_MAX = 4
+
+
+def _pm_system_prompt() -> str:
+    global _PM_SYSTEM_PROMPT
+    if _PM_SYSTEM_PROMPT is not None:
+        return _PM_SYSTEM_PROMPT
+    _PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM optimizing to BEAT VTI on a risk-adjusted basis (Sharpe first, then return vs passive beta).
 
 Primary objective: outperform buy-and-hold VTI without taking unnecessary drawdown. Every tilt must earn its risk budget.
 
@@ -216,6 +233,15 @@ TILT_RATIONALE: [Link asymmetry + sector/stat-arb/vol view to each sleeve >5%; m
 CONFIDENCE: 0.XX
 
 Do not explain your process. Start with NARRATIVE:"""
+    return _PM_SYSTEM_PROMPT
+
+
+def clear_thinking_runtime_caches() -> None:
+    """Drop in-process macro / validation / Ollama caches."""
+    global _MACRO_SERIES_CACHE, _VALIDATION_RESULT_CACHE, _OLLAMA_RESPONSE_CACHE
+    _MACRO_SERIES_CACHE.clear()
+    _VALIDATION_RESULT_CACHE.clear()
+    _OLLAMA_RESPONSE_CACHE.clear()
 
 _STRUCTURED_FIELD_RE = re.compile(
     r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
@@ -258,7 +284,18 @@ def _load_macro_close(col: str, cache: dict | None = None):
         if col not in cache:
             cache[col] = _load_daily_close(col)
         return cache[col]
-    return _load_daily_close(col)
+
+    now = time.monotonic()
+    hit = _MACRO_SERIES_CACHE.get(col)
+    if hit and now - hit[0] < _MACRO_CACHE_TTL_SEC:
+        return hit[1]
+
+    series = _load_daily_close(col)
+    if len(_MACRO_SERIES_CACHE) >= _MACRO_CACHE_MAX:
+        oldest = min(_MACRO_SERIES_CACHE, key=lambda k: _MACRO_SERIES_CACHE[k][0])
+        del _MACRO_SERIES_CACHE[oldest]
+    _MACRO_SERIES_CACHE[col] = (now, series)
+    return series
 
 
 def _yield_curve_summary(macro_cache: dict | None = None) -> str:
@@ -874,7 +911,7 @@ def _thinking_decision_id(regime: str, tilt: dict[str, float]) -> str:
 
 def get_pm_system_prompt() -> str:
     """Return the production PM system prompt (for docs/tests)."""
-    return _PM_SYSTEM_PROMPT
+    return _pm_system_prompt()
 
 
 def get_thinking_status_snapshot() -> dict[str, object]:
@@ -1123,11 +1160,41 @@ def _compute_validation_score(errors: list[str], result: dict[str, Any]) -> int:
     return max(0, min(100, base + bonus // 2))
 
 
+def _validation_cache_key(result: dict[str, Any], market_summary: dict) -> str:
+    prev = _load_previous_tilt()
+    payload = {
+        "tilt": result.get("suggested_tilt"),
+        "narrative": result.get("narrative"),
+        "asymmetry": result.get("asymmetry"),
+        "conf": result.get("confidence"),
+        "gold_chg": market_summary.get("gold_change"),
+        "vix_trend": market_summary.get("vix_trend"),
+        "regime": market_summary.get("regime"),
+        "prev": prev,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()
+    ).hexdigest()[:20]
+
+
+def _store_validation_cache(key: str, valid: bool, errors: list[str]) -> None:
+    if len(_VALIDATION_RESULT_CACHE) >= _VALIDATION_CACHE_MAX:
+        oldest = min(_VALIDATION_RESULT_CACHE, key=lambda k: _VALIDATION_RESULT_CACHE[k][0])
+        del _VALIDATION_RESULT_CACHE[oldest]
+    _VALIDATION_RESULT_CACHE[key] = (time.monotonic(), valid, tuple(errors))
+
+
 def _validate_thinking_quality(
     result: dict[str, Any],
     market_summary: dict,
 ) -> tuple[bool, list[str]]:
     """Post-process validator — reject contradictory or low-quality tilts."""
+    cache_key = _validation_cache_key(result, market_summary)
+    now = time.monotonic()
+    cached = _VALIDATION_RESULT_CACHE.get(cache_key)
+    if cached and now - cached[0] < _VALIDATION_CACHE_TTL_SEC:
+        return cached[1], list(cached[2])
+
     errors: list[str] = []
     tilt = dict(result.get("suggested_tilt") or {})
     narrative = str(result.get("narrative") or "").lower()
@@ -1215,7 +1282,9 @@ def _validate_thinking_quality(
         if asym_snip and asym_snip not in rationale.lower() and "asymmetry" not in rationale.lower():
             errors.append("TILT_RATIONALE not linked to ASYMMETRY")
 
-    return len(errors) == 0, errors
+    valid = len(errors) == 0
+    _store_validation_cache(cache_key, valid, errors)
+    return valid, errors
 
 
 def thinking_daily_loss_tripped(equity: float | None) -> tuple[bool, str]:
@@ -1343,7 +1412,10 @@ def _finalize_thinking_result(
     out["validation_errors"] = val_errors
     out["validation_score"] = _compute_validation_score(val_errors, out)
     if not valid:
-        logger.info("Thinking validation failed: %s", "; ".join(val_errors))
+        log_subsystem_warning(
+            "thinking_engine",
+            "Thinking validation failed: " + "; ".join(val_errors),
+        )
         safe_tilt = derive_heuristic_tilt(market_summary)
         out["suggested_tilt"] = _clamp_gold_in_tilt(
             market_summary, safe_tilt, str(out.get("asymmetry") or "")
@@ -1801,6 +1873,13 @@ def _ollama_generate(
 ) -> tuple[str, str]:
     """Return (full_text_for_logs, answer_text_for_parsing)."""
     model = model or config.OLLAMA_MODEL
+    cache_payload = f"{model}\0{system or ''}\0{prompt}"
+    cache_key = hashlib.sha256(cache_payload.encode()).hexdigest()[:24]
+    now = time.monotonic()
+    cached = _OLLAMA_RESPONSE_CACHE.get(cache_key)
+    if cached and now - cached[0] < _OLLAMA_CACHE_TTL_SEC:
+        return cached[1]
+
     body: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
@@ -1838,6 +1917,10 @@ def _ollama_generate(
         parse_text = thinking
     else:
         raise RuntimeError("Ollama returned empty response")
+    if len(_OLLAMA_RESPONSE_CACHE) >= _OLLAMA_CACHE_MAX:
+        oldest = min(_OLLAMA_RESPONSE_CACHE, key=lambda k: _OLLAMA_RESPONSE_CACHE[k][0])
+        del _OLLAMA_RESPONSE_CACHE[oldest]
+    _OLLAMA_RESPONSE_CACHE[cache_key] = (time.monotonic(), (full, parse_text))
     return full, parse_text
 
 
@@ -2288,7 +2371,9 @@ def _llm_parse_quality(
 def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[str, Any]:
     """Single Ollama attempt; raises on transport/empty response."""
     user_prompt = _build_reasoning_user_prompt(market_summary)
-    full_text, answer_text = _ollama_generate(user_prompt, system=_PM_SYSTEM_PROMPT, model=model)
+    full_text, answer_text = _ollama_generate(
+        user_prompt, system=_pm_system_prompt(), model=model
+    )
     structured = _best_structured_parse(full_text, answer_text)
     parse_chunks = _structured_parse_candidates(full_text, answer_text)
     for chunk in parse_chunks:
@@ -2648,8 +2733,12 @@ def run_thinking_with_news(
         if ollama_available():
             try:
                 result = get_market_reasoning(summary)
-            except Exception:
-                logger.exception("Thinking engine: scheduled news LLM failed; heuristic fallback")
+            except Exception as exc:
+                log_subsystem_error(
+                    "thinking_engine",
+                    "Scheduled news LLM failed; heuristic fallback",
+                    exc,
+                )
                 result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-llm-error")
         else:
             result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-no-ollama")
@@ -2725,8 +2814,12 @@ def maybe_run_thinking(
     if force:
         try:
             result = get_market_reasoning(summary)
-        except Exception:
-            logger.exception("Thinking engine: LLM failed during forced run; falling back to heuristic")
+        except Exception as exc:
+            log_subsystem_error(
+                "thinking_engine",
+                "LLM failed during forced run; falling back to heuristic",
+                exc,
+            )
             result = build_heuristic_reasoning_result(summary, reason="llm-error-forced")
         if result.get("source") == "heuristic":
             logger.info("Thinking engine: heuristic fallback (%s)", result.get("model"))
@@ -2756,8 +2849,12 @@ def maybe_run_thinking(
                 source=res.get("source"),
                 confidence=res.get("confidence"),
             )
-        except Exception:
-            logger.exception("Thinking engine background refresh failed")
+        except Exception as exc:
+            log_subsystem_error(
+                "thinking_engine",
+                "Background refresh failed",
+                exc,
+            )
             cached_err = read_json_file(OUTPUT_FILE)
             if cached_err:
                 logger.info("Thinking engine: kept last cached snapshot after refresh failure")
