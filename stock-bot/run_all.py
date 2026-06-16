@@ -253,6 +253,17 @@ def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
 _last_equity = 0.0
 
 
+def _record_cycle_error(error: str) -> None:
+    """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
+    from modules.safe_io import read_json_file, write_json_atomic
+
+    path = config.HEARTBEAT_FILE
+    payload = read_json_file(path) or {}
+    payload["last_cycle_error"] = str(error)[:500]
+    payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
+    write_json_atomic(path, payload)
+
+
 def _write_heartbeat(
     regime,
     equity,
@@ -308,6 +319,8 @@ def _write_heartbeat(
         "equity_session_open": market_open,
         "halted": halted,
         "paper": config.PAPER_TRADING,
+        "last_cycle_error": None,
+        "last_cycle_error_at": None,
     }
     if dynamic_vol_score is not None:
         payload["dynamic_vol_score"] = round(float(dynamic_vol_score), 6)
@@ -1401,6 +1414,7 @@ if __name__ == "__main__":
             sys.exit(1)
         except Exception as e:
             tb = traceback.format_exc()
+            _record_cycle_error(str(e))
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
             logger.exception("Cycle error: %s", e)
             notes = str(e)

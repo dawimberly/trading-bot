@@ -238,8 +238,16 @@ def read_bot_log_tail(username: str, book_id: str = "alpaca_paper", max_chars: i
     path = book_bot_log_path(username, book_id)
     if not path.is_file():
         return ""
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return text[-max_chars:].strip()
+    try:
+        size = path.stat().st_size
+        read_bytes = min(size, max(max_chars * 4, 8192))
+        with path.open("rb") as handle:
+            if size > read_bytes:
+                handle.seek(size - read_bytes)
+            chunk = handle.read().decode("utf-8", errors="replace")
+        return chunk[-max_chars:].strip()
+    except OSError:
+        return ""
 
 
 def fund_slot_dir(slot: str) -> Path:

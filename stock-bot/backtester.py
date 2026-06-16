@@ -75,6 +75,7 @@ from modules.backtester_core import (
     get_indicator_cache,
     parallel_map_backtests,
     prepare_indicator_cache,
+    release_backtest_memory,
     reset_caches,
     run_slippage_sensitivity,
     store_last_result,
@@ -2578,6 +2579,7 @@ def run_simulate_live_thinking_compare(
             }
             result = run_backtest(data, track_active_exposure=True, **kwargs)
             rows.append(_vti_level_result_row(level_label, vti_pct, result))
+            release_backtest_memory()
         _print_vti_levels_table(
             "--- LIVE SMALL-ACCOUNT + THINKING @ VTI LEVELS ---",
             (
@@ -2664,6 +2666,7 @@ def run_simulate_live_thinking_compare(
             with_thinking = result
         else:
             baseline = result
+        release_backtest_memory()
         if with_news:
             print(
                 f"{label_cfg:<32} "

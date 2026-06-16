@@ -58,6 +58,22 @@ def _heartbeat_ts(hb: dict | None) -> str:
     return str(hb["timestamp"])[:19]
 
 
+def _heartbeat_age_minutes(hb: dict | None) -> float | None:
+    if not hb or not hb.get("timestamp"):
+        return None
+    try:
+        ts = datetime.fromisoformat(str(hb["timestamp"]).replace("Z", "+00:00"))
+        age = (datetime.now(ts.tzinfo) - ts).total_seconds() / 60.0
+        return max(0.0, age)
+    except (TypeError, ValueError):
+        return None
+
+
+def _heartbeat_scan_phase(hb: dict | None) -> str:
+    scan = (hb or {}).get("scan_schedule") or {}
+    return str(scan.get("phase") or scan.get("label") or "").strip()
+
+
 def _alpaca_equity(*, paper: bool, credentials_fn=None) -> tuple[float | None, str | None]:
     from modules.alpaca_diagnostics import fetch_alpaca_equity
 
@@ -378,6 +394,10 @@ def main() -> None:
     live_regime = _heartbeat_regime(live_hb) or "n/a"
     paper_regime = _heartbeat_regime(paper_hb) or "n/a"
     regime = live_regime if live_regime != "n/a" else paper_regime
+    live_hb_age = _heartbeat_age_minutes(live_hb)
+    paper_hb_age = _heartbeat_age_minutes(paper_hb)
+    live_phase = _heartbeat_scan_phase(live_hb)
+    paper_phase = _heartbeat_scan_phase(paper_hb)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mode = "LIVE + PAPER" if _is_live_book_active() else "PAPER ONLY (.env)"
@@ -385,9 +405,14 @@ def main() -> None:
     _emit("=" * 72)
     live_dl = _daily_loss_status(paper=False)
     safety_tag = "CIRCUIT TRIPPED" if live_dl.get("tripped") else "OK"
+    quick_extra = ""
+    if live_phase and live_hb and not (live_hb.get("scan_schedule") or {}).get("market_open"):
+        quick_extra = f" | Live scan {live_phase}"
+    elif paper_phase and paper_hb and not (paper_hb.get("scan_schedule") or {}).get("market_open"):
+        quick_extra = f" | Paper scan {paper_phase}"
     _emit(
         f"QUICK: Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
-        f"Regime {regime} | Daily breaker {safety_tag}"
+        f"Regime {regime} | Daily breaker {safety_tag}{quick_extra}"
     )
     _emit("=" * 72)
 
@@ -402,6 +427,13 @@ def main() -> None:
     _emit(f"      {_live_profile_line()}")
     _emit(f"      flags: {_live_flags()}")
     _emit(f"      heartbeat: {_heartbeat_ts(live_hb)}")
+    if live_hb_age is not None:
+        stale = " STALE" if live_hb_age > 90 else ""
+        _emit(f"      heartbeat age: {live_hb_age:.0f} min{stale}")
+    if live_phase:
+        _emit(f"      scan phase: {live_phase}")
+    if live_hb and live_hb.get("last_cycle_error"):
+        _emit(f"      last cycle error: {str(live_hb['last_cycle_error'])[:120]}")
     _emit()
 
     paper_on, paper_off = config.format_best_paper_status_lines()
@@ -412,6 +444,13 @@ def main() -> None:
     _emit(f"      OFF (locked): {paper_off}")
     _emit(f"      universe: {_universe_line()}")
     _emit(f"      heartbeat: {_heartbeat_ts(paper_hb)}")
+    if paper_hb_age is not None:
+        stale = " STALE" if paper_hb_age > 90 else ""
+        _emit(f"      heartbeat age: {paper_hb_age:.0f} min{stale}")
+    if paper_phase:
+        _emit(f"      scan phase: {paper_phase}")
+    if paper_hb and paper_hb.get("last_cycle_error"):
+        _emit(f"      last cycle error: {str(paper_hb['last_cycle_error'])[:120]}")
     _emit()
 
     for line in _thinking_engine_monitor_lines(live_eq):
