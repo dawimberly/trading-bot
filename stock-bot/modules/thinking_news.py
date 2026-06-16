@@ -347,9 +347,32 @@ def consolidate_news_deltas(
     max_per_sleeve: float,
     max_sleeves: int = _THINKING_MAX_ACTIVE_SLEEVES,
 ) -> dict[str, float]:
-    """Merge multi-sleeve news tilts into <=3 custodians before live safety guard."""
+    """
+    Rank sleeves by impact_score + |delta|, keep top custodians, merge smallest moves.
+
+    Outputs at most ``max_sleeves`` non-zero sleeves so live 3-sleeve safety can pass.
+    """
+    raw = {k: float(deltas.get(k, 0.0)) for k in _CAP_KEYS}
+    material = {k: v for k, v in raw.items() if abs(v) >= 0.005}
+
+    if len(material) <= max_sleeves:
+        return _clamp_cap_deltas(raw, max_per_sleeve=max_per_sleeve)
+
     if not market_summary:
-        return _clamp_cap_deltas(deltas, max_per_sleeve=max_per_sleeve)
+        scored = sorted(material.items(), key=lambda kv: abs(kv[1]), reverse=True)
+        keep_ordered = [k for k, _ in scored[:max_sleeves]]
+        keep_set = set(keep_ordered)
+        consolidated = {k: 0.0 for k in _CAP_KEYS}
+        for key, val in sorted(material.items(), key=lambda kv: abs(kv[1])):
+            if key in keep_set:
+                consolidated[key] += val
+            else:
+                target = min(keep_ordered, key=lambda k: abs(consolidated[k]))
+                consolidated[target] += val
+        for key in _CAP_KEYS:
+            if key not in keep_set:
+                consolidated[key] = 0.0
+        return _clamp_cap_deltas(consolidated, max_per_sleeve=max_per_sleeve)
 
     impact = float(market_summary.get("news_impact_score") or 0.0)
     has_news = bool(
@@ -357,24 +380,52 @@ def consolidate_news_deltas(
         or market_summary.get("news_digest")
         or market_summary.get("news_theme_summary")
     )
-    raw = {k: float(deltas.get(k, 0.0)) for k in _CAP_KEYS}
-    material = {k: v for k, v in raw.items() if abs(v) >= 0.005}
+    theme_top3 = _news_priority_sleeves(market_summary) if has_news else []
+    if not theme_top3:
+        theme_top3 = ["vti_core", "cash_buffer", "nyse"]
 
-    if len(material) <= max_sleeves and not (has_news and impact >= 0.25):
-        return _clamp_cap_deltas(raw, max_per_sleeve=max_per_sleeve)
+    scored: list[tuple[str, float, float]] = []
+    for key, val in material.items():
+        score = _sleeve_rank_score(
+            key,
+            val,
+            market_summary,
+            impact=impact,
+            top3=theme_top3,
+        )
+        scored.append((key, val, score))
+    scored.sort(key=lambda row: row[2], reverse=True)
 
-    top3 = _news_priority_sleeves(market_summary)
-    keep_list = list(top3)
+    keep_ordered: list[str] = []
+    for key, _, _ in scored:
+        if key not in keep_ordered:
+            keep_ordered.append(key)
+        if len(keep_ordered) >= max_sleeves:
+            break
+    for pref in theme_top3:
+        if pref not in keep_ordered and abs(raw.get(pref, 0.0)) >= 0.005:
+            keep_ordered.append(pref)
+        elif pref not in keep_ordered and len(keep_ordered) < max_sleeves:
+            keep_ordered.append(pref)
+        if len(keep_ordered) >= max_sleeves:
+            break
+
+    keep_set = set(keep_ordered[:max_sleeves])
     consolidated = {k: 0.0 for k in _CAP_KEYS}
 
-    for key, val in raw.items():
-        if abs(val) < 1e-9:
+    # Largest moves stay on their sleeve; smallest merge into best custodian.
+    for key, val, score in sorted(scored, key=lambda row: row[2]):
+        if key in keep_set:
+            consolidated[key] += val
             continue
-        target = key if key in keep_list else _redirect_cap_to_priority(key, tuple(keep_list), market_summary)
+        target = _redirect_cap_to_priority(key, tuple(keep_ordered), market_summary)
+        if target not in keep_set:
+            # Fall back to highest-scored keeper
+            target = keep_ordered[0] if keep_ordered else theme_top3[0]
         consolidated[target] += val
 
     for key in _CAP_KEYS:
-        if key not in keep_list:
+        if key not in keep_set:
             consolidated[key] = 0.0
 
     return _clamp_cap_deltas(consolidated, max_per_sleeve=max_per_sleeve)

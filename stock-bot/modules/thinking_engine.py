@@ -88,6 +88,69 @@ def _tilt_deltas_reasonable(deltas: dict[str, float]) -> tuple[bool, str]:
     return True, ""
 
 
+def _material_sleeve_count(deltas: dict[str, float]) -> int:
+    return len([v for v in deltas.values() if abs(float(v)) >= 0.005])
+
+
+def _thinking_tilt_apply_kwargs(equity: float | None = None) -> dict[str, Any]:
+    """Live-like kwargs for apply_thinking_tilt_to_caps (small account + ±6% cap)."""
+    kwargs: dict[str, Any] = {}
+    small = equity is not None and float(equity) < config.SMALL_ACCOUNT_EQUITY_THRESHOLD
+    live_book = not config.PAPER_TRADING and not config.paper_only_sleeves_active()
+    live_sim = config.live_thinking_sim_context()
+    if small or live_book or live_sim:
+        kwargs["allow_small_account"] = True
+        kwargs["max_sleeve_delta"] = config.LIVE_THINKING_MAX_SLEEVE_DELTA
+    return kwargs
+
+
+def _merge_caps_from_deltas(
+    base: dict[str, float],
+    cap_deltas: dict[str, float],
+) -> dict[str, float]:
+    merged = dict(base)
+    for key, delta in cap_deltas.items():
+        merged[key] = round(max(0.0, merged.get(key, 0.0) + delta), 6)
+
+    non_cash = sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer")
+    merged["cash_buffer"] = round(max(0.0, 1.0 - non_cash), 6)
+    if merged["cash_buffer"] < 0:
+        merged["cash_buffer"] = 0.0
+        scale = 1.0 / max(non_cash, 1e-9)
+        for key in _CAP_KEYS:
+            if key != "cash_buffer":
+                merged[key] = round(merged[key] * scale, 6)
+        merged["cash_buffer"] = round(
+            1.0 - sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer"), 6
+        )
+    return merged
+
+
+def _should_consolidate_news_deltas(
+    cap_deltas: dict[str, float],
+    market_summary: dict | None,
+    *,
+    live_like: bool = False,
+) -> bool:
+    """True when consolidation should run before the 3-sleeve safety guard."""
+    material_n = _material_sleeve_count(cap_deltas)
+    if material_n > THINKING_MAX_ACTIVE_SLEEVES:
+        return True
+    if not market_summary:
+        return False
+    has_news = bool(
+        market_summary.get("news_headlines")
+        or market_summary.get("news_digest")
+        or market_summary.get("news_theme_summary")
+    )
+    if not has_news:
+        return False
+    impact = _news_impact(market_summary)
+    if live_like or impact >= 0.15:
+        return True
+    return material_n > 1
+
+
 def _consolidate_news_deltas(
     deltas: dict[str, float],
     market_summary: dict | None,
@@ -1537,10 +1600,10 @@ def apply_thinking_tilt_to_caps(
         if max_sleeve_delta is not None
         else config.effective_thinking_max_sleeve_delta()
     )
-    if market_summary and (
-        _news_impact(market_summary) >= 0.25
-        or market_summary.get("news_headlines")
-        or len([v for v in cap_deltas.values() if abs(v) >= 0.005]) > THINKING_MAX_ACTIVE_SLEEVES
+    if _should_consolidate_news_deltas(
+        cap_deltas,
+        market_summary,
+        live_like=allow_small_account or max_sleeve_delta is not None,
     ):
         before = dict(cap_deltas)
         cap_deltas = _consolidate_news_deltas(
@@ -1556,25 +1619,29 @@ def apply_thinking_tilt_to_caps(
                 after={k: round(v, 4) for k, v in cap_deltas.items() if abs(v) > 0.001},
             )
 
-    merged = dict(base)
-    for key, delta in cap_deltas.items():
-        merged[key] = round(max(0.0, merged.get(key, 0.0) + delta), 6)
-
-    non_cash = sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer")
-    merged["cash_buffer"] = round(max(0.0, 1.0 - non_cash), 6)
-    if merged["cash_buffer"] < 0:
-        merged["cash_buffer"] = 0.0
-        scale = 1.0 / max(non_cash, 1e-9)
-        for key in _CAP_KEYS:
-            if key != "cash_buffer":
-                merged[key] = round(merged[key] * scale, 6)
-        merged["cash_buffer"] = round(
-            1.0 - sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer"), 6
-        )
+    merged = _merge_caps_from_deltas(base, cap_deltas)
 
     actual_deltas = {
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
+    if _material_sleeve_count(actual_deltas) > THINKING_MAX_ACTIVE_SLEEVES:
+        before_act = dict(actual_deltas)
+        actual_deltas = _consolidate_news_deltas(
+            actual_deltas,
+            market_summary,
+            max_per_sleeve=max_delta,
+        )
+        merged = _merge_caps_from_deltas(base, actual_deltas)
+        actual_deltas = {
+            k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
+        }
+        if actual_deltas != before_act:
+            _audit_thinking(
+                "post_merge_deltas_consolidated",
+                news_impact_score=_news_impact(market_summary) if market_summary else 0.0,
+                before={k: round(v, 4) for k, v in before_act.items() if abs(v) > 0.001},
+                after={k: round(v, 4) for k, v in actual_deltas.items() if abs(v) > 0.001},
+            )
     ok, reason = _tilt_deltas_reasonable(actual_deltas)
     if not ok:
         logger.info("Thinking engine: tilt rejected (%s)", reason)
@@ -1600,6 +1667,7 @@ def apply_thinking_to_sleeve_caps(
         confidence=float(thinking_result.get("confidence", 0.65)),
         market_summary=thinking_result.get("market_summary"),
         equity=equity,
+        **_thinking_tilt_apply_kwargs(equity),
     )
 
 
@@ -2305,10 +2373,15 @@ Top headline: {market_summary['top_headline']}
     + f"{float(market_summary.get('news_impact_score') or 0.0):.2f}"
     + " to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
     + (
-        "When news_impact_score >= 0.35, move at most 3 sleeves vs prior day — "
-        "merge energy into NYSE sleeve, gold into cash, liquidity into SPY/VTI barbell.\n"
+        "HIGH-IMPACT NEWS: move at most 3 sleeves vs prior day (strict live cap). "
+        "Rank by conviction: keep VTI/cash barbell, SPY liquidity, NYSE energy as custodians; "
+        "merge smaller sleeve nudges into those three (e.g. gold->cash, crypto->SPY, metal->cash).\n"
         if float(market_summary.get("news_impact_score") or 0.0) >= 0.35
-        else ""
+        else (
+            "When news_impact_score >= 0.25, prefer <=3 sleeve moves — consolidate minor tilts.\n"
+            if float(market_summary.get("news_impact_score") or 0.0) >= 0.25
+            else ""
+        )
     )
     + "AI/tech boom context: "
     + str(market_summary.get("news_ai_tech_context") or market_summary.get("ai_cycle_phase", "n/a"))
