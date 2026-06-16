@@ -19,11 +19,11 @@ def _find_run_all_root(start: Path, *, max_depth: int = 8) -> Path | None:
     """Walk parents from start until run_all.py or stock-bot/run_all.py is found."""
     candidate = start.resolve()
     for _ in range(max_depth):
-        if _has_run_all(candidate):
-            return candidate
         nested = candidate / "stock-bot"
         if _has_run_all(nested):
             return nested
+        if _has_run_all(candidate):
+            return candidate
         parent = candidate.parent
         if parent == candidate:
             break
@@ -31,11 +31,25 @@ def _find_run_all_root(start: Path, *, max_depth: int = 8) -> Path | None:
     return None
 
 
+def _resolve_run_all_root(path: Path) -> Path:
+    """Prefer stock-bot/ when monorepo root has no run_all.py beside modules."""
+    resolved = path.resolve()
+    if _has_run_all(resolved):
+        nested = resolved / "stock-bot"
+        if nested.is_dir() and _has_run_all(nested):
+            return nested
+        return resolved
+    nested = resolved / "stock-bot"
+    if _has_run_all(nested):
+        return nested
+    return resolved
+
+
 def resolve_project_root() -> Path:
     """Project root for writable data (users.db, desktop_prefs, per-user .env)."""
     override = os.getenv("PYTHONTRADING_ROOT", "").strip()
     if override:
-        return Path(override).resolve()
+        return _resolve_run_all_root(Path(override))
     if getattr(sys, "frozen", False):
         found = _find_run_all_root(Path(sys.executable).resolve().parent)
         if found is not None:

@@ -342,6 +342,8 @@ CRYPTO_ONLY_CYCLE_INTERVAL_SEC = int(os.getenv("CRYPTO_ONLY_CYCLE_INTERVAL_SEC",
 MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "0.10"))
 # Resume entries when drawdown falls below this (0 = never resume, legacy halt)
 HALT_RESUME_DRAWDOWN_PCT = float(os.getenv("HALT_RESUME_DRAWDOWN_PCT", "0.08"))
+# Minimum seconds halted before auto-resume (stops rapid halt/resume flicker).
+HALT_MIN_SECONDS = int(os.getenv("HALT_MIN_SECONDS", "300"))
 HALT_LIQUIDATE_ON_BREACH = os.getenv("HALT_LIQUIDATE_ON_BREACH", "true").lower() in (
     "1",
     "true",
@@ -395,6 +397,17 @@ SENTIMENT_DIR = os.getenv("SENTIMENT_DIR", "sentiment")
 WEB_SENTIMENT_CACHE_FILE = os.path.join(SENTIMENT_DIR, "live", "web_sentiment_live.json")
 WAYBACK_SENTIMENT_FILE = os.path.join(SENTIMENT_DIR, "archive", "wayback_sentiment.csv")
 WEB_SENTIMENT_CACHE_HOURS = int(os.getenv("WEB_SENTIMENT_CACHE_HOURS", "24"))
+
+
+def ensure_sentiment_dirs() -> None:
+    """Create sentiment/live and sentiment/archive (safe after crash or fresh install)."""
+    from pathlib import Path
+
+    base = Path(SENTIMENT_DIR)
+    (base / "live").mkdir(parents=True, exist_ok=True)
+    (base / "archive").mkdir(parents=True, exist_ok=True)
+
+
 # Felix & Friends / Goat Academy YouTube transcripts (optional macro overlay)
 FELIX_SYNC_ENABLED = os.getenv("FELIX_SYNC_ENABLED", "false").lower() in (
     "1",

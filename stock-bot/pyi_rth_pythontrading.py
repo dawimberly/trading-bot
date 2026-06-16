@@ -10,11 +10,11 @@ from pathlib import Path
 def _find_project_root() -> Path:
     candidate = Path(sys.executable).resolve().parent
     for _ in range(8):
-        if (candidate / "run_all.py").is_file():
-            return candidate
         nested = candidate / "stock-bot"
         if (nested / "run_all.py").is_file():
             return nested
+        if (candidate / "run_all.py").is_file():
+            return candidate
         parent = candidate.parent
         if parent == candidate:
             break

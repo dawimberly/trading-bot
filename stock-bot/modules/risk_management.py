@@ -1,6 +1,7 @@
 """Drawdown monitoring and position-size helpers."""
 
 import datetime
+from pathlib import Path
 
 import config
 
@@ -16,6 +17,7 @@ class RiskManager:
         self.peak_equity = None
         self.log_file = log_file or config.RISK_EVENTS_LOG
         self.halted = False
+        self._halted_at: datetime.datetime | None = None
         self._breach_liquidated = False
         self.halt_events = 0
         self.resume_events = 0
@@ -38,6 +40,7 @@ class RiskManager:
         if not self.halted:
             if drawdown >= self.max_drawdown:
                 self.halted = True
+                self._halted_at = datetime.datetime.now()
                 self.halt_events += 1
                 self._log_event(
                     f"CRITICAL: Drawdown {drawdown:.2%} reached. System Halted."
@@ -46,7 +49,13 @@ class RiskManager:
             return True
 
         if drawdown < self.resume_drawdown:
+            min_halt = config.HALT_MIN_SECONDS
+            if self._halted_at is not None and min_halt > 0:
+                elapsed = (datetime.datetime.now() - self._halted_at).total_seconds()
+                if elapsed < min_halt:
+                    return False
             self.halted = False
+            self._halted_at = None
             self._breach_liquidated = False
             self.resume_events += 1
             self._log_event(
@@ -77,7 +86,9 @@ class RiskManager:
 
     def _log_event(self, message):
         ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(self.log_file, "a") as f:
+        log_path = Path(self.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"{ts} | {message}\n")
 
 

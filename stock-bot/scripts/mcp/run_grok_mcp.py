@@ -9,15 +9,15 @@ from pathlib import Path
 
 def _load_project_env() -> Path:
     root = Path(__file__).resolve().parents[2]
-    env_file = root / ".env"
     try:
         from dotenv import load_dotenv
     except ImportError as exc:
         print("python-dotenv is required to load .env", file=sys.stderr)
         raise SystemExit(1) from exc
 
-    if env_file.is_file():
-        load_dotenv(env_file, override=False)
+    for env_file in (root / ".env", root.parent / ".env"):
+        if env_file.is_file():
+            load_dotenv(env_file, override=False)
     return root
 
 

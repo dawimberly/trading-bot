@@ -270,6 +270,9 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
             pass
         pid_path.unlink(missing_ok=True)
 
+    stop_orphan_project_bots()
+    time.sleep(1.0)
+
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
@@ -351,6 +354,9 @@ def bot_env_running(slot: str) -> bool:
 def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     if bot_running(username, book_id):
         return False, f"Bot is already running for {book_id}."
+    orphans_stopped, orphan_msg = stop_orphan_project_bots()
+    if orphans_stopped:
+        time.sleep(1.0)
     bot_script = _bot_entry_script(username, book_id)
     if not bot_script.is_file():
         return False, f"{bot_script.name} not found in project root."
@@ -379,10 +385,18 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
         book_pid_path(username, book_id).unlink(missing_ok=True)
         tail = read_bot_log_tail(username, book_id)
         detail = f"\n\n{tail}" if tail else ""
-        return False, f"Bot exited immediately (code {proc.returncode}).{detail}"
+        hint = ""
+        if "401" in tail or "not authorized" in tail.lower():
+            hint = (
+                "\n\nAlpaca returned 401 — check API keys in the portal menu "
+                "(paper vs live keys must match PAPER_TRADING in your book .env)."
+            )
+        orphan_note = f"\n{orphan_msg}" if orphans_stopped else ""
+        return False, f"Bot exited immediately (code {proc.returncode}).{hint}{orphan_note}{detail}"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
+    orphan_note = f" ({orphan_msg})" if orphans_stopped else ""
     return True, (
-        f"{mode} bot started via {bot_script.name} (PID {proc.pid}). "
+        f"{mode} bot started via {bot_script.name} (PID {proc.pid}){orphan_note}. "
         "First heartbeat may take up to 60s."
     )
 
