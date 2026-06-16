@@ -782,10 +782,12 @@ def run_backtest(
     paper_stat_arb_optimized: bool | None = None,
     paper_thinking: bool | None = None,
     paper_crypto_v2: bool | None = None,
+    paper_crypto_universe_expanded: bool | None = None,
     paper_risk_parity: bool | None = None,
     paper_vol_trading: bool | None = None,
     paper_vol_live_parity: bool = False,
     paper_dynamic_universe: bool | None = None,
+    paper_dynamic_universe_strict: bool | None = None,
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
@@ -812,9 +814,11 @@ def run_backtest(
     saved_paper_stat_arb_opt = config.PAPER_STAT_ARB_OPTIMIZED
     saved_paper_thinking = config.PAPER_THINKING_ENGINE_ENABLED
     saved_paper_crypto_v2 = config.PAPER_CRYPTO_V2_ENABLED
+    saved_paper_crypto_expanded = config.PAPER_CRYPTO_UNIVERSE_EXPANDED
     saved_paper_risk_parity = config.PAPER_RISK_PARITY_ENABLED
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
     saved_paper_dynamic_univ = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_paper_dynamic_univ_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     saved_live_thinking_ctx = config.live_thinking_sim_context()
     config.set_paper_aggressive_context(paper_aggressive)
@@ -856,12 +860,16 @@ def run_backtest(
         config.PAPER_THINKING_ENGINE_ENABLED = False
     if paper_crypto_v2 is not None:
         config.PAPER_CRYPTO_V2_ENABLED = bool(paper_crypto_v2)
+    if paper_crypto_universe_expanded is not None:
+        config.PAPER_CRYPTO_UNIVERSE_EXPANDED = bool(paper_crypto_universe_expanded)
     if paper_risk_parity is not None:
         config.PAPER_RISK_PARITY_ENABLED = bool(paper_risk_parity)
     if paper_vol_trading is not None:
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
     if paper_dynamic_universe is not None:
         config.PAPER_DYNAMIC_UNIVERSE_ENABLED = bool(paper_dynamic_universe)
+    if paper_dynamic_universe_strict is not None:
+        config.PAPER_DYNAMIC_UNIVERSE_STRICT = bool(paper_dynamic_universe_strict)
     if RUN_OPTIONS.fast_mode:
         apply_run_options_to_config()
     if paper_aggressive and not any(
@@ -1695,9 +1703,11 @@ def run_backtest(
     config.PAPER_STAT_ARB_OPTIMIZED = saved_paper_stat_arb_opt
     config.PAPER_THINKING_ENGINE_ENABLED = saved_paper_thinking
     config.PAPER_CRYPTO_V2_ENABLED = saved_paper_crypto_v2
+    config.PAPER_CRYPTO_UNIVERSE_EXPANDED = saved_paper_crypto_expanded
     config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_paper_dynamic_univ
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_paper_dynamic_univ_strict
     store_last_result(result)
     return result
 
@@ -2322,6 +2332,117 @@ def run_compare_crypto_v2(days=None, refresh=False, use_max=False) -> None:
                 elif kind == "breakout" and "range_spike" in t:
                     extra = f" spike={t['range_spike']}x"
                 print(f"  [{kind}] {sym} {pnl:+.2f}% ({reason}){extra}")
+
+
+def run_compare_crypto_universe(days=None, refresh=False, use_max=False) -> None:
+    """Compare base (24-pair) vs expanded Alpaca crypto universe (paper aggressive)."""
+    from modules.crypto_universe import crypto_trading_columns, prefetch_expanded_crypto_history
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    days = days or config.BACKTEST_DAYS
+
+    saved_exp = config.PAPER_CRYPTO_UNIVERSE_EXPANDED
+    saved_prefetch = config.backtest_crypto_expanded_prefetch()
+    config.PAPER_CRYPTO_UNIVERSE_EXPANDED = True
+    config.set_backtest_crypto_expanded_prefetch(True)
+    try:
+        prefetch_expanded_crypto_history(days=days, refresh=refresh, use_max=use_max)
+        data = _ensure_daily_data(days, refresh=refresh, use_max=use_max)
+    finally:
+        config.PAPER_CRYPTO_UNIVERSE_EXPANDED = saved_exp
+        config.set_backtest_crypto_expanded_prefetch(saved_prefetch)
+
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    if use_max:
+        label = "max"
+    else:
+        label = f"{days}d"
+
+    base_n = len(crypto_trading_columns(data, expanded=False))
+    exp_n = len(crypto_trading_columns(data, expanded=True))
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_stat_arb": True,
+        "paper_vol_trading": True,
+        "paper_macro_regime": False,
+        "paper_crypto_v2": False,
+        "track_metrics": True,
+    }
+    configs = [
+        (f"Base crypto ({base_n} symbols)", {**base_kwargs, "paper_crypto_universe_expanded": False}),
+        (
+            f"Expanded Alpaca ({exp_n} symbols)",
+            {**base_kwargs, "paper_crypto_universe_expanded": True},
+        ),
+    ]
+
+    print("--- CRYPTO UNIVERSE EXPANDED A/B (paper aggressive; live unchanged) ---")
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars) | vol gate + stat-arb MR unchanged"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Crypto':>7} {'Pairs':>6}"
+    )
+    print("-" * 78)
+
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.SOCIAL_SLEEVE_ENABLED = False
+    results: list[tuple[str, dict]] = []
+    try:
+        for label_cfg, kwargs in configs:
+            result = run_backtest(data, track_active_exposure=True, **kwargs)
+            results.append((label_cfg, result))
+            print(
+                f"{label_cfg:<32} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{result.get('crypto_signals', 0):>7d} "
+                f"{result.get('pairs_traded', 0):>6d}"
+            )
+            release_backtest_memory()
+    finally:
+        config.SOCIAL_SLEEVE_ENABLED = saved_social
+    print("-" * 78)
+
+    if len(results) == 2:
+        base_label, base = results[0]
+        exp_label, exp = results[1]
+        base_trades = int(base.get("crypto_signals") or 0)
+        exp_trades = int(exp.get("crypto_signals") or 0)
+        freq_delta = exp_trades - base_trades
+        print(
+            f"Expanded vs base: return {exp['total_return_pct'] - base['total_return_pct']:+.2f}pp | "
+            f"Sharpe {exp['sharpe'] - base['sharpe']:+.2f} | "
+            f"MaxDD {exp['max_drawdown_pct'] - base['max_drawdown_pct']:+.2f}pp | "
+            f"crypto trades {freq_delta:+d} ({base_trades} -> {exp_trades})"
+        )
+        print("\n--- Live $300 Profile A recommendation ---")
+        if exp_trades > base_trades and exp["sharpe"] >= base["sharpe"] - 0.05:
+            print(
+                "OPTIONAL on paper only — keep PAPER_CRYPTO_UNIVERSE_EXPANDED=true on Profile B. "
+                "Do NOT enable on live $300: crypto sleeve is disabled on Profile A; "
+                "expanded pairs add fee/slippage surface without live execution path."
+            )
+        elif exp["sharpe"] > base["sharpe"] + 0.1 and exp["max_drawdown_pct"] >= base["max_drawdown_pct"] - 1.0:
+            print(
+                "Paper-only benefit — enable PAPER_CRYPTO_UNIVERSE_EXPANDED=true on Best Paper v2.1. "
+                "Live $300: leave OFF (crypto disabled on Alpaca live Profile A)."
+            )
+        else:
+            print(
+                "Keep expanded universe OFF for now — insufficient Sharpe/DD improvement vs base 24 pairs. "
+                "Live $300: unchanged (crypto sleeve off on Profile A)."
+            )
 
 
 def _equity_underperformance_stats(baseline: dict, with_thinking: dict) -> dict:
@@ -3449,15 +3570,21 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
 
 
 def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare static UNIVERSE vs exchange-agnostic dynamic screener (paper aggressive)."""
+    """Compare static UNIVERSE vs strict dynamic screener (paper aggressive)."""
     saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
     config.set_paper_aggressive_context(True)
     config.set_backtest_paper_sleeves_context(True)
 
     sim_days = days or config.BACKTEST_DAYS
+    from modules.dynamic_universe import screener_universe_meta
+
+    filters = (screener_universe_meta().get("filters") or {})
+    need_strict_file = filters.get("strict_mode") is not True
     screener = _prefetch_screener_for_backtest(
-        sim_days, refresh=refresh, use_max=use_max
+        sim_days, refresh=refresh or need_strict_file, use_max=use_max
     )
 
     if use_max:
@@ -3466,13 +3593,20 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
         data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
 
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
 
     if len(data) < MIN_HISTORY:
         print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
         return
 
     static_size = len(_static_equity_universe(data.columns))
+    saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
     dyn_size = len(_dynamic_equity_universe(data.columns))
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
     bench = _benchmark_return(data, MIN_HISTORY)
     base_kwargs = {
         "paper_aggressive": True,
@@ -3485,34 +3619,47 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
     configs = [
         (
             f"Static equity ({static_size} names)",
-            {**base_kwargs, "paper_dynamic_universe": False},
+            {**base_kwargs, "paper_dynamic_universe": False, "paper_dynamic_universe_strict": False},
         ),
         (
-            f"Dynamic screener ({dyn_size} names)",
-            {**base_kwargs, "paper_dynamic_universe": True},
+            f"Dynamic strict ({dyn_size} names)",
+            {
+                **base_kwargs,
+                "paper_dynamic_universe": True,
+                "paper_dynamic_universe_strict": True,
+            },
         ),
     ]
 
-    print("--- PAPER DYNAMIC UNIVERSE A/B (NYSE+NASDAQ, paper only) ---")
+    print("--- PAPER DYNAMIC UNIVERSE A/B (static vs strict screener, paper only) ---")
     print(
         f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
     )
     if bench is not None:
         print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    from modules.dynamic_universe import STRICT_MIN_AVG_DOLLAR_VOLUME
+
     print(
         f"Screener file: {len(screener)} tickers | "
-        f"static pool {static_size} | dynamic pool {dyn_size} | "
-        f"filter: price>$5, avg daily $vol>$50M"
+        f"static pool {static_size} | dynamic strict pool {dyn_size} | "
+        f"filters: 30d momentum rank, ${STRICT_MIN_AVG_DOLLAR_VOLUME/1e6:.0f}M $vol, "
+        f"sector cap, ETB-only (no short-interest feed)"
     )
     samples = _universe_sample_lines(data, screener)
     if samples:
         print("Sample dynamic names in backtest window:")
         for line in samples:
             print(line)
+    new_names = sorted(
+        set(screener) - set(config.UNIVERSE),
+        key=lambda t: screener.index(t) if t in screener else 999,
+    )
+    if new_names:
+        print(f"New vs static UNIVERSE: {', '.join(new_names[:16])}")
     print(
         f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
-        f"{'NYSE':>6} {'Pairs':>6} {'Univ':>5}"
+        f"{'Trades':>7} {'Univ':>5}"
     )
     print("-" * 82)
 
@@ -3525,8 +3672,7 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
             f"{result['total_return_pct']:>+7.2f}% "
             f"{result['sharpe']:>7.2f} "
             f"{result['max_drawdown_pct']:>7.2f}% "
-            f"{result.get('nyse_signals', 0):>6} "
-            f"{result.get('pairs_traded', 0):>6} "
+            f"{result.get('nyse_signals', 0):>7} "
             f"{result.get('equity_universe_size', 0):>5}"
         )
 
@@ -3535,12 +3681,11 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
         _, static_r = results[0]
         _, dyn_r = results[1]
         print(
-            f"Delta (dynamic - static): "
+            f"Delta (dynamic strict - static): "
             f"return {dyn_r['total_return_pct'] - static_r['total_return_pct']:+.2f}pp | "
             f"Sharpe {dyn_r['sharpe'] - static_r['sharpe']:+.2f} | "
             f"MaxDD {dyn_r['max_drawdown_pct'] - static_r['max_drawdown_pct']:+.2f}pp | "
-            f"NYSE signals {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d} | "
-            f"pairs {dyn_r.get('pairs_traded', 0) - static_r.get('pairs_traded', 0):+d}"
+            f"Trades {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d}"
         )
     print("-" * 82)
 
@@ -3987,7 +4132,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-dynamic-universe",
         action="store_true",
-        help="Compare static UNIVERSE vs dynamic NYSE+NASDAQ screener (paper aggressive)",
+        help="Compare static UNIVERSE vs strict dynamic screener (paper aggressive)",
     )
     parser.add_argument(
         "--compare-dynamic-vti",
@@ -4078,6 +4223,11 @@ if __name__ == "__main__":
         "--compare-crypto-v2",
         action="store_true",
         help="Compare stat-arb crypto vs dual-entry crypto v2 sleeve (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-crypto-universe",
+        action="store_true",
+        help="Compare base vs expanded Alpaca crypto universe (paper aggressive)",
     )
     parser.add_argument(
         "--compare-vti-levels",
@@ -4292,6 +4442,13 @@ if __name__ == "__main__":
             print("--compare-crypto-v2 requires --paper-aggressive")
             sys.exit(1)
         run_compare_crypto_v2(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_crypto_universe:
+        if not args.paper_aggressive:
+            print("--compare-crypto-universe requires --paper-aggressive")
+            sys.exit(1)
+        run_compare_crypto_universe(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_vti_levels:

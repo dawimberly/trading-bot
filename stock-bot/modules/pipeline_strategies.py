@@ -4,6 +4,7 @@ import numpy as np
 
 import config
 from modules import deployment_sizing
+from modules.crypto_universe import crypto_trading_columns
 
 PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
 
@@ -211,7 +212,7 @@ def crypto_trade_intents(
     """Same logic as crypto strategy but returns intents for Kraken mirror (no Alpaca orders)."""
     from modules.crypto_vol_gate import crypto_trading_allowed
 
-    crypto_cols = [c for c in data.columns if config.is_crypto(c)]
+    crypto_cols = crypto_trading_columns(data)
     if len(crypto_cols) < 2:
         return []
     gate = crypto_trading_allowed(
@@ -651,6 +652,20 @@ def _apply_sector_tech_cap(ranked, *, top_n=3, max_tech=None):
     return primary + fill + remaining
 
 
+def _apply_screener_momentum_order(ranked):
+    """Strict dynamic universe: prefer screener 30d momentum rank among MA50 picks."""
+    try:
+        from modules.dynamic_universe import screener_momentum_order
+
+        screener_order = screener_momentum_order(ranked)
+    except ImportError:
+        return ranked
+    if not screener_order:
+        return ranked
+    order_index = {sym: i for i, sym in enumerate(screener_order)}
+    return sorted(ranked, key=lambda s: order_index.get(s, len(order_index)))
+
+
 def _equity_momentum_ranked(
     data,
     equity_cols,
@@ -661,6 +676,8 @@ def _equity_momentum_ranked(
     ranked = _equity_momentum_candidates(data, equity_cols)
     if not ranked:
         return ranked
+    if config.effective_paper_dynamic_universe_strict():
+        ranked = _apply_screener_momentum_order(ranked)
     if _spy_sleeve_active(data, yield_gated=yield_gated, regime=regime):
         if config.NYSE_SECTOR_TECH_CAP > 0:
             ranked = _apply_sector_tech_cap(ranked)

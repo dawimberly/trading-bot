@@ -40,6 +40,19 @@ from modules.dynamic_universe import (
     MIN_AVG_DOLLAR_VOLUME,
     MIN_PRICE,
     MIN_SHARE_VOLUME,
+    MOMENTUM_LOOKBACK,
+    STRICT_MAX_PER_SECTOR,
+    STRICT_MAX_UNIVERSE_SIZE,
+    STRICT_MIN_MOMENTUM_RANK,
+    STRICT_MIN_UNIVERSE_SIZE,
+    apply_sector_balance,
+    effective_max_ipo_slots,
+    effective_max_universe_size,
+    effective_min_dollar_volume,
+    effective_min_share_volume,
+    effective_momentum_lookback,
+    sector_for_symbol,
+    strict_mode_active,
 )
 
 OUTPUT_PATH = ROOT / "data" / "screener_universe.json"
@@ -211,7 +224,9 @@ def _atr_pct(frame: pd.DataFrame, window: int = LOOKBACK) -> float:
     return float(atr / price)
 
 
-def _metrics(frame: pd.DataFrame, asset_meta: dict) -> dict[str, float | int | bool | str] | None:
+def _metrics(
+    frame: pd.DataFrame, asset_meta: dict, *, symbol: str = ""
+) -> dict[str, float | int | bool | str] | None:
     trading_days = len(frame)
     if trading_days < IPO_MIN_TRADING_DAYS:
         return None
@@ -220,19 +235,27 @@ def _metrics(frame: pd.DataFrame, asset_meta: dict) -> dict[str, float | int | b
     price = float(close.iloc[-1])
     if price <= MIN_PRICE:
         return None
-    avg_shares = float(volume.tail(LOOKBACK).mean())
-    if avg_shares < MIN_SHARE_VOLUME:
+    mom_lookback = effective_momentum_lookback()
+    vol_lookback = max(LOOKBACK, mom_lookback)
+    avg_shares = float(volume.tail(vol_lookback).mean())
+    min_share_vol = effective_min_share_volume()
+    if avg_shares < min_share_vol:
         return None
     avg_dollar_vol = avg_shares * price
-    if avg_dollar_vol < MIN_AVG_DOLLAR_VOLUME:
+    min_dollar_vol = effective_min_dollar_volume()
+    if avg_dollar_vol < min_dollar_vol:
         return None
     atr_pct = _atr_pct(frame, LOOKBACK)
     is_ipo = trading_days < IPO_MAX_TRADING_DAYS
     if atr_pct > MAX_ATR_PCT and not is_ipo:
         return None
-    if len(close) < LOOKBACK + 1:
+    if strict_mode_active():
+        etb = asset_meta.get("easy_to_borrow")
+        if etb is False:
+            return None
+    if len(close) < mom_lookback + 1:
         return None
-    momentum = float(close.iloc[-1] / close.iloc[-LOOKBACK - 1] - 1.0)
+    momentum = float(close.iloc[-1] / close.iloc[-mom_lookback - 1] - 1.0)
     ma50 = float(close.rolling(min(MA_WINDOW, len(close))).mean().iloc[-1])
     if ma50 <= 0:
         return None
@@ -247,12 +270,14 @@ def _metrics(frame: pd.DataFrame, asset_meta: dict) -> dict[str, float | int | b
         "avg_volume": int(avg_shares),
         "avg_dollar_volume": round(avg_dollar_vol, 0),
         "momentum": momentum,
+        "momentum_30d": momentum if mom_lookback >= 30 else None,
         "atr_pct": atr_pct,
         "trend": trend,
         "trading_days": trading_days,
         "is_ipo": is_ipo,
         "exchange": asset_meta.get("exchange", ""),
         "easy_to_borrow": asset_meta.get("easy_to_borrow"),
+        "sector": sector_for_symbol(symbol),
         "position_scale": position_scale,
     }
 
@@ -278,6 +303,22 @@ def score_candidates(rows: list[dict]) -> list[dict]:
     vol_rank = 1.0 - _percentile_rank(atr_pct)
     trend_rank = _percentile_rank(trend)
 
+    if strict_mode_active():
+        keep = mom_rank >= STRICT_MIN_MOMENTUM_RANK
+        if not keep.any():
+            keep = np.ones(len(rows), dtype=bool)
+        rows = [r for r, ok in zip(rows, keep) if ok]
+        if not rows:
+            return []
+        dollar_vol = np.array([r["avg_dollar_volume"] for r in rows], dtype=float)
+        momentum = np.array([r["momentum"] for r in rows], dtype=float)
+        atr_pct = np.array([r["atr_pct"] for r in rows], dtype=float)
+        trend = np.array([r["trend"] for r in rows], dtype=float)
+        liq_rank = _percentile_rank(dollar_vol)
+        mom_rank = _percentile_rank(momentum)
+        vol_rank = 1.0 - _percentile_rank(atr_pct)
+        trend_rank = _percentile_rank(trend)
+
     scored = []
     for i, row in enumerate(rows):
         composite = (
@@ -291,6 +332,13 @@ def score_candidates(rows: list[dict]) -> list[dict]:
                 "ticker": row["ticker"],
                 "score": round(float(composite), 6),
                 "momentum": round(float(row["momentum"]), 6),
+                "momentum_30d": round(float(row["momentum"]), 6)
+                if effective_momentum_lookback() >= 30
+                else None,
+                "momentum_rank": round(float(mom_rank[i]), 6),
+                "momentum_30d_rank": round(float(mom_rank[i]), 6)
+                if effective_momentum_lookback() >= 30
+                else None,
                 "atr_pct": round(float(row["atr_pct"]), 6),
                 "trend": round(float(row["trend"]), 6),
                 "price": round(float(row["price"]), 4),
@@ -299,6 +347,7 @@ def score_candidates(rows: list[dict]) -> list[dict]:
                 "trading_days": int(row["trading_days"]),
                 "is_ipo": bool(row["is_ipo"]),
                 "exchange": row.get("exchange", ""),
+                "sector": row.get("sector", "Other"),
                 "easy_to_borrow": row.get("easy_to_borrow"),
                 "position_scale": round(float(row["position_scale"]), 2),
             }
@@ -308,12 +357,36 @@ def score_candidates(rows: list[dict]) -> list[dict]:
 
 
 def _select_universe(scored: list[dict]) -> list[dict]:
+    max_size = effective_max_universe_size()
+    max_ipo = effective_max_ipo_slots()
+    if strict_mode_active():
+        established = [r for r in scored if not r["is_ipo"]]
+        ipos = [r for r in scored if r["is_ipo"]]
+        ipos.sort(key=lambda r: (r["avg_dollar_volume"], r["score"]), reverse=True)
+        max_established = max(0, max_size - min(len(ipos), max_ipo))
+        pool = established[:max_established] + ipos[:max_ipo]
+        selected = apply_sector_balance(
+            pool,
+            max_size=max_size,
+            max_per_sector=STRICT_MAX_PER_SECTOR,
+        )
+        if len(selected) < STRICT_MIN_UNIVERSE_SIZE:
+            seen = {r["ticker"] for r in selected}
+            for row in scored:
+                if row["ticker"] in seen:
+                    continue
+                selected.append(row)
+                seen.add(row["ticker"])
+                if len(selected) >= STRICT_MIN_UNIVERSE_SIZE:
+                    break
+        return selected[:max_size]
+
     established = [r for r in scored if not r["is_ipo"]]
     ipos = [r for r in scored if r["is_ipo"]]
     ipos.sort(key=lambda r: (r["avg_dollar_volume"], r["score"]), reverse=True)
-    max_established = max(0, MAX_UNIVERSE_SIZE - min(len(ipos), MAX_IPO_SLOTS))
-    selected = established[:max_established] + ipos[:MAX_IPO_SLOTS]
-    return selected[:MAX_UNIVERSE_SIZE]
+    max_established = max(0, max_size - min(len(ipos), max_ipo))
+    selected = established[:max_established] + ipos[:max_ipo]
+    return selected[:max_size]
 
 
 def run_screener(*, asset_map: dict[str, dict] | None = None) -> dict:
@@ -335,13 +408,14 @@ def run_screener(*, asset_map: dict[str, dict] | None = None) -> dict:
             frame = frames.get(sym)
             if frame is None:
                 continue
-            metrics = _metrics(frame, asset_map.get(sym, {}))
+            metrics = _metrics(frame, {**asset_map.get(sym, {}), "symbol": sym}, symbol=sym)
             if metrics is None:
                 continue
             candidates.append({"ticker": sym, **metrics})
 
     print(
-        f"Passed filters (price>${MIN_PRICE}, ${MIN_AVG_DOLLAR_VOLUME/1e6:.0f}M avg daily $vol): "
+        f"Passed filters (price>${MIN_PRICE}, ${effective_min_dollar_volume()/1e6:.0f}M avg daily $vol"
+        f"{', strict ETB' if strict_mode_active() else ''}): "
         f"{len(candidates)}"
     )
     score_table = score_candidates(candidates)
@@ -354,10 +428,15 @@ def run_screener(*, asset_map: dict[str, dict] | None = None) -> dict:
         "ipo_count": ipo_count,
         "filters": {
             "min_price": MIN_PRICE,
-            "min_avg_dollar_volume": MIN_AVG_DOLLAR_VOLUME,
+            "min_avg_dollar_volume": effective_min_dollar_volume(),
+            "min_share_volume": effective_min_share_volume(),
+            "momentum_lookback": effective_momentum_lookback(),
             "max_atr_pct": MAX_ATR_PCT,
             "ipo_max_trading_days": IPO_MAX_TRADING_DAYS,
-            "max_tickers": MAX_UNIVERSE_SIZE,
+            "max_tickers": effective_max_universe_size(),
+            "strict_mode": strict_mode_active(),
+            "max_per_sector": STRICT_MAX_PER_SECTOR if strict_mode_active() else None,
+            "min_momentum_rank": STRICT_MIN_MOMENTUM_RANK if strict_mode_active() else None,
         },
     }
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)

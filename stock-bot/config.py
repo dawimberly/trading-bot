@@ -110,6 +110,14 @@ PAPER_CRYPTO_V2_SYMBOLS = [
     "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
     "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
 ]
+# Path B: expanded Alpaca crypto universe (paper default on; live Profile A off)
+_paper_crypto_expanded_default = "true" if PAPER_TRADING else "false"
+PAPER_CRYPTO_UNIVERSE_EXPANDED = os.getenv(
+    "PAPER_CRYPTO_UNIVERSE_EXPANDED", _paper_crypto_expanded_default
+).lower() in ("1", "true", "yes")
+CRYPTO_EXPANDED_MAX_SYMBOLS = int(os.getenv("CRYPTO_EXPANDED_MAX_SYMBOLS", "48"))
+CRYPTO_EXPANDED_MIN_BARS = int(os.getenv("CRYPTO_EXPANDED_MIN_BARS", "30"))
+_backtest_crypto_expanded_prefetch = False
 PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
 PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
     "1",
@@ -125,6 +133,9 @@ _paper_dyn_univ = os.getenv("PAPER_DYNAMIC_UNIVERSE_ENABLED") or os.getenv(
     "PAPER_DYNAMIC_UNIVERSE", "true"
 )
 PAPER_DYNAMIC_UNIVERSE_ENABLED = _paper_dyn_univ.lower() in ("1", "true", "yes")
+PAPER_DYNAMIC_UNIVERSE_STRICT = os.getenv(
+    "PAPER_DYNAMIC_UNIVERSE_STRICT", "false"
+).lower() in ("1", "true", "yes")
 PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
 PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
 PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.01"))
@@ -1083,7 +1094,17 @@ def effective_max_notional_per_order(equity: float | None = None) -> float:
 
 def is_crypto(symbol: str) -> bool:
     """True for universe crypto pairs (BTC-USD) or Alpaca format (BTC/USD, BTCUSD)."""
-    return normalize_symbol(symbol) in CRYPTO_TICKERS
+    sym = normalize_symbol(symbol)
+    if sym in CRYPTO_TICKERS:
+        return True
+    if effective_crypto_universe_expanded():
+        try:
+            from modules.crypto_universe import expanded_crypto_symbols
+
+            return sym in expanded_crypto_symbols()
+        except ImportError:
+            pass
+    return False
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -1094,8 +1115,40 @@ def normalize_symbol(symbol: str) -> str:
     return s
 
 
-def crypto_universe():
-    return [t for t in UNIVERSE if is_crypto(t)]
+def base_crypto_universe() -> list[str]:
+    """Static crypto pairs from UNIVERSE (24 majors)."""
+    return [t for t in UNIVERSE if t in CRYPTO_TICKERS]
+
+
+def crypto_universe() -> list[str]:
+    """Crypto symbols for data refresh and sleeve scans."""
+    if effective_crypto_universe_expanded():
+        try:
+            from modules.crypto_universe import expanded_crypto_symbols
+
+            return expanded_crypto_symbols()
+        except ImportError:
+            pass
+    return base_crypto_universe()
+
+
+def effective_crypto_universe_expanded() -> bool:
+    """Paper expanded Alpaca crypto universe; off on live Profile A by default."""
+    if not PAPER_CRYPTO_UNIVERSE_EXPANDED:
+        return False
+    if paper_only_sleeves_active() or PAPER_TRADING:
+        return True
+    return bool(backtest_paper_sleeves_context())
+
+
+def set_backtest_crypto_expanded_prefetch(enabled: bool) -> None:
+    """Include expanded crypto tickers in backtest_fetch_tickers() prefetch."""
+    global _backtest_crypto_expanded_prefetch
+    _backtest_crypto_expanded_prefetch = bool(enabled)
+
+
+def backtest_crypto_expanded_prefetch() -> bool:
+    return bool(_backtest_crypto_expanded_prefetch)
 
 
 def equity_universe():
@@ -1151,11 +1204,18 @@ def nyse_momentum_universe(data_columns) -> list[str]:
 
 
 def backtest_fetch_tickers() -> list[str]:
-    """Tickers to load for daily backtests (static UNIVERSE + screener when dynamic)."""
+    """Tickers to load for daily backtests (static UNIVERSE + screener + expanded crypto)."""
     tickers = list(UNIVERSE)
     if USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe():
         extra = load_screener_universe_tickers() or []
         tickers = sorted(set(tickers) | set(extra))
+    if effective_crypto_universe_expanded() or backtest_crypto_expanded_prefetch():
+        try:
+            from modules.crypto_universe import expanded_crypto_symbols
+
+            tickers = sorted(set(tickers) | set(expanded_crypto_symbols()))
+        except ImportError:
+            pass
     return tickers
 
 
@@ -1731,6 +1791,13 @@ def effective_crypto_v2_enabled() -> bool:
 def effective_paper_dynamic_universe() -> bool:
     """Weekly NYSE/screener refresh — paper aggressive only."""
     return bool(paper_only_sleeves_active() and PAPER_DYNAMIC_UNIVERSE_ENABLED)
+
+
+def effective_paper_dynamic_universe_strict() -> bool:
+    """Strict quality screener (8–12 names, 30d momentum) — paper aggressive only."""
+    return bool(
+        effective_paper_dynamic_universe() and PAPER_DYNAMIC_UNIVERSE_STRICT
+    )
 
 
 def paper_crypto_v2_symbols() -> list[str]:
