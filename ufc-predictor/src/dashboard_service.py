@@ -382,6 +382,97 @@ def run_quick_odds_refresh(
     return {"books": books, "threshold_ctx": threshold_ctx, "odds_updated_at": _utc_now()}
 
 
+def load_next_two_cards(
+    *,
+    explain: bool = True,
+    use_cache: bool = True,
+    progress: ProgressFn | None = None,
+) -> tuple[list[tuple[int, str]], list[dict[str, Any]], pd.DataFrame, bool]:
+    """
+    Resolve and predict the two soonest upcoming cards (Refresh Next Two path).
+
+    Logs target resolution, raw card size, and prediction row counts for debugging.
+    """
+    from main import fetch_event_card, load_or_refresh_data
+    from src.predictor import resolve_analysis_targets
+
+    _log(progress, "Resolving next two events…", 0.02)
+    try:
+        targets = resolve_analysis_targets(
+            None,
+            next_two=True,
+            include_adjacent_week=False,
+        )
+    except SystemExit as exc:
+        logger.warning("resolve_analysis_targets (next two) failed: %s", exc)
+        raise
+
+    labels = [name for _, name in targets]
+    logger.info(
+        "load_next_two_cards: resolve_analysis_targets returned %d event(s): %s",
+        len(targets),
+        labels,
+    )
+    if not targets:
+        logger.warning("load_next_two_cards: no events resolved")
+        return [], [], pd.DataFrame(), False
+
+    fights = load_or_refresh_data(refresh=False)
+    logger.info("load_next_two_cards: historical fight pool rows=%d", len(fights))
+
+    cards: list[dict[str, Any]] = []
+    n = len(targets)
+    all_cached = bool(use_cache)
+
+    for idx, (event_index, event_name) in enumerate(targets):
+        base_pct = 0.05 + (idx / n) * 0.5
+        span = 0.5 / n
+        _log(progress, f"Card {idx + 1}/{n}: {event_name}", base_pct)
+        card = fetch_event_card(event_index, refresh=False)
+        raw_rows = len(card)
+        logger.info(
+            "load_next_two_cards: card %d %r raw bouts=%d",
+            idx + 1,
+            event_name,
+            raw_rows,
+        )
+        if use_cache:
+            hit = load_event_cache(event_name, card)
+            if not hit or hit["meta"].get("explain") != explain:
+                all_cached = False
+        else:
+            all_cached = False
+        preds = predict_card_cached(
+            card,
+            fights,
+            event_name,
+            explain=explain,
+            use_cache=use_cache,
+            progress=progress,
+            step_pct=base_pct,
+            step_span=span,
+        )
+        logger.info(
+            "load_next_two_cards: card %d %r predictions=%d (from %d bouts)",
+            idx + 1,
+            event_name,
+            len(preds),
+            raw_rows,
+        )
+        cards.append({"event_name": event_name, "predictions": preds})
+
+    combined = pd.concat(
+        [c["predictions"] for c in cards if not c["predictions"].empty],
+        ignore_index=True,
+    )
+    logger.info(
+        "load_next_two_cards: done — %d total predictions across %d card(s)",
+        len(combined),
+        len(cards),
+    )
+    return targets, cards, combined, all_cached
+
+
 def run_full_analysis(
     *,
     event_mode: str,
@@ -419,51 +510,66 @@ def run_full_analysis(
     next_two = event_mode in ("Next Two Cards", "Last Two Cards")
     event_query = None if event_mode in ("Next Card", "Next Two Cards", "Last Two Cards") else event_mode
 
-    _log(progress, "Resolving events…", 0.02)
-    try:
-        targets = resolve_event_targets(
-            event_query,
-            next_two=next_two,
-            include_adjacent_week=not next_two and event_query is not None,
-        )
-    except SystemExit as exc:
-        result["errors"].append(str(exc) or "Could not resolve events.")
-        return result
+    if event_mode == "Next Two Cards":
+        try:
+            targets, cards, combined, all_cached = load_next_two_cards(
+                explain=explain,
+                use_cache=use_cache,
+                progress=progress,
+            )
+        except SystemExit as exc:
+            result["errors"].append(str(exc) or "Could not resolve events.")
+            return result
+        result["event_label"] = " + ".join(name for _, name in targets)
+        result["cards"] = cards
+        result["combined"] = combined
+        result["from_cache"] = all_cached
+    else:
+        _log(progress, "Resolving events…", 0.02)
+        try:
+            targets = resolve_event_targets(
+                event_query,
+                next_two=next_two,
+                include_adjacent_week=not next_two and event_query is not None,
+            )
+        except SystemExit as exc:
+            result["errors"].append(str(exc) or "Could not resolve events.")
+            return result
 
-    result["event_label"] = " + ".join(name for _, name in targets)
-    fights = load_or_refresh_data(refresh=False)
-    n = len(targets)
-    all_cached = bool(use_cache)
+        result["event_label"] = " + ".join(name for _, name in targets)
+        fights = load_or_refresh_data(refresh=False)
+        n = len(targets)
+        all_cached = bool(use_cache)
 
-    for idx, (event_index, event_name) in enumerate(targets):
-        base_pct = 0.05 + (idx / n) * 0.5
-        span = 0.5 / n
-        _log(progress, f"Card {idx + 1}/{n}: {event_name}", base_pct)
-        card = fetch_event_card(event_index, refresh=False)
-        if use_cache:
-            hit = load_event_cache(event_name, card)
-            if not hit or hit["meta"].get("explain") != explain:
+        for idx, (event_index, event_name) in enumerate(targets):
+            base_pct = 0.05 + (idx / n) * 0.5
+            span = 0.5 / n
+            _log(progress, f"Card {idx + 1}/{n}: {event_name}", base_pct)
+            card = fetch_event_card(event_index, refresh=False)
+            if use_cache:
+                hit = load_event_cache(event_name, card)
+                if not hit or hit["meta"].get("explain") != explain:
+                    all_cached = False
+            else:
                 all_cached = False
-        else:
-            all_cached = False
-        preds = predict_card_cached(
-            card,
-            fights,
-            event_name,
-            explain=explain,
-            use_cache=use_cache,
-            progress=progress,
-            step_pct=base_pct,
-            step_span=span,
-        )
-        result["cards"].append({"event_name": event_name, "predictions": preds})
+            preds = predict_card_cached(
+                card,
+                fights,
+                event_name,
+                explain=explain,
+                use_cache=use_cache,
+                progress=progress,
+                step_pct=base_pct,
+                step_span=span,
+            )
+            result["cards"].append({"event_name": event_name, "predictions": preds})
 
-    combined = pd.concat(
-        [c["predictions"] for c in result["cards"] if not c["predictions"].empty],
-        ignore_index=True,
-    )
-    result["combined"] = combined
-    result["from_cache"] = all_cached
+        combined = pd.concat(
+            [c["predictions"] for c in result["cards"] if not c["predictions"].empty],
+            ignore_index=True,
+        )
+        result["combined"] = combined
+        result["from_cache"] = all_cached
 
     bankroll = bankroll_from_budget(budget_state)
     if budget_state is not None:

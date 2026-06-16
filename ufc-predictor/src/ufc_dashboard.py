@@ -1832,6 +1832,22 @@ def _apply_risk_warning_label(label: ctk.CTkLabel, warnings: list[tuple[str, str
         label.pack_forget()
 
 
+def _budget_badge_style(pool_usd: float, *, books_enabled: bool) -> tuple[str, str]:
+    """Badge colors for Available-this-card (uses strategy helper when present)."""
+    try:
+        from src.strategy import budget_availability_badge_style
+
+        return budget_availability_badge_style(pool_usd, books_enabled=books_enabled)
+    except ImportError:
+        if not books_enabled:
+            return "#451a1a", "#fca5a5"
+        if pool_usd > 50:
+            return "#14532d", "#86efac"
+        if pool_usd >= 20:
+            return "#713f12", "#fde047"
+        return "#451a1a", "#fca5a5"
+
+
 class BudgetManagerBar(_CTK_FRAME):
     """Bankroll, card budget, and per-book toggles — sits beside Profile selector."""
 
@@ -1850,6 +1866,9 @@ class BudgetManagerBar(_CTK_FRAME):
         self._on_change = on_change
         self._profile_getter = profile_getter
         self._persisted_state = config.default_budget_state()
+        self._refreshing = False
+        self._refresh_after_id: str | None = None
+        self._pending_notify_parent = True
 
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 8))
@@ -1903,7 +1922,7 @@ class BudgetManagerBar(_CTK_FRAME):
         _ToolTip(self.card_budget_label, _CARD_BUDGET_TIP)
         self.card_budget_entry = ctk.CTkEntry(row, textvariable=self.card_budget_var, width=56)
         self.card_budget_entry.pack(side="left", padx=(0, 4))
-        self.card_budget_entry.bind("<KeyRelease>", lambda _e: self._refresh_live())
+        self.card_budget_entry.bind("<KeyRelease>", lambda _e: self._schedule_refresh())
         _ToolTip(self.card_budget_entry, _CARD_BUDGET_TIP)
         self.card_cap_hint = ctk.CTkLabel(row, text="", text_color="#9ca3af", anchor="w")
         self.card_cap_hint.pack(side="left", padx=(0, 10))
@@ -1917,13 +1936,13 @@ class BudgetManagerBar(_CTK_FRAME):
         self.live_cap_warning.pack(side="left", padx=(0, 8))
 
         ctk.CTkCheckBox(
-            row, text="Use BetNow", variable=self.use_betnow_var, width=100, command=self._refresh_live
+            row, text="Use BetNow", variable=self.use_betnow_var, width=100, command=self._schedule_refresh
         ).pack(side="left", padx=(0, 4))
         ctk.CTkCheckBox(
-            row, text="Use DraftKings", variable=self.use_dk_var, width=118, command=self._refresh_live
+            row, text="Use DraftKings", variable=self.use_dk_var, width=118, command=self._schedule_refresh
         ).pack(side="left", padx=(0, 4))
         ctk.CTkCheckBox(
-            row, text="Use MyBookie", variable=self.use_myb_var, width=118, command=self._refresh_live
+            row, text="Use MyBookie", variable=self.use_myb_var, width=118, command=self._schedule_refresh
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(row, text="Save", width=64, command=self._save).pack(side="right", padx=(4, 0))
@@ -1961,7 +1980,7 @@ class BudgetManagerBar(_CTK_FRAME):
         lbl.pack(side="left", padx=(0, 2))
         entry = ctk.CTkEntry(parent, textvariable=var, width=width)
         entry.pack(side="left", padx=(0, 4))
-        entry.bind("<KeyRelease>", lambda _e: self._refresh_live())
+        entry.bind("<KeyRelease>", lambda _e: self._schedule_refresh())
         if tooltip:
             _ToolTip(lbl, tooltip)
             _ToolTip(entry, tooltip)
@@ -2004,16 +2023,47 @@ class BudgetManagerBar(_CTK_FRAME):
         self.use_betnow_var.set(bool(normalized["use_betnow"]))
         self.use_dk_var.set(bool(normalized["use_draftkings"]))
         self.use_myb_var.set(bool(normalized["use_mybookie"]))
-        self._refresh_live()
+        self._refresh_live(notify_parent=False)
 
     def refresh_warnings(self) -> None:
-        self._refresh_live()
+        """Refresh budget bar labels only — does not notify the app."""
+        self._refresh_live(notify_parent=False)
 
-    def _refresh_live(self) -> None:
+    def _schedule_refresh(self, *, notify_parent: bool = True) -> None:
+        """Debounce UI refresh to avoid re-entrant budget handler loops."""
+        self._pending_notify_parent = notify_parent
+        if self._refresh_after_id is not None:
+            try:
+                self.after_cancel(self._refresh_after_id)
+            except Exception:
+                pass
+        self._refresh_after_id = self.after(10, self._run_scheduled_refresh)
+
+    def _run_scheduled_refresh(self) -> None:
+        self._refresh_after_id = None
+        self._refresh_live(notify_parent=self._pending_notify_parent)
+
+    def _refresh_live(self, *, notify_parent: bool = True) -> None:
+        if self._refreshing:
+            return
+        self._refreshing = True
+        try:
+            self._refresh_live_ui()
+            master = self.winfo_toplevel()
+            payload = getattr(master, "_payload", None)
+            if payload is not None:
+                n = len(payload.combined) if not payload.combined.empty else 0
+                _debug_log(f"BudgetManagerBar._refresh_live: current payload combined fights={n}")
+            if notify_parent and self._on_change:
+                state = config.normalize_budget_state(self.get_state())
+                self._on_change(state)
+        finally:
+            self._refreshing = False
+
+    def _refresh_live_ui(self) -> None:
         from src.strategy import (
             available_card_budget_text,
             available_card_budget_usd,
-            budget_availability_badge_style,
             collect_dashboard_risk_warnings,
             format_risk_warnings,
         )
@@ -2026,7 +2076,7 @@ class BudgetManagerBar(_CTK_FRAME):
             state.get("use_betnow") or state.get("use_draftkings") or state.get("use_mybookie")
         )
         pool_usd = available_card_budget_usd(state, profile=profile)
-        bg, fg = budget_availability_badge_style(pool_usd, books_enabled=books_enabled)
+        bg, fg = _budget_badge_style(pool_usd, books_enabled=books_enabled)
         self.available_badge.configure(fg_color=bg)
         self.available_label.configure(text_color=fg)
 
@@ -2066,9 +2116,6 @@ class BudgetManagerBar(_CTK_FRAME):
             self.warning_box.pack(fill="x", padx=12, pady=(0, 8))
         else:
             self.warning_box.pack_forget()
-
-        if self._on_change:
-            self._on_change(state)
 
     def _save(self) -> None:
         state = config.normalize_budget_state(self.get_state())
@@ -2264,6 +2311,8 @@ class UFCDashboardApp(_CTK_BASE):
         self._rendered_sections: set[str] = set()
         self._grok_result: dict[str, Any] | None = None
         self._grok_busy = False
+        self._updating_budget = False
+        self._budget_after_id: str | None = None
 
         config.UFC_PROFILE = "paper"
         config.apply_profile_overrides()
@@ -2340,6 +2389,7 @@ class UFCDashboardApp(_CTK_BASE):
                     trigger = manifest.get("trigger", "background")
                     run_type = manifest.get("run_type", "full")
                     self._sync_profile_menu(payload.profile)
+                    self._log_loaded_fights("background cache", payload)
                     self._apply_payload(payload, full_refresh=bool(full_ts), odds_refresh=bool(odds_ts))
                     self.status.configure(
                         text=f"Loaded background cache ({run_type}/{trigger}) — {payload.event_label}"
@@ -2471,8 +2521,6 @@ class UFCDashboardApp(_CTK_BASE):
                     f"(safe ~${cap:,.0f})  |  Min edge {config.ALERT_MIN_EDGE:.0%}"
                 ),
             )
-        if hasattr(self, "budget_bar"):
-            self.budget_bar.refresh_warnings()
 
     def _current_budget_state(self) -> dict[str, Any]:
         if hasattr(self, "budget_bar"):
@@ -2754,8 +2802,25 @@ class UFCDashboardApp(_CTK_BASE):
 
     def _on_budget_live_change(self, state: dict[str, Any]) -> None:
         self._budget_state = state
-        self._update_mode_banner()
-        self._refresh_top_recommendations()
+        if self._updating_budget:
+            return
+        if self._budget_after_id is not None:
+            try:
+                self.after_cancel(self._budget_after_id)
+            except Exception:
+                pass
+        self._budget_after_id = self.after(10, self._apply_budget_live_change)
+
+    def _apply_budget_live_change(self) -> None:
+        self._budget_after_id = None
+        if self._updating_budget:
+            return
+        self._updating_budget = True
+        try:
+            self._update_mode_banner()
+            self._refresh_top_recommendations()
+        finally:
+            self._updating_budget = False
 
     def _on_budget_saved(self, state: dict[str, Any]) -> None:
         self._budget_state = state
@@ -2853,6 +2918,22 @@ class UFCDashboardApp(_CTK_BASE):
         self.status.configure(text="Operation timed out — controls re-enabled. Try Refresh again.")
         self._finish_busy()
 
+    def _log_loaded_fights(self, source: str, payload: DashboardPayload) -> None:
+        """Debug log for fight row counts after refresh or cache load."""
+        combined = payload.combined
+        n_combined = len(combined) if combined is not None and not combined.empty else 0
+        ov = payload.books.get("Overview", {}).get("predictions", pd.DataFrame())
+        n_overview = len(ov) if isinstance(ov, pd.DataFrame) and not ov.empty else 0
+        card_counts = [
+            len(c.get("predictions", []))
+            for c in payload.cards
+            if isinstance(c.get("predictions"), pd.DataFrame) and not c["predictions"].empty
+        ]
+        _debug_log(
+            f"{source}: fights loaded combined={n_combined} overview={n_overview} "
+            f"cards={len(payload.cards)} per_card={card_counts} label={payload.event_label!r}"
+        )
+
     def _on_refresh(self) -> None:
         """Full prediction + odds for the two soonest upcoming cards."""
         if self._busy:
@@ -2860,6 +2941,7 @@ class UFCDashboardApp(_CTK_BASE):
             self.status.configure(text="Already running — wait for the current operation to finish.")
             return
         self._set_busy(True)
+        self.event_var.set("Next Two Cards")
         self._on_progress("Refresh: next two upcoming cards (predictions + odds)…", 0.02)
 
         def worker() -> None:
@@ -3007,6 +3089,7 @@ class UFCDashboardApp(_CTK_BASE):
         odds_refresh: bool = False,
         quick: bool = False,
     ) -> None:
+        self._log_loaded_fights("_apply_payload", payload)
         self._payload = payload
         now = time.time()
         if full_refresh:
@@ -3173,6 +3256,8 @@ class UFCDashboardApp(_CTK_BASE):
             )
         )
         preds = overview.get("predictions", pd.DataFrame())
+        if (preds is None or (isinstance(preds, pd.DataFrame) and preds.empty)) and not payload.combined.empty:
+            preds = payload.combined
         self.overview_table.load_rows(_rows_for_table(preds, bankroll, strategy, compact=True))
 
         bs = self._budget_state

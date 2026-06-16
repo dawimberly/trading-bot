@@ -356,12 +356,7 @@ def build_card_features(
             upcoming[config.DATE_COLUMN] = upcoming[config.DATE_COLUMN].fillna(fill_val)
 
     combined = pd.concat([history, upcoming], ignore_index=True)
-    features = build_feature_matrix(
-        combined,
-        keep_unlabeled=True,
-        use_fighter_cache=True,
-        target_fight_ids=card_ids,
-    )
+    features = build_feature_matrix(combined, keep_unlabeled=True)
     card_features = features[features[config.FIGHT_ID_COLUMN].isin(card_ids)].copy()
     do_sentiment = (
         attach_sentiment
@@ -397,12 +392,12 @@ class FightPredictor:
         self._shap_cache_key = str(artifact.get("features_fingerprint", str(self.model_path)))
 
     def _prepare_features(self, X: pd.DataFrame) -> pd.DataFrame:
-        missing = [c for c in self.feature_columns if c not in X.columns]
-        if missing:
-            raise ValueError(f"Feature matrix missing columns: {missing}")
         frame = X.copy()
         if self.interaction_specs:
             frame = apply_interaction_specs(frame, self.interaction_specs)
+        missing = [c for c in self.feature_columns if c not in frame.columns]
+        if missing:
+            raise ValueError(f"Feature matrix missing columns: {missing}")
         if self.imputer is not None:
             frame = apply_imputer(frame, self.imputer)
         elif frame[self.feature_columns].isna().any().any():
@@ -585,12 +580,13 @@ class FightPredictor:
         if prepared.empty:
             return features.iloc[0:0].copy()
         proba = self.model.predict_proba(prepared[self.feature_columns])[:, 1]
-        proba_raw = proba.copy()
         if apply_style_bonus:
             proba, bonuses = apply_style_calibration(prepared, proba)
             out = self._attach_predictions(prepared, proba, prepared=prepared)
             out["style_bonus"] = bonuses
-            out["prob_f1_win_raw"] = proba_raw
+            out["prob_f1_win_raw"] = self.model.predict_proba(
+                prepared[self.feature_columns]
+            )[:, 1]
         else:
             out = self._attach_predictions(prepared, proba, prepared=prepared)
         if explain:
