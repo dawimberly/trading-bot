@@ -191,6 +191,34 @@ def _load_json(path: Path) -> dict | None:
         return None
 
 
+def _process_rss_mb() -> str | None:
+    try:
+        import psutil
+
+        rss = psutil.Process().memory_info().rss / (1024 * 1024)
+        return f"{rss:.0f} MB"
+    except Exception:
+        return None
+
+
+def _heartbeat_age_minutes(heartbeat: dict | None) -> float | None:
+    if not heartbeat or not heartbeat.get("timestamp"):
+        return None
+    try:
+        ts = pd.Timestamp(heartbeat["timestamp"])
+        if ts.tzinfo is None:
+            ts = ts.tz_localize(None)
+        age = (pd.Timestamp.now() - ts).total_seconds() / 60.0
+        return max(0.0, age)
+    except Exception:
+        return None
+
+
+def _scan_phase_label(heartbeat: dict | None) -> str:
+    scan = (heartbeat or {}).get("scan_schedule") or {}
+    return str(scan.get("phase") or scan.get("label") or "").strip()
+
+
 def _infer_sleeve(symbol: str) -> str:
     sym = config.normalize_symbol(symbol or "")
     if sym == config.SPY_BOT_SYMBOL:
@@ -467,7 +495,7 @@ def _load_trade_history(
     for path in _journal_search_paths(username, book_id):
         part = _filter_journal_for_book(
             path,
-            _read_trade_journal_csv(path, tail_rows=max(limit * 4, 200)),
+            _read_trade_journal_csv(path, tail_rows=max(limit * 2, 120)),
             book_id,
         )
         if not part.empty:
@@ -628,6 +656,9 @@ def _expected_actions(heartbeat: dict | None) -> list[str]:
     vti_cap = float(exposure.get("vti_core_cap") or 0)
     vti_tgt = float((heartbeat.get("sleeve_caps") or {}).get("vti_core") or 0)
     scan = heartbeat.get("scan_schedule") or {}
+    phase = _scan_phase_label(heartbeat)
+    if phase and not scan.get("market_open"):
+        lines.append(f"Overnight / closed session: {phase}.")
     if vti_tgt > 0 and vti_cap > 0 and vti_val < vti_cap * 0.95:
         if scan.get("market_open"):
             lines.append(f"VTI under target — rebalance toward {vti_tgt:.0%} likely.")
@@ -1334,6 +1365,8 @@ class TradingDashboardApp(ctk.CTk):
         self._price_canvases: list[FigureCanvasTkAgg] = []
         self._tray_icon = None
         self._shutting_down = False
+        self._refresh_busy = False
+        self._refresh_pending = False
 
         if ICON_PATH.is_file():
             try:
@@ -1990,6 +2023,19 @@ class TradingDashboardApp(ctk.CTk):
             )
 
     def refresh_data(self) -> None:
+        if self._refresh_busy:
+            self._refresh_pending = True
+            return
+        self._refresh_busy = True
+        try:
+            self._refresh_data_impl()
+        finally:
+            self._refresh_busy = False
+            if self._refresh_pending:
+                self._refresh_pending = False
+                self.after(150, self.refresh_data)
+
+    def _refresh_data_impl(self) -> None:
         _reset_equity_cache()
         heartbeat = _load_json(_resolve_path(config.HEARTBEAT_FILE))
         scorecard, scorecard_src = _load_scorecard(self._username, self._book_id)
@@ -2042,7 +2088,14 @@ class TradingDashboardApp(ctk.CTk):
 
         mode = "LIVE" if not config.PAPER_TRADING else "Paper"
         ts = datetime.now().strftime("%H:%M:%S")
-        self._status_label.configure(text=f"{mode} · {ts} · every {REFRESH_SECONDS}s")
+        mem = _process_rss_mb()
+        hb_age = _heartbeat_age_minutes(heartbeat)
+        parts = [mode, ts, f"every {REFRESH_SECONDS}s"]
+        if mem:
+            parts.append(mem)
+        if running and hb_age is not None and hb_age > 90:
+            parts.append(f"hb stale {hb_age:.0f}m")
+        self._status_label.configure(text=" · ".join(parts))
 
     def _fill_crypto_vol_panel(self) -> None:
         hb = _load_json(_resolve_path(CRYPTO_VOL_HEARTBEAT_FILE))
@@ -2136,6 +2189,9 @@ class TradingDashboardApp(ctk.CTk):
 
         regime = heartbeat.get("regime", "—")
         halted = bool(heartbeat.get("halted"))
+        phase = _scan_phase_label(heartbeat)
+        if phase and not (heartbeat.get("scan_schedule") or {}).get("market_open"):
+            regime = f"{regime} · {phase}"
         self._update_status_row(
             equity,
             equity > 0 and config.is_small_account(equity),
@@ -2145,6 +2201,16 @@ class TradingDashboardApp(ctk.CTk):
         )
 
         self._clear_frame(self._actions_frame)
+        cycle_err = heartbeat.get("last_cycle_error")
+        if cycle_err:
+            ctk.CTkLabel(
+                self._actions_frame,
+                text=f"Last cycle error: {str(cycle_err)[:200]}",
+                anchor="w",
+                text_color=COLORS["red"],
+                font=ctk.CTkFont(size=12),
+                wraplength=780,
+            ).pack(fill="x", pady=(0, 6))
         for action in _expected_actions(heartbeat):
             ctk.CTkLabel(
                 self._actions_frame,

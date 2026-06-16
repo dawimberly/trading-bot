@@ -22,20 +22,29 @@ fetch_data.py|Download market OHLCV from yfinance into SQLite. Run live 5m refre
 launch_bots.py|Start or stop **both** fund bots: live (~$100) + paper Sharpe chase. Each bot is a separate run_all.py process with isol
 portal.py|Web portal: login → Alpaca keys → dashboard → bot control. Friends (after git clone): friend_setup.bat # Windows ./frien
 run_all.py|24/7 live trading loop: refresh data, detect regime, run crypto and equity strategies. Run: python run_all.py Preflight:
-run_paper_bot.py|24/7 paper Sharpe-chase bot — aggressive profile, isolated from live ~$100. Uses run_all.py with PAPER_CHASE_MODE: - Dyn
+run_paper_bot.py|24/7 paper Sharpe-chase bot — Best Paper Bot stack, isolated from live ~$100. Uses run_all.py with PAPER_CHASE_MODE and 
 run_spy.py|Optional standalone SPY loop. Prefer integrated mode: python run_all.py SPY is capped at SPY_SLEEVE_CAP_PCT (33.33%) ins
-status.py|At-a-glance bot status: live + paper equity, regime, key flags. Run: python status.py
+status.py|At-a-glance bot status: live + paper equity, regime, safety, thinking. Run: python status.py
 
 ## MODULES (path|doc)
+cloud_bot/modules/__init__.py|Cloud bot modules — stack metadata; strategy code lives in parent repo.
+cloud_bot/modules/stack.py|Cloud bot stack definition — Best Paper Bot v2.1 (matches main repo profile).
 modules/__init__.py|Shared trading library: execution, data, risk, and strategy helpers.
 modules/alerts.py|Email and Telegram alerts for halts and daily paper-trading summaries.
+modules/alpaca_client.py|Shared Alpaca REST client factory, caching, and resilient API wrappers.
+modules/alpaca_diagnostics.py|Alpaca credential checks and user-facing error messages.
 modules/alpaca_executor.py|Canonical Alpaca paper-trading executor (notional orders, crypto formatting).
+modules/backtest_common.py|Shared helpers for backtester.py hub and satellite research scripts.
+modules/backtester_core.py|Optimized shared backtest helpers — cache, metrics, validation, reporting.
+modules/console_output.py|Windows-safe console output with optional Rich rendering.
 modules/cost_basis.py|Cost-basis awareness from Alpaca positions (avg_entry_price).
+modules/crypto_dual_sleeve.py|Paper-aggressive crypto sleeve v2: mean-reversion dips + momentum breakouts.
 modules/crypto_vol_gate.py|Crypto sleeve vol gate + optional SpaceX IPO narrative override.
 modules/crypto_vol_sleeve.py|Crypto vol mean-reversion sleeve — paper-only, isolated PAPER_APCA book (v4 filters).
 modules/data_loader.py|Load close-price matrices from the SQLite market database.
 modules/data_refresh.py|Market-hours-aware refresh scheduling for live bots.
 modules/deployment_sizing.py|Shared sleeve deployment sizing (adaptive chunks + co-fire budget pooling).
+modules/dynamic_universe.py|Exchange-agnostic equity universe for paper NYSE momentum + stat arb (weekly refresh).
 modules/felix_sentiment.py|YouTube creator transcripts (Felix, Andrei Jikh, …): sync, store, wisdom/social blend.
 modules/fund_config.py|Live + paper fund pair and dynamic fund allocation helpers.
 modules/game_plan.py|Live game plan: yield gate, metal blend sleeve, stress cash trim.
@@ -56,8 +65,9 @@ modules/kraken_scanner.py|Scan Kraken pairs for SMA-20 trend via ccxt.
 modules/kraken_spot.py|Kraken spot helpers: market buy/sell with dry-run validate support.
 modules/kraken_stock_routes.py|How each ticker can be traded on Kraken via API (xStock, equity spot, or app-only .EQ).
 modules/kraken_xstocks.py|Kraken xStock (tokenized_asset) pair resolution and orders.
+modules/logging_utils.py|Central logging helpers for the main project.
 modules/macro_calendar.py|Scheduled US macro release calendar (hardcoded; no per-cycle scraping).
-modules/macro_regime_adaptor.py|Macro Regime Adaptor — oil/gold/VIX/yield/geo signals for paper aggressive profile.
+modules/macro_regime_adaptor.py|Regime Shift Detector — oil/gold/VIX/geo/yield signals (paper aggressive only).
 modules/macro_signals.py|Daily macro signals for game plan (bonds, yields, stress).
 modules/market_context.py|Market regime, volatility, and sentiment helpers for the trading pipeline.
 modules/market_hours.py|US equity session helpers via Alpaca clock.
@@ -65,11 +75,12 @@ modules/mock_executor.py|Mock order executor for backtesting without live API ca
 modules/options_sleeve.py|Options income sleeve — monthly covered calls on VTI/SPY (paper aggressive only).
 modules/pipeline_strategies.py|Crypto pair and equity MA50 strategies shared by run_all.py and backtester.py.
 modules/portal_auth.py|Simple user accounts for the shared Streamlit portal (trusted friends / self-hosted).
-modules/portal_bot.py|Start/stop run_all.py with per-user / per-book environment.
+modules/portal_bot.py|Start/stop run_all.py / run_paper_bot.py with per-user / per-book environment.
 modules/portal_paths.py|Per-user directories for portal (credentials, bot state, logs).
 modules/portfolio_manager.py|JSONL ledger for open and closed pair positions.
 modules/position_exits.py|Stop-loss and max-hold exits for open Alpaca positions.
 modules/risk_management.py|Drawdown monitoring and position-size helpers.
+modules/risk_parity_sleeve.py|Bridgewater-style risk parity / All Weather + Millennium pod drawdown (paper only).
 modules/safe_io.py|Windows-safe console and file writes (avoids OSError errno 22 on broken stdout).
 modules/scan_schedule.py|Equity scan windows: crypto-only overnight, SPY/NYSE around the US open.
 modules/sentiment_keywords.py|Keyword sentiment scoring (shared by Wayback research and live web fetch).
@@ -78,9 +89,16 @@ modules/social_sleeve_backtest.py|Social sleeve simulation on daily backtests (p
 modules/spacex_ipo_buy.py|Optional first-day market buy when SPCX becomes tradable on Alpaca.
 modules/spacex_ipo_listing_monitor.py|Monitor the real SpaceX IPO (Nasdaq SPCX): SEC milestones + Alpaca tradability.
 modules/spacex_ipo_monitor.py|SpaceX IPO ↔ crypto headline monitor (free RSS; no Tavily). SpaceX S-1 disclosed ~18,712 BTC on the balance sheet — cryp
+modules/ssl_certs.py|Ensure valid TLS CA bundle paths for Alpaca/httpx (especially PyInstaller exe).
+modules/stat_arb_optimized.py|DISABLED — experimental Kalman/decay stat-arb optimization (paper A/B only). Not wired into production. Set PAPER_STAT_A
+modules/stat_arb_sleeve.py|Statistical arbitrage sleeve — cointegration + z-score (paper aggressive only).
+modules/thinking_engine.py|Local LLM market reasoning via Ollama — paper bot only.
+modules/thinking_news.py|Scheduled market headlines for paper Thinking Engine (8 AM / 6 PM ET).
 modules/trade_journal.py|Structured CSV journal for paper-trading data collection.
+modules/trade_notifier.py|Telegram notifications for confirmed Alpaca order fills.
 modules/trading_books.py|Trading books — multiple platforms/accounts under one portal login.
-
+modules/trading_safety.py|Production safety: daily loss circuit breaker (blocks new entries + thinking tilts). Live book: 2% daily loss limit (con
+modules/volatility_sleeve.py|Volatility trading overlay — VIX/VXX regime sleeve (paper aggressive only).
 modules/vti_core.py|Passive VTI core sleeve — index anchor; active bot runs on the remainder.
 modules/wayback_sentiment.py|Load monthly Wayback web sentiment and forward-fill to daily bars.
 modules/web_sentiment_live.py|Live web mood: daily cached headline sentiment (free, no Tavily).
@@ -89,6 +107,147 @@ modules/wisdom_evaluator.py|Rolling self-evaluation of wisdom modes (live journa
 modules/wisdom_journal.py|Append-only journal of wisdom layer state and account metrics (live bot).
 modules/wisdom_sentiment.py|Wisdom layer: combine live/Wayback web mood with price math for RHYME regimes.
 
+## SCRIPTS (path|doc)
+scripts/__init__.py|Utility scripts; run from project root, e.g. python scripts/db/check_tables.py.
+scripts/account/__init__.py|Alpaca account utilities.
+scripts/account/check_account.py|Print Alpaca account status via alpaca-py. Run: python scripts/account/check_account.py
+scripts/account/check_balance.py|Print Alpaca paper account buying power and cash. Run: python scripts/account/check_balance.py
+scripts/account/check_holdings.py|List Alpaca positions vs fund sleeve caps (pre-existing holdings audit). Run: python scripts/account/check_holdings.py
+scripts/account/get_telegram_chat_id.py|Find your Telegram chat id for alert setup. EASIEST (no script): In Telegram, message @userinfobot — it replies with you
+scripts/account/kraken_capabilities_check.py|Print what Kraken API key can trade (crypto / xStocks / equity). python scripts/account/kraken_capabilities_check.py
+scripts/account/kraken_stock_setup.py|Full-control checklist: Kraken stocks via API (xStocks + migration off .EQ). Run: python scripts/account/kraken_stock_se
+scripts/account/preflight.py|One-shot checklist before leaving paper trading running for a month. Run: python scripts/account/preflight.py
+scripts/account/preflight_kraken.py|Kraken live-readiness checklist before Monday (or any session). Run: python scripts/account/preflight_kraken.py python s
+scripts/account/preflight_spy.py|Checklist before running the standalone SPY bot (run_spy.py). Run: python scripts/account/preflight_spy.py
+scripts/account/rebalance_fund.py|Rebalance paper/live account toward fund sleeve targets. Run: python scripts/account/rebalance_fund.py # plan only pytho
+scripts/account/reconcile_holdings.py|Reconcile Alpaca holdings with ledger and trim over-cap sleeves. Run: python scripts/account/reconcile_holdings.py # aud
+scripts/account/reset_account.py|Cancel all orders and close all Alpaca positions. Run: python scripts/account/reset_account.py
+scripts/account/test_alerts.py|Send a test alert to configured Telegram and/or email channels. Run: python scripts/account/test_alerts.py
+scripts/account/test_trade.py|Place a 1-share VTI test market order on Alpaca paper. Run: python scripts/account/test_trade.py
+scripts/account/today_performance.py|Today's paper bot performance snapshot. Run: python scripts/account/today_performance.py
+scripts/account/verify.py|Verify Alpaca API credentials and connection. Run: python scripts/account/verify.py
+scripts/analysis/crypto_vol_correlation.py|Correlate crypto vol backtest trades with timing, market regime, and coin profile. Reads crypto_vol_backtest_results.csv
+scripts/analysis/deployment_efficiency_ab.py|A/B test deployment sizing: baseline vs adaptive chunk vs co-fire vs both. Run from repo root: python scripts/analysis/d
+scripts/analysis/final_recommended_stack_comparison.py|Final comparison: old baseline vs intermediate vs current recommended stack. Run from repo root: python scripts/analysis
+scripts/analysis/game_plan_ab_test.py|A/B test: baseline vs full game plan vs yield-gate-only. Run: python scripts/analysis/game_plan_ab_test.py
+scripts/analysis/live_vs_backtest_snapshot.py|Aligned live journal vs fund-backtest comparison (same calendar window). Run: python scripts/analysis/live_vs_backtest_s
+scripts/analysis/nyse_anti_overlap_ab.py|A/B: NYSE anti-overlap vs SPY sleeve (corr/beta filter, sector tech cap). Run from repo root: python scripts/analysis/ny
+scripts/analysis/nyse_overlap_active_only_test.py|Active-only NYSE overlap filter A/B (0% VTI, full sleeve caps). Run from repo root: python scripts/analysis/nyse_overlap
+scripts/analysis/paper_iteration_compare.py|Compare live paper journal vs aligned fund backtest for the current bot iteration. Excludes the $100 live-account switch
+scripts/analysis/print_thinking_demo_samples.py|Print VTI-beat tuned thinking engine demo samples (no Ollama required).
+scripts/analysis/refinements_grid_ab.py|Grid A/B: SPY exit rule + dynamic sizing refinements on recommended stack. Run from repo root: python scripts/analysis/r
+scripts/analysis/regime_effectiveness.py|Regime filter and risk-halt effectiveness analysis (daily bars on market_data.db). Compares backtest variants: baseline 
+scripts/analysis/risk_layer_ab.py|A/B: drawdown halt resume/liquidation vs regime pause calibration. Run from repo root: python scripts/analysis/risk_laye
+scripts/analysis/run_vti_thinking_compare.py|Run VTI level + thinking compares (365d) with quiet logging.
+scripts/analysis/sharpe_flag_grid.py|One-at-a-time flag additions on current_dynamic baseline (Sharpe tuning). Run from repo root: python scripts/analysis/sh
+scripts/analysis/sharpe_phase_compare.py|Sharpe optimization phase: Old vs current dynamic vs new optimized stack. Run from repo root: python scripts/analysis/sh
+scripts/analysis/sizing_allocation_analysis.py|Position sizing & sleeve cap fill-rate simulation (live rules vs backtester). Run from repo root: python scripts/analysi
+scripts/analysis/sleeve_overlap_analysis.py|Sleeve overlap, correlation, and concurrent-risk analysis (SPY / NYSE / crypto). Run from repo root: python scripts/anal
+scripts/analysis/spy_exit_rule_test.py|SPY MA-break exit rule A/B: active-only vs 80/20 VTI. Run from repo root: python scripts/analysis/spy_exit_rule_test.py 
+scripts/analysis/trade_reconciliation.py|Match Alpaca fills to paper_journal signals; estimate notional/slippage vs sim sizing. Run: python scripts/analysis/trad
+scripts/analysis/universe_screener.py|Screen US equities from Alpaca and rank by momentum / liquidity / trend. Pulls active tradable NYSE/NASDAQ/ARCA symbols 
+scripts/analyze_thinking_engine.py|Analyze thinking engine regime detection and tilt accuracy.
+scripts/approve_thinking_tilt.py|Approve the pending Thinking Engine tilt for live trading. Reads decision_id from thinking_engine_last.json and writes t
+scripts/background_runner.py|Trading bot background runner — scheduled health checks and paper maintenance. Mirrors ufc-predictor/scripts/background_
+scripts/db/__init__.py|SQLite database utilities.
+scripts/db/check_db.py|Inspect VTI table schema sample rows. Run: python scripts/db/check_db.py
+scripts/db/check_tables.py|List all tables in market_data.db. Run: python scripts/db/check_tables.py
+scripts/db/cleanup_db.py|Drop legacy *_5m and *_daily tables from market_data.db. Run: python scripts/db/cleanup_db.py
+scripts/db/delete_db.py|Delete market_data.db (repopulate with fetch_data.py after). Run: python scripts/db/delete_db.py
+scripts/exchange/__init__.py|Exchange connectivity checks (Kraken).
+scripts/exchange/health_check.py|Verify Kraken API credentials and fetch balance. Run: python scripts/exchange/health_check.py
+scripts/exchange/test_kraken.py|Test Kraken REST balance endpoint. Run: python scripts/exchange/test_kraken.py
+scripts/exchange/test_kraken_buy.py|Place a small Kraken spot test order (e.g. 0.01 ETH). Run: python scripts/exchange/test_kraken_buy.py --dry-run python s
+scripts/generate_dashboard_icon.py|Generate assets/dashboard.ico for shortcuts and PyInstaller. Run: python scripts/generate_dashboard_icon.py
+scripts/kraken_advice_once.py|One-shot Kraken advice (rebalance plan + cleanup + crypto intents). No orders.
+scripts/kraken_autopilot_once.py|Run one Kraken autopilot cycle (dry-run by default). python scripts/kraken_autopilot_once.py python scripts/kraken_autop
+scripts/kraken_manual_checklist.py|Print in-app Kraken steps when stock API is blocked (e.g. US:TX).
+scripts/kraken_send_playbook.py|Send Kraken phone playbook (Telegram + email). python scripts/kraken_send_playbook.py --dry-run python scripts/kraken_se
+scripts/maintenance/__init__.py|Maintenance and cleanup utilities.
+scripts/maintenance/check_spacex_ipo_listing.py|Check real SpaceX IPO listing status (SEC milestones + Alpaca SPCX). Run: python scripts/maintenance/check_spacex_ipo_li
+scripts/maintenance/check_spacex_monitor.py|Check SpaceX IPO ↔ crypto headline monitor (manual). Run: python scripts/maintenance/check_spacex_monitor.py python scri
+scripts/maintenance/cleanup.py|Cancel all open Alpaca orders via alpaca-py. Run: python scripts/maintenance/cleanup.py
+scripts/maintenance/directory_cleanup.py|Scan project tree for .pyc, .log, and other debris files. Run: python scripts/maintenance/directory_cleanup.py
+... +26 more scripts
 
-## NOTE
-Full file tree in data/bot_manifest.txt; drill down by path.
+## OPTIMIZED_SYSTEM_SUMMARY (excerpt)
+# Optimized System Summary
+
+**Date:** 2026-06-10  
+**Status:** Two deployment profiles — live conservative (`current_dynamic`) vs paper research (`paper_aggressive`). Final paper defaults: dynamic VTI + overlap/chunk/co-fire **on**; macro adaptor, social sleeve, SPY MA exit **off**.
+
+## Two profiles (source of truth)
+
+| | **Profile A: Live** (`current_dynamic`) | **Profile B: Paper research** (`paper_aggressive`) |
+|---|-------------------------------------------|-----------------------------------------------------|
+| **Use when** | Live ~$100 account, default `run_all.py`, preflight live | Paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user |
+| **VTI core** | 90% when equity &lt; $500; 80% when ≥ $500 | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`); static 20% fallback |
+| **Active sleeves** | ~10% (small) / ~20% (large) of equity | ~31% avg active with dynamic VTI; boost 1.40× on base caps |
+| **Risk / order cap** | 1% / $10 (small) or 2% / scaled (large) | Full paper book sizing |
+| **Game plan** | Yield-gate-only | Yield-gate-only |
+| **NYSE overlap filter** | **off** (opt-in) | **on** (`PAPER_NYSE_OVERLAP_FILTER_ENABLED=true`) |
+| **NYSE beta scaling** | **off** (opt-in) | **on** when `PAPER_CHASE_MODE` + `PAPER_CHASE_EXTRA` |
+| **Adaptive chunk / co-fire** | **off** (opt-in) | **on** (paper defaults) |
+| **SPY MA exit** | **off** (opt-in) | **off** (`PAPER_SPY_EXIT_ON_MA_BREAK=false`) |
+| **Macro regime adaptor** | **off** | **off** (`PAPER_MACRO_REGIME_ADAPTOR_ENABLED=false`) |
+| **Crypto vol gate** | High vol only | All vol (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| **Social / Felix sleeve** | **off** by default | **off** (`PAPER_SOCIAL_SLEEVE_ENABLED=false`; Felix sync optional via chase extras) |
+| **Halt** | 10% DD; resume 8%; liquidate on breach | same |
+
+Live defaults stay conservative in `config.py`. Paper chase enables aggressive layers via `configure_paper_chase()` / `init_paper_chase_if_enabled()` — no live behavior change unless you opt in via `.env`.
+
+## Sleeve allocation (base caps)
+
+| Sleeve | Base cap | Strategy | Session |
+|--------|----------|----------|---------|
+| SPY | 45% | Price > MA200 | US equity |
+| Crypto | 20% | Z-score pairs; vol-gated on live | 24/7 |
+| NYSE | 20% | Top momentum above MA50 (excludes SPY) | US equity |
+| Cash buffer | 15% | Structural headroom | — |
+| Metal | 0% | Disabled in yield-gate-only mode | — |
+
+Effective caps = base × `active_sleeve_scale()` (VTI core + paper boost). Enforced per buy in `modules/alpaca_executor.py`.
+
+## Game plan (yield-gate-only — both profiles)
+
+| Component | Default | Notes |
+|-----------|---------|-------|
+| `GAME_PLAN_YIELD_GATE_ONLY` | `true` | Blocks new SPY buys when 10Y (TNX) above MA50 and rising |
+| `YIELD_GATE_ENABLED` | `true` | Same gate in backtests |
+| Metal sleeve | off | No GLD/SLV/CPER deploy |
+| Stress cash | off | No trim-to-25% on macro stress |
+| Long scale 0.9 | off | Full 45/20/20/15 base caps |
+
+**A/B (`game_plan_ab_test.py`, verified 2026-06-02):** yield-gate-only ≈ baseline long-window return with simpler ops. Full `game_plan_gld_slv_cper` helps fresh 2022 MaxDD but drags recent windows — opt-in only.
+
+## Risk controls (shared)
+
+| Control | Live small (&lt; $500) | Live large | Paper research |
+|---------|------------------------|------------|----------------|
+| Per-order risk | 1% | 2% | 2% (paper book equity) |
+| Max per order | $10 | scaled | scaled |
+| Stop-loss | 5% | 5% | 5% |
+| Max drawdown halt | 10% | 10% | 10% |
+| Halt resume | 8% DD | 8% DD | 8% DD |
+| Liquidate on breach | true → 25% cash | same | same |
+| Derived bear pause | **off** | **off** | **off** |
+
+**A/B (`risk_layer_ab.py`):** Halt resume + liquidate improved 500-day Sharpe; derived bear pause blocked too many days — leave off.
+
+## Deployment sizing (profile-specific)
+
+| Flag | Profile A (live default) | Profile B (paper chase) | Grid note |
+|------|--------------------------|-------------------------|-----------|
+| `ADAPTIVE_CHUNK_ENABLED` | `false` | `true` (`PAPER_ADAPTIVE_CHUNK_ENABLED`) | Best on long window in `deployment_efficiency_ab.py` |
+| `COFIRE_BUDGET_ENABLED` | `false` | `true` (`PAPER_COFIRE_BUDGET_ENABLED`) | Co-fire when SPY+NYSE same bar |
+| `NYSE_BETA_SCALING_ENABLED` | `false` | `true` (via paper chase extras) | Recommended for research grids |
+| `NYSE_OVERLAP_FILTER_ENABLED` | `false` | `true` (`PAPER_NYSE_OVERLAP_FILTER_ENABLED`) | Paper default on |
+| `SPY_EXIT_ON_MA_BREAK` | `false` | `false` (`PAPER_SPY_EXIT_ON_MA_BREAK=false`) | Opt-in only |
+| `PAPER_MACRO_REGIME_ADAPTOR_ENABLED` | n/a | `false` | Opt-in only |
+| `PAPER_SOCIAL_SLEEVE_ENABLED` | n/a | `false` | Opt-in only |
+| `PAPER_DYNAMIC_VTI` | n/a | `true` | Dynamic 40–75% vs fixed 20% |
+
+## Wisdom & sentiment (both profiles)
+
+- `WISDOM_MODE=dynamic` (default)
+- `SENTIMENT_SOURCE=price` (free, matches backtests)

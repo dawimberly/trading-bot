@@ -57,6 +57,7 @@ LAST_BACKTEST_RESULT: dict[str, Any] | None = None
 
 _DATA_CACHE: dict[tuple[Any, ...], pd.DataFrame] = {}
 _INDICATOR_CACHE: dict[str, dict[str, Any]] = {}
+_DATA_CACHE_MAX_ENTRIES = int(os.getenv("BACKTEST_MEM_CACHE_MAX", "2"))
 
 
 def reset_caches(*, disk: bool = False) -> None:
@@ -69,6 +70,21 @@ def reset_caches(*, disk: bool = False) -> None:
             p.unlink(missing_ok=True)
         for p in DISK_CACHE_DIR.glob("*.meta.json"):
             p.unlink(missing_ok=True)
+
+
+def release_backtest_memory(*, collect: bool = True) -> None:
+    """Drop in-process backtest matrices between compare arms (disk cache kept)."""
+    _DATA_CACHE.clear()
+    _INDICATOR_CACHE.clear()
+    if collect:
+        import gc
+
+        gc.collect()
+
+
+def _trim_data_cache() -> None:
+    while len(_DATA_CACHE) > _DATA_CACHE_MAX_ENTRIES:
+        _DATA_CACHE.pop(next(iter(_DATA_CACHE)))
 
 
 def _db_mtime() -> float | None:
@@ -143,6 +159,7 @@ def ensure_daily_data_cached(
         disk_df = _load_disk_cache(disk_key)
         if disk_df is not None and len(disk_df) >= min_history + 10:
             _DATA_CACHE[("1d", disk_key)] = disk_df.copy()
+            _trim_data_cache()
             if use_max:
                 return disk_df.copy()
             sim_days = days or backtest_days
@@ -150,6 +167,7 @@ def ensure_daily_data_cached(
             if len(disk_df) >= need_rows:
                 out = disk_df.iloc[-need_rows:].copy() if len(disk_df) > need_rows else disk_df.copy()
                 _DATA_CACHE[("1d", "days", sim_days)] = out.copy()
+                _trim_data_cache()
                 return out
 
     if use_max:
@@ -161,6 +179,7 @@ def ensure_daily_data_cached(
         fetch_daily_history(use_max=True)
         data = load_close_matrix(interval="1d")
         _DATA_CACHE[mem_key] = data.copy()
+        _trim_data_cache()
         _save_disk_cache(disk_key, data)
         return data
 
@@ -180,6 +199,7 @@ def ensure_daily_data_cached(
         if long_key in _DATA_CACHE and len(_DATA_CACHE[long_key]) >= need_rows:
             data = _DATA_CACHE[long_key].iloc[-need_rows:].copy()
             _DATA_CACHE[mem_key] = data.copy()
+            _trim_data_cache()
             return data
 
     if not refresh:
@@ -188,6 +208,7 @@ def ensure_daily_data_cached(
             if len(data) > need_rows:
                 data = data.iloc[-need_rows:]
             _DATA_CACHE[mem_key] = data.copy()
+            _trim_data_cache()
             _save_disk_cache(disk_key, data)
             return data.copy()
 
@@ -200,6 +221,7 @@ def ensure_daily_data_cached(
         fetch_daily_history(use_max=True)
         data = load_close_matrix(interval="1d")
     _DATA_CACHE[mem_key] = data.copy()
+    _trim_data_cache()
     _save_disk_cache(disk_key, data)
     return data.copy()
 

@@ -2344,6 +2344,11 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
         if "rising" in vix_trend.lower()
         else f"VIX trend: {vix_trend}"
     )
+    news_text = str(
+        market_summary.get("news_digest") or market_summary.get("news_headlines") or ""
+    )
+    if len(news_text) > 1200:
+        news_text = news_text[:1200] + "\n...(truncated for prompt size)"
 
     return f"""Current market snapshot:
 
@@ -2368,7 +2373,7 @@ Top headline: {market_summary['top_headline']}
     "Scheduled news digest ("
     + str(market_summary.get("news_slot") or "scheduled")
     + "):\n"
-    + str(market_summary.get("news_digest") or market_summary.get("news_headlines") or "")
+    + news_text
     + "\nUse news_impact_score="
     + f"{float(market_summary.get('news_impact_score') or 0.0):.2f}"
     + " to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
@@ -2562,8 +2567,11 @@ def get_market_reasoning(
     for idx, candidate in enumerate(candidates):
         try:
             result = _get_market_reasoning_with_model(market_summary, candidate)
-        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
             errors.append(f"{candidate}: {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
             continue
         quality = float(result.get("parse_quality") or 0.0)
         if best is None or quality > float(best.get("parse_quality") or 0.0):
@@ -2581,6 +2589,8 @@ def get_market_reasoning(
         return best
 
     reason = "; ".join(errors) if errors else "no-models"
+    if errors:
+        clear_thinking_runtime_caches()
     result = build_heuristic_reasoning_result(market_summary, reason=reason)
     persist_thinking_last(result, regime=market_summary.get("regime"))
     return result
