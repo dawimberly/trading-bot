@@ -62,7 +62,7 @@ class RefreshScheduler:
             self._refresh_symbols(equity_symbols)
             self.last_equity_refresh = now_ts
 
-        if self.refresh_crypto and self._due(self.last_crypto_refresh, now_ts):
+        if self.refresh_crypto and config.crypto_sleeve_enabled() and self._due(self.last_crypto_refresh, now_ts):
             crypto_symbols = config.crypto_universe()
             if crypto_symbols:
                 safe_print(f"--- Refreshing {len(crypto_symbols)} crypto tickers ---")

@@ -28,7 +28,6 @@ status.py|At-a-glance bot status: live + paper equity, regime, key flags. Run: p
 
 ## MODULES (path|doc)
 modules/__init__.py|Shared trading library: execution, data, risk, and strategy helpers.
-modules/advisor_ranker.py|Rank asset pairs by z-score mean-reversion potential.
 modules/alerts.py|Email and Telegram alerts for halts and daily paper-trading summaries.
 modules/alpaca_executor.py|Canonical Alpaca paper-trading executor (notional orders, crypto formatting).
 modules/cost_basis.py|Cost-basis awareness from Alpaca positions (avg_entry_price).
@@ -62,7 +61,6 @@ modules/macro_regime_adaptor.py|Macro Regime Adaptor — oil/gold/VIX/yield/geo 
 modules/macro_signals.py|Daily macro signals for game plan (bonds, yields, stress).
 modules/market_context.py|Market regime, volatility, and sentiment helpers for the trading pipeline.
 modules/market_hours.py|US equity session helpers via Alpaca clock.
-modules/market_screener.py|Generate a static buy plan JSON for target allocations. Run: python scripts/dev/market_screener.py
 modules/mock_executor.py|Mock order executor for backtesting without live API calls.
 modules/options_sleeve.py|Options income sleeve — monthly covered calls on VTI/SPY (paper aggressive only).
 modules/pipeline_strategies.py|Crypto pair and equity MA50 strategies shared by run_all.py and backtester.py.

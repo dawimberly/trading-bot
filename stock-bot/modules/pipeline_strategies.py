@@ -462,6 +462,9 @@ def run_crypto_strategy(
     spacex_snapshot=None,
 ):
     """Z-score pairs; paper aggressive uses cointegration stat arb when enabled."""
+    if not config.crypto_sleeve_enabled():
+        return 0
+
     if config.effective_crypto_v2_enabled():
         from modules.crypto_dual_sleeve import run_crypto_dual_sleeve
 
@@ -842,7 +845,9 @@ def resolve_cycle_deploy(
         if room >= min_n:
             rooms["spy"] = room
 
-    if _crypto_buy_intent(
+    if (
+        config.crypto_sleeve_enabled()
+        and _crypto_buy_intent(
         data,
         regime,
         now,
@@ -851,6 +856,7 @@ def resolve_cycle_deploy(
         cooldown_bars=cooldown_bars,
         volatility=volatility,
         spacex_snapshot=spacex_snapshot,
+    )
     ):
         room = _sleeve_room(executor, crypto_cap, executor.crypto_sleeve_value)
         if room >= min_n:

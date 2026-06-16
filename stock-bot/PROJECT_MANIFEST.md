@@ -1,17 +1,17 @@
-# Structural Symmetry Trading Engine - Project Manifest
+# PythonTrading — Project Manifest
 
-## 1. Core Modules
-- **`modules/advisor_ranker.py`**: The "Brain". Calculates the geometric coupling (Symmetry Score) between assets using inverse standard deviation of normalized price spreads.
-- **`run_all.py`**: The "Orchestrator". 
-    - **Scanner**: Uses `ThreadPoolExecutor` for concurrent `yfinance` data fetching.
-    - **Filter**: Trend-following logic (Price > 20-period SMA).
-    - **Runner**: Executes the top-ranked structural invariant every hour.
+## 1. Core loop
+- **`run_all.py`**: 24/7 orchestrator — data refresh, wisdom regime, sleeve strategies, Alpaca execution, heartbeat.
+- **`modules/pipeline_strategies.py`**: Shared crypto z-pair, SPY MA200, and NYSE MA50 logic (live + backtester).
+- **`backtester.py`**: Mirrors the live stack on historical daily bars.
 
-## 2. Key Mathematical Principles
-- **Normalization**: Assets are scaled to their initial value ($P_t / P_0$) to allow cross-asset comparison (e.g., VTI vs BTC).
-- **Manifold Stability**: The system optimizes for the *Inverse* of volatility ($\frac{1}{\sigma_{spread}}$). A higher score = lower structural variance.
+## 2. Profiles
+- **Profile A (live)**: 90% VTI core, yield-gate-only, small-account safety — see `config.py` / `current_dynamic`.
+- **Paper v2.1**: Aggressive paper chase profile — isolated env via `run_paper_bot.py`.
 
-## 3. Current Status
-- **Architecture**: Asynchronous/Concurrent.
-- **Data Handling**: Multi-Index aware (handles single and multi-ticker frames).
-- **Execution**: Operational; currently logging signals to console.
+## 3. Data & ops
+- **`fetch_data.py`** + **`modules/data_loader.py`**: SQLite OHLCV (5m live, daily history).
+- **`dashboard_app.py`**, **`status.py`**, **`portal.py`**: Monitor and friend portal (no legacy advisor-ranker loop).
+
+## 4. Removed legacy (Phase 3.1)
+Pre-2026 advisor ranker, watchlist duplicates, `scripts/dev/` prototypes, and orphan `strategy/` stubs — superseded by `pipeline_strategies` + `config.UNIVERSE`.

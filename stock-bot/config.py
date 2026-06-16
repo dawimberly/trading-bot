@@ -979,6 +979,25 @@ def is_small_account(equity: float | None = None) -> bool:
     return _small_account_mode
 
 
+def trading_profile() -> str:
+    """Live Profile A (default) vs paper/research profiles (set TRADING_PROFILE in .env)."""
+    return os.getenv("TRADING_PROFILE", "A").strip().upper()
+
+
+CRYPTO_SLEEVE_DISABLED_MSG = (
+    "Crypto sleeve disabled for Profile A (Alpaca crypto not enabled)"
+)
+
+
+def crypto_sleeve_enabled() -> bool:
+    """Alpaca crypto orders — on for paper Profile B; off for Profile A / small live."""
+    if PAPER_TRADING or paper_only_sleeves_active():
+        return True
+    if is_small_account() or trading_profile() == "A":
+        return False
+    return True
+
+
 def set_dynamic_risk_context(
     *,
     vol_score: float | None = None,
@@ -1300,6 +1319,8 @@ def print_live_stack_flags() -> None:
             f"risk {effective_risk_per_trade():.0%} | "
             f"max order ${effective_max_notional_per_order():,.0f}"
         )
+    if not crypto_sleeve_enabled():
+        print(f"  crypto_sleeve:          {CRYPTO_SLEEVE_DISABLED_MSG}")
     if vti_core_enabled():
         print(
             f"  vti_core:             {alloc['vti_core']:.0%} {VTI_CORE_SYMBOL} passive | "

@@ -1,12 +1,12 @@
 """Kraken buy-budget cap tests.
 
-Run: python scripts/dev/test_kraken_budget.py
+Run: python tests/test_kraken_budget.py
 """
 
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config
 from modules import kraken_budget
