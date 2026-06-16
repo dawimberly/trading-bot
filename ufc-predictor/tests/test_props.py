@@ -22,6 +22,17 @@ def enable_props(monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PROPS", True)
 
 
+def test_env_bool_parsing(monkeypatch):
+    monkeypatch.setenv("ENABLE_PROPS", "true")
+    assert config.env_bool("ENABLE_PROPS") is True
+    monkeypatch.setenv("ENABLE_PROPS", '"true"')
+    assert config.env_bool("ENABLE_PROPS") is True
+    monkeypatch.setenv("ENABLE_PROPS", "1")
+    assert config.env_bool("ENABLE_PROPS") is True
+    monkeypatch.setenv("ENABLE_PROPS", "false")
+    assert config.env_bool("ENABLE_PROPS") is False
+
+
 def test_method_flags_ko_sub_dec():
     assert method_flags("KO/TKO") == (1, 0, 0)
     assert method_flags("SUB Armbar") == (0, 1, 0)

@@ -184,7 +184,7 @@ def _load_dependencies(progress: Callable[[str], None] | None = None) -> None:
         import config
 
         config.refresh_runtime_env()
-        _debug_log(f"Loaded ENABLE_PROPS = {config.ENABLE_PROPS}")
+        _debug_log(f"ENABLE_PROPS loaded as: {config.ENABLE_PROPS}")
         _debug_log(f"Loaded MYBOOKIE_ENABLED = {config.MYBOOKIE_ENABLED}")
         from src.alerts import generate_alerts
         from src.explainability import parse_explanation_json
@@ -337,6 +337,22 @@ def run_dashboard_analysis(
     )
     data["profile"] = profile
     return _result_to_payload(data)
+
+
+def _ensure_props_config() -> bool:
+    """Reload .env and refresh ENABLE_PROPS (props tabs + analysis)."""
+    if config is None:
+        return False
+    try:
+        from src.project_paths import reload_runtime_env
+
+        reload_runtime_env(_ROOT, log=_debug_log if _DEBUG_MODE else None)
+    except Exception as exc:
+        _debug_log(f"Props config reload failed: {exc}")
+        config.refresh_runtime_env()
+    enabled = bool(config.ENABLE_PROPS)
+    _debug_log(f"ENABLE_PROPS loaded as: {enabled}")
+    return enabled
 
 
 def _top_shap(row: pd.Series) -> str:
@@ -699,211 +715,209 @@ class DataTable(_CTK_FRAME):
 
 
 class TopRecommendedBetsPanel(_CTK_FRAME):
-    """Prominent #1–#3 singles plus best parlay highlight."""
+    """Prominent #1–#5 recommendations on the Overview tab."""
 
-    _RANK_COLORS = ("#fbbf24", "#cbd5e1", "#cd7f32")
-    _PANEL_BG = "#111827"
-    _INNER_BG = "#0f172a"
-    _CARD_BG = "#1e293b"
-    _CARD_BORDER = "#334155"
+    _PANEL_BG = "#0c1222"
+    _INNER_BG = "#111827"
+    _ROW_BG = "#1e293b"
+    _HERO_BG = "#1e1b4b"
+    _HERO_BORDER = "#fbbf24"
+    _BORDER = "#334155"
 
     def __init__(self, master, **kwargs) -> None:
         super().__init__(
             master,
             fg_color=self._PANEL_BG,
-            corner_radius=10,
-            border_width=1,
-            border_color=self._CARD_BORDER,
+            corner_radius=12,
+            border_width=2,
+            border_color="#475569",
             **kwargs,
         )
-        inner = ctk.CTkFrame(self, fg_color=self._INNER_BG, corner_radius=8)
-        inner.pack(fill="x", padx=3, pady=3)
+        inner = ctk.CTkFrame(self, fg_color=self._INNER_BG, corner_radius=10)
+        inner.pack(fill="both", expand=True, padx=4, pady=4)
 
         hdr = ctk.CTkFrame(inner, fg_color="transparent")
-        hdr.pack(fill="x", padx=16, pady=(12, 8))
+        hdr.pack(fill="x", padx=16, pady=(14, 10))
+        title_block = ctk.CTkFrame(hdr, fg_color="transparent")
+        title_block.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
-            hdr,
+            title_block,
             text="Top Recommended Bets",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            font=ctk.CTkFont(size=18, weight="bold"),
             text_color="#f8fafc",
             anchor="w",
-        ).pack(side="left")
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            title_block,
+            text="Actionable picks from selected books · stakes scaled to card budget",
+            font=ctk.CTkFont(size=11),
+            text_color="#64748b",
+            anchor="w",
+        ).pack(fill="x", pady=(2, 0))
         self.pool_label = ctk.CTkLabel(
             hdr,
             text="",
-            font=ctk.CTkFont(size=12),
-            text_color="#94a3b8",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#86efac",
             anchor="e",
         )
-        self.pool_label.pack(side="right", fill="x", expand=True)
+        self.pool_label.pack(side="right", padx=(12, 0))
 
-        self.cards_frame = ctk.CTkFrame(inner, fg_color="transparent")
-        self.cards_frame.pack(fill="x", padx=12, pady=(0, 6))
-        self.parlay_frame = ctk.CTkFrame(inner, fg_color="transparent")
-        self.parlay_frame.pack(fill="x", padx=12, pady=(0, 12))
-        self.parlay_frame.pack_forget()
+        self.list_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        self.list_frame.pack(fill="x", padx=12, pady=(0, 14))
         self.empty_label = ctk.CTkLabel(
             inner,
             text="Refresh to load top edges from your selected books.",
             text_color="#64748b",
             anchor="w",
+            font=ctk.CTkFont(size=12),
         )
-        self.empty_label.pack(fill="x", padx=16, pady=(0, 12))
+        self.empty_label.pack(fill="x", padx=16, pady=(0, 14))
 
-    def _apply_max_safe_bet(self, stake_label: ctk.CTkLabel, amount: float) -> None:
-        stake_label.configure(text=f"Stake ${amount:.2f} (max safe)", text_color="#6ee7b7")
-        try:
-            root = self.winfo_toplevel()
-            root.clipboard_clear()
-            root.clipboard_append(f"{amount:.2f}")
-        except Exception:
-            pass
+    @staticmethod
+    def _odds_line(bet: dict[str, Any]) -> str:
+        book = str(bet.get("book") or "—")
+        am = str(bet.get("american_odds") or "—")
+        dec = str(bet.get("odds_display") or "—")
+        return f"{book}  {am} ({dec})"
 
-    def _render_bet_card(
-        self,
-        parent,
-        bet: dict[str, Any],
-        *,
-        rank: int | None = None,
-        accent: str | None = None,
-        highlight: bool = False,
-        compact: bool = False,
-    ) -> None:
-        bg = "#312e81" if highlight else self._CARD_BG
+    def _render_hero(self, bet: dict[str, Any]) -> None:
         card = ctk.CTkFrame(
-            parent,
-            fg_color=bg,
-            corner_radius=8,
-            border_width=0 if highlight else 1,
-            border_color=self._CARD_BORDER,
+            self.list_frame,
+            fg_color=self._HERO_BG,
+            corner_radius=10,
+            border_width=2,
+            border_color=self._HERO_BORDER,
         )
-        card.pack(fill="both" if compact else "x", expand=bool(compact), pady=5, padx=3 if compact else 0)
-        wrap = 280 if compact else 720
-        pad = 10 if compact else 12
+        card.pack(fill="x", pady=(0, 8))
 
-        header = ctk.CTkFrame(card, fg_color="transparent")
-        header.pack(fill="x", padx=pad, pady=(pad, 4))
-        label = f"#{rank}" if rank else "★"
-        color = accent or ("#a78bfa" if highlight else "#94a3b8")
+        ribbon = ctk.CTkFrame(card, fg_color="#fbbf24", corner_radius=6, height=28)
+        ribbon.pack(fill="x", padx=10, pady=(10, 6))
+        ribbon.pack_propagate(False)
         ctk.CTkLabel(
-            header,
-            text=label,
-            font=ctk.CTkFont(size=20 if compact else 18, weight="bold"),
-            text_color=color,
-        ).pack(side="left")
+            ribbon,
+            text="#1  BEST BET",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#1c1917",
+        ).pack(side="left", padx=12, pady=4)
+
         edge_pct = float(bet.get("edge_pct") or 0)
-        edge_color = "#34d399" if edge_pct > 0 else "#f87171"
         ctk.CTkLabel(
-            header,
-            text=f"{edge_pct:+.1f}% edge",
+            ribbon,
+            text=f"{edge_pct:+.1f}% model edge",
             font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=edge_color,
-        ).pack(side="right")
+            text_color="#1c1917",
+        ).pack(side="right", padx=12)
 
         body = ctk.CTkFrame(card, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=pad, pady=(0, pad))
+        body.pack(fill="x", padx=14, pady=(0, 12))
         bet_type = str(bet.get("bet_type") or "Bet")
         ctk.CTkLabel(
             body,
             text=bet_type,
             font=ctk.CTkFont(size=10, weight="bold"),
-            text_color="#93c5fd" if highlight else "#64748b",
+            text_color="#a5b4fc",
             anchor="w",
         ).pack(fill="x")
         ctk.CTkLabel(
             body,
-            text=str(bet.get("pick_line") or bet.get("pick") or "—"),
-            font=ctk.CTkFont(size=13 if compact else 14, weight="bold"),
-            text_color="#f1f5f9",
+            text=str(bet.get("display_label") or bet.get("pick_line") or bet.get("pick") or "—"),
+            font=ctk.CTkFont(size=17, weight="bold"),
+            text_color="#f8fafc",
             anchor="w",
-            wraplength=wrap,
+            wraplength=900,
             justify="left",
-        ).pack(fill="x", pady=(2, 0))
-        if not compact:
-            desc = str(bet.get("description") or "").strip()
-            if desc and not highlight:
-                ctk.CTkLabel(
-                    body,
-                    text=desc[:160] + ("…" if len(desc) > 160 else ""),
-                    font=ctk.CTkFont(size=11),
-                    text_color="#94a3b8",
-                    anchor="w",
-                    wraplength=wrap,
-                    justify="left",
-                ).pack(fill="x", pady=(2, 0))
-        prob = bet.get("prob")
-        prob_txt = f"Model {prob:.0%}  |  " if prob is not None else ""
-        ev_txt = ""
-        if highlight and bet.get("expected_value") is not None:
-            ev_txt = f"  |  EV {float(bet['expected_value']):+.0%}"
+        ).pack(fill="x", pady=(4, 6))
         ctk.CTkLabel(
             body,
-            text=(
-                f"{prob_txt}{bet.get('book', '—')}  |  "
-                f"{bet.get('american_odds', '—')} ({bet.get('odds_display', '—')}){ev_txt}"
-            ),
+            text=self._odds_line(bet),
+            font=ctk.CTkFont(size=13),
+            text_color="#cbd5e1",
+            anchor="w",
+        ).pack(fill="x")
+
+        stake = float(bet.get("suggested_stake") or 0)
+        stake_row = ctk.CTkFrame(body, fg_color="#312e81", corner_radius=8)
+        stake_row.pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(
+            stake_row,
+            text=f"Suggested stake: ${stake:.2f}",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color="#fde68a",
+            anchor="w",
+        ).pack(side="left", padx=12, pady=8)
+        prob = bet.get("prob")
+        if prob is not None:
+            ctk.CTkLabel(
+                stake_row,
+                text=f"Model win prob {float(prob):.0%}",
+                font=ctk.CTkFont(size=11),
+                text_color="#94a3b8",
+                anchor="e",
+            ).pack(side="right", padx=12)
+
+    def _render_row(self, bet: dict[str, Any], rank: int) -> None:
+        row = ctk.CTkFrame(
+            self.list_frame,
+            fg_color=self._ROW_BG,
+            corner_radius=8,
+            border_width=1,
+            border_color=self._BORDER,
+        )
+        row.pack(fill="x", pady=3)
+
+        rank_colors = ("#fbbf24", "#cbd5e1", "#cd7f32", "#94a3b8", "#94a3b8")
+        rank_color = rank_colors[min(rank - 1, 4)]
+
+        left = ctk.CTkFrame(row, fg_color="transparent", width=44)
+        left.pack(side="left", padx=(12, 4), pady=10)
+        left.pack_propagate(False)
+        ctk.CTkLabel(
+            left,
+            text=f"#{rank}",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=rank_color,
+        ).pack(anchor="w")
+
+        mid = ctk.CTkFrame(row, fg_color="transparent")
+        mid.pack(side="left", fill="x", expand=True, padx=4, pady=10)
+        label = str(bet.get("display_label") or bet.get("pick_line") or bet.get("pick") or "—")
+        ctk.CTkLabel(
+            mid,
+            text=label,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#f1f5f9",
+            anchor="w",
+            wraplength=420,
+            justify="left",
+        ).pack(fill="x")
+        ctk.CTkLabel(
+            mid,
+            text=self._odds_line(bet),
             font=ctk.CTkFont(size=11),
             text_color="#94a3b8",
             anchor="w",
-            wraplength=wrap,
-            justify="left",
-        ).pack(fill="x", pady=(4, 0))
+        ).pack(fill="x", pady=(2, 0))
 
-        if compact:
-            kelly_pct = bet.get("kelly_pct")
-            confidence = str(bet.get("confidence") or "—")
-            kelly_txt = f"Kelly {float(kelly_pct):.2f}%" if kelly_pct is not None else "Kelly —"
-            grok_factor = bet.get("grok_kelly_factor")
-            if grok_factor is not None and float(grok_factor) != 1.0:
-                kelly_txt += f"  (Grok ×{float(grok_factor):.2f})"
-            ctk.CTkLabel(
-                body,
-                text=f"{kelly_txt}  ·  Confidence {confidence}",
-                font=ctk.CTkFont(size=11),
-                text_color="#cbd5e1",
-                anchor="w",
-            ).pack(fill="x", pady=(4, 0))
-            grok_note = str(bet.get("grok_narrative") or "").strip()
-            if grok_note:
-                ctk.CTkLabel(
-                    body,
-                    text=grok_note[:120] + ("…" if len(grok_note) > 120 else ""),
-                    font=ctk.CTkFont(size=10),
-                    text_color="#a78bfa",
-                    anchor="w",
-                    wraplength=wrap,
-                    justify="left",
-                ).pack(fill="x", pady=(2, 0))
+        edge_pct = float(bet.get("edge_pct") or 0)
+        edge_color = "#34d399" if edge_pct > 0 else "#f87171"
+        ctk.CTkLabel(
+            row,
+            text=f"{edge_pct:+.1f}%",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=edge_color,
+            width=56,
+        ).pack(side="left", padx=4, pady=10)
 
         stake = float(bet.get("suggested_stake") or 0)
-        stake_row = ctk.CTkFrame(body, fg_color="transparent")
-        stake_row.pack(fill="x", pady=(6, 0))
-        stake_label = ctk.CTkLabel(
-            stake_row,
-            text=f"Stake ${stake:.2f}",
-            font=ctk.CTkFont(size=12, weight="bold"),
+        ctk.CTkLabel(
+            row,
+            text=f"${stake:.2f}",
+            font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#fde68a",
-            anchor="w",
-        )
-        stake_label.pack(side="left")
-
-        if compact and rank:
-            max_safe = float(bet.get("max_safe_bet_usd") or 0)
-            safe_btn = ctk.CTkButton(
-                stake_row,
-                text="Max Safe Bet",
-                width=108,
-                height=26,
-                font=ctk.CTkFont(size=11, weight="bold"),
-                fg_color="#334155",
-                hover_color="#475569",
-                command=lambda lbl=stake_label, amt=max_safe: self._apply_max_safe_bet(lbl, amt),
-            )
-            safe_btn.pack(side="right")
-            _ToolTip(
-                safe_btn,
-                f"Set stake to min(0.5% bankroll, Kelly) = ${max_safe:.2f}. Copies amount to clipboard.",
-            )
+            width=64,
+            anchor="e",
+        ).pack(side="right", padx=14, pady=10)
 
     def render(
         self,
@@ -911,53 +925,27 @@ class TopRecommendedBetsPanel(_CTK_FRAME):
         *,
         highlight_parlay: dict[str, Any] | None = None,
     ) -> None:
-        for w in self.cards_frame.winfo_children():
-            w.destroy()
-        for w in self.parlay_frame.winfo_children():
+        del highlight_parlay  # unified list via aggregate_overview_recommendations
+        for w in self.list_frame.winfo_children():
             w.destroy()
 
-        has_singles = bool(bets)
-        has_parlay = bool(highlight_parlay)
-        if not has_singles and not has_parlay:
+        if not bets:
             self.pool_label.configure(text="")
-            self.cards_frame.pack_forget()
-            self.parlay_frame.pack_forget()
-            self.empty_label.pack(fill="x", padx=14, pady=(0, 10))
+            self.list_frame.pack_forget()
+            self.empty_label.pack(fill="x", padx=16, pady=(0, 14))
             return
 
         self.empty_label.pack_forget()
-        pool = 0.0
-        if bets:
-            pool = float(bets[0].get("card_pool_usd") or 0)
-        elif highlight_parlay:
-            pool = float(highlight_parlay.get("card_pool_usd") or 0)
-        self.pool_label.configure(text=f"Card budget pool: ${pool:,.2f}")
+        self.list_frame.pack(fill="x", padx=12, pady=(0, 14))
+        pool = float(bets[0].get("card_pool_usd") or 0)
+        self.pool_label.configure(text=f"Card budget: ${pool:,.2f}")
 
-        if has_singles:
-            self.cards_frame.pack(fill="x", padx=10, pady=(0, 4))
-            row = ctk.CTkFrame(self.cards_frame, fg_color="transparent")
-            row.pack(fill="x")
-            for bet in bets[:3]:
-                rank = int(bet.get("rank") or 0)
-                accent = self._RANK_COLORS[min(rank - 1, 2)] if rank else "#94a3b8"
-                col = ctk.CTkFrame(row, fg_color="transparent")
-                col.pack(side="left", fill="both", expand=True, padx=3)
-                self._render_bet_card(col, bet, rank=rank, accent=accent, compact=True)
-        else:
-            self.cards_frame.pack_forget()
-
-        if has_parlay:
-            self.parlay_frame.pack(fill="x", padx=10, pady=(0, 10))
-            ctk.CTkLabel(
-                self.parlay_frame,
-                text="Strongest Parlay",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                text_color="#c4b5fd",
-                anchor="w",
-            ).pack(fill="x", pady=(0, 2))
-            self._render_bet_card(self.parlay_frame, highlight_parlay, highlight=True)
-        else:
-            self.parlay_frame.pack_forget()
+        for bet in bets:
+            rank = int(bet.get("rank") or 0)
+            if rank == 1:
+                self._render_hero(bet)
+            elif rank > 1:
+                self._render_row(bet, rank)
 
 
 class GrokAnalysisPanel(_CTK_FRAME):
@@ -1182,6 +1170,7 @@ class BookTab(_CTK_FRAME):
         threshold_ctx: dict[str, Any],
         *,
         budget_state: dict[str, Any] | None = None,
+        profile: str | None = None,
     ) -> None:
         from src.strategy import (
             allocate_card_budget_per_book,
@@ -1196,6 +1185,7 @@ class BookTab(_CTK_FRAME):
             book_data.get("alerts") or {},
             budget_state,
             self.title,
+            profile=profile,
         )
         matched = book_data.get("odds_matched", 0)
         total = book_data.get("odds_total", 0)
@@ -1217,11 +1207,11 @@ class BookTab(_CTK_FRAME):
         book_pool = 0.0
         alloc_line = ""
         if budget_state:
-            plan = allocate_card_budget_per_book(budget_state)
+            plan = allocate_card_budget_per_book(budget_state, profile=profile)
             info = plan.get(self.title, {})
             if info.get("enabled"):
                 book_pool = float(info.get("allocation") or 0)
-                card_eff, _ = effective_card_budget_usd(budget_state)
+                card_eff, _ = effective_card_budget_usd(budget_state, profile=profile)
                 alloc_line = (
                     f"Book card pool: ${book_pool:.2f} "
                     f"({float(info.get('share_pct') or 0):.0f}% of ${card_eff:.0f} card budget)  |  "
@@ -1425,7 +1415,7 @@ class BookPropsTab(_CTK_FRAME):
         self._last_budget_state: dict[str, Any] | None = None
         self.summary = ctk.CTkLabel(
             self,
-            text="Prop betting disabled. Set ENABLE_PROPS=true in .env and refresh.",
+            text="Props — click Refresh Next Two to load ranked prop lines.",
             anchor="w",
             justify="left",
         )
@@ -1486,7 +1476,8 @@ class BookPropsTab(_CTK_FRAME):
         val = bool(self.show_all_var.get()) if self.show_all_var is not None else False
         _debug_log(f"Show all props toggled ({self.book_name}): {val}")
         if self._last_payload is not None:
-            self.render(self._last_payload, budget_state=self._last_budget_state)
+            profile = self.profile_getter() if self.profile_getter else None
+            self.render(self._last_payload, budget_state=self._last_budget_state, profile=profile)
 
     def _is_paper_profile(self) -> bool:
         if self.profile_getter:
@@ -1670,7 +1661,13 @@ class BookPropsTab(_CTK_FRAME):
         line_color = badge_color if source == "live" else "#3dd68c"
         return text, line_color
 
-    def render(self, payload: "DashboardPayload", *, budget_state: dict[str, Any] | None = None) -> None:
+    def render(
+        self,
+        payload: "DashboardPayload",
+        *,
+        budget_state: dict[str, Any] | None = None,
+        profile: str | None = None,
+    ) -> None:
         self._last_payload = payload
         self._last_budget_state = budget_state
         for w in self.scroll.winfo_children():
@@ -1684,13 +1681,14 @@ class BookPropsTab(_CTK_FRAME):
         risk_warnings = collect_dashboard_risk_warnings(alerts, budget_state)
         _apply_risk_warning_label(self.risk_warning_box, risk_warnings)
 
-        if not config.ENABLE_PROPS:
+        props_on = _ensure_props_config()
+        if not props_on:
             self.summary.configure(text="Prop betting disabled — set ENABLE_PROPS=true in .env")
             self.filter_label.configure(text="")
             self.backtest_box.configure(text="")
             self._pack_empty_state(
                 "Props disabled",
-                "Add ENABLE_PROPS=true to .env, restart if needed, then click Refresh Next Two "
+                "Add ENABLE_PROPS=true to .env, then click Refresh Next Two "
                 "to load method and total markets from each book.",
                 color="#fbbf24",
             )
@@ -1710,7 +1708,7 @@ class BookPropsTab(_CTK_FRAME):
         if budget_state:
             from src.strategy import allocate_card_budget_per_book, book_display_name
 
-            plan = allocate_card_budget_per_book(budget_state)
+            plan = allocate_card_budget_per_book(budget_state, profile=profile)
             info = plan.get(self.book_name, {})
             book_disabled = not info.get("enabled", True)
             pool = float(info.get("allocation") or 0)
@@ -1745,7 +1743,7 @@ class BookPropsTab(_CTK_FRAME):
         props = book.get("props") or {}
         singles_all = props.get("singles") or []
         singles = self._filter_singles(singles_all)
-        singles = attach_prop_stakes(singles, budget_state, self.book_name)
+        singles = attach_prop_stakes(singles, budget_state, self.book_name, profile=profile)
         meta = props.get("singles_meta") or {}
         parlays = props.get("parlays") or [] if self.show_parlays else []
         book_warning = str(book.get("warning") or book.get("error") or "").strip()
@@ -1835,7 +1833,7 @@ def _apply_risk_warning_label(label: ctk.CTkLabel, warnings: list[tuple[str, str
 
 
 class BudgetManagerBar(_CTK_FRAME):
-    """Bankroll, card budget, and per-book toggles — placed beside Profile selector."""
+    """Bankroll, card budget, and per-book toggles — sits beside Profile selector."""
 
     def __init__(
         self,
@@ -1844,6 +1842,7 @@ class BudgetManagerBar(_CTK_FRAME):
         on_save: Callable[[dict[str, Any]], None],
         on_change: Callable[[dict[str, Any]], None] | None = None,
         profile_getter: Callable[[], str],
+        leading_frame: _CTK_FRAME | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, fg_color="#0f172a", corner_radius=10, border_width=1, border_color="#334155", **kwargs)
@@ -1854,6 +1853,8 @@ class BudgetManagerBar(_CTK_FRAME):
 
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 8))
+        if leading_frame is not None:
+            leading_frame.pack(side="left", padx=(0, 16))
         ctk.CTkLabel(
             header,
             text="Budget Manager",
@@ -1875,8 +1876,8 @@ class BudgetManagerBar(_CTK_FRAME):
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.pack(fill="x", padx=14, pady=(0, 6))
 
-        self.total_bankroll_var = ctk.StringVar(value="75")
-        self.card_budget_var = ctk.StringVar(value="12")
+        self.total_bankroll_var = ctk.StringVar(value=f"{config.DEFAULT_TOTAL_BANKROLL:g}")
+        self.card_budget_var = ctk.StringVar(value=f"{config.DEFAULT_CARD_BUDGET:g}")
         self.use_betnow_var = ctk.BooleanVar(value=True)
         self.use_dk_var = ctk.BooleanVar(value=True)
         self.use_myb_var = ctk.BooleanVar(value=True)
@@ -1906,15 +1907,23 @@ class BudgetManagerBar(_CTK_FRAME):
         _ToolTip(self.card_budget_entry, _CARD_BUDGET_TIP)
         self.card_cap_hint = ctk.CTkLabel(row, text="", text_color="#9ca3af", anchor="w")
         self.card_cap_hint.pack(side="left", padx=(0, 10))
+        self.live_cap_warning = ctk.CTkLabel(
+            row,
+            text="",
+            text_color="#f87171",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            anchor="w",
+        )
+        self.live_cap_warning.pack(side="left", padx=(0, 8))
 
         ctk.CTkCheckBox(
-            row, text="BetNow", variable=self.use_betnow_var, width=88, command=self._refresh_live
+            row, text="Use BetNow", variable=self.use_betnow_var, width=100, command=self._refresh_live
         ).pack(side="left", padx=(0, 4))
         ctk.CTkCheckBox(
-            row, text="DraftKings", variable=self.use_dk_var, width=100, command=self._refresh_live
+            row, text="Use DraftKings", variable=self.use_dk_var, width=118, command=self._refresh_live
         ).pack(side="left", padx=(0, 4))
         ctk.CTkCheckBox(
-            row, text="MyBookie", variable=self.use_myb_var, width=100, command=self._refresh_live
+            row, text="Use MyBookie", variable=self.use_myb_var, width=118, command=self._refresh_live
         ).pack(side="left", padx=(0, 8))
 
         ctk.CTkButton(row, text="Save", width=64, command=self._save).pack(side="right", padx=(4, 0))
@@ -2009,29 +2018,32 @@ class BudgetManagerBar(_CTK_FRAME):
             format_risk_warnings,
         )
 
+        profile = self._profile_getter()
         state = config.normalize_budget_state(self.get_state())
-        avail = available_card_budget_text(state)
+        avail = available_card_budget_text(state, profile=profile)
         self.available_label.configure(text=avail)
         books_enabled = bool(
             state.get("use_betnow") or state.get("use_draftkings") or state.get("use_mybookie")
         )
-        pool_usd = available_card_budget_usd(state)
+        pool_usd = available_card_budget_usd(state, profile=profile)
         bg, fg = budget_availability_badge_style(pool_usd, books_enabled=books_enabled)
         self.available_badge.configure(fg_color=bg)
         self.available_label.configure(text_color=fg)
 
-        profile = self._profile_getter()
         is_live = config.normalize_profile(profile) == "live"
         br = float(state["total_bankroll"])
         live_cap = config.live_card_budget_cap_usd(br)
         raw_card = float(state["card_budget"])
 
         if is_live:
-            self.card_cap_hint.configure(
-                text=f"Live max ${live_cap:g}",
-                text_color="#f87171" if raw_card > live_cap else "#9ca3af",
-            )
             over_cap = raw_card > live_cap
+            self.card_cap_hint.configure(
+                text=f"Live cap ${live_cap:g}",
+                text_color="#f87171" if over_cap else "#9ca3af",
+            )
+            self.live_cap_warning.configure(
+                text="Exceeds Live $12 cap — stakes use capped amount" if over_cap else "",
+            )
             self.card_budget_label.configure(text_color="#f87171" if over_cap else "#e2e8f0")
             self.card_budget_entry.configure(
                 border_color="#ef4444" if over_cap else "#565b5e",
@@ -2043,6 +2055,7 @@ class BudgetManagerBar(_CTK_FRAME):
                 text=f"Safe ~${safe:g}",
                 text_color="#9ca3af",
             )
+            self.live_cap_warning.configure(text="")
             self.card_budget_label.configure(text_color="#e2e8f0")
             self.card_budget_entry.configure(border_color="#565b5e", text_color="#DCE4EE")
 
@@ -2059,7 +2072,8 @@ class BudgetManagerBar(_CTK_FRAME):
 
     def _save(self) -> None:
         state = config.normalize_budget_state(self.get_state())
-        if config.is_live_profile():
+        profile = self._profile_getter()
+        if config.normalize_profile(profile) == "live":
             live_cap = config.live_card_budget_cap_usd(state["total_bankroll"])
             if state["card_budget"] > live_cap:
                 state["card_budget"] = live_cap
@@ -2262,8 +2276,7 @@ class UFCDashboardApp(_CTK_BASE):
         self._build_mode_banner()
         self.control_header = ctk.CTkFrame(self, fg_color="transparent")
         self.control_header.pack(fill="x", padx=8, pady=(4, 2))
-        self._build_budget_bar(self.control_header)
-        self._build_top_bar(self.control_header)
+        self._build_control_header()
         self._build_tabs()
         self._build_status_area()
         self._schedule_status_tick()
@@ -2466,16 +2479,66 @@ class UFCDashboardApp(_CTK_BASE):
             return config.normalize_budget_state(self.budget_bar.get_state())
         return self._budget_state
 
-    def _build_budget_bar(self, master=None) -> None:
-        parent = master if master is not None else self
+    def _overview_recommendations(self) -> list[dict[str, Any]]:
+        """Top 3–5 picks for Overview, respecting budget, books, profile, and Grok."""
+        if self._payload is None:
+            return []
+        from src.grok_analysis import apply_grok_kelly_adjustments
+        from src.strategy import aggregate_overview_recommendations
+
+        profile = self._profile_from_menu(self.profile_var.get())
+        return apply_grok_kelly_adjustments(
+            aggregate_overview_recommendations(
+                self._payload.books, self._budget_state, limit=5, profile=profile
+            ),
+            self._grok_result,
+        )
+
+    def _refresh_top_recommendations(self) -> None:
+        if hasattr(self, "top_bets_panel"):
+            self.top_bets_panel.render(self._overview_recommendations())
+
+    def _build_control_header(self) -> None:
+        """Profile selector + Budget Manager + action toolbar."""
+        selector_row = ctk.CTkFrame(self.control_header, fg_color="transparent")
+        selector_row.pack(side="left", padx=(4, 0), pady=(6, 0))
+        ctk.CTkLabel(selector_row, text="Profile", font=ctk.CTkFont(weight="bold")).pack(
+            side="left", padx=(4, 4)
+        )
+        self.profile_menu = ctk.CTkOptionMenu(
+            selector_row,
+            variable=self.profile_var,
+            values=["Paper", "Live"],
+            width=110,
+            command=self._wrap_button_click("Profile", self._on_profile_change),
+        )
+        self.profile_menu.pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(selector_row, text="Event", font=ctk.CTkFont(weight="bold")).pack(
+            side="left", padx=(4, 4)
+        )
+        self.event_menu = ctk.CTkOptionMenu(
+            selector_row,
+            variable=self.event_var,
+            values=["Next Two Cards", "Next Card", "Freedom 250"],
+            width=170,
+        )
+        self.event_menu.pack(side="left", padx=(0, 4))
+
         self.budget_bar = BudgetManagerBar(
-            parent,
+            self.control_header,
             on_save=self._on_budget_saved,
             on_change=self._on_budget_live_change,
             profile_getter=lambda: self._profile_from_menu(self.profile_var.get()),
+            leading_frame=selector_row,
         )
         self.budget_bar.pack(fill="x", padx=4, pady=(4, 2))
         self.budget_bar.load(self._budget_state)
+
+        self._build_action_bar(self.control_header)
+
+    def _build_budget_bar(self, master=None) -> None:
+        """Legacy hook — budget bar is built via _build_control_header."""
+        return
 
     def _profile_from_menu(self, display: str) -> str:
         return config.normalize_profile(display)
@@ -2484,29 +2547,10 @@ class UFCDashboardApp(_CTK_BASE):
         p = config.normalize_profile(profile)
         self.profile_var.set("Live" if p == "live" else "Paper")
 
-    def _build_top_bar(self, master=None) -> None:
+    def _build_action_bar(self, master=None) -> None:
         parent = master if master is not None else self
         bar = ctk.CTkFrame(parent, fg_color="transparent")
         bar.pack(fill="x", padx=4, pady=(4, 2))
-
-        ctk.CTkLabel(bar, text="Profile", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(8, 4))
-        self.profile_menu = ctk.CTkOptionMenu(
-            bar,
-            variable=self.profile_var,
-            values=["Paper", "Live"],
-            width=120,
-            command=self._wrap_button_click("Profile", self._on_profile_change),
-        )
-        self.profile_menu.pack(side="left", padx=(0, 16))
-
-        ctk.CTkLabel(bar, text="Event", font=ctk.CTkFont(weight="bold")).pack(side="left", padx=(8, 4))
-        self.event_menu = ctk.CTkOptionMenu(
-            bar,
-            variable=self.event_var,
-            values=["Next Two Cards", "Next Card", "Freedom 250"],
-            width=180,
-        )
-        self.event_menu.pack(side="left", padx=(0, 16))
 
         self.refresh_btn = ctk.CTkButton(
             bar,
@@ -2711,13 +2755,7 @@ class UFCDashboardApp(_CTK_BASE):
     def _on_budget_live_change(self, state: dict[str, Any]) -> None:
         self._budget_state = state
         self._update_mode_banner()
-        if self._payload is not None and hasattr(self, "top_bets_panel"):
-            from src.strategy import aggregate_best_parlay, aggregate_top_recommended_bets
-
-            self.top_bets_panel.render(
-                aggregate_top_recommended_bets(self._payload.books, state, limit=3),
-                highlight_parlay=aggregate_best_parlay(self._payload.books, state),
-            )
+        self._refresh_top_recommendations()
 
     def _on_budget_saved(self, state: dict[str, Any]) -> None:
         self._budget_state = state
@@ -2826,6 +2864,7 @@ class UFCDashboardApp(_CTK_BASE):
 
         def worker() -> None:
             try:
+                _ensure_props_config()
                 payload = run_dashboard_analysis(
                     event_mode="Next Two Cards",
                     profile=self._profile_from_menu(self.profile_var.get()),
@@ -3091,10 +3130,15 @@ class UFCDashboardApp(_CTK_BASE):
         self._render_payload = payload
         self._rendered_sections.clear()
         _debug_log("Rendering overview + books (lazy tabs deferred)")
+        props_enabled = _ensure_props_config()
+        _debug_log(f"Rendering Props tabs: {'enabled' if props_enabled else 'disabled'}")
         self._render_overview_section(payload)
         self._rendered_sections.add("overview")
         self._render_books_section(payload)
         self._rendered_sections.add("books")
+        if props_enabled:
+            self._render_props_section(payload)
+            self._rendered_sections.add("props")
         current = self.tabs.get() if hasattr(self, "tabs") else "Overview"
         self.after(1, lambda: self._render_tab_lazy(current))
         self.after(800, lambda t=token: self._render_idle_deferred(t))
@@ -3132,21 +3176,9 @@ class UFCDashboardApp(_CTK_BASE):
         self.overview_table.load_rows(_rows_for_table(preds, bankroll, strategy, compact=True))
 
         bs = self._budget_state
-        from src.strategy import (
-            aggregate_best_parlay,
-            aggregate_top_recommended_bets,
-            collect_dashboard_risk_warnings,
-            format_risk_warnings,
-        )
-        from src.grok_analysis import apply_grok_kelly_adjustments
+        from src.strategy import collect_dashboard_risk_warnings, format_risk_warnings
 
-        self.top_bets_panel.render(
-            apply_grok_kelly_adjustments(
-                aggregate_top_recommended_bets(payload.books, bs, limit=3),
-                self._grok_result,
-            ),
-            highlight_parlay=aggregate_best_parlay(payload.books, bs),
-        )
+        self.top_bets_panel.render(self._overview_recommendations())
 
         overview_risks = collect_dashboard_risk_warnings(alerts, bs, bankroll=bankroll)
         risk_txt, risk_color = format_risk_warnings(overview_risks, max_lines=3)
@@ -3171,10 +3203,11 @@ class UFCDashboardApp(_CTK_BASE):
     def _render_books_section(self, payload: DashboardPayload) -> None:
         ctx = payload.threshold_ctx or {}
         bs = self._budget_state
-        self.betnow_tab.render(payload.books.get("BetNow.eu", {}), ctx, budget_state=bs)
-        self.dk_tab.render(payload.books.get("DraftKings", {}), ctx, budget_state=bs)
+        profile = self._profile_from_menu(self.profile_var.get())
+        self.betnow_tab.render(payload.books.get("BetNow.eu", {}), ctx, budget_state=bs, profile=profile)
+        self.dk_tab.render(payload.books.get("DraftKings", {}), ctx, budget_state=bs, profile=profile)
         if config.MYBOOKIE_ENABLED:
-            self.mybookie_tab.render(payload.books.get("MyBookie", {}), ctx, budget_state=bs)
+            self.mybookie_tab.render(payload.books.get("MyBookie", {}), ctx, budget_state=bs, profile=profile)
         else:
             self.mybookie_tab.summary.configure(
                 text="MyBookie disabled — set MYBOOKIE_ENABLED=true in .env and refresh."
@@ -3235,10 +3268,15 @@ class UFCDashboardApp(_CTK_BASE):
                 _debug_log(f"Parlay render skipped for {ev}: {exc}")
 
     def _render_props_section(self, payload: DashboardPayload) -> None:
+        props_enabled = _ensure_props_config()
+        _debug_log(f"Rendering Props tabs: {'enabled' if props_enabled else 'disabled'}")
+        if not props_enabled:
+            return
         bs = self._budget_state
-        self.props_betnow_tab.render(payload, budget_state=bs)
-        self.props_dk_tab.render(payload, budget_state=bs)
-        self.props_mybookie_tab.render(payload, budget_state=bs)
+        profile = self._profile_from_menu(self.profile_var.get())
+        self.props_betnow_tab.render(payload, budget_state=bs, profile=profile)
+        self.props_dk_tab.render(payload, budget_state=bs, profile=profile)
+        self.props_mybookie_tab.render(payload, budget_state=bs, profile=profile)
 
     def _render_risk_section(self, payload: DashboardPayload) -> None:
         self._render_risk_tab(payload, budget_state=self._budget_state)

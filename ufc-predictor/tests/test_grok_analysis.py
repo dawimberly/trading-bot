@@ -106,3 +106,15 @@ def test_apply_grok_kelly_adjustments_noop_when_failed():
     bets = [{"fight_id": "f1", "kelly_stake_usd": 10.0}]
     out = apply_grok_kelly_adjustments(bets, {"ok": False, "picks": []})
     assert out[0]["kelly_stake_usd"] == 10.0
+
+
+def test_refresh_runtime_env_grok(monkeypatch):
+    import config
+
+    monkeypatch.setenv("GROK_ENABLED", "true")
+    monkeypatch.setenv("XAI_API_KEY", "test-key")
+    monkeypatch.setenv("ENABLE_PROPS", "true")
+    config.refresh_runtime_env()
+    assert config.GROK_ENABLED is True
+    assert config.GROK_API_KEY == "test-key"
+    assert config.ENABLE_PROPS is True

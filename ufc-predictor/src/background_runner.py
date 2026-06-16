@@ -437,18 +437,25 @@ def main(argv: list[str] | None = None) -> int:
         default="manual",
         help="What invoked this run (for logging)",
     )
-    parser.add_argument("--profile", default="research", choices=("research", "live"))
+    parser.add_argument("--profile", default="paper", choices=("paper", "live", "research"))
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args(argv)
 
     setup_logging(verbose=args.verbose, log_dir=config.LOG_DIR, log_name="background_runner.log")
-    logger.info("Background runner start — root=%s mode=%s trigger=%s", root, args.mode, args.trigger)
+    profile = config.normalize_profile(args.profile)
+    logger.info(
+        "Background runner start — root=%s mode=%s trigger=%s profile=%s",
+        root,
+        args.mode,
+        args.trigger,
+        profile,
+    )
 
-    config.UFC_PROFILE = args.profile
+    config.UFC_PROFILE = profile
     config.apply_profile_overrides()
 
     try:
-        return run_background(mode=args.mode, trigger=args.trigger, profile=args.profile)
+        return run_background(mode=args.mode, trigger=args.trigger, profile=profile)
     except Exception as exc:
         logger.error("Unhandled background runner error: %s", exc)
         logger.debug(traceback.format_exc())

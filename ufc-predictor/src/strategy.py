@@ -394,6 +394,25 @@ def enrich_summary_with_risk_metrics(
 # --- Budget manager (per-book card allocation) --------------------------------
 
 
+def resolve_budget_for_calculations(
+    budget_state: dict[str, Any] | None,
+    *,
+    profile: str | None = None,
+) -> dict[str, Any]:
+    """
+    Normalize budget and apply profile card cap for stake / allocation math.
+
+    Live mode clamps card_budget to the live USD cap (default $12).
+    """
+    import config as _cfg
+
+    state = _cfg.normalize_budget_state(budget_state)
+    card_eff, _ = effective_card_budget_usd(state, profile=profile)
+    resolved = dict(state)
+    resolved["card_budget"] = card_eff
+    return resolved
+
+
 def effective_card_budget_usd(
     budget_state: dict[str, Any],
     *,
@@ -417,7 +436,9 @@ def effective_card_budget_usd(
 
     live = _cfg.is_live_profile() if profile is None else _cfg.normalize_profile(profile) == "live"
     if live:
-        live_usd = float(_cfg.profile_settings().get("max_card_stake_usd") or _cfg.DEFAULT_CARD_BUDGET)
+        live_usd = float(
+            _cfg.profile_settings().get("max_card_stake_usd") or _cfg.LIVE_MAX_CARD_BUDGET_USD
+        )
         if raw > live_usd:
             warnings.append(
                 f"Card budget ${raw:,.2f} exceeds Live cap ${live_usd:,.2f}; "
@@ -433,7 +454,11 @@ def effective_card_budget_usd(
     return max(capped, 0.0), warnings
 
 
-def allocate_card_budget_per_book(budget_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def allocate_card_budget_per_book(
+    budget_state: dict[str, Any],
+    *,
+    profile: str | None = None,
+) -> dict[str, dict[str, Any]]:
     """
     Split effective card budget across enabled books.
 
@@ -442,7 +467,7 @@ def allocate_card_budget_per_book(budget_state: dict[str, Any]) -> dict[str, dic
     """
     import config as _cfg
 
-    card_budget, _ = effective_card_budget_usd(budget_state)
+    card_budget, _ = effective_card_budget_usd(budget_state, profile=profile)
     enabled: list[tuple[str, float]] = []
     for book in _cfg.BUDGET_BOOKS:
         use_key = _cfg.BUDGET_USE_KEYS[book]
@@ -504,6 +529,8 @@ def attach_prop_stakes(
     singles: list[dict[str, Any]],
     budget_state: dict[str, Any] | None,
     book: str,
+    *,
+    profile: str | None = None,
 ) -> list[dict[str, Any]]:
     """Scale suggested prop stakes to the book's card allocation pool."""
     if not singles:
@@ -511,14 +538,15 @@ def attach_prop_stakes(
     if not budget_state:
         return [{**s, "suggested_stake": 0.0} for s in singles]
 
-    plan = allocate_card_budget_per_book(budget_state)
+    resolved = resolve_budget_for_calculations(budget_state, profile=profile)
+    plan = allocate_card_budget_per_book(resolved, profile=profile)
     info = plan.get(book, {})
     if not info.get("enabled"):
         return [{**s, "suggested_stake": 0.0, "book_disabled": True} for s in singles]
 
     pool = float(info.get("allocation") or 0)
     if pool <= 0 and info.get("enabled"):
-        pool = available_card_budget_usd(budget_state) / max(
+        pool = available_card_budget_usd(resolved, profile=profile) / max(
             1,
             sum(1 for b in plan.values() if b.get("enabled")),
         )
@@ -575,28 +603,33 @@ def book_display_name(book: str) -> str:
     return book.replace(".eu", "")
 
 
-def available_card_budget_usd(budget_state: dict[str, Any]) -> float:
+def available_card_budget_usd(
+    budget_state: dict[str, Any],
+    *,
+    profile: str | None = None,
+) -> float:
     """Total dollars allocatable this card across enabled books."""
-    plan = allocate_card_budget_per_book(budget_state)
+    plan = allocate_card_budget_per_book(budget_state, profile=profile)
     return float(
         sum(float(info.get("allocation") or 0) for info in plan.values() if info.get("enabled"))
     )
 
 
-def available_card_budget_text(budget_state: dict[str, Any]) -> str:
-    """Human label: 'Available this card: $12.00 across BetNow, DraftKings, MyBookie'."""
+def available_card_budget_text(
+    budget_state: dict[str, Any],
+    *,
+    profile: str | None = None,
+) -> str:
+    """Human label: 'Available this card: $12.00 across selected books'."""
+    total = available_card_budget_usd(budget_state, profile=profile)
     import config as _cfg
 
-    total = available_card_budget_usd(budget_state)
-    enabled: list[str] = []
-    for book in _cfg.BUDGET_BOOKS:
-        use_key = _cfg.BUDGET_USE_KEYS[book]
-        if budget_state.get(use_key, True):
-            enabled.append(book_display_name(book))
-    if not enabled:
+    enabled = sum(
+        1 for book in _cfg.BUDGET_BOOKS if budget_state.get(_cfg.BUDGET_USE_KEYS[book], True)
+    )
+    if enabled == 0:
         return "Available this card: $0.00 (no books selected)"
-    book_txt = ", ".join(enabled)
-    return f"Available this card: ${total:,.2f} across {book_txt}"
+    return f"Available this card: ${total:,.2f} across selected books"
 
 
 MAX_SAFE_BANKROLL_FRACTION = 0.005  # 0.5% hard cap for "max safe" single bet
@@ -664,15 +697,19 @@ def scale_alerts_to_book_pool(
     alerts: dict[str, Any],
     budget_state: dict[str, Any] | None,
     book: str,
+    *,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Scale singles/parlay suggested stakes to the book's card allocation pool."""
     if not alerts or not budget_state:
         return alerts
 
+    resolved = resolve_budget_for_calculations(budget_state, profile=profile)
+
     if book == "Overview":
-        pool = available_card_budget_usd(budget_state)
+        pool = available_card_budget_usd(resolved, profile=profile)
     else:
-        plan = allocate_card_budget_per_book(budget_state)
+        plan = allocate_card_budget_per_book(resolved, profile=profile)
         info = plan.get(book, {})
         if not info.get("enabled"):
             return {**alerts, "singles": [], "parlays": [], "book_disabled": True}
@@ -703,11 +740,13 @@ def budget_aware_alerts(
     alerts: dict[str, Any],
     budget_state: dict[str, Any] | None,
     book: str,
+    *,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Apply book enablement and card-budget stake scaling to an alert payload."""
     if not budget_state:
         return alerts
-    return scale_alerts_to_book_pool(alerts, budget_state, book)
+    return scale_alerts_to_book_pool(alerts, budget_state, book, profile=profile)
 
 
 def collect_dashboard_risk_warnings(
@@ -851,18 +890,20 @@ def aggregate_top_recommended_bets(
     budget_state: dict[str, Any],
     *,
     limit: int = 3,
+    profile: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Best singles across enabled books, deduped by fight, stakes scaled to card budget.
     """
     import config as _cfg
 
+    resolved = resolve_budget_for_calculations(budget_state, profile=profile)
     enabled = [
         book
         for book in _cfg.BUDGET_BOOKS
-        if budget_state.get(_cfg.BUDGET_USE_KEYS[book], True)
+        if resolved.get(_cfg.BUDGET_USE_KEYS[book], True)
     ]
-    bankroll = bankroll_from_budget(budget_state)
+    bankroll = bankroll_from_budget(resolved)
     strategy = strategy_from_profile(bankroll=bankroll)
     best_by_fight: dict[str, dict[str, Any]] = {}
 
@@ -919,7 +960,7 @@ def aggregate_top_recommended_bets(
             }
 
     ranked = sorted(best_by_fight.values(), key=lambda x: float(x.get("edge") or 0), reverse=True)[:limit]
-    pool = available_card_budget_usd(budget_state)
+    pool = available_card_budget_usd(resolved, profile=profile)
     stakes = distribute_stakes_to_pool(ranked, pool)
     for i, (bet, stake) in enumerate(zip(ranked, stakes), start=1):
         bet["rank"] = i
@@ -928,18 +969,60 @@ def aggregate_top_recommended_bets(
     return ranked
 
 
+def aggregate_overview_recommendations(
+    books: dict[str, dict[str, Any]],
+    budget_state: dict[str, Any],
+    *,
+    limit: int = 5,
+    profile: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Up to 5 actionable Overview picks: top singles plus best parlay when available.
+
+    Singles are deduped by fight, ranked by edge, and stakes scaled to card budget.
+    """
+    cap = max(3, min(5, int(limit)))
+    parlay = aggregate_best_parlay(books, budget_state, profile=profile)
+    singles_limit = cap - 1 if parlay else cap
+    singles = aggregate_top_recommended_bets(
+        books, budget_state, limit=singles_limit, profile=profile
+    )
+    for single in singles:
+        pick = str(single.get("pick") or "").strip()
+        single["display_label"] = f"{pick} ML" if pick else str(single.get("pick_line") or "—")
+
+    items: list[dict[str, Any]] = list(singles)
+    if parlay:
+        legs = str(parlay.get("pick_line") or "").strip()
+        bt = str(parlay.get("bet_type") or "Parlay")
+        leg_n = bt.split("-Leg")[0].strip() if "-Leg" in bt else ""
+        if legs and leg_n.isdigit():
+            parlay["display_label"] = f"{legs} {leg_n}-leg"
+        else:
+            parlay["display_label"] = legs or bt
+        parlay["is_parlay"] = True
+        items.append(parlay)
+
+    for i, bet in enumerate(items[:cap], start=1):
+        bet["rank"] = i
+    return items[:cap]
+
+
 def aggregate_best_parlay(
     books: dict[str, dict[str, Any]],
     budget_state: dict[str, Any],
+    *,
+    profile: str | None = None,
 ) -> dict[str, Any] | None:
     """Highest-EV parlay across enabled books (for Overview highlight)."""
     import config as _cfg
     from src.parlay_builder import enrich_parlays_for_display, format_recommended_parlay_header
 
+    resolved = resolve_budget_for_calculations(budget_state, profile=profile)
     enabled = [
         book
         for book in _cfg.BUDGET_BOOKS
-        if budget_state.get(_cfg.BUDGET_USE_KEYS[book], True)
+        if resolved.get(_cfg.BUDGET_USE_KEYS[book], True)
     ]
     best: dict[str, Any] | None = None
     best_ev = -1.0
@@ -965,7 +1048,7 @@ def aggregate_best_parlay(
             from src.parlay_builder import leg_pick_label
 
             legs_txt = " + ".join(leg_pick_label(leg) for leg in p["legs"])
-        pool = available_card_budget_usd(budget_state)
+        pool = available_card_budget_usd(resolved, profile=profile)
         stake = round(min(float(p.get("suggested_stake") or 0), pool * 0.25), 2)
         best_ev = ev
         best = {

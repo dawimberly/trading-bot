@@ -7,7 +7,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-import numpy as np
 import pandas as pd
 
 import config
@@ -17,6 +16,20 @@ from src.parlay_builder import threshold_context_for_alerts
 from src.predictor import merge_predictions_with_odds
 
 logger = logging.getLogger(__name__)
+
+
+def _reload_config_flags() -> None:
+    """Re-read .env and refresh ENABLE_PROPS / related flags before analysis."""
+    try:
+        from src.project_paths import reload_runtime_env
+
+        reload_runtime_env()
+    except Exception as exc:
+        logger.warning("Config reload failed: %s", exc)
+    logger.info("ENABLE_PROPS loaded as: %s", config.ENABLE_PROPS)
+
+
+ProgressFn = Callable[[str, float | None], None]
 
 _ODDS_OVERVIEW_COLS = (
     "f1_odds",
@@ -96,6 +109,10 @@ def _build_props_payload(
     from src.odds_providers.prop_odds_common import prop_odds_summary
     from src.props import enrich_predictions_with_props, fetch_live_prop_odds, rank_prop_parlays_for_card, rank_prop_singles
     from src.strategy import bankroll_from_budget, strategy_from_profile
+
+    if not config.ENABLE_PROPS:
+        logger.debug("Props payload skipped — ENABLE_PROPS is False")
+        return {}
 
     if predictions.empty:
         return {
@@ -294,6 +311,35 @@ def apply_books_to_predictions(
     return books
 
 
+def _ensure_book_props(
+    books: dict[str, dict[str, Any]],
+    combined: pd.DataFrame,
+    *,
+    force_refresh_odds: bool,
+    budget_state: dict[str, Any] | None = None,
+) -> None:
+    """Build props payloads when ENABLE_PROPS is on but books lack prop data."""
+    if not config.ENABLE_PROPS:
+        return
+    for book_name, entry in books.items():
+        if book_name == "Overview":
+            continue
+        props = entry.get("props") or {}
+        meta = props.get("singles_meta") or {}
+        if props.get("singles") or int(meta.get("total_found", 0)) > 0:
+            continue
+        preds = entry.get("predictions", combined)
+        if not isinstance(preds, pd.DataFrame) or preds.empty:
+            continue
+        entry["props"] = _build_props_payload(
+            preds,
+            book_name,
+            force_refresh_odds=force_refresh_odds,
+            budget_state=budget_state,
+        )
+        logger.info("Built props for %s (ENABLE_PROPS=True)", book_name)
+
+
 def run_quick_odds_refresh(
     base_preds: pd.DataFrame,
     *,
@@ -302,6 +348,7 @@ def run_quick_odds_refresh(
     budget_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fast path: BetNow + DraftKings (+ MyBookie when enabled)."""
+    _reload_config_flags()
     from src.strategy import bankroll_from_budget, budget_aware_alerts
 
     books_label = "BetNow + DraftKings"
@@ -346,6 +393,7 @@ def run_full_analysis(
     budget_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Full dashboard analysis with cached feature engineering."""
+    _reload_config_flags()
     from main import fetch_event_card, resolve_event_targets, load_or_refresh_data, _model_exists
     from src.risk_manager import assess_upcoming_card_risk
     from src.strategy import bankroll_from_budget
@@ -427,6 +475,12 @@ def run_full_analysis(
         force_refresh_odds=force_refresh_odds,
         event_label=result["event_label"],
         progress=progress,
+        budget_state=budget_state,
+    )
+    _ensure_book_props(
+        result["books"],
+        combined,
+        force_refresh_odds=force_refresh_odds,
         budget_state=budget_state,
     )
 

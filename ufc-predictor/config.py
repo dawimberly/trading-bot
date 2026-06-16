@@ -6,6 +6,15 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+
+def env_bool(key: str, default: str = "false") -> bool:
+    """Parse ENABLE_PROPS-style flags; tolerates quotes and whitespace."""
+    raw = os.getenv(key)
+    if raw is None:
+        raw = default
+    return str(raw).strip().strip('"').strip("'").lower() in ("1", "true", "yes", "on")
+
+
 # Standalone layout: .env at project root or ufc_betting_bot/.env
 # Frozen EXE: defer to project_paths.bootstrap() — config.py may live in _MEIPASS.
 ROOT_DIR = Path(__file__).resolve().parent
@@ -435,7 +444,7 @@ DASHBOARD_AUTO_ODDS_MINUTES = int(os.getenv("UFC_DASHBOARD_AUTO_ODDS_MINUTES", "
 DASHBOARD_CARD_CHECK_MINUTES = int(os.getenv("UFC_DASHBOARD_CARD_CHECK_MINUTES", "45"))
 
 # --- Prop betting (method, rounds, decision) ---
-ENABLE_PROPS = os.getenv("ENABLE_PROPS", "false").lower() in ("1", "true", "yes")
+ENABLE_PROPS = env_bool("ENABLE_PROPS", "false")
 PROP_MIN_EDGE = float(os.getenv("PROP_MIN_EDGE", "0.04"))
 PROP_MIN_MODEL_PROB = float(os.getenv("PROP_MIN_MODEL_PROB", "0.21"))
 PROP_SHOW_ALL_MIN_PROB = float(os.getenv("PROP_SHOW_ALL_MIN_PROB", "0.12"))
@@ -477,9 +486,13 @@ def refresh_runtime_env() -> None:
     """Re-read env-backed flags after bootstrap load_dotenv (required for frozen EXE)."""
     global ENABLE_PROPS, MYBOOKIE_ENABLED, ODDS_API_KEY, BETNOW_COOKIE, MYBOOKIE_COOKIE
     global PROP_MIN_EDGE, PROP_MIN_MODEL_PROB, PROP_MAX_RESULTS, UFC_PROFILE
+    global GROK_ENABLED, GROK_API_KEY, GROK_MODEL, GROK_API_BASE
+    global GROK_MAX_FIGHTS, GROK_MAX_PROPS, GROK_TIMEOUT_SEC
+    global GROK_KELLY_ADJ_MIN, GROK_KELLY_ADJ_MAX, GROK_CACHE_TTL_HOURS
+    global NEWS_API_KEY
 
-    ENABLE_PROPS = os.getenv("ENABLE_PROPS", "false").lower() in ("1", "true", "yes")
-    MYBOOKIE_ENABLED = os.getenv("MYBOOKIE_ENABLED", "true").lower() in ("1", "true", "yes")
+    ENABLE_PROPS = env_bool("ENABLE_PROPS", "false")
+    MYBOOKIE_ENABLED = env_bool("MYBOOKIE_ENABLED", "true")
     ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY") or os.getenv("ODDS_API_KEY", "")
     BETNOW_COOKIE = os.getenv("BETNOW_COOKIE", "")
     MYBOOKIE_COOKIE = os.getenv("MYBOOKIE_COOKIE", "")
@@ -487,6 +500,17 @@ def refresh_runtime_env() -> None:
     PROP_MIN_MODEL_PROB = float(os.getenv("PROP_MIN_MODEL_PROB", "0.21"))
     PROP_MAX_RESULTS = int(os.getenv("PROP_MAX_RESULTS", "24"))
     UFC_PROFILE = normalize_profile(os.getenv("UFC_PROFILE", "paper"))
+    NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
+    GROK_ENABLED = os.getenv("GROK_ENABLED", "false").lower() in ("1", "true", "yes")
+    GROK_API_KEY = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY", "")
+    GROK_MODEL = os.getenv("GROK_MODEL", "grok-3-mini")
+    GROK_API_BASE = os.getenv("GROK_API_BASE", "https://api.x.ai/v1")
+    GROK_MAX_FIGHTS = int(os.getenv("GROK_MAX_FIGHTS", "6"))
+    GROK_MAX_PROPS = int(os.getenv("GROK_MAX_PROPS", "6"))
+    GROK_TIMEOUT_SEC = int(os.getenv("GROK_TIMEOUT_SEC", "90"))
+    GROK_KELLY_ADJ_MIN = float(os.getenv("GROK_KELLY_ADJ_MIN", "0.70"))
+    GROK_KELLY_ADJ_MAX = float(os.getenv("GROK_KELLY_ADJ_MAX", "1.15"))
+    GROK_CACHE_TTL_HOURS = int(os.getenv("GROK_CACHE_TTL_HOURS", "12"))
 
 
 def is_live_profile() -> bool:
@@ -578,6 +602,7 @@ def apply_profile_overrides() -> None:
 BUDGET_JSON_PATH = DATA_DIR / "budget.json"
 DEFAULT_TOTAL_BANKROLL = INITIAL_BANKROLL
 DEFAULT_CARD_BUDGET = CARD_BUDGET
+LIVE_MAX_CARD_BUDGET_USD = float(os.getenv("LIVE_MAX_CARD_BUDGET_USD", "12"))
 LIVE_SMALL_BANKROLL_USD = 100.0
 
 BUDGET_BOOKS: tuple[str, ...] = ("BetNow.eu", "DraftKings", "MyBookie")
@@ -708,7 +733,7 @@ def live_card_budget_cap_usd(bankroll: float | None = None) -> float:
     """Hard USD cap for card budget in Live profile (default $12)."""
     br = max(float(bankroll if bankroll is not None else INITIAL_BANKROLL), 1.0)
     if is_live_profile():
-        return float(profile_settings().get("max_card_stake_usd") or DEFAULT_CARD_BUDGET)
+        return float(profile_settings().get("max_card_stake_usd") or LIVE_MAX_CARD_BUDGET_USD)
     return max_card_stake_cap(br)
 
 
