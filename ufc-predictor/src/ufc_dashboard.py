@@ -380,9 +380,12 @@ def _pick_edge(row: pd.Series) -> tuple[float | None, str | None]:
 
 
 def _site_odds(row: pd.Series, pick: str | None) -> str:
-    if not pick or not row.get("odds_matched"):
-        return "—"
+    if not pick:
+        pick = str(row.get("predicted_winner", "") or "")
     f1 = str(row.get("fighter_1", ""))
+    has_odds = bool(row.get("odds_matched")) or pd.notna(row.get("f1_odds")) or pd.notna(row.get("f2_odds"))
+    if not pick or not has_odds:
+        return "—"
     if pick == f1 and pd.notna(row.get("f1_odds")):
         return f"{float(row['f1_odds']):.2f}"
     if pd.notna(row.get("f2_odds")):
@@ -3285,14 +3288,30 @@ class UFCDashboardApp(_CTK_BASE):
             _debug_log(f"Gane foul scenario render failed: {exc}")
             self.gane_foul_panel.render({"found": False, "message": f"Scenario unavailable: {exc}"})
 
+    def _book_tab_data(self, payload: DashboardPayload, book_key: str) -> dict[str, Any]:
+        """Book payload for a tab, falling back to combined fights when predictions missing."""
+        data = dict(payload.books.get(book_key) or {})
+        preds = data.get("predictions", pd.DataFrame())
+        if not isinstance(preds, pd.DataFrame) or preds.empty:
+            if not payload.combined.empty:
+                data = {
+                    **data,
+                    "predictions": payload.combined,
+                    "odds_total": len(payload.combined),
+                    "odds_matched": int(payload.combined.get("odds_matched", pd.Series(False)).sum())
+                    if "odds_matched" in payload.combined.columns
+                    else 0,
+                }
+        return data
+
     def _render_books_section(self, payload: DashboardPayload) -> None:
         ctx = payload.threshold_ctx or {}
         bs = self._budget_state
         profile = self._profile_from_menu(self.profile_var.get())
-        self.betnow_tab.render(payload.books.get("BetNow.eu", {}), ctx, budget_state=bs, profile=profile)
-        self.dk_tab.render(payload.books.get("DraftKings", {}), ctx, budget_state=bs, profile=profile)
+        self.betnow_tab.render(self._book_tab_data(payload, "BetNow.eu"), ctx, budget_state=bs, profile=profile)
+        self.dk_tab.render(self._book_tab_data(payload, "DraftKings"), ctx, budget_state=bs, profile=profile)
         if config.MYBOOKIE_ENABLED:
-            self.mybookie_tab.render(payload.books.get("MyBookie", {}), ctx, budget_state=bs, profile=profile)
+            self.mybookie_tab.render(self._book_tab_data(payload, "MyBookie"), ctx, budget_state=bs, profile=profile)
         else:
             self.mybookie_tab.summary.configure(
                 text="MyBookie disabled — set MYBOOKIE_ENABLED=true in .env and refresh."
