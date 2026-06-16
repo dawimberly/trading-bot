@@ -12,6 +12,8 @@ Monorepo for local trading and betting tools. Clone once, run what you need on y
 
 **Friend setup guide:** [FRIENDS.md](FRIENDS.md)
 
+**Environment:** copy [`stock-bot/.env.example`](stock-bot/.env.example) → `stock-bot/.env` (placeholders only — never commit real keys).
+
 ## Quick start (stock bot)
 
 ```powershell
