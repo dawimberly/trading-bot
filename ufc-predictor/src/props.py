@@ -409,60 +409,166 @@ def enrich_predictions_with_props(
     return out
 
 
+def _prop_fighter_name(prop_key: str, row: pd.Series, probs: dict[str, float] | None = None) -> str:
+    """Fighter column for prop table — pick name for fighter-specific markets."""
+    if prop_key in ("fighter_ko", "fighter_sub", "fighter_decision"):
+        p = probs or method_probs_from_row(row)
+        return str(p.get("pick_name", "—"))
+    return "—"
+
+
+def _prop_row_dict(
+    cand: BetCandidate,
+    *,
+    rank: int,
+    book: str,
+    row: pd.Series,
+    probs: dict[str, float],
+    strict_qualified: bool,
+) -> dict[str, Any]:
+    odds_source = getattr(cand, "odds_source", "synthetic")
+    edge_pct = cand.edge * 100.0 if odds_source == "live" else None
+    prop_key = cand.prop_key
+    return {
+        "rank": rank,
+        "book": book,
+        "fight_id": cand.fight_id,
+        "fight": f"{cand.fighter1_name} vs {cand.fighter2_name}",
+        "prop_key": prop_key,
+        "prop_type": PROP_MARKET_LABELS.get(prop_key, prop_key),
+        "fighter": _prop_fighter_name(prop_key, row, probs),
+        "label": cand.display_label or cand.pick_name,
+        "prob": cand.prob,
+        "odds": cand.decimal_odds,
+        "edge": cand.edge,
+        "edge_pct": edge_pct,
+        "ev": cand.expected_value,
+        "market_type": "prop",
+        "odds_source": odds_source,
+        "strict_qualified": strict_qualified,
+        "parlay_allowed": config.BOOK_PROP_RULES.get(book, {}).get("allow_prop_parlays", False),
+    }
+
+
+def _collect_prop_candidates(
+    rows: pd.DataFrame,
+    *,
+    book: str,
+    strategy: StrategyConfig | None,
+    prop_odds: pd.DataFrame | None,
+    include_relaxed: bool,
+) -> tuple[list[tuple[BetCandidate, pd.Series, dict[str, float], bool]], set[str]]:
+    """Return (candidate, row, probs, strict) tuples and seen keys for dedupe."""
+    collected: list[tuple[BetCandidate, pd.Series, dict[str, float], bool]] = []
+    seen: set[str] = set()
+
+    for _, row in rows.iterrows():
+        probs = method_probs_from_row(row)
+        for key in config.PROP_MARKETS:
+            cand = extract_prop_candidate(
+                row,
+                key,
+                config=strategy,
+                probs=probs,
+                book=book,
+                prop_odds=prop_odds,
+                for_display=True,
+            )
+            if cand is not None:
+                dedupe = f"{cand.fight_id}|{key}"
+                if dedupe not in seen:
+                    seen.add(dedupe)
+                    collected.append((cand, row, probs, True))
+                continue
+            if not include_relaxed:
+                continue
+            quote = resolve_prop_quote(row, key, book=book, prop_odds=prop_odds, probs=probs)
+            model_p = prop_model_prob(key, row, probs)
+            if str(quote.get("odds_source", "synthetic")) != "synthetic":
+                continue
+            if model_p < config.PROP_SHOW_ALL_MIN_PROB:
+                continue
+            dedupe = f"{row.get('fight_id', '')}|{key}"
+            if dedupe in seen:
+                continue
+            seen.add(dedupe)
+            f1 = str(row.get("fighter_1", row.get("fighter1", ""))).strip()
+            f2 = str(row.get("fighter_2", row.get("fighter2", ""))).strip()
+            label = prop_display_label(key, row, probs)
+            relaxed = BetCandidate(
+                fight_id=str(row.get("fight_id", "")),
+                event_key=str(row.get("event_name", row.get("event", ""))),
+                bet_side=probs.get("pick_side", "f1"),
+                prob=model_p,
+                decimal_odds=float(quote["decimal_odds"]),
+                edge=float(quote["edge"]),
+                kelly_full=0.0,
+                expected_value=bet_expected_value(model_p, float(quote["decimal_odds"])),
+                fighter1_name=f1,
+                fighter2_name=f2,
+                pick_name=label,
+                winner_name=label,
+                market_type="prop",
+                prop_key=key,
+                display_label=label,
+            )
+            relaxed.odds_source = "synthetic"
+            collected.append((relaxed, row, probs, False))
+
+    return collected, seen
+
+
 def rank_prop_singles(
     rows: pd.DataFrame,
     *,
     book: str,
     strategy: StrategyConfig | None = None,
-    max_results: int = 12,
+    max_results: int | None = None,
     prop_odds: pd.DataFrame | None = None,
-) -> list[dict[str, Any]]:
-    """Top prop singles by edge for a book (always singles on BetNow)."""
+    include_relaxed: bool = True,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """
+    Top prop singles by edge for a book.
+
+    Returns (ranked rows, meta) where meta has total_found and strict_count.
+    """
+    empty_meta = {"total_found": 0, "strict_count": 0, "relaxed_count": 0}
     if not config.ENABLE_PROPS or rows.empty:
-        return []
+        return [], empty_meta
 
-    candidates: list[BetCandidate] = []
-    for _, row in rows.iterrows():
-        candidates.extend(
-            extract_prop_candidates_for_row(
-                row,
-                strategy=strategy,
-                book=book,
-                prop_odds=prop_odds,
-                for_display=True,
-            )
-        )
+    cap = max_results if max_results is not None else config.PROP_MAX_RESULTS
+    collected, _ = _collect_prop_candidates(
+        rows,
+        book=book,
+        strategy=strategy,
+        prop_odds=prop_odds,
+        include_relaxed=include_relaxed,
+    )
 
-    def _rank_key(cand: BetCandidate) -> tuple[int, float]:
+    def _rank_key(item: tuple[BetCandidate, pd.Series, dict, bool]) -> tuple[int, float]:
+        cand, _, _, strict = item
         source = getattr(cand, "odds_source", "synthetic")
-        if source == "live":
-            return (1, cand.edge)
-        return (0, cand.prob)
+        score = cand.edge if source == "live" else cand.prob
+        return (2 if strict and source == "live" else 1 if strict else 0, score)
 
-    candidates.sort(key=_rank_key, reverse=True)
+    collected.sort(key=_rank_key, reverse=True)
+    strict_count = sum(1 for *_, strict in collected if strict)
+    total_found = len(collected)
+
     ranked: list[dict[str, Any]] = []
-    for i, cand in enumerate(candidates[:max_results], 1):
-        odds_source = getattr(cand, "odds_source", "synthetic")
-        edge_pct = cand.edge * 100.0 if odds_source == "live" else None
+    for i, (cand, row, probs, strict) in enumerate(collected[:cap], 1):
         ranked.append(
-            {
-                "rank": i,
-                "book": book,
-                "fight_id": cand.fight_id,
-                "fight": f"{cand.fighter1_name} vs {cand.fighter2_name}",
-                "prop_key": cand.prop_key,
-                "label": cand.display_label or cand.pick_name,
-                "prob": cand.prob,
-                "odds": cand.decimal_odds,
-                "edge": cand.edge,
-                "edge_pct": edge_pct,
-                "ev": cand.expected_value,
-                "market_type": "prop",
-                "odds_source": odds_source,
-                "parlay_allowed": config.BOOK_PROP_RULES.get(book, {}).get("allow_prop_parlays", False),
-            }
+            _prop_row_dict(cand, rank=i, book=book, row=row, probs=probs, strict_qualified=strict)
         )
-    return ranked
+
+    meta = {
+        "total_found": total_found,
+        "strict_count": strict_count,
+        "relaxed_count": max(0, total_found - strict_count),
+        "shown": len(ranked),
+        "cap": cap,
+    }
+    return ranked, meta
 
 
 @dataclass

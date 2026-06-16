@@ -32,9 +32,165 @@ HIGH_VOL_ATR_PCT = float(__import__("os").getenv("PAPER_UNIVERSE_HIGH_VOL_ATR", 
 HIGH_VOL_POSITION_SCALE = float(
     __import__("os").getenv("PAPER_UNIVERSE_HIGH_VOL_SCALE", "0.75")
 )
+# Strict mode: quality-over-quantity (8–12 names, 30d momentum, sector balance)
+STRICT_MIN_UNIVERSE_SIZE = int(__import__("os").getenv("PAPER_UNIVERSE_STRICT_MIN", "8"))
+STRICT_MAX_UNIVERSE_SIZE = int(__import__("os").getenv("PAPER_UNIVERSE_STRICT_MAX", "12"))
+STRICT_MIN_AVG_DOLLAR_VOLUME = float(
+    __import__("os").getenv("PAPER_UNIVERSE_STRICT_MIN_DOLLAR_VOL", "100000000")
+)
+STRICT_MIN_SHARE_VOLUME = int(
+    __import__("os").getenv("PAPER_UNIVERSE_STRICT_MIN_SHARE_VOL", "500000")
+)
+STRICT_MOMENTUM_LOOKBACK = int(
+    __import__("os").getenv("PAPER_UNIVERSE_STRICT_MOMENTUM_DAYS", "30")
+)
+STRICT_MAX_PER_SECTOR = int(
+    __import__("os").getenv("PAPER_UNIVERSE_STRICT_MAX_PER_SECTOR", "2")
+)
+STRICT_MIN_MOMENTUM_RANK = float(
+    __import__("os").getenv("PAPER_UNIVERSE_STRICT_MIN_MOM_RANK", "0.65")
+)
+STRICT_MAX_IPO_SLOTS = int(__import__("os").getenv("PAPER_UNIVERSE_STRICT_MAX_IPO", "1"))
+MOMENTUM_LOOKBACK = int(__import__("os").getenv("PAPER_UNIVERSE_MOMENTUM_DAYS", "20"))
+
+# GICS-lite tags for sector balance (subset of liquid US names)
+EQUITY_SECTOR_MAP: dict[str, str] = {
+    "AAPL": "Tech",
+    "MSFT": "Tech",
+    "NVDA": "Tech",
+    "AMD": "Tech",
+    "GOOGL": "Tech",
+    "GOOG": "Tech",
+    "AMZN": "Tech",
+    "TSLA": "Tech",
+    "META": "Tech",
+    "NFLX": "Tech",
+    "INTC": "Tech",
+    "MU": "Tech",
+    "SMCI": "Tech",
+    "CRM": "Tech",
+    "SHOP": "Tech",
+    "SNOW": "Tech",
+    "OKTA": "Tech",
+    "HPE": "Tech",
+    "BB": "Tech",
+    "ARM": "Tech",
+    "PLTR": "Tech",
+    "COIN": "Tech",
+    "SPCX": "Tech",
+    "XOM": "Energy",
+    "CVX": "Energy",
+    "LNG": "Energy",
+    "COP": "Energy",
+    "RTX": "Defense",
+    "LMT": "Defense",
+    "KTOS": "Defense",
+    "NOC": "Defense",
+    "GD": "Defense",
+    "JPM": "Financials",
+    "BAC": "Financials",
+    "GS": "Financials",
+    "MS": "Financials",
+    "JNJ": "Healthcare",
+    "UNH": "Healthcare",
+    "PFE": "Healthcare",
+    "LLY": "Healthcare",
+    "WMT": "Consumer",
+    "COST": "Consumer",
+    "HD": "Consumer",
+    "DIS": "Consumer",
+}
 
 _meta_cache: dict[str, dict] | None = None
 _meta_cache_mtime: float | None = None
+
+
+def strict_mode_active() -> bool:
+    try:
+        return bool(config.effective_paper_dynamic_universe_strict())
+    except AttributeError:
+        return False
+
+
+def effective_max_universe_size() -> int:
+    return STRICT_MAX_UNIVERSE_SIZE if strict_mode_active() else MAX_UNIVERSE_SIZE
+
+
+def effective_min_dollar_volume() -> float:
+    return STRICT_MIN_AVG_DOLLAR_VOLUME if strict_mode_active() else MIN_AVG_DOLLAR_VOLUME
+
+
+def effective_min_share_volume() -> int:
+    return STRICT_MIN_SHARE_VOLUME if strict_mode_active() else MIN_SHARE_VOLUME
+
+
+def effective_momentum_lookback() -> int:
+    return STRICT_MOMENTUM_LOOKBACK if strict_mode_active() else MOMENTUM_LOOKBACK
+
+
+def effective_max_ipo_slots() -> int:
+    return STRICT_MAX_IPO_SLOTS if strict_mode_active() else MAX_IPO_SLOTS
+
+
+def sector_for_symbol(symbol: str) -> str:
+    return EQUITY_SECTOR_MAP.get(config.normalize_symbol(symbol), "Other")
+
+
+def apply_sector_balance(
+    scored: list[dict],
+    *,
+    max_size: int | None = None,
+    max_per_sector: int | None = None,
+) -> list[dict]:
+    """Pick top names with at most max_per_sector per sector tag."""
+    max_size = max_size if max_size is not None else effective_max_universe_size()
+    max_per_sector = (
+        max_per_sector if max_per_sector is not None else STRICT_MAX_PER_SECTOR
+    )
+    selected: list[dict] = []
+    sector_counts: dict[str, int] = {}
+    deferred: list[dict] = []
+    for row in scored:
+        sym = str(row.get("ticker", "")).upper()
+        sector = sector_for_symbol(sym)
+        if sector_counts.get(sector, 0) < max_per_sector:
+            selected.append(row)
+            sector_counts[sector] = sector_counts.get(sector, 0) + 1
+        else:
+            deferred.append(row)
+        if len(selected) >= max_size:
+            break
+    if len(selected) < max_size:
+        for row in deferred:
+            if len(selected) >= max_size:
+                break
+            selected.append(row)
+    return selected
+
+
+def screener_momentum_order(symbols: list[str]) -> list[str] | None:
+    """Order symbols by screener 30d momentum rank (strict mode helper)."""
+    if not strict_mode_active():
+        return None
+    meta = load_screener_ticker_meta()
+    ranked: list[tuple[float, float, str]] = []
+    for sym in symbols:
+        row = meta.get(config.normalize_symbol(sym), {})
+        mom_rank = row.get("momentum_30d_rank")
+        if mom_rank is None:
+            mom_rank = row.get("momentum_rank")
+        score = row.get("score")
+        mom = row.get("momentum_30d")
+        if mom is None:
+            mom = row.get("momentum")
+        if mom_rank is not None:
+            ranked.append((float(mom_rank), float(mom or 0), sym))
+        elif score is not None:
+            ranked.append((float(score), float(mom or 0), sym))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    return [sym for _, _, sym in ranked]
 
 
 def screener_universe_age_days() -> float | None:
@@ -173,36 +329,48 @@ def build_offline_screener_seed() -> dict:
         if t not in (config.SPY_BOT_SYMBOL, config.VTI_CORE_SYMBOL, "QQQ", "IWM")
     ]
     seeds: list[str] = []
+    max_seed = effective_max_universe_size()
     for sym in priority + from_universe:
         sym = sym.upper()
         if sym not in seeds:
             seeds.append(sym)
-        if len(seeds) >= MAX_UNIVERSE_SIZE:
+        if len(seeds) >= max_seed:
             break
+    if strict_mode_active() and len(seeds) > STRICT_MIN_UNIVERSE_SIZE:
+        rows_pre = [{"ticker": sym, "score": 1.0 - i * 0.01} for i, sym in enumerate(seeds)]
+        seeds = [r["ticker"] for r in apply_sector_balance(rows_pre, max_size=max_seed)]
     rows = [
         {
             "ticker": sym,
-            "score": 1.0,
+            "score": round(1.0 - i * 0.02, 4),
             "momentum": 0.0,
+            "momentum_30d": 0.0,
+            "momentum_rank": round(1.0 - i * 0.02, 4),
+            "momentum_30d_rank": round(1.0 - i * 0.02, 4),
             "atr_pct": 0.05,
             "trend": 0.0,
             "price": 0.0,
             "avg_volume": 0,
-            "avg_dollar_volume": int(MIN_AVG_DOLLAR_VOLUME),
+            "avg_dollar_volume": int(
+                STRICT_MIN_AVG_DOLLAR_VOLUME
+                if strict_mode_active()
+                else MIN_AVG_DOLLAR_VOLUME
+            ),
             "trading_days": 120,
             "is_ipo": False,
             "exchange": "NASDAQ" if sym in {"NVDA", "TSLA", "AMD", "AAPL", "SPCX"} else "NYSE",
+            "sector": sector_for_symbol(sym),
             "easy_to_borrow": True,
             "position_scale": 1.0,
         }
-        for sym in seeds
+        for i, sym in enumerate(seeds)
     ]
     payload = {
         "tickers": seeds,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "score_table": rows,
         "ipo_count": 0,
-        "filters": {"source": "offline_seed"},
+        "filters": {"source": "offline_seed", "strict_mode": strict_mode_active()},
     }
     path = Path(config.SCREENER_UNIVERSE_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)

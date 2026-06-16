@@ -735,14 +735,19 @@ def main(argv: list[str] | None = None) -> int:
 
     # Backtest-only shortcut
     if args.backtest and not args.event and not args.output:
-        if not _features_exist():
+        need_features = (
+            not _features_exist()
+            or args.refresh_data
+            or args.enrich_ufcstats
+        )
+        if need_features:
             fights = load_or_refresh_data(
                 refresh=args.refresh_data,
                 enrich_ufcstats=args.enrich_ufcstats,
             )
             features = build_or_load_features(
                 fights,
-                refresh=args.refresh_data,
+                refresh=args.refresh_data or args.enrich_ufcstats or not _features_exist(),
             )
         else:
             features = load_processed_features()

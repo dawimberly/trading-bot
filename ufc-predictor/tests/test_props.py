@@ -22,6 +22,17 @@ def enable_props(monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PROPS", True)
 
 
+def test_env_bool_parsing(monkeypatch):
+    monkeypatch.setenv("ENABLE_PROPS", "true")
+    assert config.env_bool("ENABLE_PROPS") is True
+    monkeypatch.setenv("ENABLE_PROPS", '"true"')
+    assert config.env_bool("ENABLE_PROPS") is True
+    monkeypatch.setenv("ENABLE_PROPS", "1")
+    assert config.env_bool("ENABLE_PROPS") is True
+    monkeypatch.setenv("ENABLE_PROPS", "false")
+    assert config.env_bool("ENABLE_PROPS") is False
+
+
 def test_method_flags_ko_sub_dec():
     assert method_flags("KO/TKO") == (1, 0, 0)
     assert method_flags("SUB Armbar") == (0, 1, 0)
@@ -103,7 +114,9 @@ def test_rank_prop_singles_includes_synthetic_when_no_live(monkeypatch):
             }
         ]
     )
-    ranked = rank_prop_singles(preds, book="BetNow.eu", prop_odds=pd.DataFrame())
+    ranked, meta = rank_prop_singles(preds, book="BetNow.eu", prop_odds=pd.DataFrame())
     assert ranked
+    assert meta["strict_count"] >= 1
     assert all(r["odds_source"] == "synthetic" for r in ranked)
     assert ranked[0]["prob"] >= config.PROP_MIN_MODEL_PROB
+    assert ranked[0].get("prop_type")

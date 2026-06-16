@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import config
 
-from fetch_data import fetch_and_store
+from modules.data_loader import clear_close_matrix_cache
 from modules.market_hours import is_equity_market_open
 from modules.safe_io import safe_print
 
@@ -35,6 +35,16 @@ class RefreshScheduler:
             return True
         return (now_ts - last_refresh).total_seconds() >= config.REFRESH_INTERVAL
 
+    @staticmethod
+    def _refresh_symbols(symbols: list[str]) -> None:
+        """Fetch yfinance data and invalidate in-memory price matrices."""
+        if not symbols:
+            return
+        from fetch_data import fetch_and_store
+
+        fetch_and_store(symbols)
+        clear_close_matrix_cache()
+
     def sync(self, trading_client, now_ts, *, equity_prep=False):
         """Run due refreshes. Returns whether the equity session is open."""
         market_open = is_equity_market_open(trading_client)
@@ -49,14 +59,14 @@ class RefreshScheduler:
         ):
             label = "Market open" if market_open else "Open prep"
             safe_print(f"--- {label}: refreshing {len(equity_symbols)} equity tickers ---")
-            fetch_and_store(equity_symbols)
+            self._refresh_symbols(equity_symbols)
             self.last_equity_refresh = now_ts
 
-        if self.refresh_crypto and self._due(self.last_crypto_refresh, now_ts):
+        if self.refresh_crypto and config.crypto_sleeve_enabled() and self._due(self.last_crypto_refresh, now_ts):
             crypto_symbols = config.crypto_universe()
             if crypto_symbols:
                 safe_print(f"--- Refreshing {len(crypto_symbols)} crypto tickers ---")
-                fetch_and_store(crypto_symbols)
+                self._refresh_symbols(crypto_symbols)
                 self.last_crypto_refresh = now_ts
 
         if (
@@ -66,7 +76,7 @@ class RefreshScheduler:
             and self._due(self.last_equity_refresh, now_ts)
         ):
             safe_print(f"--- Refreshing {len(equity_symbols)} equity tickers ---")
-            fetch_and_store(equity_symbols)
+            self._refresh_symbols(equity_symbols)
             self.last_equity_refresh = now_ts
 
         self._market_was_open = market_open

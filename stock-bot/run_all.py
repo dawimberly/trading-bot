@@ -13,7 +13,7 @@ import sys
 import time
 import traceback
 
-from modules.logging_utils import setup_logging, log_event
+from modules.logging_utils import setup_logging, log_event, log_subsystem_warning
 
 import config
 from modules.safe_io import install_safe_stdout, write_json_atomic
@@ -35,20 +35,7 @@ from modules.portfolio_manager import PortfolioManager
 from modules.holdings_reconcile import reconcile
 from modules.holdings_rebalance import rebalance_to_targets
 from modules.crypto_vol_gate import crypto_trading_allowed
-from modules.spacex_ipo_monitor import format_monitor_line, get_spacex_ipo_monitor
-from modules.spacex_ipo_listing_monitor import (
-    format_listing_line,
-    get_spacex_ipo_listing_status,
-)
-from modules.felix_sentiment import maybe_sync_felix_transcripts
-from modules.social_sleeve import (
-    get_social_alpaca_credentials,
-    run_social_sleeve_cycle,
-    social_paper_available,
-)
 from modules.vti_core import rebalance_vti_core, vti_core_value
-from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
-from modules.kraken_autopilot import format_autopilot_line, run_kraken_autopilot
 from modules.position_exits import run_position_exits
 from modules.risk_management import RiskManager
 from modules import trade_journal
@@ -71,7 +58,13 @@ logger = logging.getLogger(__name__)
 
 
 def _warn_nonfatal(context: str, exc: BaseException) -> None:
-    logger.warning("%s (non-fatal): %s", context, exc, exc_info=True)
+    log_subsystem_warning("run_all", context, exc)
+
+
+def _social_alpaca_credentials():
+    from modules.social_sleeve import get_social_alpaca_credentials
+
+    return get_social_alpaca_credentials()
 
 
 def _executor_cache_key() -> tuple:
@@ -79,7 +72,7 @@ def _executor_cache_key() -> tuple:
         config.paper_chase_mode_enabled()
         and os.getenv("PAPER_CHASE_USE_RESEARCH_KEYS", "").lower() in ("1", "true", "yes")
     ):
-        creds = get_social_alpaca_credentials()
+        creds = _social_alpaca_credentials()
         if creds:
             return ("research", creds[0][-8], True)
     return ("main", config.PAPER_TRADING)
@@ -96,7 +89,7 @@ def _make_executor() -> AlpacaExecutor:
     if _executor_singleton is not None and _executor_singleton_key == key:
         return _executor_singleton
     if key[0] == "research":
-        creds = get_social_alpaca_credentials()
+        creds = _social_alpaca_credentials()
         _executor_singleton = AlpacaExecutor(paper=True, credentials_fn=lambda: creds)
     else:
         _executor_singleton = AlpacaExecutor()
@@ -260,6 +253,17 @@ def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
 _last_equity = 0.0
 
 
+def _record_cycle_error(error: str) -> None:
+    """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
+    from modules.safe_io import read_json_file, write_json_atomic
+
+    path = config.HEARTBEAT_FILE
+    payload = read_json_file(path) or {}
+    payload["last_cycle_error"] = str(error)[:500]
+    payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
+    write_json_atomic(path, payload)
+
+
 def _write_heartbeat(
     regime,
     equity,
@@ -315,6 +319,8 @@ def _write_heartbeat(
         "equity_session_open": market_open,
         "halted": halted,
         "paper": config.PAPER_TRADING,
+        "last_cycle_error": None,
+        "last_cycle_error_at": None,
     }
     if dynamic_vol_score is not None:
         payload["dynamic_vol_score"] = round(float(dynamic_vol_score), 6)
@@ -502,7 +508,11 @@ def main():
         trade_journal.log_event("skip", equity=equity, notes="empty or short data")
         return
 
-    felix_sync = maybe_sync_felix_transcripts()
+    felix_sync = None
+    if config.FELIX_SYNC_ENABLED:
+        from modules.felix_sentiment import maybe_sync_felix_transcripts
+
+        felix_sync = maybe_sync_felix_transcripts()
     if felix_sync:
         if felix_sync.get("ok"):
             print(
@@ -658,11 +668,17 @@ def main():
     )
 
     spacex_snapshot = None
-    if not schedule.get("crypto_only") or config.SPACEX_IPO_CRYPTO_OVERRIDE:
+    if config.SPACEX_IPO_MONITOR_ENABLED and (
+        not schedule.get("crypto_only") or config.SPACEX_IPO_CRYPTO_OVERRIDE
+    ):
+        from modules.spacex_ipo_monitor import get_spacex_ipo_monitor
+
         spacex_snapshot = get_spacex_ipo_monitor()
     spacex_heartbeat = None
     crypto_gate = crypto_trading_allowed(vol, regime, spacex_snapshot=spacex_snapshot)
     if spacex_snapshot:
+        from modules.spacex_ipo_monitor import format_monitor_line
+
         print(f"--- {format_monitor_line(spacex_snapshot)} ---")
         s = spacex_snapshot.get("summary", {})
         spacex_heartbeat = {
@@ -696,6 +712,11 @@ def main():
             maybe_apply_thinking_caps,
             maybe_run_thinking,
         )
+        from modules.thinking_news import maybe_run_scheduled_news_thinking
+
+        news_slot = maybe_run_scheduled_news_thinking(data, regime, vol, wisdom)
+        if news_slot:
+            print(f"--- Thinking news scheduled run started ({news_slot}) ---")
 
         thinking_result = maybe_run_thinking(
             data,
@@ -743,11 +764,15 @@ def main():
             print(f"--- {pod_log} ---")
 
     listing_snapshot = None
-    if not schedule.get("crypto_only"):
+    if config.SPACEX_IPO_LISTING_MONITOR_ENABLED and not schedule.get("crypto_only"):
+        from modules.spacex_ipo_listing_monitor import get_spacex_ipo_listing_status
+
         listing_snapshot = get_spacex_ipo_listing_status(executor=executor)
     spacex_listing_heartbeat = None
     ipo_buy_result = None
     if listing_snapshot:
+        from modules.spacex_ipo_listing_monitor import format_listing_line
+
         print(f"--- {format_listing_line(listing_snapshot)} ---")
         if listing_snapshot.get("ready_to_buy_alpaca"):
             print(f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON ALPACA — IPO listing live !!!")
@@ -772,6 +797,8 @@ def main():
         except Exception as exc:
             _warn_nonfatal("SpaceX listing alert error", exc)
         if listing_snapshot.get("ready_to_buy_kraken"):
+            from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
+
             kraken_buy = maybe_buy_kraken_spcx(listing_snapshot)
             if kraken_buy:
                 if kraken_buy.get("ok"):
@@ -835,6 +862,8 @@ def main():
 
     social_result = None
     if config.effective_social_sleeve_enabled() and market_open:
+        from modules.social_sleeve import run_social_sleeve_cycle
+
         social_result = run_social_sleeve_cycle(wisdom, executor, market_open=market_open)
         if social_result.get("enabled"):
             tgt = social_result.get("target") or "cash"
@@ -975,6 +1004,8 @@ def main():
     kraken_autopilot_result = None
     if config.KRAKEN_AUTOPILOT_ENABLED:
         try:
+            from modules.kraken_autopilot import format_autopilot_line, run_kraken_autopilot
+
             kraken_autopilot_result = run_kraken_autopilot(
                 wisdom=wisdom,
                 gp_signals=gp_signals,
@@ -1013,7 +1044,7 @@ def main():
                 dry = " (dry-run)" if item.get("dry_run") else ""
                 print(f"--- Kraken rebalance: {tr.get('side')} {sym}{dry} ---")
         except Exception as exc:
-            log_event("kraken_autopilot_error", error=str(exc))
+            log_subsystem_warning("kraken_autopilot", "Autopilot cycle failed", exc)
             print(f"--- Kraken autopilot error (non-fatal): {exc} ---")
 
     sleeves = executor.sleeve_snapshot()
@@ -1271,6 +1302,8 @@ def _print_startup_banner():
             "narrative hot (despite Low 5m vol) ---"
         )
     if config.SOCIAL_SLEEVE_ENABLED:
+        from modules.social_sleeve import social_paper_available
+
         paper_note = "yes" if social_paper_available() else "need PAPER_APCA_* or SOCIAL_APCA_*"
         print(
             f"--- Social sleeve: {config.SOCIAL_SLEEVE_CAP_PCT:.0%} on paper ({paper_note}) | "
@@ -1326,10 +1359,22 @@ def _confirm_live_trading_startup(equity: float) -> None:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="24/7 integrated fund trading loop")
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=0,
+        help="Exit after N main-loop cycles (0 = run forever)",
+    )
+    cli_args = parser.parse_args()
+
     install_safe_stdout()
     from pathlib import Path
 
     setup_logging(log_dir=Path("logs"))
+    config.ensure_sentiment_dirs()
     try:
         config.validate_alpaca_config()
     except ValueError as exc:
@@ -1349,12 +1394,17 @@ if __name__ == "__main__":
     if startup_equity is not None:
         _confirm_live_trading_startup(startup_equity)
     trade_journal.log_event("startup", notes="run_all.py started")
+    cycle_count = 0
     while True:
         try:
             main()
         except AlpacaAuthError as e:
             log_event("alpaca_auth_failure", error=str(e))
-            logger.critical("Alpaca authentication failed: %s", e)
+            logger.critical(
+                "Alpaca authentication failed: %s — verify APCA_API_KEY_ID / "
+                "APCA_API_SECRET_KEY in .env (paper keys when PAPER_TRADING=true)",
+                e,
+            )
             trade_journal.log_event("error", notes=f"Alpaca auth failure: {e}")
             sys.exit(1)
         except AlpacaCriticalError as e:
@@ -1364,10 +1414,15 @@ if __name__ == "__main__":
             sys.exit(1)
         except Exception as e:
             tb = traceback.format_exc()
+            _record_cycle_error(str(e))
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
             logger.exception("Cycle error: %s", e)
             notes = str(e)
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
+        cycle_count += 1
+        if cli_args.cycles and cycle_count >= cli_args.cycles:
+            logger.info("Completed %s cycle(s); exiting (--cycles)", cli_args.cycles)
+            break
         time.sleep(cycle_sleep_seconds(_last_cycle_schedule))

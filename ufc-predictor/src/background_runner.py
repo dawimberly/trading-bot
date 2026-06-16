@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
+import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 FULL_STALE_HOURS = 24
 ODDS_STALE_MINUTES = 45
 MANIFEST_VERSION = 1
+LOCK_MAX_AGE_SEC = 3600
 
 # Set by main() after bootstrap
 BACKGROUND_DIR: Path | None = None
@@ -96,6 +99,40 @@ def _ensure_paths() -> tuple[Path, Path]:
 
 def _paths() -> tuple[Path, Path]:
     return _ensure_paths()
+
+
+def _lock_path() -> Path:
+    import config
+
+    return config.CACHE_DIR / "background_runner.lock"
+
+
+def _acquire_run_lock() -> bool:
+    """Prevent overlapping scheduled runs (stale lock expires after 1 hour)."""
+    lock = _lock_path()
+    try:
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        if lock.is_file():
+            age = time.time() - lock.stat().st_mtime
+            if age < LOCK_MAX_AGE_SEC:
+                logger.warning(
+                    "Another background run appears active (lock age %.0fs) — skipping",
+                    age,
+                )
+                return False
+            lock.unlink(missing_ok=True)
+        lock.write_text(f"pid={os.getpid()} started={_iso_now()}\n", encoding="utf-8")
+        return True
+    except OSError as exc:
+        logger.warning("Could not acquire run lock (%s) — continuing anyway", exc)
+        return True
+
+
+def _release_run_lock() -> None:
+    try:
+        _lock_path().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def read_manifest() -> dict[str, Any]:
@@ -177,7 +214,7 @@ def save_background_snapshot(
         "generated_at": data.get("generated_at", _utc_now()),
         "odds_updated_at": data.get("odds_updated_at", data.get("generated_at", _utc_now())),
         "event_label": data.get("event_label", ""),
-        "profile": data.get("profile", "research"),
+        "profile": data.get("profile", "paper"),
         "from_cache": bool(data.get("from_cache", False)),
         "errors": list(data.get("errors") or []),
         "card_events": card_events,
@@ -239,10 +276,31 @@ def load_background_snapshot(*, max_age_hours: float | None = FULL_STALE_HOURS) 
         meta = read_json_file(meta_path)
         books[book_name] = {**meta, "predictions": preds}
 
+    if "Overview" not in books and not combined.empty:
+        books["Overview"] = {
+            "predictions": combined.copy(),
+            "alerts": {},
+            "odds_matched": int(combined.get("odds_matched", pd.Series(False)).sum())
+            if "odds_matched" in combined.columns
+            else 0,
+            "odds_total": len(combined),
+        }
+
+    import config
+
+    overview_preds = books.get("Overview", {}).get("predictions")
+    overview_n = len(overview_preds) if isinstance(overview_preds, pd.DataFrame) else 0
+    logger.info(
+        "Background snapshot loaded: %d combined fights, %d card(s), Overview=%d",
+        len(combined),
+        len(cards),
+        overview_n,
+    )
+
     return {
         "generated_at": manifest.get("generated_at", ""),
         "event_label": manifest.get("event_label", ""),
-        "profile": manifest.get("profile", "research"),
+        "profile": config.normalize_profile(manifest.get("profile", "paper")),
         "cards": cards,
         "combined": combined,
         "books": books,
@@ -267,7 +325,7 @@ def _resolve_mode(mode: str, trigger: str) -> str:
     return "skip"
 
 
-def run_full_job(*, trigger: str, profile: str = "research") -> int:
+def run_full_job(*, trigger: str, profile: str = "paper") -> int:
     from main import _model_exists
     from src.dashboard_service import run_full_analysis
     from src.heartbeat import write_heartbeat
@@ -371,7 +429,7 @@ def run_lightweight_job(*, trigger: str) -> int:
         return 1
 
 
-def run_background(*, mode: str = "auto", trigger: str = "manual", profile: str = "research") -> int:
+def run_background(*, mode: str = "auto", trigger: str = "manual", profile: str = "paper") -> int:
     resolved = _resolve_mode(mode, trigger)
     if resolved == "skip":
         manifest = read_manifest()
@@ -407,6 +465,7 @@ def _bootstrap() -> Path:
     root = bootstrap(entry_file=entry)
     import config
 
+    config.refresh_runtime_env()
     BACKGROUND_DIR = config.CACHE_DIR / "background"
     MANIFEST_PATH = BACKGROUND_DIR / "manifest.json"
     BACKGROUND_DIR.mkdir(parents=True, exist_ok=True)
@@ -434,22 +493,30 @@ def main(argv: list[str] | None = None) -> int:
         default="manual",
         help="What invoked this run (for logging)",
     )
-    parser.add_argument("--profile", default="research", choices=("research", "live"))
+    parser.add_argument("--profile", default="paper", choices=("paper", "live", "research"))
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
     args = parser.parse_args(argv)
 
     setup_logging(verbose=args.verbose, log_dir=config.LOG_DIR, log_name="background_runner.log")
     logger.info("Background runner start — root=%s mode=%s trigger=%s", root, args.mode, args.trigger)
 
-    config.UFC_PROFILE = args.profile
+    config.UFC_PROFILE = config.normalize_profile(args.profile)
     config.apply_profile_overrides()
 
+    if not _acquire_run_lock():
+        return 0
+
     try:
+        from main import _model_exists
+
+        logger.info("model_exists=%s", _model_exists())
         return run_background(mode=args.mode, trigger=args.trigger, profile=args.profile)
     except Exception as exc:
         logger.error("Unhandled background runner error: %s", exc)
         logger.debug(traceback.format_exc())
         return 1
+    finally:
+        _release_run_lock()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 import logging
 import time
+from datetime import datetime
 from typing import Callable, TypeVar
 
 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -38,6 +39,8 @@ class AlpacaExecutor:
         self._cofire_notionals = {}
         self._account = self._api("get_account", self.client.get_account)
         self._positions = list(self._api("get_all_positions", self.client.get_all_positions))
+        self._order_notify_ctx: dict[str, dict] = {}
+        self._notified_order_ids: set[str] = set()
         logger.info(
             "AlpacaExecutor initialized",
             extra={"paper": self.paper, "base_url": config.get_alpaca_base_url(paper=self.paper)},
@@ -177,6 +180,82 @@ class AlpacaExecutor:
     def _order_status(order) -> str:
         return str(getattr(order, "status", "")).lower()
 
+    @staticmethod
+    def _order_side_label(order, fallback: str = "") -> str:
+        side = getattr(order, "side", None)
+        if side is not None:
+            raw = str(side).replace("OrderSide.", "").replace("orderside.", "")
+            if raw:
+                return raw.capitalize()
+        return fallback.capitalize() if fallback else "?"
+
+    def _account_type_label(self) -> str:
+        return "Paper" if self.paper else "Live"
+
+    def _infer_sleeve(self, symbol: str) -> str:
+        norm = config.normalize_symbol(symbol)
+        if config.is_crypto(symbol):
+            return "Crypto"
+        if norm == config.SPY_BOT_SYMBOL:
+            return "SPY"
+        if config.is_metal_symbol(symbol):
+            return "Metal"
+        if norm == config.VTI_CORE_SYMBOL:
+            return "VTI"
+        return "NYSE"
+
+    def _track_order(
+        self,
+        order,
+        *,
+        symbol: str,
+        side: str,
+        reason: str = "",
+        sleeve: str | None = None,
+    ) -> None:
+        oid = str(getattr(order, "id", "") or "")
+        if not oid:
+            return
+        self._order_notify_ctx[oid] = {
+            "symbol": config.normalize_symbol(symbol),
+            "side": side.capitalize() if side else self._order_side_label(order),
+            "reason": reason,
+            "sleeve": sleeve or self._infer_sleeve(symbol),
+        }
+
+    def _emit_fill_notification(self, order, details: dict) -> None:
+        if not details or not details.get("filled"):
+            return
+        oid = str(getattr(order, "id", "") or "")
+        if not oid or oid in self._notified_order_ids:
+            return
+
+        ctx = self._order_notify_ctx.pop(oid, {})
+        symbol = ctx.get("symbol") or config.normalize_symbol(getattr(order, "symbol", ""))
+        side = ctx.get("side") or self._order_side_label(order)
+        qty = float(details.get("qty") or self._order_filled_qty(order) or 0)
+        avg = float(getattr(order, "filled_avg_price", None) or 0)
+        notional = details.get("notional")
+        if (not notional or notional <= 0) and qty > 0 and avg > 0:
+            notional = round(qty * avg, 2)
+
+        from modules.trade_notifier import send_trade_notification
+
+        send_trade_notification(
+            {
+                "symbol": symbol,
+                "side": side,
+                "quantity": qty if qty > 0 else None,
+                "price": avg if avg > 0 else None,
+                "notional": notional if notional and notional > 0 else None,
+                "sleeve": ctx.get("sleeve") or self._infer_sleeve(symbol),
+                "reason": ctx.get("reason", ""),
+                "account_type": self._account_type_label(),
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        )
+        self._notified_order_ids.add(oid)
+
     def order_filled(self, order, max_wait=5.0, *, require_complete: bool = True):
         """True when Alpaca confirms fill (poll market orders; optional partial OK)."""
         details = self.order_fill_details(
@@ -220,6 +299,7 @@ class AlpacaExecutor:
 
         first = _details(order)
         if first and first["filled"]:
+            self._emit_fill_notification(order, first)
             return first
         if max_wait <= 0:
             return first
@@ -235,14 +315,18 @@ class AlpacaExecutor:
                 return latest
             latest = _details(order)
             if latest and latest["filled"]:
+                self._emit_fill_notification(order, latest)
                 return latest
             status = self._order_status(order)
             if any(x in status for x in ("cancel", "reject", "expire", "fail")):
                 return latest
         try:
-            return _details(
+            final = _details(
                 self._api("get_order_by_id", self.client.get_order_by_id, oid)
             ) or latest
+            if final and final.get("filled"):
+                self._emit_fill_notification(order, final)
+            return final
         except Exception:
             return latest
 
@@ -467,7 +551,7 @@ class AlpacaExecutor:
                 return pos
         return None
 
-    def execute_reduce_notional(self, symbol, reduce_notional):
+    def execute_reduce_notional(self, symbol, reduce_notional, *, reason="reduce", sleeve=None):
         """Reduce long (sell) or short (buy cover) up to reduce_notional."""
         if not self._equity_trading_allowed(symbol):
             return None
@@ -533,13 +617,21 @@ class AlpacaExecutor:
                 )
         submitted = self._api("submit_order", self.client.submit_order, order_data=order)
         self._invalidate_cache()
+        side_label = "Sell" if qty > 0 else "Buy"
+        self._track_order(
+            submitted,
+            symbol=symbol,
+            side=side_label,
+            reason=reason,
+            sleeve=sleeve,
+        )
         logger.info(
             "execute_reduce_notional submitted",
             extra={"symbol": symbol, "order_id": getattr(submitted, "id", None)},
         )
         return submitted
 
-    def execute_full_exit(self, symbol):
+    def execute_full_exit(self, symbol, *, reason="exit", sleeve=None):
         if not self._equity_trading_allowed(symbol):
             return None
         pos = self._find_position(symbol)
@@ -584,13 +676,30 @@ class AlpacaExecutor:
                 )
         submitted = self._api("submit_order", self.client.submit_order, order_data=order)
         self._invalidate_cache()
+        side_label = "Sell" if qty > 0 else "Buy"
+        self._track_order(
+            submitted,
+            symbol=symbol,
+            side=side_label,
+            reason=reason,
+            sleeve=sleeve,
+        )
         logger.info(
             "execute_full_exit submitted",
             extra={"symbol": symbol, "order_id": getattr(submitted, "id", None)},
         )
         return submitted
 
-    def execute_order(self, symbol, side, notional=None, reduce_only=False):
+    def execute_order(
+        self,
+        symbol,
+        side,
+        notional=None,
+        reduce_only=False,
+        *,
+        reason="",
+        sleeve=None,
+    ):
         if not self._equity_trading_allowed(symbol):
             return None
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
@@ -628,6 +737,13 @@ class AlpacaExecutor:
         submitted = self._api("submit_order", self.client.submit_order, order_data=order)
         self._invalidate_cache()
         order_id = getattr(submitted, "id", None)
+        self._track_order(
+            submitted,
+            symbol=symbol,
+            side=side,
+            reason=reason,
+            sleeve=sleeve,
+        )
         logger.info(
             "order submitted",
             extra={

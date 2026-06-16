@@ -49,18 +49,8 @@ JOURNAL_FIELDS = [
     "notes",
 ]
 
-_monthly_web_cache: pd.Series | None = None
-
-
 def _path() -> str:
     return getattr(config, "WISDOM_JOURNAL_FILE", "wisdom_journal.csv")
-
-
-def _monthly_web() -> pd.Series:
-    global _monthly_web_cache
-    if _monthly_web_cache is None:
-        _monthly_web_cache = load_monthly_web_sentiment()
-    return _monthly_web_cache
 
 
 def _ensure_header() -> None:
@@ -115,7 +105,7 @@ def log_cycle(
 ) -> None:
     _ensure_header()
     gap_threshold = config.WISDOM_GAP_THRESHOLD
-    monthly_web = _monthly_web()
+    monthly_web = load_monthly_web_sentiment()
     shadows = _shadow_pauses(data, ts, monthly_web, gap_threshold)
 
     summary = (spacex_ipo or {}).get("summary") or {}

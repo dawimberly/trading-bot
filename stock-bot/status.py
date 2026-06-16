@@ -58,6 +58,22 @@ def _heartbeat_ts(hb: dict | None) -> str:
     return str(hb["timestamp"])[:19]
 
 
+def _heartbeat_age_minutes(hb: dict | None) -> float | None:
+    if not hb or not hb.get("timestamp"):
+        return None
+    try:
+        ts = datetime.fromisoformat(str(hb["timestamp"]).replace("Z", "+00:00"))
+        age = (datetime.now(ts.tzinfo) - ts).total_seconds() / 60.0
+        return max(0.0, age)
+    except (TypeError, ValueError):
+        return None
+
+
+def _heartbeat_scan_phase(hb: dict | None) -> str:
+    scan = (hb or {}).get("scan_schedule") or {}
+    return str(scan.get("phase") or scan.get("label") or "").strip()
+
+
 def _alpaca_equity(*, paper: bool, credentials_fn=None) -> tuple[float | None, str | None]:
     from modules.alpaca_diagnostics import fetch_alpaca_equity
 
@@ -229,6 +245,54 @@ def _thinking_effective_label() -> str:
     return "OFF (start paper bot with PAPER_CHASE_MODE)"
 
 
+def _thinking_engine_monitor_lines(live_equity: float | None = None) -> list[str]:
+    """Latest Thinking Engine decision + live apply preview."""
+    try:
+        from modules.thinking_engine import evaluate_live_apply_status
+
+        mon = evaluate_live_apply_status(equity=live_equity)
+    except Exception as exc:
+        return [f"Thinking Engine Monitor: unavailable ({exc})"]
+
+    lines = ["=== Thinking Engine Monitor ==="]
+    ts = mon.get("timestamp")
+    regime = mon.get("regime") or "n/a"
+    if ts:
+        lines.append(f"Last decision: {str(ts)[:19]} | regime {regime}")
+    else:
+        lines.append("Last decision: none (run paper bot or scripts/test_thinking_engine.py)")
+        lines.append("Would apply on live: No — no decision on file")
+        return lines
+
+    narrative = str(mon.get("narrative") or "n/a")
+    asymmetry = str(mon.get("asymmetry") or "n/a")
+    lines.append(f"Narrative:          {narrative[:140]}")
+    lines.append(f"Asymmetry:          {asymmetry[:140]}")
+    lines.append(f"Recommended tilt:   {mon.get('recommended_tilt', 'n/a')}")
+    lines.append(
+        f"Confidence:         {mon.get('confidence_pct', 'n/a')} | "
+        f"Validation: {mon.get('validation_label', 'n/a')}"
+    )
+    lines.append(f"Approval status:    {mon.get('approval_status', 'n/a')}")
+    news_slot = mon.get("news_slot")
+    if news_slot:
+        lines.append(f"News slot:          {news_slot}")
+        impact = mon.get("news_impact_score")
+        if impact is not None:
+            lines.append(f"News impact:        {float(impact):.2f}")
+        ns = str(mon.get("news_summary") or "")[:140]
+        if ns:
+            lines.append(f"News digest:        {ns}")
+    apply_label = mon.get("would_apply_label", "No")
+    reason = str(mon.get("block_reason") or "").strip()
+    if apply_label == "Yes":
+        lines.append(f"Would apply on live: Yes — {reason}")
+    else:
+        lines.append(f"Would apply on live: No — {reason}")
+    lines.append("Audit: thinking_engine_last.json | logs/thinking_engine.log")
+    return lines
+
+
 def _thinking_status_lines() -> list[str]:
     try:
         from modules.thinking_engine import get_thinking_status_snapshot
@@ -266,6 +330,12 @@ def _thinking_status_lines() -> list[str]:
                     f"  Live tilt: PENDING approval (decision {did}) - "
                     "run scripts/approve_thinking_tilt.py --show"
                 )
+        cached = _load_json(ROOT / config.THINKING_ENGINE_OUTPUT_FILE)
+        if cached and cached.get("news_slot"):
+            lines.append(f"  Last news slot: {cached.get('news_slot')}")
+            ns = str(cached.get("news_summary") or "")[:120]
+            if ns:
+                lines.append(f"  News digest: {ns}")
     else:
         lines.append("Last run: none (thinking_engine_last.json not found)")
 
@@ -324,6 +394,10 @@ def main() -> None:
     live_regime = _heartbeat_regime(live_hb) or "n/a"
     paper_regime = _heartbeat_regime(paper_hb) or "n/a"
     regime = live_regime if live_regime != "n/a" else paper_regime
+    live_hb_age = _heartbeat_age_minutes(live_hb)
+    paper_hb_age = _heartbeat_age_minutes(paper_hb)
+    live_phase = _heartbeat_scan_phase(live_hb)
+    paper_phase = _heartbeat_scan_phase(paper_hb)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mode = "LIVE + PAPER" if _is_live_book_active() else "PAPER ONLY (.env)"
@@ -331,9 +405,14 @@ def main() -> None:
     _emit("=" * 72)
     live_dl = _daily_loss_status(paper=False)
     safety_tag = "CIRCUIT TRIPPED" if live_dl.get("tripped") else "OK"
+    quick_extra = ""
+    if live_phase and live_hb and not (live_hb.get("scan_schedule") or {}).get("market_open"):
+        quick_extra = f" | Live scan {live_phase}"
+    elif paper_phase and paper_hb and not (paper_hb.get("scan_schedule") or {}).get("market_open"):
+        quick_extra = f" | Paper scan {paper_phase}"
     _emit(
         f"QUICK: Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
-        f"Regime {regime} | Daily breaker {safety_tag}"
+        f"Regime {regime} | Daily breaker {safety_tag}{quick_extra}"
     )
     _emit("=" * 72)
 
@@ -348,6 +427,13 @@ def main() -> None:
     _emit(f"      {_live_profile_line()}")
     _emit(f"      flags: {_live_flags()}")
     _emit(f"      heartbeat: {_heartbeat_ts(live_hb)}")
+    if live_hb_age is not None:
+        stale = " STALE" if live_hb_age > 90 else ""
+        _emit(f"      heartbeat age: {live_hb_age:.0f} min{stale}")
+    if live_phase:
+        _emit(f"      scan phase: {live_phase}")
+    if live_hb and live_hb.get("last_cycle_error"):
+        _emit(f"      last cycle error: {str(live_hb['last_cycle_error'])[:120]}")
     _emit()
 
     paper_on, paper_off = config.format_best_paper_status_lines()
@@ -358,9 +444,20 @@ def main() -> None:
     _emit(f"      OFF (locked): {paper_off}")
     _emit(f"      universe: {_universe_line()}")
     _emit(f"      heartbeat: {_heartbeat_ts(paper_hb)}")
+    if paper_hb_age is not None:
+        stale = " STALE" if paper_hb_age > 90 else ""
+        _emit(f"      heartbeat age: {paper_hb_age:.0f} min{stale}")
+    if paper_phase:
+        _emit(f"      scan phase: {paper_phase}")
+    if paper_hb and paper_hb.get("last_cycle_error"):
+        _emit(f"      last cycle error: {str(paper_hb['last_cycle_error'])[:120]}")
     _emit()
 
-    _emit("THINKING")
+    for line in _thinking_engine_monitor_lines(live_eq):
+        _emit(line)
+    _emit()
+
+    _emit("THINKING (engine env)")
     for line in _thinking_status_lines():
         _emit(f"  {line}")
     _emit()

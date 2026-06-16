@@ -20,6 +20,90 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
+**Architecture reference:** [`PROJECT_MANIFEST.md`](PROJECT_MANIFEST.md) · compact LLM manifest: [`data/bot_manifest.txt`](data/bot_manifest.txt) (regenerate with `python scripts/mcp/export_bot_manifest.py`).
+
+---
+
+## System overview
+
+One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → VTI core rebalance → sleeve strategies → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`, `launch.bat`) and **`status.py`** read heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
+
+| Component | Role |
+|-----------|------|
+| **`run_all.py`** | Main orchestrator — Profile A live default, Profile B when `PAPER_CHASE_MODE=1` |
+| **`run_paper_bot.py`** | Isolated paper Sharpe chase (Best Paper v2.1) on separate keys/book |
+| **`dashboard_app.py`** | CustomTkinter monitor — equity, positions, trades, wisdom; 60s auto-refresh |
+| **`status.py`** | CLI snapshot — live + paper equity, regime, stack flags, heartbeat age |
+| **`modules/thinking_engine.py`** | Opt-in Ollama PM tilts (paper only by default; live requires manual approval) |
+| **`backtester.py`** | Daily-bar mirror of the live stack for validation |
+
+**Two profiles (do not mix on the same book without intent):**
+
+- **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
+- **Profile B — paper v2.1** (`paper_aggressive`): dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking engine opt-in.
+
+---
+
+## Memory & performance (Phase 3.2)
+
+Long-running bots and the dashboard were tuned to avoid loading full journals/logs/backtest matrices into RAM:
+
+| Improvement | Where | What it does |
+|-------------|-------|--------------|
+| **Journal tail reads** | `dashboard_app._read_csv_tail()` | Reads last N CSV rows via `deque` — Trades/Wisdom tabs never load full `paper_journal.csv` |
+| **Log tail seek** | `modules/portal_bot.read_bot_log_tail()` | Seeks from end of `bot.log` (~8 KB window) instead of reading the whole file |
+| **Backtest cache trim** | `modules/backtester_core.py` | In-process matrix cache capped (`BACKTEST_MEM_CACHE_MAX`, default 2); disk cache under `data/cache/backtest/` kept |
+| **Backtest memory release** | `release_backtest_memory()` | Clears in-process caches + `gc.collect()` between compare arms in `backtester.py --compare-final` |
+| **Dashboard refresh debounce** | `dashboard_app.refresh_data()` | Coalesces overlapping refresh requests (`_refresh_busy` / `_refresh_pending`) so rapid tab clicks don't stack Alpaca calls |
+| **Optional memory indicator** | Dashboard status bar | Shows process RSS (e.g. `142 MB`) when `psutil` is installed — omit from `requirements.txt` if not needed |
+
+No trading logic, risk rules, or order sizing changed — I/O and cache bounds only.
+
+---
+
+## Live vs paper — when to use each
+
+| Goal | Profile | How to run | Key env |
+|------|---------|------------|---------|
+| **Real money ~$100–$300** | Profile A | `launch.bat` or `python run_all.py` after preflight | `PAPER_TRADING=false`, `ALLOW_LIVE_TRADING=yes` |
+| **Paper evaluation / first month** | Profile A on paper keys | Same loop with paper keys | `PAPER_TRADING=true` (default) |
+| **Sharpe research ~$98k book** | Profile B | `python run_paper_bot.py` or portal paper user | `PAPER_CHASE_MODE=1`, `PAPER_APCA_*` |
+| **Both in parallel** | A + B | `launch_both.bat` / `launch_bots.py` | `data/portal/fund_pair.json` |
+
+**Monitoring:** `python status.py` prints live + paper equity, regime, stack ON/OFF lines, heartbeat timestamps, and **STALE** when heartbeat age &gt; 90 min. Dashboard status bar shows the same heartbeat age and optional RSS. Paper chase heartbeat: `paper_chase_heartbeat.json`; live: `bot_heartbeat.json`.
+
+**Before first live cycle:** always run `python scripts/account/preflight.py` (checks keys, alerts, data freshness, small-account sizing). See [Before going live](#before-going-live-real-money).
+
+---
+
+## Long-running stability
+
+Recommended setup for a Windows PC left running 24/7:
+
+1. **Start via launcher** — `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) so the dashboard supervises one `run_all.py` process. Use **Stop Bot** before restarting to avoid duplicates.
+2. **Task Scheduler (optional)** — schedule `scripts/background_runner.py --mode auto --trigger startup` at logon and `--trigger midnight` daily. Lightweight mode runs `status.py`, checks heartbeats (stale &gt; 30 min), daily loss circuit, and can auto-start `run_paper_bot.py` when paper-only.
+3. **Logging rotation** — `modules/logging_utils.setup_project_logging()` attaches midnight-rotating handlers to `logs/run_all.log` and `logs/events.log` (7 days retained). No manual log cleanup needed for normal operation.
+4. **Heartbeat monitoring** — each cycle writes `bot_heartbeat.json` (live) or `paper_chase_heartbeat.json` (paper chase). If timestamp is stale: restart bot via dashboard **Stop Bot** → relaunch, or `python launch_bots.py --stop` then start again.
+5. **Preflight before live** — `python scripts/account/preflight.py` with live keys; confirms `ALLOW_LIVE_TRADING=yes`, equity, alerts, and recent `market_data.db`.
+6. **Data refresh** — `fetch_data.py` on schedule or when preflight flags stale DB; background runner can trigger refresh when DB age &gt; 24 h.
+
+Dual-bot owners: see [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase) for isolated heartbeat/journal paths per book.
+
+---
+
+## Remaining cleanups (non-blocking)
+
+These are informational warnings or optional paths — **no action required** for Alpaca live Profile A:
+
+| Item | Symptom | Notes |
+|------|---------|-------|
+| **Stat-arb orphan warnings** | `Stat-arb orphans (not in book)` in logs at startup | Paper Profile B only; reconcile removes stale book entries — orphans are pairs in Alpaca not tracked in stat-arb ledger |
+| **Kraken xStocks API off** | Startup banner: SPY/NYSE will not auto-trade on Kraken | Alpaca-only live is fine; set `KRAKEN_AUTOPILOT_ENABLED=false` to silence Kraken paths |
+| **Kraken autopilot vs Alpaca** | Preflight warns when both live | Recommended: Alpaca-only for ~$100 live; Kraken is separate `scripts/exchange/` stack |
+| **Thinking engine calibration** | Heuristic fallback common on first cycles | Keep off on live; use `--simulate-live-thinking` before enabling |
+| **Universe screener age** | `status.py` universe line &gt; 7 days | Run `python scripts/analysis/universe_screener.py` on paper book |
+| **Legacy Streamlit dashboard** | `dashboard.py` still works | CustomTkinter `dashboard_app.py` is primary; Streamlit is backup |
+
 ---
 
 ## Two deployment profiles
@@ -241,21 +325,26 @@ flowchart TB
   runAll --> gamePlan[modules/game_plan.py]
   runAll --> macroSig[modules/macro_signals.py]
   runAll --> marketCtx[modules/market_context.py]
+  runAll --> thinking[modules/thinking_engine.py]
   runAll --> executor[modules/alpaca_executor.py]
   runAll --> risk[modules/risk_management.py]
   runAll --> alerts[modules/alerts.py]
-  runAll --> journal[paper_journal.csv]
+  runAll --> hb[bot_heartbeat.json]
   gamePlan --> macroSig
+  thinking -.->|paper opt-in| runAll
+  dashboard[dashboard_app.py] --> hb
+  dashboard --> alpaca[Alpaca API]
+  status[status.py] --> hb
   backtester[backtester.py] --> strategies
   backtestMetals[backtester_metals.py] --> strategies
   backtestSpy[backtest_spy.py] --> strategies
   backtester --> db
   backtestMetals --> db
   backtestSpy --> db
-  executor --> alpaca[Alpaca API]
+  executor --> alpaca
 ```
 
-**One process:** `run_all.py` runs all sleeves on a single Alpaca account with per-sleeve capital caps enforced by `modules/alpaca_executor.py`.
+**One process:** `run_all.py` runs all sleeves on a single Alpaca account with per-sleeve capital caps enforced by `modules/alpaca_executor.py`. Each cycle writes `bot_heartbeat.json` (or `paper_chase_heartbeat.json` for paper chase). The **thinking engine** runs in a background thread on paper when enabled — main loop never blocks on Ollama. **Dashboard** and **status.py** read heartbeats + Alpaca for monitoring; they do not execute trades.
 
 **Two Alpaca books (optional):**
 
@@ -1190,7 +1279,6 @@ stock-bot/
 ├── backtester_macro_hedge.py  # Yield gate, GLD, stress cash variants
 ├── backtest_spy.py         # SPY sleeve backtest + grid search
 ├── backtester_wisdom.py    # Wisdom sentiment modes + game plan backtest
-├── simulate.py             # Mean-reversion research
 ├── modules/
 │   ├── pipeline_strategies.py  # SPY, crypto, NYSE strategies
 │   ├── vti_core.py             # Passive VTI rebalance (live + paper)
@@ -1228,7 +1316,7 @@ stock-bot/
     ├── create_monitor_shortcut.ps1 # Desktop shortcut → launch_monitor.bat
     ├── dashboard_running.ps1       # Detect running monitor (venv or .exe)
     ├── exchange/           # Kraken checks
-    └── dev/                # Tests and legacy loops
+    └── tests/              # Unit tests (e.g. test_kraken_budget.py)
 ```
 
 ## Utility scripts
@@ -1315,6 +1403,8 @@ Forced on cloud: `PAPER_TRADING=true`, `ALLOW_LIVE_TRADING=false`, paper API end
 
 ## Notes
 
+- **Manifest files:** [`PROJECT_MANIFEST.md`](PROJECT_MANIFEST.md) (human architecture summary) · [`data/bot_manifest.txt`](data/bot_manifest.txt) (compact for LLMs — regenerate: `python scripts/mcp/export_bot_manifest.py`).
+- **Background health:** `python scripts/background_runner.py --mode auto --trigger manual` for on-demand heartbeat/safety check; see [Long-running stability](#long-running-stability).
 - **Single virtualenv:** Use `.venv` only. Reinstall with `pip install -r requirements.txt` after pulling changes.
 - **`write_bot.py`:** Regenerates `fetch_data.py` only. Does **not** overwrite `run_all.py`.
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.

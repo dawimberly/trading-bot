@@ -14,6 +14,8 @@ sys.path.insert(0, str(MCP_DIR))
 from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env", override=False)
+if not os.getenv("GROK_API_KEY") and (ROOT.parent / ".env").is_file():
+    load_dotenv(ROOT.parent / ".env", override=False)
 if os.getenv("XAI_API_KEY") and not os.getenv("GROK_API_KEY"):
     os.environ["GROK_API_KEY"] = os.environ["XAI_API_KEY"]
 os.environ.setdefault(

@@ -97,10 +97,12 @@ def ensure_macro_daily(refresh: bool = False) -> None:
 def load_daily_matrix(days: int = 400, refresh: bool = False) -> pd.DataFrame:
     """Wide daily closes for SPY, metals, TLT (+ fund cols from DB)."""
     global _daily_cache
+    if refresh:
+        _daily_cache = None
     ensure_macro_daily(refresh=refresh)
     from modules.data_loader import load_close_matrix
 
-    data = load_close_matrix(interval="1d", days=days)
+    data = load_close_matrix(interval="1d", days=days, force_refresh=refresh)
     for col in ("TLT", "TNX"):
         series = _load_daily_column(col)
         if not series.empty:

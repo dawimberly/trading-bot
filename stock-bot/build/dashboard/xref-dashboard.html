@@ -15,7 +15,7 @@
 
 <div class="node">
   <a name="dashboard_app.py"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/dashboard_app.py" type="text/plain"><tt>dashboard_app.py</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/dashboard_app.py" type="text/plain"><tt>dashboard_app.py</tt></a>
 <span class="moduletype">Script</span>  <div class="import">
 imports:
     <a href="#PIL">PIL</a>
@@ -394,7 +394,7 @@ imported by:
 
 <div class="node">
   <a name="pyi_rth_pythontrading.py"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/pyi_rth_pythontrading.py" type="text/plain"><tt>pyi_rth_pythontrading.py</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/pyi_rth_pythontrading.py" type="text/plain"><tt>pyi_rth_pythontrading.py</tt></a>
 <span class="moduletype">Script</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -4715,6 +4715,8 @@ imported by:
  &#8226;   <a href="#mdurl._url">mdurl._url</a>
  &#8226;   <a href="#modules.alpaca_client">modules.alpaca_client</a>
  &#8226;   <a href="#modules.backtest_common">modules.backtest_common</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
+ &#8226;   <a href="#modules.console_output">modules.console_output</a>
  &#8226;   <a href="#modules.cost_basis">modules.cost_basis</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#modules.crypto_vol_gate">modules.crypto_vol_gate</a>
@@ -10499,13 +10501,15 @@ imported by:
 
 <div class="node">
   <a name="backtester"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/backtester.py" type="text/plain"><tt>backtester</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/backtester.py" type="text/plain"><tt>backtester</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#argparse">argparse</a>
  &#8226;   <a href="#config">config</a>
  &#8226;   <a href="#fetch_data">fetch_data</a>
  &#8226;   <a href="#modules">modules</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
+ &#8226;   <a href="#modules.console_output">modules.console_output</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#modules.data_loader">modules.data_loader</a>
  &#8226;   <a href="#modules.deployment_sizing">modules.deployment_sizing</a>
@@ -10524,6 +10528,7 @@ imports:
  &#8226;   <a href="#modules.wayback_sentiment">modules.wayback_sentiment</a>
  &#8226;   <a href="#modules.wisdom_sentiment">modules.wisdom_sentiment</a>
  &#8226;   <a href="#numpy">numpy</a>
+ &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#pandas">pandas</a>
  &#8226;   <a href="#pathlib">pathlib</a>
  &#8226;   <a href="#sys">sys</a>
@@ -10543,7 +10548,7 @@ imported by:
 
 <div class="node">
   <a name="backtester_macro_hedge"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/backtester_macro_hedge.py" type="text/plain"><tt>backtester_macro_hedge</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/backtester_macro_hedge.py" type="text/plain"><tt>backtester_macro_hedge</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -10573,7 +10578,7 @@ imported by:
 
 <div class="node">
   <a name="backtester_metals"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/backtester_metals.py" type="text/plain"><tt>backtester_metals</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/backtester_metals.py" type="text/plain"><tt>backtester_metals</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -10606,7 +10611,7 @@ imported by:
 
 <div class="node">
   <a name="backtester_wisdom"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/backtester_wisdom.py" type="text/plain"><tt>backtester_wisdom</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/backtester_wisdom.py" type="text/plain"><tt>backtester_wisdom</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -10683,6 +10688,7 @@ imported by:
  &#8226;   <a href="#logging.handlers">logging.handlers</a>
  &#8226;   <a href="#matplotlib.colors">matplotlib.colors</a>
  &#8226;   <a href="#matplotlib.font_manager">matplotlib.font_manager</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#multiprocessing.resource_tracker">multiprocessing.resource_tracker</a>
  &#8226;   <a href="#pydantic.types">pydantic.types</a>
  &#8226;   <a href="#requests.auth">requests.auth</a>
@@ -13400,6 +13406,7 @@ imported by:
  &#8226;   <a href="#concurrent.futures.thread">concurrent.futures.thread</a>
  &#8226;   <a href="#curl_cffi.requests.models">curl_cffi.requests.models</a>
  &#8226;   <a href="#curl_cffi.requests.session">curl_cffi.requests.session</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#numpy.testing._private.utils">numpy.testing._private.utils</a>
  &#8226;   <a href="#pandas._testing">pandas._testing</a>
  &#8226;   <a href="#pyarrow.pandas_compat">pyarrow.pandas_compat</a>
@@ -13582,7 +13589,7 @@ imported by:
 
 <div class="node">
   <a name="config"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/config.py" type="text/plain"><tt>config</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/config.py" type="text/plain"><tt>config</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#'config.best_paper_config'">'config.best_paper_config'</a>
@@ -13607,6 +13614,7 @@ imported by:
  &#8226;   <a href="#fetch_data">fetch_data</a>
  &#8226;   <a href="#modules.alpaca_client">modules.alpaca_client</a>
  &#8226;   <a href="#modules.alpaca_executor">modules.alpaca_executor</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.cost_basis">modules.cost_basis</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#modules.crypto_vol_gate">modules.crypto_vol_gate</a>
@@ -17891,6 +17899,7 @@ imported by:
  &#8226;   <a href="#markdown_it.token">markdown_it.token</a>
  &#8226;   <a href="#matplotlib._text_helpers">matplotlib._text_helpers</a>
  &#8226;   <a href="#matplotlib.font_manager">matplotlib.font_manager</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#more_itertools.recipes">more_itertools.recipes</a>
  &#8226;   <a href="#orjson">orjson</a>
@@ -26308,7 +26317,7 @@ imported by:
 
 <div class="node">
   <a name="fetch_data"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/fetch_data.py" type="text/plain"><tt>fetch_data</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/fetch_data.py" type="text/plain"><tt>fetch_data</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#argparse">argparse</a>
@@ -28257,6 +28266,7 @@ imported by:
  &#8226;   <a href="#jinja2.bccache">jinja2.bccache</a>
  &#8226;   <a href="#jinja2.loaders">jinja2.loaders</a>
  &#8226;   <a href="#matplotlib.texmanager">matplotlib.texmanager</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.portal_auth">modules.portal_auth</a>
  &#8226;   <a href="#modules.thinking_engine">modules.thinking_engine</a>
  &#8226;   <a href="#peewee">peewee</a>
@@ -31234,6 +31244,7 @@ imported by:
  &#8226;   <a href="#matplotlib.backends.backend_webagg_core">matplotlib.backends.backend_webagg_core</a>
  &#8226;   <a href="#matplotlib.colors">matplotlib.colors</a>
  &#8226;   <a href="#matplotlib.font_manager">matplotlib.font_manager</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#multiprocessing.connection">multiprocessing.connection</a>
  &#8226;   <a href="#multiprocessing.popen_forkserver">multiprocessing.popen_forkserver</a>
  &#8226;   <a href="#multiprocessing.popen_spawn_posix">multiprocessing.popen_spawn_posix</a>
@@ -32392,6 +32403,7 @@ imported by:
  &#8226;   <a href="#matplotlib.backends.backend_webagg">matplotlib.backends.backend_webagg</a>
  &#8226;   <a href="#matplotlib.backends.backend_webagg_core">matplotlib.backends.backend_webagg_core</a>
  &#8226;   <a href="#matplotlib.font_manager">matplotlib.font_manager</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.dynamic_universe">modules.dynamic_universe</a>
  &#8226;   <a href="#modules.felix_sentiment">modules.felix_sentiment</a>
  &#8226;   <a href="#modules.fund_config">modules.fund_config</a>
@@ -34679,6 +34691,7 @@ imported by:
  &#8226;   <a href="#matplotlib.typing">matplotlib.typing</a>
  &#8226;   <a href="#matplotlib.units">matplotlib.units</a>
  &#8226;   <a href="#matplotlib.widgets">matplotlib.widgets</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#mpl_toolkits.mplot3d.art3d">mpl_toolkits.mplot3d.art3d</a>
  &#8226;   <a href="#mpl_toolkits.mplot3d.axes3d">mpl_toolkits.mplot3d.axes3d</a>
  &#8226;   <a href="#mpl_toolkits.mplot3d.axis3d">mpl_toolkits.mplot3d.axis3d</a>
@@ -35709,7 +35722,6 @@ imports:
  &#8226;   <a href="#matplotlib.backends._backend_tk">matplotlib.backends._backend_tk</a>
  &#8226;   <a href="#matplotlib.backends._tkagg">matplotlib.backends._tkagg</a>
  &#8226;   <a href="#matplotlib.backends.backend_agg">matplotlib.backends.backend_agg</a>
- &#8226;   <a href="#matplotlib.backends.backend_tkagg">matplotlib.backends.backend_tkagg</a>
  &#8226;   <a href="#matplotlib.backends.backend_webagg">matplotlib.backends.backend_webagg</a>
  &#8226;   <a href="#matplotlib.backends.backend_webagg_core">matplotlib.backends.backend_webagg_core</a>
  &#8226;   <a href="#matplotlib.backends.registry">matplotlib.backends.registry</a>
@@ -35855,7 +35867,6 @@ imports:
   <div class="import">
 imported by:
     <a href="#dashboard_app.py">dashboard_app.py</a>
- &#8226;   <a href="#matplotlib.backends">matplotlib.backends</a>
 
   </div>
 
@@ -37180,6 +37191,7 @@ imported by:
  &#8226;   <a href="#matplotlib.backends.backend_webagg_core">matplotlib.backends.backend_webagg_core</a>
  &#8226;   <a href="#matplotlib.figure">matplotlib.figure</a>
  &#8226;   <a href="#matplotlib.image">matplotlib.image</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#pandas.plotting._matplotlib">pandas.plotting._matplotlib</a>
  &#8226;   <a href="#pandas.plotting._matplotlib.boxplot">pandas.plotting._matplotlib.boxplot</a>
  &#8226;   <a href="#pandas.plotting._matplotlib.core">pandas.plotting._matplotlib.core</a>
@@ -38096,7 +38108,7 @@ imported by:
 
 <div class="node">
   <a name="modules"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/__init__.py" type="text/plain"><tt>modules</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/__init__.py" type="text/plain"><tt>modules</tt></a>
 <span class="moduletype">Package</span>  <div class="import">
 imports:
     <a href="#modules.deployment_sizing">modules.deployment_sizing</a>
@@ -38108,6 +38120,8 @@ imported by:
  &#8226;   <a href="#modules.alpaca_client">modules.alpaca_client</a>
  &#8226;   <a href="#modules.alpaca_executor">modules.alpaca_executor</a>
  &#8226;   <a href="#modules.backtest_common">modules.backtest_common</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
+ &#8226;   <a href="#modules.console_output">modules.console_output</a>
  &#8226;   <a href="#modules.cost_basis">modules.cost_basis</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#modules.crypto_vol_gate">modules.crypto_vol_gate</a>
@@ -38153,7 +38167,7 @@ imported by:
 
 <div class="node">
   <a name="modules.alpaca_client"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/alpaca_client.py" type="text/plain"><tt>modules.alpaca_client</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/alpaca_client.py" type="text/plain"><tt>modules.alpaca_client</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38179,7 +38193,7 @@ imported by:
 
 <div class="node">
   <a name="modules.alpaca_executor"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/alpaca_executor.py" type="text/plain"><tt>modules.alpaca_executor</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/alpaca_executor.py" type="text/plain"><tt>modules.alpaca_executor</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#alpaca.trading.enums">alpaca.trading.enums</a>
@@ -38208,7 +38222,7 @@ imported by:
 
 <div class="node">
   <a name="modules.backtest_common"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/backtest_common.py" type="text/plain"><tt>modules.backtest_common</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/backtest_common.py" type="text/plain"><tt>modules.backtest_common</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38228,8 +38242,58 @@ imported by:
 </div>
 
 <div class="node">
+  <a name="modules.backtester_core"></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/backtester_core.py" type="text/plain"><tt>modules.backtester_core</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#base64">base64</a>
+ &#8226;   <a href="#concurrent.futures">concurrent.futures</a>
+ &#8226;   <a href="#config">config</a>
+ &#8226;   <a href="#dataclasses">dataclasses</a>
+ &#8226;   <a href="#hashlib">hashlib</a>
+ &#8226;   <a href="#io">io</a>
+ &#8226;   <a href="#json">json</a>
+ &#8226;   <a href="#matplotlib">matplotlib</a>
+ &#8226;   <a href="#matplotlib.pyplot">matplotlib.pyplot</a>
+ &#8226;   <a href="#modules">modules</a>
+ &#8226;   <a href="#numpy">numpy</a>
+ &#8226;   <a href="#os">os</a>
+ &#8226;   <a href="#pandas">pandas</a>
+ &#8226;   <a href="#pathlib">pathlib</a>
+ &#8226;   <a href="#typing">typing</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#backtester">backtester</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="modules.console_output"></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/console_output.py" type="text/plain"><tt>modules.console_output</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#__future__">__future__</a>
+ &#8226;   <a href="#modules">modules</a>
+ &#8226;   <a href="#rich.console">rich.console</a>
+ &#8226;   <a href="#sys">sys</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#backtester">backtester</a>
+
+  </div>
+
+</div>
+
+<div class="node">
   <a name="modules.cost_basis"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/cost_basis.py" type="text/plain"><tt>modules.cost_basis</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/cost_basis.py" type="text/plain"><tt>modules.cost_basis</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38248,7 +38312,7 @@ imported by:
 
 <div class="node">
   <a name="modules.crypto_dual_sleeve"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/crypto_dual_sleeve.py" type="text/plain"><tt>modules.crypto_dual_sleeve</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/crypto_dual_sleeve.py" type="text/plain"><tt>modules.crypto_dual_sleeve</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38272,7 +38336,7 @@ imported by:
 
 <div class="node">
   <a name="modules.crypto_vol_gate"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/crypto_vol_gate.py" type="text/plain"><tt>modules.crypto_vol_gate</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/crypto_vol_gate.py" type="text/plain"><tt>modules.crypto_vol_gate</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38292,7 +38356,7 @@ imported by:
 
 <div class="node">
   <a name="modules.data_loader"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/data_loader.py" type="text/plain"><tt>modules.data_loader</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/data_loader.py" type="text/plain"><tt>modules.data_loader</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -38318,7 +38382,7 @@ imported by:
 
 <div class="node">
   <a name="modules.deployment_sizing"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/deployment_sizing.py" type="text/plain"><tt>modules.deployment_sizing</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/deployment_sizing.py" type="text/plain"><tt>modules.deployment_sizing</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -38340,7 +38404,7 @@ imported by:
 
 <div class="node">
   <a name="modules.dynamic_universe"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/dynamic_universe.py" type="text/plain"><tt>modules.dynamic_universe</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/dynamic_universe.py" type="text/plain"><tt>modules.dynamic_universe</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38366,7 +38430,7 @@ imported by:
 
 <div class="node">
   <a name="modules.felix_sentiment"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/felix_sentiment.py" type="text/plain"><tt>modules.felix_sentiment</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/felix_sentiment.py" type="text/plain"><tt>modules.felix_sentiment</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38394,7 +38458,7 @@ imported by:
 
 <div class="node">
   <a name="modules.fund_config"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/fund_config.py" type="text/plain"><tt>modules.fund_config</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/fund_config.py" type="text/plain"><tt>modules.fund_config</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38416,7 +38480,7 @@ imported by:
 
 <div class="node">
   <a name="modules.logging_utils"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/logging_utils.py" type="text/plain"><tt>modules.logging_utils</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/logging_utils.py" type="text/plain"><tt>modules.logging_utils</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38444,7 +38508,7 @@ imported by:
 
 <div class="node">
   <a name="modules.macro_regime_adaptor"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/macro_regime_adaptor.py" type="text/plain"><tt>modules.macro_regime_adaptor</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/macro_regime_adaptor.py" type="text/plain"><tt>modules.macro_regime_adaptor</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38469,7 +38533,7 @@ imported by:
 
 <div class="node">
   <a name="modules.macro_signals"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/macro_signals.py" type="text/plain"><tt>modules.macro_signals</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/macro_signals.py" type="text/plain"><tt>modules.macro_signals</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38496,7 +38560,7 @@ imported by:
 
 <div class="node">
   <a name="modules.market_context"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/market_context.py" type="text/plain"><tt>modules.market_context</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/market_context.py" type="text/plain"><tt>modules.market_context</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -38523,7 +38587,7 @@ imported by:
 
 <div class="node">
   <a name="modules.market_hours"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/market_hours.py" type="text/plain"><tt>modules.market_hours</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/market_hours.py" type="text/plain"><tt>modules.market_hours</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#modules">modules</a>
@@ -38540,7 +38604,7 @@ imported by:
 
 <div class="node">
   <a name="modules.options_sleeve"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/options_sleeve.py" type="text/plain"><tt>modules.options_sleeve</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/options_sleeve.py" type="text/plain"><tt>modules.options_sleeve</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38567,7 +38631,7 @@ imported by:
 
 <div class="node">
   <a name="modules.pipeline_strategies"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/pipeline_strategies.py" type="text/plain"><tt>modules.pipeline_strategies</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/pipeline_strategies.py" type="text/plain"><tt>modules.pipeline_strategies</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -38600,7 +38664,7 @@ imported by:
 
 <div class="node">
   <a name="modules.portal_auth"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/portal_auth.py" type="text/plain"><tt>modules.portal_auth</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/portal_auth.py" type="text/plain"><tt>modules.portal_auth</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38611,7 +38675,9 @@ imports:
  &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#pathlib">pathlib</a>
  &#8226;   <a href="#secrets">secrets</a>
+ &#8226;   <a href="#shutil">shutil</a>
  &#8226;   <a href="#sqlite3">sqlite3</a>
+ &#8226;   <a href="#sys">sys</a>
 
   </div>
   <div class="import">
@@ -38624,7 +38690,7 @@ imported by:
 
 <div class="node">
   <a name="modules.portal_bot"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/portal_bot.py" type="text/plain"><tt>modules.portal_bot</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/portal_bot.py" type="text/plain"><tt>modules.portal_bot</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38633,6 +38699,7 @@ imports:
  &#8226;   <a href="#modules.trading_books">modules.trading_books</a>
  &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#pathlib">pathlib</a>
+ &#8226;   <a href="#shutil">shutil</a>
  &#8226;   <a href="#signal">signal</a>
  &#8226;   <a href="#subprocess">subprocess</a>
  &#8226;   <a href="#sys">sys</a>
@@ -38649,7 +38716,7 @@ imported by:
 
 <div class="node">
   <a name="modules.portal_paths"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/portal_paths.py" type="text/plain"><tt>modules.portal_paths</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/portal_paths.py" type="text/plain"><tt>modules.portal_paths</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38677,7 +38744,7 @@ imported by:
 
 <div class="node">
   <a name="modules.risk_management"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/risk_management.py" type="text/plain"><tt>modules.risk_management</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/risk_management.py" type="text/plain"><tt>modules.risk_management</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -38698,7 +38765,7 @@ imported by:
 
 <div class="node">
   <a name="modules.risk_parity_sleeve"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/risk_parity_sleeve.py" type="text/plain"><tt>modules.risk_parity_sleeve</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/risk_parity_sleeve.py" type="text/plain"><tt>modules.risk_parity_sleeve</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38723,7 +38790,7 @@ imported by:
 
 <div class="node">
   <a name="modules.safe_io"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/safe_io.py" type="text/plain"><tt>modules.safe_io</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/safe_io.py" type="text/plain"><tt>modules.safe_io</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38750,7 +38817,7 @@ imported by:
 
 <div class="node">
   <a name="modules.sentiment_keywords"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/sentiment_keywords.py" type="text/plain"><tt>modules.sentiment_keywords</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/sentiment_keywords.py" type="text/plain"><tt>modules.sentiment_keywords</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#modules">modules</a>
@@ -38768,7 +38835,7 @@ imported by:
 
 <div class="node">
   <a name="modules.social_sleeve"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/social_sleeve.py" type="text/plain"><tt>modules.social_sleeve</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/social_sleeve.py" type="text/plain"><tt>modules.social_sleeve</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38792,7 +38859,7 @@ imported by:
 
 <div class="node">
   <a name="modules.social_sleeve_backtest"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/social_sleeve_backtest.py" type="text/plain"><tt>modules.social_sleeve_backtest</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/social_sleeve_backtest.py" type="text/plain"><tt>modules.social_sleeve_backtest</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38817,7 +38884,7 @@ imported by:
 
 <div class="node">
   <a name="modules.ssl_certs"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/ssl_certs.py" type="text/plain"><tt>modules.ssl_certs</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/ssl_certs.py" type="text/plain"><tt>modules.ssl_certs</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38839,7 +38906,7 @@ imported by:
 
 <div class="node">
   <a name="modules.stat_arb_sleeve"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/stat_arb_sleeve.py" type="text/plain"><tt>modules.stat_arb_sleeve</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/stat_arb_sleeve.py" type="text/plain"><tt>modules.stat_arb_sleeve</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38867,7 +38934,7 @@ imported by:
 
 <div class="node">
   <a name="modules.thinking_engine"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/thinking_engine.py" type="text/plain"><tt>modules.thinking_engine</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/thinking_engine.py" type="text/plain"><tt>modules.thinking_engine</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38901,7 +38968,7 @@ imported by:
 
 <div class="node">
   <a name="modules.trade_journal"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/trade_journal.py" type="text/plain"><tt>modules.trade_journal</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/trade_journal.py" type="text/plain"><tt>modules.trade_journal</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -38921,7 +38988,7 @@ imported by:
 
 <div class="node">
   <a name="modules.trading_books"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/trading_books.py" type="text/plain"><tt>modules.trading_books</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/trading_books.py" type="text/plain"><tt>modules.trading_books</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38941,7 +39008,7 @@ imported by:
 
 <div class="node">
   <a name="modules.trading_safety"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/trading_safety.py" type="text/plain"><tt>modules.trading_safety</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/trading_safety.py" type="text/plain"><tt>modules.trading_safety</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38963,7 +39030,7 @@ imported by:
 
 <div class="node">
   <a name="modules.volatility_sleeve"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/volatility_sleeve.py" type="text/plain"><tt>modules.volatility_sleeve</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/volatility_sleeve.py" type="text/plain"><tt>modules.volatility_sleeve</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -38986,7 +39053,7 @@ imported by:
 
 <div class="node">
   <a name="modules.vti_core"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/vti_core.py" type="text/plain"><tt>modules.vti_core</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/vti_core.py" type="text/plain"><tt>modules.vti_core</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -39004,7 +39071,7 @@ imported by:
 
 <div class="node">
   <a name="modules.wayback_sentiment"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/wayback_sentiment.py" type="text/plain"><tt>modules.wayback_sentiment</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/wayback_sentiment.py" type="text/plain"><tt>modules.wayback_sentiment</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config">config</a>
@@ -39031,7 +39098,7 @@ imported by:
 
 <div class="node">
   <a name="modules.web_sentiment_live"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/web_sentiment_live.py" type="text/plain"><tt>modules.web_sentiment_live</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/web_sentiment_live.py" type="text/plain"><tt>modules.web_sentiment_live</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -39056,7 +39123,7 @@ imported by:
 
 <div class="node">
   <a name="modules.wisdom_adaptor"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/wisdom_adaptor.py" type="text/plain"><tt>modules.wisdom_adaptor</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/wisdom_adaptor.py" type="text/plain"><tt>modules.wisdom_adaptor</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -39080,7 +39147,7 @@ imported by:
 
 <div class="node">
   <a name="modules.wisdom_evaluator"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/wisdom_evaluator.py" type="text/plain"><tt>modules.wisdom_evaluator</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/wisdom_evaluator.py" type="text/plain"><tt>modules.wisdom_evaluator</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -39109,7 +39176,7 @@ imported by:
 
 <div class="node">
   <a name="modules.wisdom_journal"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/wisdom_journal.py" type="text/plain"><tt>modules.wisdom_journal</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/wisdom_journal.py" type="text/plain"><tt>modules.wisdom_journal</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -39135,7 +39202,7 @@ imported by:
 
 <div class="node">
   <a name="modules.wisdom_sentiment"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/modules/wisdom_sentiment.py" type="text/plain"><tt>modules.wisdom_sentiment</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/modules/wisdom_sentiment.py" type="text/plain"><tt>modules.wisdom_sentiment</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -40776,6 +40843,7 @@ imported by:
  &#8226;   <a href="#matplotlib.tri._tritools">matplotlib.tri._tritools</a>
  &#8226;   <a href="#matplotlib.units">matplotlib.units</a>
  &#8226;   <a href="#matplotlib.widgets">matplotlib.widgets</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#modules.deployment_sizing">modules.deployment_sizing</a>
  &#8226;   <a href="#modules.macro_regime_adaptor">modules.macro_regime_adaptor</a>
@@ -47781,6 +47849,7 @@ imported by:
  &#8226;   <a href="#asyncio.selector_events">asyncio.selector_events</a>
  &#8226;   <a href="#asyncio.unix_events">asyncio.unix_events</a>
  &#8226;   <a href="#asyncio.windows_utils">asyncio.windows_utils</a>
+ &#8226;   <a href="#backtester">backtester</a>
  &#8226;   <a href="#bdb">bdb</a>
  &#8226;   <a href="#bz2">bz2</a>
  &#8226;   <a href="#cffi._imp_emulation">cffi._imp_emulation</a>
@@ -47877,6 +47946,7 @@ imported by:
  &#8226;   <a href="#matplotlib.style.core">matplotlib.style.core</a>
  &#8226;   <a href="#matplotlib.texmanager">matplotlib.texmanager</a>
  &#8226;   <a href="#mimetypes">mimetypes</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.data_loader">modules.data_loader</a>
  &#8226;   <a href="#modules.fund_config">modules.fund_config</a>
  &#8226;   <a href="#modules.portal_auth">modules.portal_auth</a>
@@ -48648,6 +48718,7 @@ imported by:
  &#8226;   <a href="#dashboard_app.py">dashboard_app.py</a>
  &#8226;   <a href="#fetch_data">fetch_data</a>
  &#8226;   <a href="#modules.backtest_common">modules.backtest_common</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.crypto_dual_sleeve">modules.crypto_dual_sleeve</a>
  &#8226;   <a href="#modules.data_loader">modules.data_loader</a>
  &#8226;   <a href="#modules.deployment_sizing">modules.deployment_sizing</a>
@@ -61460,6 +61531,7 @@ imported by:
  &#8226;   <a href="#matplotlib.style.core">matplotlib.style.core</a>
  &#8226;   <a href="#matplotlib.texmanager">matplotlib.texmanager</a>
  &#8226;   <a href="#matplotlib.typing">matplotlib.typing</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.dynamic_universe">modules.dynamic_universe</a>
  &#8226;   <a href="#modules.felix_sentiment">modules.felix_sentiment</a>
  &#8226;   <a href="#modules.fund_config">modules.fund_config</a>
@@ -79025,6 +79097,7 @@ imports:
   <div class="import">
 imported by:
     <a href="#httpx._main">httpx._main</a>
+ &#8226;   <a href="#modules.console_output">modules.console_output</a>
  &#8226;   <a href="#pydantic._internal._core_utils">pydantic._internal._core_utils</a>
  &#8226;   <a href="#rich">rich</a>
  &#8226;   <a href="#rich.__main__">rich.__main__</a>
@@ -80376,7 +80449,7 @@ imported by:
 
 <div class="node">
   <a name="scripts"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/scripts/__init__.py" type="text/plain"><tt>scripts</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/scripts/__init__.py" type="text/plain"><tt>scripts</tt></a>
 <span class="moduletype">Package</span>  <div class="import">
 imported by:
     <a href="#scripts.analysis">scripts.analysis</a>
@@ -80403,7 +80476,7 @@ imported by:
 
 <div class="node">
   <a name="scripts.analysis.universe_screener"></a>
-  <a target="code" href="///C:/Users/Owner/PythonTrading/scripts/analysis/universe_screener.py" type="text/plain"><tt>scripts.analysis.universe_screener</tt></a>
+  <a target="code" href="///C:/Users/Owner/PythonTrading/stock-bot/scripts/analysis/universe_screener.py" type="text/plain"><tt>scripts.analysis.universe_screener</tt></a>
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#__future__">__future__</a>
@@ -84236,6 +84309,8 @@ imported by:
  &#8226;   <a href="#http.server">http.server</a>
  &#8226;   <a href="#jaraco.context">jaraco.context</a>
  &#8226;   <a href="#matplotlib">matplotlib</a>
+ &#8226;   <a href="#modules.portal_auth">modules.portal_auth</a>
+ &#8226;   <a href="#modules.portal_bot">modules.portal_bot</a>
  &#8226;   <a href="#modules.portal_paths">modules.portal_paths</a>
  &#8226;   <a href="#multiprocessing.util">multiprocessing.util</a>
  &#8226;   <a href="#numpy.f2py._backends._distutils">numpy.f2py._backends._distutils</a>
@@ -85698,8 +85773,10 @@ imported by:
  &#8226;   <a href="#matplotlib.pyplot">matplotlib.pyplot</a>
  &#8226;   <a href="#matplotlib.tri._triangulation">matplotlib.tri._triangulation</a>
  &#8226;   <a href="#mimetypes">mimetypes</a>
+ &#8226;   <a href="#modules.console_output">modules.console_output</a>
  &#8226;   <a href="#modules.felix_sentiment">modules.felix_sentiment</a>
  &#8226;   <a href="#modules.logging_utils">modules.logging_utils</a>
+ &#8226;   <a href="#modules.portal_auth">modules.portal_auth</a>
  &#8226;   <a href="#modules.portal_bot">modules.portal_bot</a>
  &#8226;   <a href="#modules.portal_paths">modules.portal_paths</a>
  &#8226;   <a href="#modules.safe_io">modules.safe_io</a>
@@ -89045,6 +89122,7 @@ imported by:
  &#8226;   <a href="#mdurl._url">mdurl._url</a>
  &#8226;   <a href="#modules.alpaca_client">modules.alpaca_client</a>
  &#8226;   <a href="#modules.alpaca_executor">modules.alpaca_executor</a>
+ &#8226;   <a href="#modules.backtester_core">modules.backtester_core</a>
  &#8226;   <a href="#modules.logging_utils">modules.logging_utils</a>
  &#8226;   <a href="#modules.risk_parity_sleeve">modules.risk_parity_sleeve</a>
  &#8226;   <a href="#modules.safe_io">modules.safe_io</a>

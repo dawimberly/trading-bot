@@ -46,6 +46,7 @@ def _load_cache() -> dict | None:
 
 
 def _save_cache(payload: dict) -> None:
+    CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CACHE_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 

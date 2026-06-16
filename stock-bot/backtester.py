@@ -75,6 +75,7 @@ from modules.backtester_core import (
     get_indicator_cache,
     parallel_map_backtests,
     prepare_indicator_cache,
+    release_backtest_memory,
     reset_caches,
     run_slippage_sensitivity,
     store_last_result,
@@ -372,16 +373,18 @@ class BacktestExecutor:
                 return _Pos(sym, qty, float(price) if price is not None else 0.0)
         return None
 
-    def execute_full_exit(self, symbol):
+    def execute_full_exit(self, symbol, **kwargs):
         pos = self._find_position(symbol)
         if pos is None or pos.qty <= 0:
             return None
         price = self.prices.get(pos.symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None
-        return self.execute_order(pos.symbol, "sell", notional=round(pos.qty * price, 2))
+        return self.execute_order(
+            pos.symbol, "sell", notional=round(pos.qty * price, 2), **kwargs
+        )
 
-    def execute_order(self, symbol, side, notional=None, reduce_only=False):
+    def execute_order(self, symbol, side, notional=None, reduce_only=False, **kwargs):
         price = self.prices.get(symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None
@@ -779,13 +782,16 @@ def run_backtest(
     paper_stat_arb_optimized: bool | None = None,
     paper_thinking: bool | None = None,
     paper_crypto_v2: bool | None = None,
+    paper_crypto_universe_expanded: bool | None = None,
     paper_risk_parity: bool | None = None,
     paper_vol_trading: bool | None = None,
     paper_vol_live_parity: bool = False,
     paper_dynamic_universe: bool | None = None,
+    paper_dynamic_universe_strict: bool | None = None,
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
+    with_news: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
     apply_run_options_to_config()
@@ -808,9 +814,11 @@ def run_backtest(
     saved_paper_stat_arb_opt = config.PAPER_STAT_ARB_OPTIMIZED
     saved_paper_thinking = config.PAPER_THINKING_ENGINE_ENABLED
     saved_paper_crypto_v2 = config.PAPER_CRYPTO_V2_ENABLED
+    saved_paper_crypto_expanded = config.PAPER_CRYPTO_UNIVERSE_EXPANDED
     saved_paper_risk_parity = config.PAPER_RISK_PARITY_ENABLED
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
     saved_paper_dynamic_univ = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_paper_dynamic_univ_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     saved_live_thinking_ctx = config.live_thinking_sim_context()
     config.set_paper_aggressive_context(paper_aggressive)
@@ -852,12 +860,16 @@ def run_backtest(
         config.PAPER_THINKING_ENGINE_ENABLED = False
     if paper_crypto_v2 is not None:
         config.PAPER_CRYPTO_V2_ENABLED = bool(paper_crypto_v2)
+    if paper_crypto_universe_expanded is not None:
+        config.PAPER_CRYPTO_UNIVERSE_EXPANDED = bool(paper_crypto_universe_expanded)
     if paper_risk_parity is not None:
         config.PAPER_RISK_PARITY_ENABLED = bool(paper_risk_parity)
     if paper_vol_trading is not None:
         config.PAPER_VOL_TRADING_ENABLED = bool(paper_vol_trading)
     if paper_dynamic_universe is not None:
         config.PAPER_DYNAMIC_UNIVERSE_ENABLED = bool(paper_dynamic_universe)
+    if paper_dynamic_universe_strict is not None:
+        config.PAPER_DYNAMIC_UNIVERSE_STRICT = bool(paper_dynamic_universe_strict)
     if RUN_OPTIONS.fast_mode:
         apply_run_options_to_config()
     if paper_aggressive and not any(
@@ -997,6 +1009,7 @@ def run_backtest(
     sample_rp_meta: dict | None = None
     thinking_cache = {
         "regime": None,
+        "last_news_date": None,
         "scales": {"spy_scale": 1.0, "nyse_scale": 1.0, "crypto_scale": 1.0},
         "vti_pct": None,
         "events": [],
@@ -1112,9 +1125,32 @@ def run_backtest(
                 config.LIVE_THINKING_MAX_SLEEVE_DELTA if live_thinking else None
             )
             refresh = thinking_cache["regime"] != regime
+            bar_date = data.index[i].date()
+            news_digest: dict | None = None
+            if with_news:
+                if thinking_cache.get("last_news_date") != bar_date:
+                    thinking_cache["last_news_date"] = bar_date
+                    refresh = True
             if refresh:
                 vti_before = vti_core_pct
-                thinking = build_backtest_thinking_result(window, regime, vol)
+                if with_news:
+                    from modules.thinking_news import synthesize_backtest_news
+
+                    news_digest = synthesize_backtest_news(
+                        window,
+                        regime,
+                        vol,
+                        slot="premarket",
+                    )
+                    thinking = build_backtest_thinking_result(
+                        window,
+                        regime,
+                        vol,
+                        news_headlines=news_digest.get("headlines"),
+                        news_slot="premarket",
+                    )
+                else:
+                    thinking = build_backtest_thinking_result(window, regime, vol)
                 base_caps = dict(config.fund_allocation_pct())
                 base_caps["vti_core"] = vti_core_pct
                 merged, deltas, log_line = apply_thinking_tilt_to_caps(
@@ -1142,20 +1178,26 @@ def run_backtest(
                 if any(abs(v) > 0.001 for v in deltas.values()):
                     summary = thinking.get("market_summary") or {}
                     vix = summary.get("vix")
-                    thinking_cache["events"].append(
-                        {
-                            "date": str(data.index[i].date()),
-                            "regime": regime,
-                            "vol": vol,
-                            "vix": vix,
-                            "narrative": thinking.get("narrative"),
-                            "tilt": thinking.get("suggested_tilt"),
-                            "deltas": deltas,
-                            "vti_before": round(vti_before, 4),
-                            "vti_after": round(float(merged["vti_core"]), 4),
-                            "log": log_line,
-                        }
-                    )
+                    event: dict = {
+                        "date": str(data.index[i].date()),
+                        "regime": regime,
+                        "vol": vol,
+                        "vix": vix,
+                        "narrative": thinking.get("narrative"),
+                        "tilt": thinking.get("suggested_tilt"),
+                        "deltas": deltas,
+                        "vti_before": round(vti_before, 4),
+                        "vti_after": round(float(merged["vti_core"]), 4),
+                        "log": log_line,
+                    }
+                    if news_digest:
+                        event["news_slot"] = news_digest.get("slot")
+                        event["news_impact_score"] = news_digest.get("news_impact_score")
+                        event["news_theme_summary"] = news_digest.get("theme_summary")
+                    elif with_news:
+                        event["news_impact_score"] = thinking.get("news_impact_score")
+                        event["news_theme_summary"] = summary.get("news_theme_summary")
+                    thinking_cache["events"].append(event)
             if thinking_cache["vti_pct"] is not None:
                 vti_core_pct = float(thinking_cache["vti_pct"])
             thinking_scales = dict(thinking_cache["scales"])
@@ -1661,9 +1703,11 @@ def run_backtest(
     config.PAPER_STAT_ARB_OPTIMIZED = saved_paper_stat_arb_opt
     config.PAPER_THINKING_ENGINE_ENABLED = saved_paper_thinking
     config.PAPER_CRYPTO_V2_ENABLED = saved_paper_crypto_v2
+    config.PAPER_CRYPTO_UNIVERSE_EXPANDED = saved_paper_crypto_expanded
     config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_paper_dynamic_univ
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_paper_dynamic_univ_strict
     store_last_result(result)
     return result
 
@@ -2290,6 +2334,117 @@ def run_compare_crypto_v2(days=None, refresh=False, use_max=False) -> None:
                 print(f"  [{kind}] {sym} {pnl:+.2f}% ({reason}){extra}")
 
 
+def run_compare_crypto_universe(days=None, refresh=False, use_max=False) -> None:
+    """Compare base (24-pair) vs expanded Alpaca crypto universe (paper aggressive)."""
+    from modules.crypto_universe import crypto_trading_columns, prefetch_expanded_crypto_history
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    days = days or config.BACKTEST_DAYS
+
+    saved_exp = config.PAPER_CRYPTO_UNIVERSE_EXPANDED
+    saved_prefetch = config.backtest_crypto_expanded_prefetch()
+    config.PAPER_CRYPTO_UNIVERSE_EXPANDED = True
+    config.set_backtest_crypto_expanded_prefetch(True)
+    try:
+        prefetch_expanded_crypto_history(days=days, refresh=refresh, use_max=use_max)
+        data = _ensure_daily_data(days, refresh=refresh, use_max=use_max)
+    finally:
+        config.PAPER_CRYPTO_UNIVERSE_EXPANDED = saved_exp
+        config.set_backtest_crypto_expanded_prefetch(saved_prefetch)
+
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    if use_max:
+        label = "max"
+    else:
+        label = f"{days}d"
+
+    base_n = len(crypto_trading_columns(data, expanded=False))
+    exp_n = len(crypto_trading_columns(data, expanded=True))
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_stat_arb": True,
+        "paper_vol_trading": True,
+        "paper_macro_regime": False,
+        "paper_crypto_v2": False,
+        "track_metrics": True,
+    }
+    configs = [
+        (f"Base crypto ({base_n} symbols)", {**base_kwargs, "paper_crypto_universe_expanded": False}),
+        (
+            f"Expanded Alpaca ({exp_n} symbols)",
+            {**base_kwargs, "paper_crypto_universe_expanded": True},
+        ),
+    ]
+
+    print("--- CRYPTO UNIVERSE EXPANDED A/B (paper aggressive; live unchanged) ---")
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars) | vol gate + stat-arb MR unchanged"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Crypto':>7} {'Pairs':>6}"
+    )
+    print("-" * 78)
+
+    saved_social = config.SOCIAL_SLEEVE_ENABLED
+    config.SOCIAL_SLEEVE_ENABLED = False
+    results: list[tuple[str, dict]] = []
+    try:
+        for label_cfg, kwargs in configs:
+            result = run_backtest(data, track_active_exposure=True, **kwargs)
+            results.append((label_cfg, result))
+            print(
+                f"{label_cfg:<32} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{result.get('crypto_signals', 0):>7d} "
+                f"{result.get('pairs_traded', 0):>6d}"
+            )
+            release_backtest_memory()
+    finally:
+        config.SOCIAL_SLEEVE_ENABLED = saved_social
+    print("-" * 78)
+
+    if len(results) == 2:
+        base_label, base = results[0]
+        exp_label, exp = results[1]
+        base_trades = int(base.get("crypto_signals") or 0)
+        exp_trades = int(exp.get("crypto_signals") or 0)
+        freq_delta = exp_trades - base_trades
+        print(
+            f"Expanded vs base: return {exp['total_return_pct'] - base['total_return_pct']:+.2f}pp | "
+            f"Sharpe {exp['sharpe'] - base['sharpe']:+.2f} | "
+            f"MaxDD {exp['max_drawdown_pct'] - base['max_drawdown_pct']:+.2f}pp | "
+            f"crypto trades {freq_delta:+d} ({base_trades} -> {exp_trades})"
+        )
+        print("\n--- Live $300 Profile A recommendation ---")
+        if exp_trades > base_trades and exp["sharpe"] >= base["sharpe"] - 0.05:
+            print(
+                "OPTIONAL on paper only — keep PAPER_CRYPTO_UNIVERSE_EXPANDED=true on Profile B. "
+                "Do NOT enable on live $300: crypto sleeve is disabled on Profile A; "
+                "expanded pairs add fee/slippage surface without live execution path."
+            )
+        elif exp["sharpe"] > base["sharpe"] + 0.1 and exp["max_drawdown_pct"] >= base["max_drawdown_pct"] - 1.0:
+            print(
+                "Paper-only benefit — enable PAPER_CRYPTO_UNIVERSE_EXPANDED=true on Best Paper v2.1. "
+                "Live $300: leave OFF (crypto disabled on Alpaca live Profile A)."
+            )
+        else:
+            print(
+                "Keep expanded universe OFF for now — insufficient Sharpe/DD improvement vs base 24 pairs. "
+                "Live $300: unchanged (crypto sleeve off on Profile A)."
+            )
+
+
 def _equity_underperformance_stats(baseline: dict, with_thinking: dict) -> dict:
     """Compare equity curves: worst gap vs no-thinking baseline."""
     b_eq = baseline.get("equity_values") or []
@@ -2484,6 +2639,28 @@ def run_compare_vti_levels(days=None, refresh=False, use_max=False) -> None:
     )
 
 
+def _avg_tilt_magnitude(result: dict) -> float:
+    events = (result.get("live_thinking_sim") or result.get("thinking_tilt") or {}).get(
+        "events"
+    ) or []
+    if not events:
+        return 0.0
+    mags = [sum(abs(float(v)) for v in (e.get("deltas") or {}).values()) for e in events]
+    return round(sum(mags) / len(mags), 4)
+
+
+def _high_impact_news_samples(result: dict, *, max_samples: int = 5) -> list[dict]:
+    events = (result.get("live_thinking_sim") or {}).get("events") or []
+    ranked = sorted(
+        events,
+        key=lambda e: float(e.get("news_impact_score") or 0.0),
+        reverse=True,
+    )
+    return [e for e in ranked if float(e.get("news_impact_score") or 0.0) >= 0.35][
+        :max_samples
+    ]
+
+
 def run_simulate_live_thinking_compare(
     days=None,
     refresh=False,
@@ -2491,6 +2668,7 @@ def run_simulate_live_thinking_compare(
     *,
     start_equity: float | None = None,
     vti_levels: bool = False,
+    with_news: bool = False,
 ) -> None:
     """Small-account live profile + capped thinking tilts (heuristic proxy, not Ollama per bar)."""
     if use_max:
@@ -2504,7 +2682,9 @@ def run_simulate_live_thinking_compare(
         print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
         return
 
-    eq_start = start_equity or config.SMALL_ACCOUNT_BACKTEST_EQUITY
+    eq_start = start_equity or (
+        300.0 if with_news else config.SMALL_ACCOUNT_BACKTEST_EQUITY
+    )
     cap_pp = round(config.LIVE_THINKING_MAX_SLEEVE_DELTA * 100, 0)
 
     if vti_levels:
@@ -2520,6 +2700,7 @@ def run_simulate_live_thinking_compare(
             }
             result = run_backtest(data, track_active_exposure=True, **kwargs)
             rows.append(_vti_level_result_row(level_label, vti_pct, result))
+            release_backtest_memory()
         _print_vti_levels_table(
             "--- LIVE SMALL-ACCOUNT + THINKING @ VTI LEVELS ---",
             (
@@ -2553,26 +2734,50 @@ def run_simulate_live_thinking_compare(
         "simulate_live_thinking": True,
         "track_metrics": True,
     }
-    configs = [
-        ("Small account (no thinking)", {**base_kwargs, "paper_thinking": False}),
-        ("Small account (+ thinking tilts)", {**base_kwargs, "paper_thinking": True}),
-    ]
+    if with_news:
+        configs = [
+            ("No thinking / no news", {**base_kwargs, "paper_thinking": False, "with_news": False}),
+            (
+                "Thinking + news (8 AM digest)",
+                {**base_kwargs, "paper_thinking": True, "with_news": True},
+            ),
+        ]
+        title = "--- LIVE $300 SIM: NO THINKING vs THINKING + NEWS ---"
+    else:
+        configs = [
+            ("Small account (no thinking)", {**base_kwargs, "paper_thinking": False}),
+            ("Small account (+ thinking tilts)", {**base_kwargs, "paper_thinking": True}),
+        ]
+        title = "--- LIVE SMALL-ACCOUNT + THINKING SIM ---"
 
+    print(title)
     print(
-        "--- LIVE SMALL-ACCOUNT + THINKING SIM "
-        f"(90% VTI base, 1% risk, ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max order, "
-        f"±{config.LIVE_THINKING_MAX_SLEEVE_DELTA:.0%} tilt cap) ---"
+        f"Profile: 90% VTI core | 1% risk/trade | ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max order | "
+        f"±{cap_pp:.0f}% sleeve cap | max 3 sleeves | daily loss breaker ON"
     )
     print(
         f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars) | start equity ${eq_start:,.0f}"
     )
-    print(
-        "Note: uses heuristic thinking proxy on regime change (same as paper backtest), "
-        "not live Ollama per bar."
-    )
-    print(f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
-    print("-" * 62)
+    if with_news:
+        print(
+            "News: synthetic 8 AM premarket digest per bar (theme + news_impact_score); "
+            "heuristic proxy (not Ollama per bar)."
+        )
+    else:
+        print(
+            "Note: uses heuristic thinking proxy on regime change (same as paper backtest), "
+            "not live Ollama per bar."
+        )
+    if with_news:
+        print(
+            f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'Tilts':>6} {'AvgTilt':>8} {'PostDD':>7}"
+        )
+        print("-" * 86)
+    else:
+        print(f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
+        print("-" * 62)
 
     baseline = None
     with_thinking = None
@@ -2582,13 +2787,28 @@ def run_simulate_live_thinking_compare(
             with_thinking = result
         else:
             baseline = result
-        print(
-            f"{label_cfg:<34} "
-            f"{result['total_return_pct']:>+7.2f}% "
-            f"{result['sharpe']:>7.2f} "
-            f"{result['max_drawdown_pct']:>7.2f}%"
-        )
-    print("-" * 62)
+        release_backtest_memory()
+        if with_news:
+            print(
+                f"{label_cfg:<32} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{_thinking_tilt_event_count(result):>6d} "
+                f"{_avg_tilt_magnitude(result):>7.3f} "
+                f"{_post_tilt_drawdown_pp(result):>6.2f}pp"
+            )
+        else:
+            print(
+                f"{label_cfg:<34} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}%"
+            )
+    if with_news:
+        print("-" * 86)
+    else:
+        print("-" * 62)
 
     if baseline and with_thinking:
         under = _equity_underperformance_stats(baseline, with_thinking)
@@ -2607,25 +2827,48 @@ def run_simulate_live_thinking_compare(
         print(
             f"Max VTI core cut on tilt refresh: {sim.get('max_vti_drop_pp', 0):.2f}pp | "
             f"tilt events: {sim.get('tilt_event_count', 0)} | "
+            f"avg tilt magnitude: {_avg_tilt_magnitude(with_thinking):.3f} | "
             f"max {post_dd:.2f}pp forward DD within 5d after a tilt"
         )
 
-        samples = _volatile_thinking_samples(with_thinking, max_samples=5)
-        if samples:
-            print("\nSample tilts during volatile periods:")
-            for ev in samples:
-                deltas = {
-                    k: round(v, 4)
-                    for k, v in (ev.get("deltas") or {}).items()
-                    if abs(v) > 0.001
-                }
-                print(
-                    f"  {ev.get('date')} | VIX {ev.get('vix')} | {ev.get('vol')} | "
-                    f"VTI {ev.get('vti_before', 0):.0%}->{ev.get('vti_after', 0):.0%}"
-                )
-                print(f"    {ev.get('narrative', '')[:120]}")
-                if deltas:
-                    print(f"    deltas: {deltas}")
+        if with_news:
+            samples = _high_impact_news_samples(with_thinking, max_samples=5)
+            if samples:
+                print("\nSample high-impact news reactions (news_impact_score >= 0.35):")
+                for ev in samples:
+                    deltas = {
+                        k: round(v, 4)
+                        for k, v in (ev.get("deltas") or {}).items()
+                        if abs(v) > 0.001
+                    }
+                    impact = float(ev.get("news_impact_score") or 0.0)
+                    print(
+                        f"  {ev.get('date')} | impact {impact:.2f} | VIX {ev.get('vix')} | "
+                        f"VTI {ev.get('vti_before', 0):.0%}->{ev.get('vti_after', 0):.0%}"
+                    )
+                    theme = str(ev.get("news_theme_summary") or "")[:100]
+                    if theme:
+                        print(f"    themes: {theme}")
+                    print(f"    {ev.get('narrative', '')[:120]}")
+                    if deltas:
+                        print(f"    deltas: {deltas}")
+        else:
+            samples = _volatile_thinking_samples(with_thinking, max_samples=5)
+            if samples:
+                print("\nSample tilts during volatile periods:")
+                for ev in samples:
+                    deltas = {
+                        k: round(v, 4)
+                        for k, v in (ev.get("deltas") or {}).items()
+                        if abs(v) > 0.001
+                    }
+                    print(
+                        f"  {ev.get('date')} | VIX {ev.get('vix')} | {ev.get('vol')} | "
+                        f"VTI {ev.get('vti_before', 0):.0%}->{ev.get('vti_after', 0):.0%}"
+                    )
+                    print(f"    {ev.get('narrative', '')[:120]}")
+                    if deltas:
+                        print(f"    deltas: {deltas}")
 
         print("\n--- Risk summary if enabled on live ~$300 ---")
         scale = 300.0 / eq_start if eq_start > 0 else 3.0
@@ -2636,6 +2879,38 @@ def run_simulate_live_thinking_compare(
             f"±{config.LIVE_THINKING_MAX_SLEEVE_DELTA:.0%} per sleeve (~±${300 * config.LIVE_THINKING_MAX_SLEEVE_DELTA:.0f} "
             f"notional shift on a single sleeve at full deploy)."
         )
+        if with_news:
+            print("\n--- Live $300 recommendation ---")
+            ret_delta = with_thinking["total_return_pct"] - baseline["total_return_pct"]
+            sharpe_delta = with_thinking["sharpe"] - baseline["sharpe"]
+            dd_delta = with_thinking["max_drawdown_pct"] - baseline["max_drawdown_pct"]
+            enable = (
+                sharpe_delta >= -0.05
+                and ret_delta >= -2.0
+                and worst_usd_300 >= -15.0
+            )
+            if enable and sharpe_delta > 0.05:
+                verdict = (
+                    "ENABLE Thinking + News on live $300 — news-aware tilts improve or match "
+                    "risk-adjusted returns with acceptable drag."
+                )
+            elif enable:
+                verdict = (
+                    "OPTIONAL — marginal benefit; keep news ON in paper, monitor 2 weeks before live."
+                )
+            else:
+                verdict = (
+                    "DO NOT enable on live $300 yet — news tilts hurt Sharpe/return or drag exceeds "
+                    "comfort on this 365d window. Keep paper-only scheduled news."
+                )
+            print(verdict)
+            print(
+                f"  Return {ret_delta:+.2f}pp | Sharpe {sharpe_delta:+.2f} | "
+                f"MaxDD {dd_delta:+.2f}pp | tilts {sim.get('tilt_event_count', 0)} | "
+                f"worst drag ~${worst_usd_300:.2f}"
+            )
+            return
+
         if with_thinking["max_drawdown_pct"] > baseline["max_drawdown_pct"]:
             print(
                 "In this window thinking slightly improved MaxDD — still heuristic-only; "
@@ -3295,15 +3570,21 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
 
 
 def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare static UNIVERSE vs exchange-agnostic dynamic screener (paper aggressive)."""
+    """Compare static UNIVERSE vs strict dynamic screener (paper aggressive)."""
     saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
     config.set_paper_aggressive_context(True)
     config.set_backtest_paper_sleeves_context(True)
 
     sim_days = days or config.BACKTEST_DAYS
+    from modules.dynamic_universe import screener_universe_meta
+
+    filters = (screener_universe_meta().get("filters") or {})
+    need_strict_file = filters.get("strict_mode") is not True
     screener = _prefetch_screener_for_backtest(
-        sim_days, refresh=refresh, use_max=use_max
+        sim_days, refresh=refresh or need_strict_file, use_max=use_max
     )
 
     if use_max:
@@ -3312,13 +3593,20 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
         data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
 
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
 
     if len(data) < MIN_HISTORY:
         print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
         return
 
     static_size = len(_static_equity_universe(data.columns))
+    saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
     dyn_size = len(_dynamic_equity_universe(data.columns))
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
     bench = _benchmark_return(data, MIN_HISTORY)
     base_kwargs = {
         "paper_aggressive": True,
@@ -3331,34 +3619,47 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
     configs = [
         (
             f"Static equity ({static_size} names)",
-            {**base_kwargs, "paper_dynamic_universe": False},
+            {**base_kwargs, "paper_dynamic_universe": False, "paper_dynamic_universe_strict": False},
         ),
         (
-            f"Dynamic screener ({dyn_size} names)",
-            {**base_kwargs, "paper_dynamic_universe": True},
+            f"Dynamic strict ({dyn_size} names)",
+            {
+                **base_kwargs,
+                "paper_dynamic_universe": True,
+                "paper_dynamic_universe_strict": True,
+            },
         ),
     ]
 
-    print("--- PAPER DYNAMIC UNIVERSE A/B (NYSE+NASDAQ, paper only) ---")
+    print("--- PAPER DYNAMIC UNIVERSE A/B (static vs strict screener, paper only) ---")
     print(
         f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
     )
     if bench is not None:
         print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    from modules.dynamic_universe import STRICT_MIN_AVG_DOLLAR_VOLUME
+
     print(
         f"Screener file: {len(screener)} tickers | "
-        f"static pool {static_size} | dynamic pool {dyn_size} | "
-        f"filter: price>$5, avg daily $vol>$50M"
+        f"static pool {static_size} | dynamic strict pool {dyn_size} | "
+        f"filters: 30d momentum rank, ${STRICT_MIN_AVG_DOLLAR_VOLUME/1e6:.0f}M $vol, "
+        f"sector cap, ETB-only (no short-interest feed)"
     )
     samples = _universe_sample_lines(data, screener)
     if samples:
         print("Sample dynamic names in backtest window:")
         for line in samples:
             print(line)
+    new_names = sorted(
+        set(screener) - set(config.UNIVERSE),
+        key=lambda t: screener.index(t) if t in screener else 999,
+    )
+    if new_names:
+        print(f"New vs static UNIVERSE: {', '.join(new_names[:16])}")
     print(
         f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
-        f"{'NYSE':>6} {'Pairs':>6} {'Univ':>5}"
+        f"{'Trades':>7} {'Univ':>5}"
     )
     print("-" * 82)
 
@@ -3371,8 +3672,7 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
             f"{result['total_return_pct']:>+7.2f}% "
             f"{result['sharpe']:>7.2f} "
             f"{result['max_drawdown_pct']:>7.2f}% "
-            f"{result.get('nyse_signals', 0):>6} "
-            f"{result.get('pairs_traded', 0):>6} "
+            f"{result.get('nyse_signals', 0):>7} "
             f"{result.get('equity_universe_size', 0):>5}"
         )
 
@@ -3381,12 +3681,11 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
         _, static_r = results[0]
         _, dyn_r = results[1]
         print(
-            f"Delta (dynamic - static): "
+            f"Delta (dynamic strict - static): "
             f"return {dyn_r['total_return_pct'] - static_r['total_return_pct']:+.2f}pp | "
             f"Sharpe {dyn_r['sharpe'] - static_r['sharpe']:+.2f} | "
             f"MaxDD {dyn_r['max_drawdown_pct'] - static_r['max_drawdown_pct']:+.2f}pp | "
-            f"NYSE signals {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d} | "
-            f"pairs {dyn_r.get('pairs_traded', 0) - static_r.get('pairs_traded', 0):+d}"
+            f"Trades {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d}"
         )
     print("-" * 82)
 
@@ -3833,7 +4132,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-dynamic-universe",
         action="store_true",
-        help="Compare static UNIVERSE vs dynamic NYSE+NASDAQ screener (paper aggressive)",
+        help="Compare static UNIVERSE vs strict dynamic screener (paper aggressive)",
     )
     parser.add_argument(
         "--compare-dynamic-vti",
@@ -3893,7 +4192,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--simulate-live-thinking",
         action="store_true",
-        help="Compare small-account live sim with vs without capped thinking tilts (±8%%)",
+        help="Compare small-account live sim with vs without capped thinking tilts (±6%%)",
+    )
+    parser.add_argument(
+        "--with-news",
+        action="store_true",
+        help=(
+            "With --simulate-live-thinking: compare no-thinking vs thinking+news "
+            "(synthetic 8 AM digest per bar)"
+        ),
+    )
+    parser.add_argument(
+        "--start-equity",
+        type=float,
+        default=None,
+        metavar="USD",
+        help="Starting equity for small-account / live-thinking sim (default: SMALL_ACCOUNT_BACKTEST_EQUITY or 300 with --with-news)",
     )
     parser.add_argument(
         "--compare-stat-arb",
@@ -3909,6 +4223,11 @@ if __name__ == "__main__":
         "--compare-crypto-v2",
         action="store_true",
         help="Compare stat-arb crypto vs dual-entry crypto v2 sleeve (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-crypto-universe",
+        action="store_true",
+        help="Compare base vs expanded Alpaca crypto universe (paper aggressive)",
     )
     parser.add_argument(
         "--compare-vti-levels",
@@ -4125,6 +4444,13 @@ if __name__ == "__main__":
         run_compare_crypto_v2(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_crypto_universe:
+        if not args.paper_aggressive:
+            print("--compare-crypto-universe requires --paper-aggressive")
+            sys.exit(1)
+        run_compare_crypto_universe(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
     elif args.compare_vti_levels:
         if not args.paper_aggressive:
             print("--compare-vti-levels requires --paper-aggressive")
@@ -4133,11 +4459,16 @@ if __name__ == "__main__":
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.simulate_live_thinking:
+        eq = args.start_equity
+        if eq is None and args.with_news:
+            eq = 300.0
         run_simulate_live_thinking_compare(
             days=args.days,
             refresh=args.refresh,
             use_max=args.max,
             vti_levels=args.vti_levels,
+            with_news=bool(args.with_news),
+            start_equity=eq,
         )
     elif args.compare_final:
         run_final_compare(

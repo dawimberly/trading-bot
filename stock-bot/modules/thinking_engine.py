@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -15,7 +16,7 @@ import threading
 
 import config
 from modules.safe_io import read_json_file, write_json_file
-from modules.logging_utils import log_event
+from modules.logging_utils import log_event, log_subsystem_error, log_subsystem_warning
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,85 @@ def _tilt_deltas_reasonable(deltas: dict[str, float]) -> tuple[bool, str]:
     return True, ""
 
 
+def _material_sleeve_count(deltas: dict[str, float]) -> int:
+    return len([v for v in deltas.values() if abs(float(v)) >= 0.005])
+
+
+def _thinking_tilt_apply_kwargs(equity: float | None = None) -> dict[str, Any]:
+    """Live-like kwargs for apply_thinking_tilt_to_caps (small account + ±6% cap)."""
+    kwargs: dict[str, Any] = {}
+    small = equity is not None and float(equity) < config.SMALL_ACCOUNT_EQUITY_THRESHOLD
+    live_book = not config.PAPER_TRADING and not config.paper_only_sleeves_active()
+    live_sim = config.live_thinking_sim_context()
+    if small or live_book or live_sim:
+        kwargs["allow_small_account"] = True
+        kwargs["max_sleeve_delta"] = config.LIVE_THINKING_MAX_SLEEVE_DELTA
+    return kwargs
+
+
+def _merge_caps_from_deltas(
+    base: dict[str, float],
+    cap_deltas: dict[str, float],
+) -> dict[str, float]:
+    merged = dict(base)
+    for key, delta in cap_deltas.items():
+        merged[key] = round(max(0.0, merged.get(key, 0.0) + delta), 6)
+
+    non_cash = sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer")
+    merged["cash_buffer"] = round(max(0.0, 1.0 - non_cash), 6)
+    if merged["cash_buffer"] < 0:
+        merged["cash_buffer"] = 0.0
+        scale = 1.0 / max(non_cash, 1e-9)
+        for key in _CAP_KEYS:
+            if key != "cash_buffer":
+                merged[key] = round(merged[key] * scale, 6)
+        merged["cash_buffer"] = round(
+            1.0 - sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer"), 6
+        )
+    return merged
+
+
+def _should_consolidate_news_deltas(
+    cap_deltas: dict[str, float],
+    market_summary: dict | None,
+    *,
+    live_like: bool = False,
+) -> bool:
+    """True when consolidation should run before the 3-sleeve safety guard."""
+    material_n = _material_sleeve_count(cap_deltas)
+    if material_n > THINKING_MAX_ACTIVE_SLEEVES:
+        return True
+    if not market_summary:
+        return False
+    has_news = bool(
+        market_summary.get("news_headlines")
+        or market_summary.get("news_digest")
+        or market_summary.get("news_theme_summary")
+    )
+    if not has_news:
+        return False
+    impact = _news_impact(market_summary)
+    if live_like or impact >= 0.15:
+        return True
+    return material_n > 1
+
+
+def _consolidate_news_deltas(
+    deltas: dict[str, float],
+    market_summary: dict | None,
+    *,
+    max_per_sleeve: float,
+) -> dict[str, float]:
+    """Merge news-driven multi-sleeve deltas to <=3 before safety guard."""
+    from modules.thinking_news import consolidate_news_deltas
+
+    return consolidate_news_deltas(
+        deltas,
+        market_summary,
+        max_per_sleeve=max_per_sleeve,
+    )
+
+
 _GEO_KEYWORDS = (
     "iran",
     "israel",
@@ -145,7 +225,23 @@ _AI_CYCLE_KEYWORDS = (
     "exhaustion",
 )
 
-_PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM optimizing to BEAT VTI on a risk-adjusted basis (Sharpe first, then return vs passive beta).
+_PM_SYSTEM_PROMPT: str | None = None
+_MACRO_SERIES_CACHE: dict[str, tuple[float, object]] = {}
+_MACRO_CACHE_TTL_SEC = 3600.0
+_MACRO_CACHE_MAX = 24
+_VALIDATION_RESULT_CACHE: dict[str, tuple[float, bool, tuple[str, ...]]] = {}
+_VALIDATION_CACHE_TTL_SEC = 600.0
+_VALIDATION_CACHE_MAX = 32
+_OLLAMA_RESPONSE_CACHE: dict[str, tuple[float, tuple[str, str]]] = {}
+_OLLAMA_CACHE_TTL_SEC = 1800.0
+_OLLAMA_CACHE_MAX = 4
+
+
+def _pm_system_prompt() -> str:
+    global _PM_SYSTEM_PROMPT
+    if _PM_SYSTEM_PROMPT is not None:
+        return _PM_SYSTEM_PROMPT
+    _PM_SYSTEM_PROMPT = """You are an elite asymmetric-risk hedge fund PM optimizing to BEAT VTI on a risk-adjusted basis (Sharpe first, then return vs passive beta).
 
 Primary objective: outperform buy-and-hold VTI without taking unnecessary drawdown. Every tilt must earn its risk budget.
 
@@ -200,6 +296,15 @@ TILT_RATIONALE: [Link asymmetry + sector/stat-arb/vol view to each sleeve >5%; m
 CONFIDENCE: 0.XX
 
 Do not explain your process. Start with NARRATIVE:"""
+    return _PM_SYSTEM_PROMPT
+
+
+def clear_thinking_runtime_caches() -> None:
+    """Drop in-process macro / validation / Ollama caches."""
+    global _MACRO_SERIES_CACHE, _VALIDATION_RESULT_CACHE, _OLLAMA_RESPONSE_CACHE
+    _MACRO_SERIES_CACHE.clear()
+    _VALIDATION_RESULT_CACHE.clear()
+    _OLLAMA_RESPONSE_CACHE.clear()
 
 _STRUCTURED_FIELD_RE = re.compile(
     r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
@@ -242,7 +347,18 @@ def _load_macro_close(col: str, cache: dict | None = None):
         if col not in cache:
             cache[col] = _load_daily_close(col)
         return cache[col]
-    return _load_daily_close(col)
+
+    now = time.monotonic()
+    hit = _MACRO_SERIES_CACHE.get(col)
+    if hit and now - hit[0] < _MACRO_CACHE_TTL_SEC:
+        return hit[1]
+
+    series = _load_daily_close(col)
+    if len(_MACRO_SERIES_CACHE) >= _MACRO_CACHE_MAX:
+        oldest = min(_MACRO_SERIES_CACHE, key=lambda k: _MACRO_SERIES_CACHE[k][0])
+        del _MACRO_SERIES_CACHE[oldest]
+    _MACRO_SERIES_CACHE[col] = (now, series)
+    return series
 
 
 def _yield_curve_summary(macro_cache: dict | None = None) -> str:
@@ -408,10 +524,13 @@ def build_market_summary(
     *,
     wisdom: dict | None = None,
     top_headline: str | None = None,
+    news_headlines: str | list | None = None,
+    news_slot: str | None = None,
     base_caps: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Assemble context for the PM-style reasoning prompt."""
     from modules.pipeline_strategies import _spy_market_up_signal
+    from modules.thinking_news import normalize_news_headlines
 
     macro_cache: dict = {}
     spy_sym = config.SPY_BOT_SYMBOL
@@ -442,7 +561,10 @@ def build_market_summary(
         macro_sentiment += f", price={price:+.2f}"
 
     headline = top_headline or (wisdom or {}).get("felix_video_title") or "n/a"
-    if headline == "n/a":
+    news_text = normalize_news_headlines(news_headlines)
+    if news_text:
+        headline = news_text.split("\n", 1)[0][:240]
+    elif headline == "n/a":
         try:
             from modules.web_sentiment_live import get_live_web_sentiment
 
@@ -461,6 +583,8 @@ def build_market_summary(
         "gold_change": _pct_change(gold_series) if not gold_series.empty else 0.0,
         "macro_sentiment": macro_sentiment,
         "top_headline": str(headline)[:240],
+        "news_headlines": news_text,
+        "news_slot": news_slot,
         "regime": regime,
         "bot_exposure": bot_exposure,
         "bot_exposure_str": _format_bot_exposure(caps),
@@ -473,6 +597,20 @@ def build_market_summary(
     summary["vol_overlay_regime"] = _vol_overlay_regime(summary)
     summary["stat_arb_regime"] = _stat_arb_regime(summary)
     summary["crowded_trade_warning"] = _crowded_trade_warning(summary)
+    if news_text:
+        from modules.thinking_news import analyze_news_headlines
+
+        news_analysis = analyze_news_headlines(
+            news_text,
+            ai_cycle_phase=str(summary.get("ai_cycle_phase") or ""),
+        )
+        summary["news_themes"] = news_analysis.get("themes")
+        summary["news_theme_summary"] = news_analysis.get("theme_summary")
+        summary["news_impact_score"] = news_analysis.get("news_impact_score")
+        summary["news_ai_tech_context"] = news_analysis.get("ai_tech_context")
+        summary["news_digest"] = news_analysis.get("digest_text")
+    else:
+        summary["news_impact_score"] = 0.0
     return summary
 
 
@@ -532,6 +670,59 @@ def _clamp_gold_in_tilt(
     return _normalize_tilt(out)
 
 
+def _news_theme_active(summary: dict, key: str) -> bool:
+    themes = summary.get("news_themes") or {}
+    block = themes.get(key) if isinstance(themes.get(key), dict) else {}
+    return bool(block.get("active"))
+
+
+def _news_impact(summary: dict) -> float:
+    return float(summary.get("news_impact_score") or 0.0)
+
+
+def _news_text_blob(summary: dict) -> str:
+    parts = [
+        summary.get("news_headlines"),
+        summary.get("news_theme_summary"),
+        summary.get("top_headline"),
+    ]
+    return " ".join(str(p or "") for p in parts).lower()
+
+
+def _apply_news_cap_deltas(deltas: dict[str, float], summary: dict, conf: float) -> None:
+    """Headline themes scaled by news_impact_score (0-1)."""
+    impact = _news_impact(summary)
+    if impact < 0.25:
+        return
+    scale = impact * conf
+    geo = _news_theme_active(summary, "geopolitics")
+    energy = _news_theme_active(summary, "sector_energy")
+    liq = _news_theme_active(summary, "liquidity")
+    policy = _news_theme_active(summary, "policy")
+    tech = _news_theme_active(summary, "sector_tech")
+    phase = str(summary.get("ai_cycle_phase") or "")
+
+    if geo or energy:
+        deltas["nyse"] += 0.05 * scale
+        deltas["spy"] -= 0.03 * scale
+        if float(summary.get("gold_change") or 0.0) >= 0.0:
+            deltas["metal"] += 0.02 * scale
+    if liq and policy and geo:
+        deltas["vti_core"] += 0.03 * scale
+        deltas["cash_buffer"] += 0.02 * scale
+    elif liq and policy and not geo:
+        deltas["vti_core"] += 0.03 * scale
+        deltas["cash_buffer"] -= 0.02 * scale
+    if tech and ("mid-cycle" in phase or "ai" in phase.lower()):
+        if policy and geo:
+            deltas["vti_core"] += 0.03 * scale
+            deltas["cash_buffer"] += 0.02 * scale
+            deltas["spy"] -= 0.02 * scale
+        elif policy and not geo:
+            deltas["spy"] += 0.02 * scale
+            deltas["vti_core"] -= 0.02 * scale
+
+
 def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]:
     """Direct sleeve cap deltas from macro signals (matches PM tilt intent)."""
     deltas = {k: 0.0 for k in _CAP_KEYS}
@@ -540,8 +731,8 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
     gold = float(summary.get("gold_change") or 0.0)
     vix = summary.get("vix")
     vix_f = float(vix) if vix not in (None, "n/a") else 18.0
-    headline = str(summary.get("top_headline", "")).lower()
-    geo = any(k in headline for k in _GEO_KEYWORDS)
+    headline = _news_text_blob(summary) or str(summary.get("top_headline", "")).lower()
+    geo = any(k in headline for k in _GEO_KEYWORDS) or _news_theme_active(summary, "geopolitics")
 
     if oil >= 4.0 or (geo and oil > 0):
         deltas["nyse"] += 0.08 * conf
@@ -606,6 +797,8 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
             deltas["spy"] += 0.04 * conf
             deltas["vti_core"] -= 0.03 * conf
 
+    _apply_news_cap_deltas(deltas, summary, conf)
+
     max_delta = config.effective_thinking_max_sleeve_delta()
     return {k: round(max(-max_delta, min(max_delta, v)), 6) for k, v in deltas.items()}
 
@@ -654,6 +847,19 @@ def compute_cap_deltas(
 def _infer_asymmetry(summary: dict | None) -> str:
     if not summary:
         return "Macro reassessment — wait for clearer edge"
+    impact = _news_impact(summary)
+    if impact >= 0.4:
+        geo = _news_theme_active(summary, "geopolitics")
+        liq = _news_theme_active(summary, "liquidity")
+        tech = _news_theme_active(summary, "sector_tech")
+        if geo and liq:
+            return (
+                "Oil supply shock meets policy liquidity rhetoric — crowd split on risk-on vs hedges"
+            )
+        if geo and tech:
+            return (
+                "AI beta still crowded while geopolitical headlines rise — asymmetric de-risk vs chase"
+            )
     oil = float(summary.get("oil_change") or 0.0)
     gold = float(summary.get("gold_change") or 0.0)
     vix = summary.get("vix")
@@ -699,6 +905,11 @@ def _infer_tilt_rationale(
     alloc = "; ".join(parts) if parts else "balanced"
     if asymmetry:
         return f"Asymmetry ({asymmetry[:100]}) -> {alloc}"
+    impact = _news_impact(summary) if summary else 0.0
+    if impact >= 0.25 and summary:
+        theme = str(summary.get("news_theme_summary") or "")[:100]
+        narrative = _infer_narrative(summary)
+        return f"news_impact={impact:.2f} | {theme} | {narrative} -> {alloc}"
     narrative = _infer_narrative(summary)
     return f"{narrative} -> {alloc}"
 
@@ -763,7 +974,7 @@ def _thinking_decision_id(regime: str, tilt: dict[str, float]) -> str:
 
 def get_pm_system_prompt() -> str:
     """Return the production PM system prompt (for docs/tests)."""
-    return _PM_SYSTEM_PROMPT
+    return _pm_system_prompt()
 
 
 def get_thinking_status_snapshot() -> dict[str, object]:
@@ -787,6 +998,125 @@ def get_thinking_status_snapshot() -> dict[str, object]:
         "approved": approved,
         "has_approval_file": bool(approval),
     }
+
+
+def format_recommended_tilt(tilt: dict | None) -> str:
+    """One-line summary of suggested_tilt weights."""
+    if not tilt:
+        return "n/a"
+    items = sorted((tilt or {}).items(), key=lambda kv: float(kv[1]), reverse=True)
+    return " | ".join(f"{k} {float(v):.0%}" for k, v in items[:6])
+
+
+def evaluate_live_apply_status(
+    thinking_result: dict | None = None,
+    *,
+    equity: float | None = None,
+) -> dict[str, object]:
+    """Preview whether the latest decision would apply on live under production safety rules."""
+    cached = dict(thinking_result or read_json_file(OUTPUT_FILE) or {})
+    conf_raw = cached.get("confidence")
+    conf = float(conf_raw) if conf_raw is not None else None
+    val_score = cached.get("validation_score")
+
+    if config.thinking_manual_approval_required():
+        if cached and is_thinking_tilt_approved(cached):
+            approval_status = "APPROVED"
+        elif cached.get("decision_id"):
+            approval_status = f"PENDING (decision {cached.get('decision_id')})"
+        else:
+            approval_status = "PENDING (no decision_id)"
+    else:
+        approval_status = "Not required"
+
+    out: dict[str, object] = {
+        "timestamp": cached.get("timestamp"),
+        "regime": cached.get("regime"),
+        "narrative": str(cached.get("narrative") or "n/a").strip() or "n/a",
+        "asymmetry": str(cached.get("asymmetry") or "n/a").strip() or "n/a",
+        "recommended_tilt": format_recommended_tilt(cached.get("suggested_tilt")),
+        "confidence": conf,
+        "confidence_pct": f"{conf:.0%}" if conf is not None else "n/a",
+        "validation_score": val_score,
+        "validation_label": str(val_score) if val_score is not None else "n/a",
+        "approval_status": approval_status,
+        "news_slot": cached.get("news_slot"),
+        "news_summary": cached.get("news_summary"),
+        "news_impact_score": cached.get("news_impact_score"),
+        "would_apply": False,
+        "would_apply_label": "No",
+        "block_reason": "",
+    }
+
+    if not cached.get("timestamp"):
+        out["block_reason"] = "No thinking_engine_last.json decision yet"
+        return out
+
+    blockers: list[str] = []
+
+    live_book = not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING
+    if live_book or (not config.PAPER_TRADING and not config.paper_only_sleeves_active()):
+        blockers.append("thinking engine disabled on live profile (locked off)")
+
+    tripped, trip_reason = thinking_daily_loss_tripped(equity)
+    if tripped:
+        blockers.append(trip_reason)
+
+    if config.thinking_manual_approval_required() and not is_thinking_tilt_approved(cached):
+        blockers.append("manual approval required")
+
+    narrative = str(cached.get("narrative") or "").strip()
+    asymmetry = str(cached.get("asymmetry") or "").strip()
+    min_conf = 0.60 if asymmetry else 0.65
+    narrative_ok = (
+        len(narrative) >= 15
+        and (
+            (conf or 0) >= 0.75
+            or bool(asymmetry)
+            or (len(narrative) >= 20 and "range-bound" not in narrative.lower())
+        )
+    )
+    if conf is None or conf < min_conf or not narrative_ok:
+        blockers.append("insufficient confidence or weak narrative")
+
+    if cached.get("validation_ok") is False and not cached.get("validation_recovered"):
+        errs = cached.get("validation_errors") or []
+        detail = f": {errs[0]}" if errs else ""
+        blockers.append(f"validation failed{detail}")
+
+    base_caps = dict(config.fund_allocation_pct())
+    if equity is not None:
+        if float(equity) < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
+            base_caps["vti_core"] = config.SMALL_ACCOUNT_VTI_CORE_PCT
+        else:
+            base_caps["vti_core"] = config.vti_core_allocation_pct(float(equity))
+
+    _merged, deltas, log_line = apply_thinking_tilt_to_caps(
+        base_caps,
+        cached.get("suggested_tilt") or {},
+        confidence=float(conf or 0.65),
+        market_summary=cached.get("market_summary"),
+        equity=equity,
+        max_sleeve_delta=config.LIVE_THINKING_MAX_SLEEVE_DELTA,
+        allow_small_account=True,
+    )
+    material = {k: v for k, v in deltas.items() if abs(float(v)) >= 0.001}
+    if not material:
+        if log_line:
+            blockers.append(log_line.replace("Thinking blocked: ", "").strip())
+        else:
+            blockers.append("tilt produced no material cap change")
+
+    if blockers:
+        out["would_apply"] = False
+        out["would_apply_label"] = "No"
+        out["block_reason"] = blockers[0] if len(blockers) == 1 else "; ".join(blockers[:4])
+    else:
+        out["would_apply"] = True
+        out["would_apply_label"] = "Yes"
+        out["block_reason"] = "Passes all live safety checks"
+
+    return out
 
 
 def _load_previous_tilt_full() -> dict | None:
@@ -893,11 +1223,41 @@ def _compute_validation_score(errors: list[str], result: dict[str, Any]) -> int:
     return max(0, min(100, base + bonus // 2))
 
 
+def _validation_cache_key(result: dict[str, Any], market_summary: dict) -> str:
+    prev = _load_previous_tilt()
+    payload = {
+        "tilt": result.get("suggested_tilt"),
+        "narrative": result.get("narrative"),
+        "asymmetry": result.get("asymmetry"),
+        "conf": result.get("confidence"),
+        "gold_chg": market_summary.get("gold_change"),
+        "vix_trend": market_summary.get("vix_trend"),
+        "regime": market_summary.get("regime"),
+        "prev": prev,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()
+    ).hexdigest()[:20]
+
+
+def _store_validation_cache(key: str, valid: bool, errors: list[str]) -> None:
+    if len(_VALIDATION_RESULT_CACHE) >= _VALIDATION_CACHE_MAX:
+        oldest = min(_VALIDATION_RESULT_CACHE, key=lambda k: _VALIDATION_RESULT_CACHE[k][0])
+        del _VALIDATION_RESULT_CACHE[oldest]
+    _VALIDATION_RESULT_CACHE[key] = (time.monotonic(), valid, tuple(errors))
+
+
 def _validate_thinking_quality(
     result: dict[str, Any],
     market_summary: dict,
 ) -> tuple[bool, list[str]]:
     """Post-process validator — reject contradictory or low-quality tilts."""
+    cache_key = _validation_cache_key(result, market_summary)
+    now = time.monotonic()
+    cached = _VALIDATION_RESULT_CACHE.get(cache_key)
+    if cached and now - cached[0] < _VALIDATION_CACHE_TTL_SEC:
+        return cached[1], list(cached[2])
+
     errors: list[str] = []
     tilt = dict(result.get("suggested_tilt") or {})
     narrative = str(result.get("narrative") or "").lower()
@@ -985,7 +1345,9 @@ def _validate_thinking_quality(
         if asym_snip and asym_snip not in rationale.lower() and "asymmetry" not in rationale.lower():
             errors.append("TILT_RATIONALE not linked to ASYMMETRY")
 
-    return len(errors) == 0, errors
+    valid = len(errors) == 0
+    _store_validation_cache(cache_key, valid, errors)
+    return valid, errors
 
 
 def thinking_daily_loss_tripped(equity: float | None) -> tuple[bool, str]:
@@ -1113,7 +1475,10 @@ def _finalize_thinking_result(
     out["validation_errors"] = val_errors
     out["validation_score"] = _compute_validation_score(val_errors, out)
     if not valid:
-        logger.info("Thinking validation failed: %s", "; ".join(val_errors))
+        log_subsystem_warning(
+            "thinking_engine",
+            "Thinking validation failed: " + "; ".join(val_errors),
+        )
         safe_tilt = derive_heuristic_tilt(market_summary)
         out["suggested_tilt"] = _clamp_gold_in_tilt(
             market_summary, safe_tilt, str(out.get("asymmetry") or "")
@@ -1126,16 +1491,50 @@ def _finalize_thinking_result(
     return out
 
 
+def _infer_narrative_from_news(summary: dict) -> str:
+    impact = _news_impact(summary)
+    if impact < 0.35:
+        return ""
+    themes = summary.get("news_themes") or {}
+    phase = str(summary.get("ai_cycle_phase") or "")
+    geo = _news_theme_active(summary, "geopolitics")
+    liq = _news_theme_active(summary, "liquidity")
+    policy = _news_theme_active(summary, "policy")
+    energy = _news_theme_active(summary, "sector_energy")
+    tech = _news_theme_active(summary, "sector_tech")
+
+    if geo and (liq or policy):
+        return (
+            "Policy liquidity push into a geopolitical oil shock — barbell VTI/cash with energy overlay, trim beta"
+        )
+    if geo and energy:
+        return "Middle East supply risk dominates — energy up, AI beta vulnerable until vol clears"
+    if policy and tech and ("mid-cycle" in phase or "ai" in phase.lower()):
+        return (
+            "Policy/tariff headlines whipsaw AI boom — stay long winners but cut crowded beta size"
+        )
+    if liq and not geo:
+        return "Liquidity-friendly policy headline — modest risk-on but respect VTI core"
+    if geo:
+        return "Geopolitical headline risk — raise cash/VTI, add energy/metal hedges"
+    return ""
+
+
 def _infer_narrative(summary: dict | None) -> str:
     if not summary:
         return "Macro reassessment"
-    headline = str(summary.get("top_headline", "")).lower()
+    news_narrative = _infer_narrative_from_news(summary)
+    if news_narrative:
+        return news_narrative
+    headline = _news_text_blob(summary) or str(summary.get("top_headline", "")).lower()
     oil = float(summary.get("oil_change") or 0.0)
     gold = float(summary.get("gold_change") or 0.0)
     vix = summary.get("vix")
     vix_f = float(vix) if vix not in (None, "n/a") else 0.0
     if any(k in headline for k in _GEO_KEYWORDS):
         return "Geopolitical tension / Middle East risk"
+    if "flood" in headline and "market" in headline:
+        return "Policy liquidity headline — reassess risk-on vs supply shock"
     if oil >= config.MACRO_OIL_SURGE_PCT * 100 * 0.5:
         return "Oil shock / energy stress"
     if gold >= config.MACRO_GLD_SURGE_PCT * 100:
@@ -1196,26 +1595,53 @@ def apply_thinking_tilt_to_caps(
             else config.effective_thinking_max_sleeve_delta()
         ),
     )
-
-    merged = dict(base)
-    for key, delta in cap_deltas.items():
-        merged[key] = round(max(0.0, merged.get(key, 0.0) + delta), 6)
-
-    non_cash = sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer")
-    merged["cash_buffer"] = round(max(0.0, 1.0 - non_cash), 6)
-    if merged["cash_buffer"] < 0:
-        merged["cash_buffer"] = 0.0
-        scale = 1.0 / max(non_cash, 1e-9)
-        for key in _CAP_KEYS:
-            if key != "cash_buffer":
-                merged[key] = round(merged[key] * scale, 6)
-        merged["cash_buffer"] = round(
-            1.0 - sum(merged[k] for k in _CAP_KEYS if k != "cash_buffer"), 6
+    max_delta = (
+        float(max_sleeve_delta)
+        if max_sleeve_delta is not None
+        else config.effective_thinking_max_sleeve_delta()
+    )
+    if _should_consolidate_news_deltas(
+        cap_deltas,
+        market_summary,
+        live_like=allow_small_account or max_sleeve_delta is not None,
+    ):
+        before = dict(cap_deltas)
+        cap_deltas = _consolidate_news_deltas(
+            cap_deltas,
+            market_summary,
+            max_per_sleeve=max_delta,
         )
+        if cap_deltas != before:
+            _audit_thinking(
+                "news_deltas_consolidated",
+                news_impact_score=_news_impact(market_summary),
+                before={k: round(v, 4) for k, v in before.items() if abs(v) > 0.001},
+                after={k: round(v, 4) for k, v in cap_deltas.items() if abs(v) > 0.001},
+            )
+
+    merged = _merge_caps_from_deltas(base, cap_deltas)
 
     actual_deltas = {
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
+    if _material_sleeve_count(actual_deltas) > THINKING_MAX_ACTIVE_SLEEVES:
+        before_act = dict(actual_deltas)
+        actual_deltas = _consolidate_news_deltas(
+            actual_deltas,
+            market_summary,
+            max_per_sleeve=max_delta,
+        )
+        merged = _merge_caps_from_deltas(base, actual_deltas)
+        actual_deltas = {
+            k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
+        }
+        if actual_deltas != before_act:
+            _audit_thinking(
+                "post_merge_deltas_consolidated",
+                news_impact_score=_news_impact(market_summary) if market_summary else 0.0,
+                before={k: round(v, 4) for k, v in before_act.items() if abs(v) > 0.001},
+                after={k: round(v, 4) for k, v in actual_deltas.items() if abs(v) > 0.001},
+            )
     ok, reason = _tilt_deltas_reasonable(actual_deltas)
     if not ok:
         logger.info("Thinking engine: tilt rejected (%s)", reason)
@@ -1241,6 +1667,7 @@ def apply_thinking_to_sleeve_caps(
         confidence=float(thinking_result.get("confidence", 0.65)),
         market_summary=thinking_result.get("market_summary"),
         equity=equity,
+        **_thinking_tilt_apply_kwargs(equity),
     )
 
 
@@ -1291,6 +1718,11 @@ def derive_heuristic_tilt(summary: dict) -> dict[str, float]:
         tilt["spy"] -= 0.03
     if deltas.get("vti_core", 0) > 0.02:
         tilt["vti"] += 0.04
+    if _news_impact(summary) >= 0.35:
+        tilt["cash"] += 0.02
+        if _news_theme_active(summary, "geopolitics"):
+            tilt["energy"] += 0.03
+            tilt["spy"] = max(0.06, float(tilt.get("spy", 0.0)) - 0.03)
     return _normalize_tilt(tilt)
 
 
@@ -1299,14 +1731,25 @@ def build_backtest_thinking_result(
     regime: str,
     vol: str,
     *,
+    news_headlines: str | list | None = None,
+    news_slot: str | None = None,
     force_decision: bool = True,
 ) -> dict:
     """Decisive thinking proxy for historical backtests (always produces a tilt)."""
-    summary = build_market_summary(data, regime, vol)
+    summary = build_market_summary(
+        data,
+        regime,
+        vol,
+        news_headlines=news_headlines,
+        news_slot=news_slot,
+    )
     tilt = derive_heuristic_tilt(summary)
     narrative = _infer_narrative(summary)
     asymmetry = _infer_asymmetry(summary)
+    news_impact = _news_impact(summary)
     conf = 0.78 if force_decision else 0.70
+    if news_impact >= 0.35:
+        conf = round(min(0.88, conf + 0.10 * news_impact), 2)
     base = {
         "reasoning": f"Force-decision proxy: {narrative}",
         "narrative": narrative,
@@ -1327,6 +1770,7 @@ def build_backtest_thinking_result(
         "source": "force_decision",
         "market_summary": summary,
         "tilt_rationale": _infer_tilt_rationale(summary, tilt, asymmetry),
+        "news_impact_score": news_impact,
     }
     return _finalize_thinking_result(base, summary, force_decision=force_decision)
 
@@ -1367,6 +1811,8 @@ def build_heuristic_reasoning_result(
     reason: str = "heuristic-fallback",
 ) -> dict[str, Any]:
     """Rule-based tilt when Ollama is unavailable or all LLM attempts fail."""
+    news_impact = _news_impact(market_summary)
+    confidence = round(min(0.88, 0.70 + 0.18 * news_impact), 2) if news_impact >= 0.35 else 0.70
     base = {
         "reasoning": f"Rule-based fallback ({reason}): {_infer_narrative(market_summary)}",
         "narrative": _infer_narrative(market_summary),
@@ -1375,16 +1821,23 @@ def build_heuristic_reasoning_result(
         "opportunities": [],
         "justification": reason,
         "suggested_tilt": derive_heuristic_tilt(market_summary),
-        "confidence": 0.70,
+        "confidence": confidence,
         "model": reason,
         "source": "heuristic",
         "parse_quality": 0.0,
         "market_summary": market_summary,
+        "news_impact_score": news_impact,
     }
     return _finalize_thinking_result(base, market_summary, force_decision=True)
 
 
-def _record_thinking_run(regime: str, result: dict) -> None:
+def _record_thinking_run(
+    regime: str,
+    result: dict,
+    *,
+    news_summary: str | None = None,
+    news_slot: str | None = None,
+) -> None:
     now = datetime.datetime.now().isoformat()
     write_json_file(
         STATE_FILE,
@@ -1394,19 +1847,27 @@ def _record_thinking_run(regime: str, result: dict) -> None:
             "last_run_at": now,
             "model": result.get("model", config.OLLAMA_MODEL),
             "source": result.get("source", "llm"),
+            "last_news_slot": news_slot,
         },
     )
     persist_thinking_last(result, regime=regime)
-    _audit_thinking(
-        "reasoning_complete",
-        regime=regime,
-        source=result.get("source"),
-        model=result.get("model"),
-        confidence=result.get("confidence"),
-        validation_ok=result.get("validation_ok"),
-        validation_score=result.get("validation_score"),
-        narrative=(str(result.get("narrative") or "")[:160]),
-    )
+    audit_fields: dict[str, Any] = {
+        "regime": regime,
+        "source": result.get("source"),
+        "model": result.get("model"),
+        "confidence": result.get("confidence"),
+        "validation_ok": result.get("validation_ok"),
+        "validation_score": result.get("validation_score"),
+        "narrative": (str(result.get("narrative") or "")[:160]),
+        "suggested_tilt": result.get("suggested_tilt"),
+    }
+    if news_slot:
+        audit_fields["news_slot"] = news_slot
+    if news_summary:
+        audit_fields["news_summary"] = news_summary[:800]
+    if result.get("news_impact_score") is not None:
+        audit_fields["news_impact_score"] = result.get("news_impact_score")
+    _audit_thinking("reasoning_complete", **audit_fields)
 
 
 def ollama_available() -> bool:
@@ -1480,6 +1941,13 @@ def _ollama_generate(
 ) -> tuple[str, str]:
     """Return (full_text_for_logs, answer_text_for_parsing)."""
     model = model or config.OLLAMA_MODEL
+    cache_payload = f"{model}\0{system or ''}\0{prompt}"
+    cache_key = hashlib.sha256(cache_payload.encode()).hexdigest()[:24]
+    now = time.monotonic()
+    cached = _OLLAMA_RESPONSE_CACHE.get(cache_key)
+    if cached and now - cached[0] < _OLLAMA_CACHE_TTL_SEC:
+        return cached[1]
+
     body: dict[str, Any] = {
         "model": model,
         "prompt": prompt,
@@ -1517,6 +1985,10 @@ def _ollama_generate(
         parse_text = thinking
     else:
         raise RuntimeError("Ollama returned empty response")
+    if len(_OLLAMA_RESPONSE_CACHE) >= _OLLAMA_CACHE_MAX:
+        oldest = min(_OLLAMA_RESPONSE_CACHE, key=lambda k: _OLLAMA_RESPONSE_CACHE[k][0])
+        del _OLLAMA_RESPONSE_CACHE[oldest]
+    _OLLAMA_RESPONSE_CACHE[cache_key] = (time.monotonic(), (full, parse_text))
     return full, parse_text
 
 
@@ -1872,6 +2344,11 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
         if "rising" in vix_trend.lower()
         else f"VIX trend: {vix_trend}"
     )
+    news_text = str(
+        market_summary.get("news_digest") or market_summary.get("news_headlines") or ""
+    )
+    if len(news_text) > 1200:
+        news_text = news_text[:1200] + "\n...(truncated for prompt size)"
 
     return f"""Current market snapshot:
 
@@ -1892,6 +2369,31 @@ Yield curve / rates: {market_summary.get('yield_curve', 'n/a')}
 Regime: {market_summary.get('regime', 'unknown')}
 Macro sentiment: {market_summary['macro_sentiment']}
 Top headline: {market_summary['top_headline']}
+{(
+    "Scheduled news digest ("
+    + str(market_summary.get("news_slot") or "scheduled")
+    + "):\n"
+    + news_text
+    + "\nUse news_impact_score="
+    + f"{float(market_summary.get('news_impact_score') or 0.0):.2f}"
+    + " to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
+    + (
+        "HIGH-IMPACT NEWS: move at most 3 sleeves vs prior day (strict live cap). "
+        "Rank by conviction: keep VTI/cash barbell, SPY liquidity, NYSE energy as custodians; "
+        "merge smaller sleeve nudges into those three (e.g. gold->cash, crypto->SPY, metal->cash).\n"
+        if float(market_summary.get("news_impact_score") or 0.0) >= 0.35
+        else (
+            "When news_impact_score >= 0.25, prefer <=3 sleeve moves — consolidate minor tilts.\n"
+            if float(market_summary.get("news_impact_score") or 0.0) >= 0.25
+            else ""
+        )
+    )
+    + "AI/tech boom context: "
+    + str(market_summary.get("news_ai_tech_context") or market_summary.get("ai_cycle_phase", "n/a"))
+    + "\n"
+    if market_summary.get("news_headlines")
+    else ""
+)}
 Bot exposure: {market_summary.get('bot_exposure_str', 'n/a')}
 
 Previous day tilt: {prev_line}
@@ -1900,6 +2402,7 @@ Previous day tilt: {prev_line}
 {gold_note}
 Maintain consistency with previous day unless strong new evidence (VIX spike, trend break, headline, sector rotation).
 Hard production cap: +/-{config.effective_thinking_max_sleeve_delta():.0%} per sleeve vs prior day without new evidence.
+Max 3 sleeves may move per refresh (strict on live); when news_impact_score >= 0.35 prefer exactly 3 custodian sleeves: VTI/cash barbell, SPY liquidity, or NYSE energy.
 When vol overlay is elevated, trim SPY/NYSE — do not stack beta on top of vol sleeve.
 When stat arb is supportive, modest crypto tilt OK; when hostile, raise VTI/cash.
 Use decimal weights in RECOMMENDED_TILT (e.g. 0.52 not "52%"); weights must sum to ~1.0.
@@ -1946,7 +2449,9 @@ def _llm_parse_quality(
 def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[str, Any]:
     """Single Ollama attempt; raises on transport/empty response."""
     user_prompt = _build_reasoning_user_prompt(market_summary)
-    full_text, answer_text = _ollama_generate(user_prompt, system=_PM_SYSTEM_PROMPT, model=model)
+    full_text, answer_text = _ollama_generate(
+        user_prompt, system=_pm_system_prompt(), model=model
+    )
     structured = _best_structured_parse(full_text, answer_text)
     parse_chunks = _structured_parse_candidates(full_text, answer_text)
     for chunk in parse_chunks:
@@ -2062,8 +2567,11 @@ def get_market_reasoning(
     for idx, candidate in enumerate(candidates):
         try:
             result = _get_market_reasoning_with_model(market_summary, candidate)
-        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
             errors.append(f"{candidate}: {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
             continue
         quality = float(result.get("parse_quality") or 0.0)
         if best is None or quality > float(best.get("parse_quality") or 0.0):
@@ -2081,6 +2589,8 @@ def get_market_reasoning(
         return best
 
     reason = "; ".join(errors) if errors else "no-models"
+    if errors:
+        clear_thinking_runtime_caches()
     result = build_heuristic_reasoning_result(market_summary, reason=reason)
     persist_thinking_last(result, regime=market_summary.get("regime"))
     return result
@@ -2257,6 +2767,99 @@ def build_demo_reasoning_samples() -> list[dict[str, Any]]:
     return scenarios
 
 
+def run_thinking_with_news(
+    data,
+    regime: str,
+    vol: str,
+    wisdom: dict | None = None,
+    *,
+    news_headlines: str | list,
+    slot: str | None = None,
+    news_digest: dict | None = None,
+    background: bool = False,
+) -> dict | None:
+    """Forced thinking refresh with scheduled news digest (paper only)."""
+    if not config.effective_thinking_engine_enabled():
+        return None
+    from modules.thinking_news import format_news_digest, format_news_summary, normalize_news_headlines
+
+    news_text = normalize_news_headlines(news_headlines)
+    if news_digest:
+        news_summary = format_news_digest(news_digest)
+        news_impact = float(news_digest.get("news_impact_score") or 0.0)
+    else:
+        news_summary = format_news_summary(news_text, slot=slot)
+        news_impact = 0.0
+    logger.info(
+        "Thinking engine: scheduled news run slot=%s headlines=%d impact=%.2f",
+        slot or "manual",
+        len(news_text.splitlines()) if news_text else 0,
+        news_impact,
+    )
+    _audit_thinking(
+        "scheduled_news_start",
+        news_slot=slot,
+        news_summary=news_summary[:800],
+        news_impact_score=news_impact,
+    )
+
+    summary = build_market_summary(
+        data,
+        regime,
+        vol,
+        wisdom=wisdom,
+        news_headlines=news_text,
+        news_slot=slot,
+    )
+
+    def _execute() -> dict:
+        if ollama_available():
+            try:
+                result = get_market_reasoning(summary)
+            except Exception as exc:
+                log_subsystem_error(
+                    "thinking_engine",
+                    "Scheduled news LLM failed; heuristic fallback",
+                    exc,
+                )
+                result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-llm-error")
+        else:
+            result = build_heuristic_reasoning_result(summary, reason=f"news-{slot or 'manual'}-no-ollama")
+        result["news_slot"] = slot
+        result["news_summary"] = news_summary
+        result["news_impact_score"] = float(
+            news_digest.get("news_impact_score") if news_digest else summary.get("news_impact_score") or 0.0
+        )
+        _record_thinking_run(
+            regime,
+            result,
+            news_summary=news_summary,
+            news_slot=slot,
+        )
+        log_thinking_result(result)
+        _audit_thinking(
+            "scheduled_news_complete",
+            news_slot=slot,
+            source=result.get("source"),
+            confidence=result.get("confidence"),
+            narrative=(str(result.get("narrative") or "")[:160]),
+            suggested_tilt=result.get("suggested_tilt"),
+            news_impact_score=result.get("news_impact_score"),
+        )
+        return result
+
+    if background:
+        threading.Thread(
+            target=_execute,
+            name=f"thinking-news-sync-{slot or 'manual'}",
+            daemon=True,
+        ).start()
+        cached = read_json_file(OUTPUT_FILE)
+        return cached
+
+    return _execute()
+
+
 def maybe_run_thinking(
     data,
     regime: str,
@@ -2264,6 +2867,8 @@ def maybe_run_thinking(
     wisdom: dict | None = None,
     *,
     top_headline: str | None = None,
+    news_headlines: str | list | None = None,
+    news_slot: str | None = None,
     force: bool = False,
 ) -> dict | None:
     """Paper-only hook: run LLM reasoning at most once per THINKING_CACHE_HOURS or on regime change."""
@@ -2275,7 +2880,13 @@ def maybe_run_thinking(
             return cached
         return None
     summary = build_market_summary(
-        data, regime, vol, wisdom=wisdom, top_headline=top_headline
+        data,
+        regime,
+        vol,
+        wisdom=wisdom,
+        top_headline=top_headline,
+        news_headlines=news_headlines,
+        news_slot=news_slot,
     )
     if not ollama_available():
         logger.info("Thinking engine: Ollama not reachable, using rule-based tilt")
@@ -2286,8 +2897,12 @@ def maybe_run_thinking(
     if force:
         try:
             result = get_market_reasoning(summary)
-        except Exception:
-            logger.exception("Thinking engine: LLM failed during forced run; falling back to heuristic")
+        except Exception as exc:
+            log_subsystem_error(
+                "thinking_engine",
+                "LLM failed during forced run; falling back to heuristic",
+                exc,
+            )
             result = build_heuristic_reasoning_result(summary, reason="llm-error-forced")
         if result.get("source") == "heuristic":
             logger.info("Thinking engine: heuristic fallback (%s)", result.get("model"))
@@ -2317,8 +2932,12 @@ def maybe_run_thinking(
                 source=res.get("source"),
                 confidence=res.get("confidence"),
             )
-        except Exception:
-            logger.exception("Thinking engine background refresh failed")
+        except Exception as exc:
+            log_subsystem_error(
+                "thinking_engine",
+                "Background refresh failed",
+                exc,
+            )
             cached_err = read_json_file(OUTPUT_FILE)
             if cached_err:
                 logger.info("Thinking engine: kept last cached snapshot after refresh failure")

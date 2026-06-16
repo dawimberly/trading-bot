@@ -56,6 +56,8 @@ def test_build_matchup_style_features():
         "age", "height_in", "reach_in", "win_rate", "last5_win_rate", "momentum",
         "control_time_per_min", "elo", "days_since_last_fight", "fight_count",
         "striker_score", "grappler_score",
+        "similar_opp_win_rate", "short_notice_flag", "long_layoff_flag",
+        "short_notice_win_rate", "long_layoff_win_rate",
     ):
         f1.setdefault(k, 0.5)
         f2.setdefault(k, 0.4)
@@ -103,3 +105,7 @@ def test_ensemble_disagreement():
 def test_config_includes_style_features():
     assert "striker_vs_grappler" in config.FEATURE_COLUMNS
     assert "sentiment_diff" in config.FEATURE_COLUMNS
+    assert "wc_age_advantage_diff" in config.FEATURE_COLUMNS
+    assert "similar_opp_win_rate_diff" in config.FEATURE_COLUMNS
+    assert "short_notice_perf_diff" in config.FEATURE_COLUMNS
+    assert "long_layoff_perf_diff" in config.FEATURE_COLUMNS

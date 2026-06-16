@@ -1606,6 +1606,10 @@ def _apply_profile_to_side(
         if col not in out.columns:
             out[col] = np.nan
         if pd.isna(out.at[idx, col]) and pd.notna(val):
+            if "dob" in col:
+                if out[col].dtype == object or str(out[col].dtype).startswith("string"):
+                    out[col] = pd.to_datetime(out[col], errors="coerce")
+                val = pd.to_datetime(val, errors="coerce")
             out.at[idx, col] = val
 
 
@@ -1759,6 +1763,10 @@ def enrich_fights_with_ufcstats(
         if col not in out.columns:
             dtype = _enrich_dtypes.get(col, float)
             out[col] = pd.Series(dtype=dtype)
+
+    for dob_col in ("fighter1_dob", "fighter2_dob"):
+        if dob_col in out.columns:
+            out[dob_col] = pd.to_datetime(out[dob_col], errors="coerce")
 
     filled_cells = 0
     target_mask = out["date"].dt.year >= year_min
@@ -2075,7 +2083,7 @@ def load_processed_features(path: Path | str | None = None) -> pd.DataFrame:
         raise FileNotFoundError(
             f"Processed features not found: {csv_path}. Run feature engineering first."
         )
-    return pd.read_csv(csv_path, parse_dates=[config.DATE_COLUMN])
+    return pd.read_csv(csv_path, parse_dates=[config.DATE_COLUMN], low_memory=True)
 
 
 def validate_columns(columns: Iterable[str]) -> None:

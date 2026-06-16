@@ -17,7 +17,10 @@ from src.greco_stats import apply_greco_to_features, fill_history_from_greco, gr
 logger = logging.getLogger(__name__)
 
 KEY_DIFF_COVERAGE_COLS = [
-    "age_diff",
+    "wc_age_advantage_diff",
+    "similar_opp_win_rate_diff",
+    "short_notice_perf_diff",
+    "long_layoff_perf_diff",
     "height_diff",
     "reach_diff",
     "striking_acc_diff",
@@ -27,6 +30,33 @@ KEY_DIFF_COVERAGE_COLS = [
     "elo_diff",
     "win_rate_diff",
 ]
+
+# Opponent similarity tolerances for "vs similar opponent" rolling win rates.
+SIMILAR_OPP_TOLERANCES: dict[str, float] = {
+    "sig_strike_acc": 0.12,
+    "td_defense": 0.15,
+    "reach_in": 3.0,
+    "age": 4.0,
+}
+SIMILAR_OPP_PROFILE_FIELDS = tuple(SIMILAR_OPP_TOLERANCES.keys())
+
+SHORT_NOTICE_DAYS = 10
+LONG_LAYOFF_DAYS = 180
+
+# Age disadvantage scales up in heavier divisions (younger = less penalty).
+WC_AGE_SENSITIVITY: dict[str, float] = {
+    "flyweight": 0.60,
+    "bantamweight": 0.70,
+    "featherweight": 0.75,
+    "lightweight": 0.85,
+    "welterweight": 0.95,
+    "middleweight": 1.00,
+    "light heavyweight": 1.10,
+    "heavyweight": 1.25,
+    "open weight": 1.20,
+    "catch weight": 0.90,
+    "women": 0.90,
+}
 
 # Stats expected by build_matchup_features (per fighter, pre-fight).
 FIGHTER_STAT_FIELDS = [
@@ -51,6 +81,11 @@ FIGHTER_STAT_FIELDS = [
     "fight_count",
     "striker_score",
     "grappler_score",
+    "similar_opp_win_rate",
+    "short_notice_flag",
+    "long_layoff_flag",
+    "short_notice_win_rate",
+    "long_layoff_win_rate",
 ]
 
 # Differential feature names produced for modeling.
@@ -77,7 +112,142 @@ DIFF_FEATURE_FIELDS = [
     "elo_diff",
     "days_since_last_fight_diff",
     "experience_diff",
+    "similar_opp_win_rate_diff",
+    "wc_age_advantage_diff",
+    "short_notice_flag_diff",
+    "long_layoff_flag_diff",
+    "short_notice_perf_diff",
+    "long_layoff_perf_diff",
 ]
+
+# --- Interaction candidates (products of base diffs; subset selected at train time) ---
+@dataclass(frozen=True)
+class InteractionSpec:
+    """Named product of two differential features."""
+
+    name: str
+    factor_a: str
+    factor_b: str
+    label: str
+
+
+INTERACTION_SPECS: tuple[InteractionSpec, ...] = (
+    InteractionSpec("ix_age_x_reach", "age_diff", "reach_diff", "Age x Reach"),
+    InteractionSpec(
+        "ix_strike_acc_x_td_def",
+        "striking_acc_diff",
+        "td_defense_diff",
+        "Striking Accuracy x Takedown Defense",
+    ),
+    InteractionSpec(
+        "ix_last5_x_layoff",
+        "last5_winrate_diff",
+        "days_since_last_fight_diff",
+        "Recent Form x Layoff Days",
+    ),
+    InteractionSpec(
+        "ix_wc_age_x_striker",
+        "wc_age_advantage_diff",
+        "striker_score_diff",
+        "WC Age Advantage x Striker Score",
+    ),
+    InteractionSpec(
+        "ix_striker_x_grappler",
+        "striker_score_diff",
+        "grappler_score_diff",
+        "Striker x Grappler Style",
+    ),
+    InteractionSpec(
+        "ix_southpaw_x_layoff",
+        "southpaw_advantage",
+        "long_layoff_flag_diff",
+        "Southpaw Advantage x Long Layoff",
+    ),
+    InteractionSpec(
+        "ix_stance_x_clash",
+        "stance_matchup",
+        "style_clash",
+        "Stance Matchup x Style Clash",
+    ),
+    InteractionSpec(
+        "ix_short_notice_x_perf",
+        "short_notice_flag_diff",
+        "short_notice_perf_diff",
+        "Short Notice x Short-Notice Record",
+    ),
+    InteractionSpec(
+        "ix_elo_x_momentum",
+        "elo_diff",
+        "momentum_diff",
+        "Elo x Momentum",
+    ),
+    InteractionSpec(
+        "ix_reach_x_striker",
+        "reach_diff",
+        "striker_score_diff",
+        "Reach x Striker Score",
+    ),
+    InteractionSpec(
+        "ix_similar_opp_x_td_def",
+        "similar_opp_win_rate_diff",
+        "td_defense_diff",
+        "Similar Opponent Record x TD Defense",
+    ),
+    InteractionSpec(
+        "ix_wc_age_x_layoff",
+        "wc_age_advantage_diff",
+        "long_layoff_flag_diff",
+        "WC Age x Long Layoff",
+    ),
+    InteractionSpec(
+        "ix_grappler_x_td_acc",
+        "grappler_score_diff",
+        "takedown_acc_diff",
+        "Grappler Score x Takedown Accuracy",
+    ),
+    InteractionSpec(
+        "ix_striker_grappler_clash",
+        "striker_vs_grappler",
+        "style_clash",
+        "Striker-vs-Grappler x Style Clash",
+    ),
+    InteractionSpec(
+        "ix_experience_x_form",
+        "experience_diff",
+        "last5_winrate_diff",
+        "Experience x Recent Form",
+    ),
+    InteractionSpec(
+        "ix_form_x_long_layoff_perf",
+        "last5_winrate_diff",
+        "long_layoff_perf_diff",
+        "Recent Form x Long-Layoff Record",
+    ),
+    InteractionSpec(
+        "ix_height_x_reach",
+        "height_diff",
+        "reach_diff",
+        "Height x Reach",
+    ),
+    InteractionSpec(
+        "ix_ko_rate_x_striker",
+        "ko_rate_diff",
+        "striker_score_diff",
+        "KO Rate x Striker Score",
+    ),
+    InteractionSpec(
+        "ix_control_x_grappler",
+        "control_time_diff",
+        "grappler_score_diff",
+        "Control Time x Grappler Score",
+    ),
+    InteractionSpec(
+        "ix_winrate_x_elo",
+        "win_rate_diff",
+        "elo_diff",
+        "Win Rate x Elo",
+    ),
+)
 
 MOMENTUM_WEIGHTS = np.array([0.35, 0.25, 0.20, 0.12, 0.08])
 ELO_START = 1500.0
@@ -157,6 +327,136 @@ def compute_style_scores(
     striker = 0.45 * sspm + 0.35 * sacc + 0.20 * ko
     grappler = 0.40 * td + 0.40 * sub + 0.20 * tdef
     return striker, grappler
+
+
+def weight_class_age_sensitivity(weight_class: Any) -> float:
+    """Return age-impact multiplier for a division (heavier = age matters more)."""
+    if weight_class is None or (isinstance(weight_class, float) and np.isnan(weight_class)):
+        return 1.0
+    text = str(weight_class).strip().lower()
+    if not text:
+        return 1.0
+    if "women" in text or "female" in text:
+        return WC_AGE_SENSITIVITY["women"]
+    for key, sens in WC_AGE_SENSITIVITY.items():
+        if key in text:
+            return sens
+    return 1.0
+
+
+def _opponent_profiles_similar(
+    target: dict[str, float],
+    candidate: dict[str, float],
+    *,
+    tolerances: dict[str, float] | None = None,
+) -> bool:
+    """True when opponent profiles match within per-dimension tolerances."""
+    tol = tolerances or SIMILAR_OPP_TOLERANCES
+    matched = 0
+    required = 0
+    for field, band in tol.items():
+        a = target.get(field)
+        b = candidate.get(field)
+        if a is None or b is None or (isinstance(a, float) and np.isnan(a)) or (
+            isinstance(b, float) and np.isnan(b)
+        ):
+            continue
+        required += 1
+        if abs(float(a) - float(b)) <= band:
+            matched += 1
+    if required < 2:
+        return False
+    return matched >= max(2, required - 1)
+
+
+def _shifted_conditional_win_rate(
+    won: pd.Series,
+    condition: pd.Series,
+    *,
+    window: int = 12,
+) -> pd.Series:
+    """Rolling win rate using only prior fights where ``condition`` was true."""
+    masked = won.where(condition.astype(bool))
+    return masked.shift(1).rolling(window, min_periods=1).mean()
+
+
+def _attach_opponent_prefight_profiles(history: pd.DataFrame) -> pd.DataFrame:
+    """Join each row with the opponent's pre-fight rolling profile on the same card."""
+    profile_cols = [c for c in SIMILAR_OPP_PROFILE_FIELDS if c in history.columns]
+    if not profile_cols:
+        return history
+    opp = history[[config.FIGHT_ID_COLUMN, "fighter", *profile_cols]].copy()
+    rename = {"fighter": "opponent"}
+    rename.update({c: f"opp_profile_{c}" for c in profile_cols})
+    opp = opp.rename(columns=rename)
+    return history.merge(opp, on=[config.FIGHT_ID_COLUMN, "opponent"], how="left")
+
+
+def _similar_opponent_mask(
+    target: np.ndarray,
+    prior: np.ndarray,
+    bands: np.ndarray,
+) -> np.ndarray:
+    """Vectorized similarity: target (d,), prior (n, d), bands (d,) -> bool (n,)."""
+    valid = ~np.isnan(target) & ~np.isnan(prior)
+    required = valid.sum(axis=1)
+    diffs = np.abs(prior - target)
+    within = valid & (diffs <= bands)
+    matched = within.sum(axis=1)
+    return (required >= 2) & (matched >= np.maximum(2, required - 1))
+
+
+def _compute_similar_opponent_win_rates(history: pd.DataFrame) -> pd.DataFrame:
+    """
+    Per-appearance win rate vs historically similar opponents (leakage-safe).
+
+    Uses only fights before the current bout for the same fighter.
+    """
+    work = _attach_opponent_prefight_profiles(history)
+    available_fields = [
+        f for f in SIMILAR_OPP_PROFILE_FIELDS if f"opp_profile_{f}" in work.columns
+    ]
+    if len(available_fields) < 2:
+        work["similar_opp_win_rate"] = np.nan
+        return work
+
+    profile_keys = [f"opp_profile_{f}" for f in available_fields]
+    bands = np.array([SIMILAR_OPP_TOLERANCES[f] for f in available_fields])
+    max_prior = 50
+
+    def _fighter_similar_wr(grp: pd.DataFrame) -> pd.Series:
+        grp = grp.sort_values(config.DATE_COLUMN)
+        profiles = grp[profile_keys].to_numpy(dtype=float)
+        won = grp["won"].to_numpy(dtype=float)
+        n = len(grp)
+        rates = np.full(n, np.nan)
+        for i in range(1, n):
+            target = profiles[i]
+            if np.all(np.isnan(target)):
+                continue
+            start = max(0, i - max_prior)
+            prior_profiles = profiles[start:i]
+            prior_won = won[start:i]
+            mask = _similar_opponent_mask(target, prior_profiles, bands)
+            if mask.any():
+                rates[i] = float(prior_won[mask].mean())
+        return pd.Series(rates, index=grp.index)
+
+    logger.info("Computing similar-opponent win rates (leakage-safe)…")
+    work["similar_opp_win_rate"] = work.groupby("fighter", group_keys=False).apply(
+        _fighter_similar_wr
+    )
+    return work
+
+
+def _layoff_context_flags(days_since_last: float) -> tuple[float, float]:
+    """Return (short_notice_flag, long_layoff_flag) for a layoff in days."""
+    if days_since_last is None or (isinstance(days_since_last, float) and np.isnan(days_since_last)):
+        return 0.0, 0.0
+    days = float(days_since_last)
+    short_flag = 1.0 if days < SHORT_NOTICE_DAYS else 0.0
+    long_flag = 1.0 if days > LONG_LAYOFF_DAYS else 0.0
+    return short_flag, long_flag
 
 
 def _stance_encoding(stance: Any) -> dict[str, float]:
@@ -369,6 +669,7 @@ def build_matchup_features(
     fighter2_stats: dict[str, Any] | pd.Series,
     *,
     impute_values: dict[str, float] | None = None,
+    weight_class: str | None = None,
 ) -> pd.Series:
     """
     Build a differential feature vector (fighter1 minus fighter2).
@@ -423,8 +724,12 @@ def build_matchup_features(
         or (f1_grappler > f1_striker and f2_striker > f2_grappler)
     )
 
+    wc_sens = weight_class_age_sensitivity(weight_class)
+    wc_age_advantage_diff = (f2["age"] - f1["age"]) * wc_sens
+
     features = {
         "age_diff": f1["age"] - f2["age"],
+        "wc_age_advantage_diff": wc_age_advantage_diff,
         "height_diff": f1["height_in"] - f2["height_in"],
         "reach_diff": f1["reach_in"] - f2["reach_in"],
         "stance_matchup": stance_matchup,
@@ -446,6 +751,11 @@ def build_matchup_features(
         "elo_diff": f1["elo"] - f2["elo"],
         "days_since_last_fight_diff": f1["days_since_last_fight"] - f2["days_since_last_fight"],
         "experience_diff": f1["fight_count"] - f2["fight_count"],
+        "similar_opp_win_rate_diff": f1["similar_opp_win_rate"] - f2["similar_opp_win_rate"],
+        "short_notice_flag_diff": f1["short_notice_flag"] - f2["short_notice_flag"],
+        "long_layoff_flag_diff": f1["long_layoff_flag"] - f2["long_layoff_flag"],
+        "short_notice_perf_diff": f1["short_notice_win_rate"] - f2["short_notice_win_rate"],
+        "long_layoff_perf_diff": f1["long_layoff_win_rate"] - f2["long_layoff_win_rate"],
     }
     return pd.Series(features, dtype=float)
 
@@ -667,9 +977,9 @@ def _weighted_recent_wins(wins: pd.Series, weights: np.ndarray = MOMENTUM_WEIGHT
     return wins.shift(1).rolling(len(weights), min_periods=1).apply(_score, raw=True)
 
 
-def _compute_elo_ratings(history: pd.DataFrame) -> pd.DataFrame:
+def _compute_elo_state(history: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     """
-    Chronological Elo updates. Returns pre-fight ratings per appearance.
+    Chronological Elo updates. Returns pre-fight ratings per fight and final ratings.
     """
     fights = (
         history[history["side"] == 1][
@@ -701,10 +1011,56 @@ def _compute_elo_ratings(history: pd.DataFrame) -> pd.DataFrame:
         ratings[f2] = r2 + ELO_K * (s2 - e2)
 
     elo_rows = [
-        {"fight_id": fid, "f1_elo": vals["f1_elo"], "f2_elo": vals["f2_elo"]}
+        {config.FIGHT_ID_COLUMN: fid, "f1_elo": vals["f1_elo"], "f2_elo": vals["f2_elo"]}
         for fid, vals in pre_fight.items()
     ]
-    return pd.DataFrame(elo_rows)
+    return pd.DataFrame(elo_rows), ratings
+
+
+def _compute_elo_ratings(history: pd.DataFrame) -> pd.DataFrame:
+    """Chronological Elo updates. Returns pre-fight ratings per appearance."""
+    elo_df, _ = _compute_elo_state(history)
+    return elo_df
+
+
+def elo_lookup_for_fights(
+    fights: pd.DataFrame,
+    ratings: dict[str, float],
+) -> pd.DataFrame:
+    """Pre-fight Elo for fights using cached post-history ratings (upcoming-safe)."""
+    side1 = (
+        fights.drop_duplicates(config.FIGHT_ID_COLUMN)
+        .sort_values(config.DATE_COLUMN)
+    )
+    rows: list[dict[str, Any]] = []
+    for _, row in side1.iterrows():
+        f1 = row.get("fighter_1", "")
+        f2 = row.get("fighter_2", "")
+        rows.append(
+            {
+                config.FIGHT_ID_COLUMN: row[config.FIGHT_ID_COLUMN],
+                "f1_elo": ratings.get(f1, ELO_START),
+                "f2_elo": ratings.get(f2, ELO_START),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _build_history_long_pipeline(fights: pd.DataFrame) -> pd.DataFrame:
+    """Long-format history with rolling, Greco, and similar-opponent stats."""
+    fights = _canonicalize_fighter_slots(fights)
+    history = _rolling_stats(_fighter_history(fights))
+    history = fill_history_from_greco(history, window=5)
+    history = _compute_similar_opponent_win_rates(history)
+    return history
+
+
+def _recompute_long_stats(long_df: pd.DataFrame) -> pd.DataFrame:
+    """Re-run rolling/Greco/similar-opp on a fighter subset (incremental cache)."""
+    out = _rolling_stats(long_df.copy())
+    out = fill_history_from_greco(out, window=5)
+    out = _compute_similar_opponent_win_rates(out)
+    return out
 
 
 def _rolling_stats(history: pd.DataFrame) -> pd.DataFrame:
@@ -801,6 +1157,17 @@ def _rolling_stats(history: pd.DataFrame) -> pd.DataFrame:
     history["days_since_last_fight"] = g[config.DATE_COLUMN].apply(lambda s: s.diff().dt.days)
     history["fight_count"] = g.cumcount()
 
+    flag_pairs = history["days_since_last_fight"].map(_layoff_context_flags)
+    history["short_notice_flag"] = [p[0] for p in flag_pairs]
+    history["long_layoff_flag"] = [p[1] for p in flag_pairs]
+    g_ctx = history.groupby("fighter", group_keys=False)
+    history["short_notice_win_rate"] = g_ctx.apply(
+        lambda s: _shifted_conditional_win_rate(s["won"], s["short_notice_flag"])
+    )
+    history["long_layoff_win_rate"] = g_ctx.apply(
+        lambda s: _shifted_conditional_win_rate(s["won"], s["long_layoff_flag"])
+    )
+
     history["striker_score"], history["grappler_score"] = zip(
         *history.apply(
             lambda row: compute_style_scores(
@@ -841,6 +1208,11 @@ def _fighter_stat_row(row: pd.Series, *, prefix: str) -> dict[str, float]:
         "fight_count": f"{prefix}_fight_count",
         "striker_score": f"{prefix}_striker_score",
         "grappler_score": f"{prefix}_grappler_score",
+        "similar_opp_win_rate": f"{prefix}_similar_opp_win_rate",
+        "short_notice_flag": f"{prefix}_short_notice_flag",
+        "long_layoff_flag": f"{prefix}_long_layoff_flag",
+        "short_notice_win_rate": f"{prefix}_short_notice_win_rate",
+        "long_layoff_win_rate": f"{prefix}_long_layoff_win_rate",
     }
     return {k: _series_get(row, col, np.nan) for k, col in mapping.items()}
 
@@ -878,6 +1250,11 @@ def _build_impute_values(features: pd.DataFrame) -> dict[str, float]:
     values.setdefault("days_since_last_fight", 120.0)
     values.setdefault("striker_score", 0.45)
     values.setdefault("grappler_score", 0.35)
+    values.setdefault("similar_opp_win_rate", 0.5)
+    values.setdefault("short_notice_flag", 0.0)
+    values.setdefault("long_layoff_flag", 0.0)
+    values.setdefault("short_notice_win_rate", 0.5)
+    values.setdefault("long_layoff_win_rate", 0.5)
     return values
 
 
@@ -912,6 +1289,11 @@ _FIELD_TO_COL_SUFFIX = {
     "fight_count": "fight_count",
     "striker_score": "striker_score",
     "grappler_score": "grappler_score",
+    "similar_opp_win_rate": "similar_opp_win_rate",
+    "short_notice_flag": "short_notice_flag",
+    "long_layoff_flag": "long_layoff_flag",
+    "short_notice_win_rate": "short_notice_win_rate",
+    "long_layoff_win_rate": "long_layoff_win_rate",
 }
 
 
@@ -937,6 +1319,12 @@ def fit_imputer(train_df: pd.DataFrame) -> ImputerStats:
         "control_time_diff": 0.0,
         "experience_diff": 0.0,
         "days_since_last_fight_diff": 0.0,
+        "wc_age_advantage_diff": 0.0,
+        "similar_opp_win_rate_diff": 0.0,
+        "short_notice_flag_diff": 0.0,
+        "long_layoff_flag_diff": 0.0,
+        "short_notice_perf_diff": 0.0,
+        "long_layoff_perf_diff": 0.0,
     }
     diff_fills: dict[str, float] = {}
     for col in DIFF_FEATURE_FIELDS:
@@ -944,6 +1332,11 @@ def fit_imputer(train_df: pd.DataFrame) -> ImputerStats:
             continue
         med = train_df[col].median()
         diff_fills[col] = diff_defaults.get(col, 0.0 if pd.isna(med) else float(med))
+
+    for col in train_df.columns:
+        if str(col).startswith("ix_"):
+            med = train_df[col].median()
+            diff_fills[str(col)] = 0.0 if pd.isna(med) else float(med)
 
     return ImputerStats(
         global_fills=global_fills,
@@ -1036,11 +1429,13 @@ def apply_historical_stat_fallbacks(
     features: pd.DataFrame,
     *,
     reference_year: int | None = None,
+    only_unlabeled: bool = False,
 ) -> pd.DataFrame:
     """
     Fill missing fighter stats from weight-class then global historical medians.
 
     Recomputes differential columns for rows that were imputed.
+    When ``only_unlabeled=True``, skip labeled training rows (inference speed-up).
     """
     if features.empty:
         return features
@@ -1077,7 +1472,13 @@ def apply_historical_stat_fallbacks(
     }
 
     imputed_rows: list[int] = []
-    for idx, row in out.iterrows():
+    target_col = config.TARGET_COLUMN
+    if only_unlabeled and target_col in out.columns:
+        row_iter = out.index[out[target_col].isna()]
+    else:
+        row_iter = out.index
+    for idx in row_iter:
+        row = out.loc[idx]
         touched = False
         wc = str(row.get("weight_class", ""))
         wc_vals = wc_fills.get(wc, global_fills)
@@ -1114,7 +1515,9 @@ def apply_historical_stat_fallbacks(
             f2_stats = _fighter_stat_row(row, prefix="f2")
             f1_stats["elo"] = row.get("f1_elo", ELO_START)
             f2_stats["elo"] = row.get("f2_elo", ELO_START)
-            diffs = build_matchup_features(f1_stats, f2_stats)
+            diffs = build_matchup_features(
+                f1_stats, f2_stats, weight_class=str(row.get("weight_class", ""))
+            )
             for col, val in diffs.items():
                 if col in out.columns:
                     out.at[idx, col] = val
@@ -1144,7 +1547,11 @@ def _apply_greco_to_feature_stats(features: pd.DataFrame) -> pd.DataFrame:
         f2_stats = _fighter_stat_row(row, prefix="f2")
         f1_stats["elo"] = row.get("f1_elo", ELO_START)
         f2_stats["elo"] = row.get("f2_elo", ELO_START)
-        diffs = build_matchup_features(f1_stats, f2_stats)
+        diffs = build_matchup_features(
+            f1_stats,
+            f2_stats,
+            weight_class=str(row.get("weight_class", "")),
+        )
         for col, val in diffs.items():
             if col in out.columns:
                 out.at[idx, col] = val
@@ -1153,20 +1560,24 @@ def _apply_greco_to_feature_stats(features: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) -> pd.DataFrame:
-    """
-    Transform raw fights into a differential modeling matrix.
+def _assemble_wide_feature_matrix(
+    history: pd.DataFrame,
+    elo: pd.DataFrame,
+    *,
+    keep_unlabeled: bool = False,
+    target_fight_ids: set[str] | None = None,
+) -> pd.DataFrame:
+    """Merge long history sides into wide differential modeling matrix."""
+    work_history = history
+    if target_fight_ids:
+        work_history = history[
+            history[config.FIGHT_ID_COLUMN].isin(target_fight_ids)
+        ].copy()
+        if config.DATE_COLUMN in elo.columns:
+            elo = elo[elo[config.FIGHT_ID_COLUMN].isin(target_fight_ids)].copy()
 
-    Target ``f1_win`` is 1 when fighter_1 wins. All rolling/Elo features use
-    only information available before each fight.
-    """
-    fights = _canonicalize_fighter_slots(fights)
-    history = _rolling_stats(_fighter_history(fights))
-    history = fill_history_from_greco(history, window=5)
-    elo = _compute_elo_ratings(history)
-
-    f1 = history[history["side"] == 1].copy()
-    f2 = history[history["side"] == 2].copy()
+    f1 = work_history[work_history["side"] == 1].copy()
+    f2 = work_history[work_history["side"] == 2].copy()
 
     f2_rename = {
         "win_rate": "f2_win_rate",
@@ -1190,6 +1601,11 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
         "fight_count": "f2_fight_count",
         "striker_score": "f2_striker_score",
         "grappler_score": "f2_grappler_score",
+        "similar_opp_win_rate": "f2_similar_opp_win_rate",
+        "short_notice_flag": "f2_short_notice_flag",
+        "long_layoff_flag": "f2_long_layoff_flag",
+        "short_notice_win_rate": "f2_short_notice_win_rate",
+        "long_layoff_win_rate": "f2_long_layoff_win_rate",
         config.FIGHT_ID_COLUMN: config.FIGHT_ID_COLUMN,
     }
     f2_subset = f2[[c for c in f2_rename if c in f2.columns]].rename(columns=f2_rename)
@@ -1216,10 +1632,16 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
         "fight_count": "f1_fight_count",
         "striker_score": "f1_striker_score",
         "grappler_score": "f1_grappler_score",
+        "similar_opp_win_rate": "f1_similar_opp_win_rate",
+        "short_notice_flag": "f1_short_notice_flag",
+        "long_layoff_flag": "f1_long_layoff_flag",
+        "short_notice_win_rate": "f1_short_notice_win_rate",
+        "long_layoff_win_rate": "f1_long_layoff_win_rate",
     }
     features = f1.rename(columns=f1_rename)
     features = features.merge(f2_subset, on=config.FIGHT_ID_COLUMN, how="inner")
     features = features.merge(elo, on=config.FIGHT_ID_COLUMN, how="left")
+    del f1, f2, f2_subset
     features["f1_elo"] = features["f1_elo"].fillna(ELO_START)
     features["f2_elo"] = features["f2_elo"].fillna(ELO_START)
 
@@ -1240,13 +1662,18 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
         f2_stats = _fighter_stat_row(pd.Series(row), prefix="f2")
         f1_stats["elo"] = row.get("f1_elo", ELO_START)
         f2_stats["elo"] = row.get("f2_elo", ELO_START)
-        diff_rows.append(build_matchup_features(f1_stats, f2_stats).to_dict())
+        diff_rows.append(
+            build_matchup_features(
+                f1_stats,
+                f2_stats,
+                weight_class=str(row.get("weight_class", "")),
+            ).to_dict()
+        )
     diff_df = pd.DataFrame(diff_rows)
     features = pd.concat([features.reset_index(drop=True), diff_df], axis=1)
 
     features = _apply_greco_to_feature_stats(features)
 
-    # Legacy aliases for existing config consumers
     features["sig_strike_acc_diff"] = features["striking_acc_diff"]
     features["td_acc_diff"] = features["takedown_acc_diff"]
     if "f1_finish_rate" in features.columns and "f2_finish_rate" in features.columns:
@@ -1279,11 +1706,125 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
     features = features.sort_values(config.DATE_COLUMN).reset_index(drop=True)
 
     log_feature_diff_coverage(features, year=2025, label="before fallback")
-    features = apply_historical_stat_fallbacks(features, reference_year=2025)
+    features = apply_historical_stat_fallbacks(
+        features, reference_year=2025, only_unlabeled=keep_unlabeled
+    )
     log_feature_diff_coverage(features, year=2025, label="after fallback")
 
-    assert_target_encoding(features)
+    features = build_interaction_candidates(features)
+
+    if features[config.TARGET_COLUMN].notna().any():
+        assert_target_encoding(features)
+    elif not keep_unlabeled:
+        raise ValueError("No valid target rows.")
+
     return features
+
+
+def build_feature_matrix(
+    fights: pd.DataFrame,
+    *,
+    keep_unlabeled: bool = False,
+    use_fighter_cache: bool = False,
+    target_fight_ids: set[str] | None = None,
+) -> pd.DataFrame:
+    """
+    Transform raw fights into a differential modeling matrix.
+
+    Target ``f1_win`` is 1 when fighter_1 wins. All rolling/Elo features use
+    only information available before each fight.
+
+    When ``use_fighter_cache`` is True (inference on upcoming cards), reuses
+    persisted per-fighter rolling stats and only recomputes fighters on the card.
+    """
+    if use_fighter_cache and keep_unlabeled and target_fight_ids:
+        from src.fighter_cache import build_features_with_cache
+
+        return build_features_with_cache(
+            fights,
+            target_fight_ids=target_fight_ids,
+            keep_unlabeled=keep_unlabeled,
+        )
+
+    history = _build_history_long_pipeline(fights)
+    elo = _compute_elo_ratings(history)
+    features = _assemble_wide_feature_matrix(
+        history,
+        elo,
+        keep_unlabeled=keep_unlabeled,
+        target_fight_ids=target_fight_ids,
+    )
+    del history, elo
+    return features
+
+
+def _interaction_product(
+    df: pd.DataFrame,
+    factor_a: str,
+    factor_b: str,
+) -> pd.Series:
+    """Element-wise product with NaN-safe zero fill for missing factors."""
+    if factor_a not in df.columns or factor_b not in df.columns:
+        return pd.Series(np.nan, index=df.index)
+    a = pd.to_numeric(df[factor_a], errors="coerce").fillna(0.0)
+    b = pd.to_numeric(df[factor_b], errors="coerce").fillna(0.0)
+    return a * b
+
+
+def build_interaction_candidates(features: pd.DataFrame) -> pd.DataFrame:
+    """Add all predefined interaction candidate columns (train-time subset selected later)."""
+    if features.empty:
+        return features
+    out = features.copy()
+    for spec in INTERACTION_SPECS:
+        out[spec.name] = _interaction_product(out, spec.factor_a, spec.factor_b)
+    return out
+
+
+def interaction_candidate_names() -> list[str]:
+    return [spec.name for spec in INTERACTION_SPECS]
+
+
+def interaction_specs_from_records(records: list[dict[str, Any]] | None) -> list[InteractionSpec]:
+    """Rebuild InteractionSpec list from model artifact / JSON."""
+    if not records:
+        return []
+    specs: list[InteractionSpec] = []
+    for row in records:
+        name = row.get("name")
+        factor_a = row.get("factor_a")
+        factor_b = row.get("factor_b")
+        if not name or not factor_a or not factor_b:
+            continue
+        specs.append(
+            InteractionSpec(
+                name=str(name),
+                factor_a=str(factor_a),
+                factor_b=str(factor_b),
+                label=str(row.get("label", name)),
+            )
+        )
+    return specs
+
+
+def apply_interaction_specs(
+    features: pd.DataFrame,
+    specs: list[InteractionSpec] | list[dict[str, Any]] | None,
+) -> pd.DataFrame:
+    """Compute only the interaction columns required for inference."""
+    if features.empty or not specs:
+        return features
+    parsed = (
+        specs
+        if specs and isinstance(specs[0], InteractionSpec)
+        else interaction_specs_from_records(specs)  # type: ignore[arg-type]
+    )
+    if not parsed:
+        return features
+    out = features.copy()
+    for spec in parsed:
+        out[spec.name] = _interaction_product(out, spec.factor_a, spec.factor_b)
+    return out
 
 
 def save_features(df: pd.DataFrame, path: Path | str | None = None) -> Path:

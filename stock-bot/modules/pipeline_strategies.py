@@ -4,6 +4,7 @@ import numpy as np
 
 import config
 from modules import deployment_sizing
+from modules.crypto_universe import crypto_trading_columns
 
 PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
 
@@ -211,7 +212,7 @@ def crypto_trade_intents(
     """Same logic as crypto strategy but returns intents for Kraken mirror (no Alpaca orders)."""
     from modules.crypto_vol_gate import crypto_trading_allowed
 
-    crypto_cols = [c for c in data.columns if config.is_crypto(c)]
+    crypto_cols = crypto_trading_columns(data)
     if len(crypto_cols) < 2:
         return []
     gate = crypto_trading_allowed(
@@ -462,6 +463,9 @@ def run_crypto_strategy(
     spacex_snapshot=None,
 ):
     """Z-score pairs; paper aggressive uses cointegration stat arb when enabled."""
+    if not config.crypto_sleeve_enabled():
+        return 0
+
     if config.effective_crypto_v2_enabled():
         from modules.crypto_dual_sleeve import run_crypto_dual_sleeve
 
@@ -535,7 +539,9 @@ def run_crypto_strategy(
         trade_notional = intent.get("notional")
         if side == "buy" and trade_notional is None:
             continue
-        order = executor.execute_order(t1, side, notional=trade_notional)
+        order = executor.execute_order(
+            t1, side, notional=trade_notional, reason=pair_key, sleeve="Crypto"
+        )
         if not _count_if_filled(executor, order, max_wait=3.0):
             continue
         pair_cooldown[pair_key] = now
@@ -646,6 +652,20 @@ def _apply_sector_tech_cap(ranked, *, top_n=3, max_tech=None):
     return primary + fill + remaining
 
 
+def _apply_screener_momentum_order(ranked):
+    """Strict dynamic universe: prefer screener 30d momentum rank among MA50 picks."""
+    try:
+        from modules.dynamic_universe import screener_momentum_order
+
+        screener_order = screener_momentum_order(ranked)
+    except ImportError:
+        return ranked
+    if not screener_order:
+        return ranked
+    order_index = {sym: i for i, sym in enumerate(screener_order)}
+    return sorted(ranked, key=lambda s: order_index.get(s, len(order_index)))
+
+
 def _equity_momentum_ranked(
     data,
     equity_cols,
@@ -656,6 +676,8 @@ def _equity_momentum_ranked(
     ranked = _equity_momentum_candidates(data, equity_cols)
     if not ranked:
         return ranked
+    if config.effective_paper_dynamic_universe_strict():
+        ranked = _apply_screener_momentum_order(ranked)
     if _spy_sleeve_active(data, yield_gated=yield_gated, regime=regime):
         if config.NYSE_SECTOR_TECH_CAP > 0:
             ranked = _apply_sector_tech_cap(ranked)
@@ -840,7 +862,9 @@ def resolve_cycle_deploy(
         if room >= min_n:
             rooms["spy"] = room
 
-    if _crypto_buy_intent(
+    if (
+        config.crypto_sleeve_enabled()
+        and _crypto_buy_intent(
         data,
         regime,
         now,
@@ -849,6 +873,7 @@ def resolve_cycle_deploy(
         cooldown_bars=cooldown_bars,
         volatility=volatility,
         spacex_snapshot=spacex_snapshot,
+    )
     ):
         room = _sleeve_room(executor, crypto_cap, executor.crypto_sleeve_value)
         if room >= min_n:
@@ -910,13 +935,15 @@ def run_spy_exits(
         if position_below_cost(executor, symbol):
             return 0
 
+    pair_key = f"{symbol}/MA{ma_window}"
     if hasattr(executor, "execute_full_exit"):
-        order = executor.execute_full_exit(symbol)
+        order = executor.execute_full_exit(symbol, reason=pair_key, sleeve="SPY")
     else:
-        order = executor.execute_order(symbol, "sell", reduce_only=True)
+        order = executor.execute_order(
+            symbol, "sell", reduce_only=True, reason=pair_key, sleeve="SPY"
+        )
     if not _count_if_filled(executor, order):
         return 0
-    pair_key = f"{symbol}/MA{ma_window}"
     if log_fn:
         notional = ""
         if isinstance(order, dict):
@@ -966,7 +993,9 @@ def run_spy_strategy(
         notional = executor.compute_spy_notional()
         if notional is None:
             return 0
-    order = executor.execute_order(symbol, "buy", notional=notional)
+    order = executor.execute_order(
+        symbol, "buy", notional=notional, reason=pair_key, sleeve="SPY"
+    )
     if not _count_if_filled(executor, order):
         return 0
     pair_cooldown[pair_key] = now
@@ -1033,7 +1062,9 @@ def run_equity_strategy(
                 notional = round(float(notional) * vol_scale, 2)
                 if notional < min_n:
                     continue
-        order = executor.execute_order(symbol, "buy", notional=notional)
+        order = executor.execute_order(
+            symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
+        )
         if not _count_if_filled(executor, order):
             continue
         pair_cooldown[pair_key] = now

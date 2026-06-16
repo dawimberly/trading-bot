@@ -32,7 +32,16 @@ from src.ensemble import (
     fit_conformal_scores,
     prediction_interval,
 )
-from src.feature_engineering import apply_imputer, assert_target_encoding, fit_imputer
+from src.feature_engineering import (
+    INTERACTION_SPECS,
+    InteractionSpec,
+    apply_imputer,
+    apply_interaction_specs,
+    assert_target_encoding,
+    build_interaction_candidates,
+    fit_imputer,
+    interaction_candidate_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,13 +156,15 @@ def prepare_time_splits(
 
 def _build_lgbm(params: dict[str, Any] | None = None, *, n_estimators: int | None = None) -> LGBMClassifier:
     merged = {**config.LGBM_PARAMS, **(params or {})}
-    trees = n_estimators or int(merged.pop("n_estimators", 300))
+    default_trees = int(merged.pop("n_estimators", 300))
+    trees = n_estimators if n_estimators is not None else default_trees
     return LGBMClassifier(n_estimators=trees, **merged)
 
 
 def _build_xgb(params: dict[str, Any] | None = None, *, n_estimators: int | None = None) -> XGBClassifier:
     merged = {**config.XGB_PARAMS, **(params or {})}
-    trees = n_estimators or int(merged.pop("n_estimators", 300))
+    default_trees = int(merged.pop("n_estimators", 300))
+    trees = n_estimators if n_estimators is not None else default_trees
     return XGBClassifier(n_estimators=trees, **merged)
 
 
@@ -440,14 +451,23 @@ def _feature_importance(
     return {k: float(v) for k, v in importance.items()}
 
 
-def _save_feature_importance(importance: dict[str, float]) -> Path:
+def _save_feature_importance(
+    importance: dict[str, float],
+    *,
+    interaction_insights: list[dict[str, Any]] | None = None,
+) -> Path:
     ensure_data_dirs()
     out = config.FEATURE_IMPORTANCE_PATH
     out.parent.mkdir(parents=True, exist_ok=True)
+    ix_top = [
+        k for k in importance.keys() if str(k).startswith("ix_")
+    ][:10]
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "importance": importance,
         "top_features": list(importance.keys())[:15],
+        "top_interaction_features": ix_top,
+        "interaction_insights": interaction_insights or [],
     }
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return out
@@ -503,6 +523,273 @@ def load_trained_model(path: Path | str | None = None) -> dict[str, Any]:
     return joblib.load(model_path)
 
 
+def _log_contextual_feature_coverage(
+    train_df: pd.DataFrame,
+    feature_cols: list[str],
+) -> None:
+    """Log coverage for matchup/context features added in advanced engineering."""
+    contextual = [
+        c
+        for c in feature_cols
+        if c
+        in {
+            "wc_age_advantage_diff",
+            "similar_opp_win_rate_diff",
+            "short_notice_perf_diff",
+            "long_layoff_perf_diff",
+            "short_notice_flag_diff",
+            "long_layoff_flag_diff",
+        }
+    ]
+    if not contextual:
+        return
+    logger.info("Contextual feature coverage (train split):")
+    for col in contextual:
+        if col not in train_df.columns:
+            continue
+        nz = float((train_df[col].notna() & (train_df[col] != 0)).mean())
+        logger.info("  %-28s non-zero: %5.1f%%", col, nz * 100)
+
+
+_INTERACTION_LABELS = {spec.name: spec.label for spec in INTERACTION_SPECS}
+_INTERACTION_BY_FACTORS = {
+    (spec.factor_a, spec.factor_b): spec for spec in INTERACTION_SPECS
+}
+_INTERACTION_BY_FACTORS.update(
+    {(spec.factor_b, spec.factor_a): spec for spec in INTERACTION_SPECS}
+)
+
+
+def _human_feature(name: str) -> str:
+    return name.replace("_diff", "").replace("_", " ").title()
+
+
+def _win_prob_effect_pp(train_df: pd.DataFrame, col: str, y_col: str) -> float:
+    """Estimate F1 win-rate lift when interaction is in top quartile vs bottom."""
+    if col not in train_df.columns or y_col not in train_df.columns:
+        return 0.0
+    x = pd.to_numeric(train_df[col], errors="coerce").fillna(0.0)
+    y = train_df[y_col].astype(float)
+    if len(x) < 20:
+        return 0.0
+    q75, q25 = x.quantile(0.75), x.quantile(0.25)
+    hi = x >= q75
+    lo = x <= q25
+    if hi.sum() < 8 or lo.sum() < 8:
+        hi = x.abs() >= x.abs().median()
+        lo = ~hi
+    return float((y[hi].mean() - y[lo].mean()) * 100.0)
+
+
+def _shap_discovered_pair_specs(
+    train_df: pd.DataFrame,
+    base_cols: list[str],
+    y: pd.Series,
+    *,
+    max_pairs: int = 4,
+    sample_size: int = 400,
+) -> list[InteractionSpec]:
+    """Use SHAP interaction values on a shallow LGBM to propose extra pair specs."""
+    try:
+        from src.explainability import shap_available
+
+        if not shap_available():
+            return []
+        import shap
+    except ImportError:
+        return []
+
+    usable = [c for c in base_cols if c in train_df.columns]
+    if len(usable) < 2:
+        return []
+
+    n = min(sample_size, len(train_df))
+    sample = train_df[usable].sample(n, random_state=config.RANDOM_STATE)
+    y_sample = y.loc[sample.index]
+    probe = _build_lgbm({"num_leaves": 15, "learning_rate": 0.08}, n_estimators=80)
+    probe.fit(sample, y_sample)
+
+    try:
+        explainer = shap.TreeExplainer(probe)
+        ix = explainer.shap_interaction_values(sample.astype(float))
+        if isinstance(ix, list):
+            ix = ix[1] if len(ix) > 1 else ix[0]
+        mean_ix = np.abs(np.asarray(ix)).mean(axis=0)
+        np.fill_diagonal(mean_ix, 0.0)
+    except Exception as exc:
+        logger.debug("SHAP interaction probe skipped: %s", exc)
+        return []
+
+    pairs: list[tuple[str, str, float]] = []
+    for i in range(len(usable)):
+        for j in range(i + 1, len(usable)):
+            pairs.append((usable[i], usable[j], float(mean_ix[i, j])))
+    pairs.sort(key=lambda t: t[2], reverse=True)
+
+    specs: list[InteractionSpec] = []
+    for a, b, _strength in pairs[: max_pairs * 3]:
+        if (a, b) in _INTERACTION_BY_FACTORS or (b, a) in _INTERACTION_BY_FACTORS:
+            continue
+        short_a = a.replace("_diff", "").replace("_", "")[:16]
+        short_b = b.replace("_diff", "").replace("_", "")[:16]
+        name = f"ix_shap_{short_a}_{short_b}"[:40]
+        if any(s.name == name for s in specs):
+            continue
+        specs.append(
+            InteractionSpec(
+                name=name,
+                factor_a=a,
+                factor_b=b,
+                label=f"{_human_feature(a)} x {_human_feature(b)}",
+            )
+        )
+        if len(specs) >= max_pairs:
+            break
+    return specs
+
+
+def discover_interaction_features(
+    train_df: pd.DataFrame,
+    base_cols: list[str],
+    candidate_cols: list[str],
+    y: pd.Series,
+    *,
+    min_select: int | None = None,
+    max_select: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Rank interaction candidates via correlation + shallow LGBM importance + SHAP.
+
+    Returns (selected_spec_records, insight_records for dashboard/logging).
+    """
+    min_n = min_select if min_select is not None else config.INTERACTION_MIN_FEATURES
+    max_n = max_select if max_select is not None else config.INTERACTION_MAX_FEATURES
+    y_col = config.TARGET_COLUMN
+
+    dynamic_specs = _shap_discovered_pair_specs(train_df, base_cols, y)
+    all_specs: list[InteractionSpec] = list(INTERACTION_SPECS) + dynamic_specs
+
+    # Ensure dynamic SHAP columns exist on train slice.
+    work = build_interaction_candidates(train_df)
+    for spec in dynamic_specs:
+        if spec.name not in work.columns:
+            a = pd.to_numeric(work.get(spec.factor_a, 0), errors="coerce").fillna(0.0)
+            b = pd.to_numeric(work.get(spec.factor_b, 0), errors="coerce").fillna(0.0)
+            work[spec.name] = a * b
+
+    spec_by_name = {s.name: s for s in all_specs}
+    pool = [c for c in candidate_cols if c in work.columns]
+    pool.extend(s.name for s in dynamic_specs if s.name in work.columns and s.name not in pool)
+    if not pool:
+        logger.info("Interaction discovery: no candidate columns available.")
+        return [], []
+
+    corr_scores: dict[str, float] = {}
+    for col in pool:
+        x = pd.to_numeric(work[col], errors="coerce")
+        if x.std(skipna=True) < 1e-9:
+            continue
+        corr_scores[col] = abs(float(x.corr(y.astype(float))))
+
+    probe_cols = list(dict.fromkeys(base_cols + pool))
+    probe_cols = [c for c in probe_cols if c in work.columns]
+    X_probe = work[probe_cols].astype(float).fillna(0.0)
+    probe = _build_lgbm({"num_leaves": 20, "learning_rate": 0.06}, n_estimators=100)
+    probe.fit(X_probe, y.astype(int))
+
+    importances = dict(zip(probe_cols, probe.feature_importances_))
+    imp_total = sum(importances.get(c, 0.0) for c in pool) or 1.0
+
+    shap_scores: dict[str, float] = {}
+    try:
+        from src.explainability import shap_available
+
+        if shap_available():
+            import shap
+
+            sample_n = min(350, len(X_probe))
+            sample = X_probe.sample(sample_n, random_state=config.RANDOM_STATE)
+            explainer = shap.TreeExplainer(probe)
+            sv = explainer.shap_values(sample)
+            if isinstance(sv, list):
+                sv = sv[1] if len(sv) > 1 else sv[0]
+            mean_abs = np.abs(np.asarray(sv)).mean(axis=0)
+            shap_scores = dict(zip(probe_cols, mean_abs))
+    except Exception as exc:
+        logger.debug("SHAP importance probe skipped: %s", exc)
+
+    ranked: list[dict[str, Any]] = []
+    for col in pool:
+        spec = spec_by_name.get(col)
+        if spec is None:
+            continue
+        corr = corr_scores.get(col, 0.0)
+        imp = importances.get(col, 0.0) / imp_total
+        shap_val = shap_scores.get(col, 0.0)
+        shap_norm = shap_val / (max(shap_scores.values()) if shap_scores else 1.0)
+        score = 0.40 * corr + 0.35 * imp + 0.25 * shap_norm
+        effect_pp = _win_prob_effect_pp(work, col, y_col)
+        ranked.append(
+            {
+                "name": spec.name,
+                "factor_a": spec.factor_a,
+                "factor_b": spec.factor_b,
+                "label": spec.label,
+                "score": float(score),
+                "corr": float(corr),
+                "importance": float(imp),
+                "shap": float(shap_norm),
+                "win_prob_effect_pp": float(effect_pp),
+            }
+        )
+
+    ranked.sort(key=lambda r: r["score"], reverse=True)
+    if not ranked:
+        return [], []
+
+    take = min(max_n, max(min_n, len(ranked)))
+    selected = ranked[:take]
+
+    insights: list[dict[str, Any]] = []
+    logger.info("Interaction discovery — selected %s of %s candidates:", len(selected), len(pool))
+    for row in selected:
+        sign = "+" if row["win_prob_effect_pp"] >= 0 else ""
+        msg = (
+            f"Discovered: {row['label']} = {sign}{row['win_prob_effect_pp']:.1f}% win prob "
+            f"(score {row['score']:.3f}, corr {row['corr']:.3f})"
+        )
+        logger.info("  %s", msg)
+        insights.append({**row, "message": msg})
+
+    return selected, insights
+
+
+def _save_discovered_interactions(
+    selected: list[dict[str, Any]],
+    insights: list[dict[str, Any]],
+    importance: dict[str, float],
+) -> Path:
+    ensure_data_dirs()
+    out = config.DISCOVERED_INTERACTIONS_PATH
+    ix_importance = {
+        k: float(v)
+        for k, v in importance.items()
+        if str(k).startswith("ix_")
+    }
+    top_ix = sorted(ix_importance.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "selected": selected,
+        "insights": insights,
+        "top_interaction_importance": [
+            {"feature": k, "importance": v, "label": _INTERACTION_LABELS.get(k, k)}
+            for k, v in top_ix
+        ],
+    }
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return out
+
+
 def train_model(
     features: pd.DataFrame,
     *,
@@ -529,6 +816,9 @@ def train_model(
     out_path = Path(model_path) if model_path else config.DEFAULT_MODEL_PATH
     assert_target_encoding(features)
 
+    if config.INTERACTION_DISCOVERY_ENABLED:
+        features = build_interaction_candidates(features)
+
     if isinstance(tune, bool):
         tune_method: TuningMethod = "optuna" if tune else "none"
     else:
@@ -550,7 +840,33 @@ def train_model(
         test_size=test_size,
         calibration_size=calibration_size,
     )
-    feature_cols = splits.feature_columns
+    base_feature_cols = splits.feature_columns
+
+    interaction_specs: list[dict[str, Any]] = []
+    interaction_insights: list[dict[str, Any]] = []
+    if config.INTERACTION_DISCOVERY_ENABLED:
+        candidate_cols = [
+            c for c in interaction_candidate_names() if c in features.columns
+        ]
+        if candidate_cols:
+            interaction_specs, interaction_insights = discover_interaction_features(
+                splits.train,
+                base_feature_cols,
+                candidate_cols,
+                splits.train[config.TARGET_COLUMN],
+            )
+
+    if interaction_specs:
+        features = apply_interaction_specs(features, interaction_specs)
+        splits = TimeSplitData(
+            train=features.loc[splits.train.index].copy(),
+            calibration=features.loc[splits.calibration.index].copy(),
+            test=features.loc[splits.test.index].copy(),
+            feature_columns=base_feature_cols,
+        )
+
+    feature_cols = base_feature_cols + [s["name"] for s in interaction_specs]
+    feature_cols = list(dict.fromkeys(feature_cols))
 
     imputer = fit_imputer(splits.train)
     train_df = apply_imputer(splits.train, imputer)
@@ -570,6 +886,8 @@ def train_model(
     test_df = test_df.dropna(subset=feature_cols).copy()
     if train_df.empty or cal_df.empty or test_df.empty:
         raise ValueError("Empty split after imputation — check feature coverage.")
+
+    _log_contextual_feature_coverage(train_df, feature_cols)
 
     X_train = train_df[feature_cols]
     y_train = train_df[config.TARGET_COLUMN]
@@ -659,7 +977,9 @@ def train_model(
         metrics["mean_ensemble_disagreement"] = float(np.mean(disagree))
 
     importance = _feature_importance(base_model, feature_cols)
-    _save_feature_importance(importance)
+    _save_feature_importance(importance, interaction_insights=interaction_insights)
+    if interaction_specs:
+        _save_discovered_interactions(interaction_specs, interaction_insights, importance)
 
     artifact = {
         "model": calibrated,
@@ -667,6 +987,9 @@ def train_model(
         "base_models": {"lgbm": base_lgbm, "xgb": base_xgb},
         "calibrated_models": {"lgbm": cal_lgbm, "xgb": cal_xgb},
         "feature_columns": feature_cols,
+        "base_feature_columns": base_feature_cols,
+        "interaction_specs": interaction_specs,
+        "interaction_insights": interaction_insights,
         "target_column": config.TARGET_COLUMN,
         "imputer": imputer,
         "metrics": metrics,

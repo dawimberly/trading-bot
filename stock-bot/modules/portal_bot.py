@@ -14,10 +14,10 @@ from modules.portal_paths import (
     PROJECT_ROOT,
     book_bot_log_path,
     book_dir,
-    book_env_path,
     book_heartbeat_path,
     book_journal_path,
     book_pid_path,
+    ensure_book_env,
     migrate_user_to_books,
     read_user_env_prefs,
     user_bot_log_path,
@@ -32,9 +32,20 @@ WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
 
 
 def _python() -> str:
-    venv = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
-    if venv.is_file():
-        return str(venv)
+    """Interpreter for run_all.py (venv or PATH python when dashboard is frozen)."""
+    for venv in (
+        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
+    ):
+        if venv.is_file():
+            return str(venv)
+    if getattr(sys, "frozen", False):
+        import shutil
+
+        for name in ("python", "python3", "python.exe"):
+            found = shutil.which(name)
+            if found:
+                return found
     return sys.executable
 
 
@@ -43,7 +54,8 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env = os.environ.copy()
     bd = book_dir(username, book_id)
     env["PYTHONUNBUFFERED"] = "1"
-    env["PYTHONTRADING_ENV_FILE"] = str(book_env_path(username, book_id))
+    env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
+    env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
     env["WISDOM_SCORECARD_FILE"] = str(bd / "wisdom_scorecard.json")
@@ -226,8 +238,16 @@ def read_bot_log_tail(username: str, book_id: str = "alpaca_paper", max_chars: i
     path = book_bot_log_path(username, book_id)
     if not path.is_file():
         return ""
-    text = path.read_text(encoding="utf-8", errors="replace")
-    return text[-max_chars:].strip()
+    try:
+        size = path.stat().st_size
+        read_bytes = min(size, max(max_chars * 4, 8192))
+        with path.open("rb") as handle:
+            if size > read_bytes:
+                handle.seek(size - read_bytes)
+            chunk = handle.read().decode("utf-8", errors="replace")
+        return chunk[-max_chars:].strip()
+    except OSError:
+        return ""
 
 
 def fund_slot_dir(slot: str) -> Path:
@@ -258,8 +278,12 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
             pass
         pid_path.unlink(missing_ok=True)
 
+    stop_orphan_project_bots()
+    time.sleep(1.0)
+
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(env_file)
     env["HEARTBEAT_FILE"] = str(slot_dir / "bot_heartbeat.json")
     env["PAPER_JOURNAL_CSV"] = str(slot_dir / "paper_journal.csv")
@@ -338,6 +362,9 @@ def bot_env_running(slot: str) -> bool:
 def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     if bot_running(username, book_id):
         return False, f"Bot is already running for {book_id}."
+    orphans_stopped, orphan_msg = stop_orphan_project_bots()
+    if orphans_stopped:
+        time.sleep(1.0)
     bot_script = _bot_entry_script(username, book_id)
     if not bot_script.is_file():
         return False, f"{bot_script.name} not found in project root."
@@ -366,10 +393,18 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
         book_pid_path(username, book_id).unlink(missing_ok=True)
         tail = read_bot_log_tail(username, book_id)
         detail = f"\n\n{tail}" if tail else ""
-        return False, f"Bot exited immediately (code {proc.returncode}).{detail}"
+        hint = ""
+        if "401" in tail or "not authorized" in tail.lower():
+            hint = (
+                "\n\nAlpaca returned 401 — check API keys in the portal menu "
+                "(paper vs live keys must match PAPER_TRADING in your book .env)."
+            )
+        orphan_note = f"\n{orphan_msg}" if orphans_stopped else ""
+        return False, f"Bot exited immediately (code {proc.returncode}).{hint}{orphan_note}{detail}"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
+    orphan_note = f" ({orphan_msg})" if orphans_stopped else ""
     return True, (
-        f"{mode} bot started via {bot_script.name} (PID {proc.pid}). "
+        f"{mode} bot started via {bot_script.name} (PID {proc.pid}){orphan_note}. "
         "First heartbeat may take up to 60s."
     )
 

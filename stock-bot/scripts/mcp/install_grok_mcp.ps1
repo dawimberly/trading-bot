@@ -1,9 +1,15 @@
 # Sync Grok MCP config into Cursor (user + project). Run from repo root.
 $ErrorActionPreference = "Stop"
-$Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$StockBot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+# Monorepo: venv + .env often live one level above stock-bot/
+$Root = $StockBot
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
-$Launcher = Join-Path $Root "scripts\mcp\run_grok_mcp.py"
-$GrokCmd = Join-Path $Root "scripts\mcp\grok_cli.cmd"
+if (-not (Test-Path $VenvPy)) {
+    $Root = (Resolve-Path (Join-Path $StockBot "..")).Path
+    $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
+}
+$Launcher = Join-Path $StockBot "scripts\mcp\run_grok_mcp.py"
+$GrokCmd = Join-Path $StockBot "scripts\mcp\grok_cli.cmd"
 $UserMcp = Join-Path $env:USERPROFILE ".cursor\mcp.json"
 $ProjectMcp = Join-Path $Root ".cursor\mcp.json"
 
@@ -19,7 +25,7 @@ $mcp = @{
         grok = @{
             command = $VenvPy
             args = @($Launcher)
-            cwd = $Root
+            cwd = $StockBot
             env = @{
                 GROK_CLI_PATH = $GrokCmd
                 PYTHONUTF8 = "1"

@@ -7,7 +7,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-import numpy as np
 import pandas as pd
 
 import config
@@ -18,7 +17,61 @@ from src.predictor import merge_predictions_with_odds
 
 logger = logging.getLogger(__name__)
 
+
+def _reload_config_flags() -> None:
+    """Re-read .env and refresh ENABLE_PROPS / related flags before analysis."""
+    try:
+        from src.project_paths import reload_runtime_env
+
+        reload_runtime_env()
+    except Exception as exc:
+        logger.warning("Config reload failed: %s", exc)
+    logger.info("ENABLE_PROPS loaded as: %s", config.ENABLE_PROPS)
+
+
 ProgressFn = Callable[[str, float | None], None]
+
+_ODDS_OVERVIEW_COLS = (
+    "f1_odds",
+    "f2_odds",
+    "edge_f1",
+    "edge_f2",
+    "edge_pct",
+    "implied_prob_f1",
+    "implied_prob_f2",
+    "odds_matched",
+)
+
+
+def _pick_best_odds_overview(
+    base: pd.DataFrame,
+    merged_by_book: dict[str, pd.DataFrame],
+) -> pd.DataFrame:
+    """Vectorized best-edge overview across book prediction frames."""
+    if base.empty or not merged_by_book:
+        return base
+    frames: list[pd.DataFrame] = []
+    for mdf in merged_by_book.values():
+        if mdf is None or mdf.empty:
+            continue
+        if "fighter_1" not in mdf.columns or "fighter_2" not in mdf.columns:
+            continue
+        keep = [c for c in ("fighter_1", "fighter_2", *_ODDS_OVERVIEW_COLS) if c in mdf.columns]
+        frames.append(mdf[keep].copy())
+    if not frames:
+        return base
+    stacked = pd.concat(frames, ignore_index=True)
+    if "edge_pct" not in stacked.columns:
+        return base
+    stacked["_edge_sort"] = pd.to_numeric(stacked["edge_pct"], errors="coerce").fillna(-1e9)
+    best = (
+        stacked.sort_values("_edge_sort", ascending=False)
+        .drop_duplicates(subset=["fighter_1", "fighter_2"], keep="first")
+        .drop(columns=["_edge_sort"])
+    )
+    cols_drop = [c for c in _ODDS_OVERVIEW_COLS if c in base.columns]
+    overview = base.drop(columns=cols_drop, errors="ignore")
+    return overview.merge(best, on=["fighter_1", "fighter_2"], how="left", suffixes=("", "_book"))
 
 BOOK_LOADERS = {
     "BetNow.eu": ("src.odds_providers.betnow_scraper", "fetch_betnow_odds"),
@@ -50,15 +103,21 @@ def _build_props_payload(
     book_name: str,
     *,
     force_refresh_odds: bool,
+    budget_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Rank prop singles/parlays from predictions; live odds when available, else synthetic."""
     from src.odds_providers.prop_odds_common import prop_odds_summary
     from src.props import enrich_predictions_with_props, fetch_live_prop_odds, rank_prop_parlays_for_card, rank_prop_singles
-    from src.strategy import strategy_from_profile
+    from src.strategy import bankroll_from_budget, strategy_from_profile
+
+    if not config.ENABLE_PROPS:
+        logger.debug("Props payload skipped — ENABLE_PROPS is False")
+        return {}
 
     if predictions.empty:
         return {
             "singles": [],
+            "singles_meta": {"total_found": 0, "strict_count": 0, "relaxed_count": 0},
             "parlays": [],
             "rules": config.BOOK_PROP_RULES.get(book_name, {}),
             "live_prop_lines": {"live": 0, "synthetic": 0},
@@ -67,14 +126,19 @@ def _build_props_payload(
 
     prop_odds = fetch_live_prop_odds(book_name, force_refresh=force_refresh_odds)
     merged = enrich_predictions_with_props(predictions, book=book_name, prop_odds=prop_odds)
-    strategy = strategy_from_profile()
+    bankroll = bankroll_from_budget(budget_state)
+    strategy = strategy_from_profile(bankroll=bankroll)
+    singles, singles_meta = rank_prop_singles(
+        merged,
+        book=book_name,
+        strategy=strategy,
+        prop_odds=prop_odds,
+        max_results=config.PROP_MAX_RESULTS,
+        include_relaxed=True,
+    )
     return {
-        "singles": rank_prop_singles(
-            merged,
-            book=book_name,
-            strategy=strategy,
-            prop_odds=prop_odds,
-        ),
+        "singles": singles,
+        "singles_meta": singles_meta,
         "parlays": (
             rank_prop_parlays_for_card(
                 merged,
@@ -99,6 +163,8 @@ def _load_book_odds(
     *,
     force_refresh_odds: bool,
     event_label: str,
+    bankroll: float | None = None,
+    budget_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Load one book; BetNow falls back to The Odds API on scraper failure."""
     warning = ""
@@ -113,7 +179,12 @@ def _load_book_odds(
     except Exception as exc:
         logger.warning("%s odds failed: %s", book_name, exc)
         props_payload = (
-            _build_props_payload(combined, book_name, force_refresh_odds=force_refresh_odds)
+            _build_props_payload(
+                combined,
+                book_name,
+                force_refresh_odds=force_refresh_odds,
+                budget_state=budget_state,
+            )
             if config.ENABLE_PROPS
             else {}
         )
@@ -151,17 +222,23 @@ def _load_book_odds(
                 "props": props_payload,
             }
 
+    from src.strategy import bankroll_from_budget, budget_aware_alerts
+
+    br = bankroll if bankroll is not None else bankroll_from_budget(budget_state)
     alerts = generate_alerts(
         merged,
         event_name=event_label,
         use_dynamic_thresholds=config.DYNAMIC_THRESHOLDS_ENABLED,
+        bankroll=br,
     )
+    alerts = budget_aware_alerts(alerts, budget_state, book_name)
     props_payload: dict[str, Any] = {}
     if config.ENABLE_PROPS:
         props_payload = _build_props_payload(
             merged,
             book_name,
             force_refresh_odds=force_refresh_odds,
+            budget_state=budget_state,
         )
     return {
         "predictions": merged,
@@ -181,8 +258,19 @@ def apply_books_to_predictions(
     event_label: str = "",
     progress: ProgressFn | None = None,
     books_filter: set[str] | None = None,
+    budget_state: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Fetch odds per book and build alert payloads."""
+    from src.strategy import bankroll_from_budget, budget_aware_alerts
+
+    if budget_state is not None:
+        enabled = config.enabled_books_from_budget(budget_state)
+        if books_filter is None:
+            books_filter = enabled
+        else:
+            books_filter = books_filter & enabled
+
+    bankroll = bankroll_from_budget(budget_state)
     books: dict[str, dict[str, Any]] = {}
     merged_by_book: dict[str, pd.DataFrame] = {}
     loaders = [
@@ -199,53 +287,57 @@ def apply_books_to_predictions(
             combined,
             force_refresh_odds=force_refresh_odds,
             event_label=event_label,
+            bankroll=bankroll,
+            budget_state=budget_state,
         )
         books[book_name] = book_data
         if book_data.get("odds_matched", 0) > 0:
             merged_by_book[book_name] = book_data["predictions"]
 
-    overview = combined.copy()
-    if merged_by_book:
-        best = combined.copy()
-        best["edge_pct"] = np.nan
-        best["odds_matched"] = False
-        for idx, row in best.iterrows():
-            f1, f2 = str(row["fighter_1"]), str(row["fighter_2"])
-            top_edge = -999.0
-            top_row = None
-            for mdf in merged_by_book.values():
-                for _, mrow in mdf.iterrows():
-                    if str(mrow.get("fighter_1")) == f1 and str(mrow.get("fighter_2")) == f2:
-                        e = mrow.get("edge_pct")
-                        if pd.notna(e) and float(e) > top_edge:
-                            top_edge = float(e)
-                            top_row = mrow
-            if top_row is not None:
-                for col in (
-                    "f1_odds",
-                    "f2_odds",
-                    "edge_f1",
-                    "edge_f2",
-                    "edge_pct",
-                    "implied_prob_f1",
-                    "implied_prob_f2",
-                    "odds_matched",
-                ):
-                    if col in top_row.index:
-                        best.at[idx, col] = top_row[col]
-        overview = best
+    overview = _pick_best_odds_overview(combined, merged_by_book)
 
+    overview_alerts = generate_alerts(
+        overview,
+        event_name=event_label,
+        use_dynamic_thresholds=config.DYNAMIC_THRESHOLDS_ENABLED,
+        bankroll=bankroll,
+    )
     books["Overview"] = {
         "predictions": overview,
-        "alerts": generate_alerts(
-            overview,
-            event_name=event_label,
-            use_dynamic_thresholds=config.DYNAMIC_THRESHOLDS_ENABLED,
-        ),
+        "alerts": budget_aware_alerts(overview_alerts, budget_state, "Overview"),
         "odds_matched": int(overview.get("odds_matched", pd.Series(False)).sum()),
         "odds_total": len(overview),
     }
     return books
+
+
+def _ensure_book_props(
+    books: dict[str, dict[str, Any]],
+    combined: pd.DataFrame,
+    *,
+    force_refresh_odds: bool,
+    budget_state: dict[str, Any] | None = None,
+) -> None:
+    """Build props payloads when ENABLE_PROPS is on but books lack prop data."""
+    if not config.ENABLE_PROPS:
+        return
+    for book_name, entry in books.items():
+        if book_name == "Overview":
+            continue
+        props = entry.get("props") or {}
+        meta = props.get("singles_meta") or {}
+        if props.get("singles") or int(meta.get("total_found", 0)) > 0:
+            continue
+        preds = entry.get("predictions", combined)
+        if not isinstance(preds, pd.DataFrame) or preds.empty:
+            continue
+        entry["props"] = _build_props_payload(
+            preds,
+            book_name,
+            force_refresh_odds=force_refresh_odds,
+            budget_state=budget_state,
+        )
+        logger.info("Built props for %s (ENABLE_PROPS=True)", book_name)
 
 
 def run_quick_odds_refresh(
@@ -253,13 +345,19 @@ def run_quick_odds_refresh(
     *,
     event_label: str = "",
     progress: ProgressFn | None = None,
+    budget_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fast path: BetNow + DraftKings (+ MyBookie when enabled)."""
+    _reload_config_flags()
+    from src.strategy import bankroll_from_budget, budget_aware_alerts
+
     books_label = "BetNow + DraftKings"
     quick_filter = {"BetNow.eu", "DraftKings"}
     if config.MYBOOKIE_ENABLED:
         books_label += " + MyBookie"
         quick_filter.add("MyBookie")
+    if budget_state is not None:
+        quick_filter &= config.enabled_books_from_budget(budget_state)
     _log(progress, f"Quick odds refresh ({books_label})…", 0.1)
     books = apply_books_to_predictions(
         base_preds,
@@ -267,41 +365,112 @@ def run_quick_odds_refresh(
         event_label=event_label,
         progress=progress,
         books_filter=quick_filter,
+        budget_state=budget_state,
     )
-    # Rebuild overview from quick books only
-    dk = books.get("DraftKings", {}).get("predictions")
-    bn = books.get("BetNow.eu", {}).get("predictions")
     merged_by_book = {k: v["predictions"] for k, v in books.items() if k != "Overview" and "predictions" in v}
-    overview = base_preds.copy()
-    if merged_by_book:
-        overview = base_preds.copy()
-        overview["edge_pct"] = np.nan
-        overview["odds_matched"] = False
-        for idx, row in overview.iterrows():
-            f1, f2 = str(row["fighter_1"]), str(row["fighter_2"])
-            top_edge = -999.0
-            top_row = None
-            for mdf in merged_by_book.values():
-                for _, mrow in mdf.iterrows():
-                    if str(mrow.get("fighter_1")) == f1 and str(mrow.get("fighter_2")) == f2:
-                        e = mrow.get("edge_pct")
-                        if pd.notna(e) and float(e) > top_edge:
-                            top_edge = float(e)
-                            top_row = mrow
-            if top_row is not None:
-                for col in ("f1_odds", "f2_odds", "edge_pct", "odds_matched", "edge_f1", "edge_f2"):
-                    if col in top_row.index:
-                        overview.at[idx, col] = top_row[col]
+    overview = _pick_best_odds_overview(base_preds, merged_by_book)
+    bankroll = bankroll_from_budget(budget_state)
+    overview_alerts = generate_alerts(overview, event_name=event_label, bankroll=bankroll)
     books["Overview"] = {
         "predictions": overview,
-        "alerts": generate_alerts(overview, event_name=event_label),
+        "alerts": budget_aware_alerts(overview_alerts, budget_state, "Overview"),
         "odds_matched": int(overview.get("odds_matched", pd.Series(False)).sum()),
         "odds_total": len(overview),
     }
-    bankroll = float(config.INITIAL_BANKROLL)
     threshold_ctx = threshold_context_for_alerts(overview, bankroll=bankroll)
     _log(progress, "Quick odds complete.", 1.0)
     return {"books": books, "threshold_ctx": threshold_ctx, "odds_updated_at": _utc_now()}
+
+
+def load_next_two_cards(
+    *,
+    explain: bool = True,
+    use_cache: bool = True,
+    progress: ProgressFn | None = None,
+) -> tuple[list[tuple[int, str]], list[dict[str, Any]], pd.DataFrame, bool]:
+    """
+    Resolve and predict the two soonest upcoming cards (Refresh Next Two path).
+
+    Logs target resolution, raw card size, and prediction row counts for debugging.
+    """
+    from main import fetch_event_card, load_or_refresh_data
+    from src.predictor import resolve_analysis_targets
+
+    _log(progress, "Resolving next two events…", 0.02)
+    try:
+        targets = resolve_analysis_targets(
+            None,
+            next_two=True,
+            include_adjacent_week=False,
+        )
+    except SystemExit as exc:
+        logger.warning("resolve_analysis_targets (next two) failed: %s", exc)
+        raise
+
+    labels = [name for _, name in targets]
+    logger.info(
+        "load_next_two_cards: resolve_analysis_targets returned %d event(s): %s",
+        len(targets),
+        labels,
+    )
+    if not targets:
+        logger.warning("load_next_two_cards: no events resolved")
+        return [], [], pd.DataFrame(), False
+
+    fights = load_or_refresh_data(refresh=False)
+    logger.info("load_next_two_cards: historical fight pool rows=%d", len(fights))
+
+    cards: list[dict[str, Any]] = []
+    n = len(targets)
+    all_cached = bool(use_cache)
+
+    for idx, (event_index, event_name) in enumerate(targets):
+        base_pct = 0.05 + (idx / n) * 0.5
+        span = 0.5 / n
+        _log(progress, f"Card {idx + 1}/{n}: {event_name}", base_pct)
+        card = fetch_event_card(event_index, refresh=False)
+        raw_rows = len(card)
+        logger.info(
+            "load_next_two_cards: card %d %r raw bouts=%d",
+            idx + 1,
+            event_name,
+            raw_rows,
+        )
+        if use_cache:
+            hit = load_event_cache(event_name, card)
+            if not hit or hit["meta"].get("explain") != explain:
+                all_cached = False
+        else:
+            all_cached = False
+        preds = predict_card_cached(
+            card,
+            fights,
+            event_name,
+            explain=explain,
+            use_cache=use_cache,
+            progress=progress,
+            step_pct=base_pct,
+            step_span=span,
+        )
+        logger.info(
+            "load_next_two_cards: card %d %r predictions=%d (from %d bouts)",
+            idx + 1,
+            event_name,
+            len(preds),
+            raw_rows,
+        )
+        cards.append({"event_name": event_name, "predictions": preds})
+
+    combined = pd.concat(
+        [c["predictions"] for c in cards if not c["predictions"].empty],
+        ignore_index=True,
+    )
+    logger.info(
+        "load_next_two_cards: done — %d total predictions across %d card(s)",
+        len(combined),
+        len(cards),
+    )
+    return targets, cards, combined, all_cached
 
 
 def run_full_analysis(
@@ -312,10 +481,13 @@ def run_full_analysis(
     explain: bool = True,
     use_cache: bool = True,
     progress: ProgressFn | None = None,
+    budget_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Full dashboard analysis with cached feature engineering."""
+    _reload_config_flags()
     from main import fetch_event_card, resolve_event_targets, load_or_refresh_data, _model_exists
     from src.risk_manager import assess_upcoming_card_risk
+    from src.strategy import bankroll_from_budget
 
     result: dict[str, Any] = {
         "generated_at": _utc_now(),
@@ -338,51 +510,70 @@ def run_full_analysis(
     next_two = event_mode in ("Next Two Cards", "Last Two Cards")
     event_query = None if event_mode in ("Next Card", "Next Two Cards", "Last Two Cards") else event_mode
 
-    _log(progress, "Resolving events…", 0.02)
-    try:
-        targets = resolve_event_targets(
-            event_query,
-            next_two=next_two,
-            include_adjacent_week=not next_two and event_query is not None,
-        )
-    except SystemExit as exc:
-        result["errors"].append(str(exc) or "Could not resolve events.")
-        return result
+    if event_mode == "Next Two Cards":
+        try:
+            targets, cards, combined, all_cached = load_next_two_cards(
+                explain=explain,
+                use_cache=use_cache,
+                progress=progress,
+            )
+        except SystemExit as exc:
+            result["errors"].append(str(exc) or "Could not resolve events.")
+            return result
+        result["event_label"] = " + ".join(name for _, name in targets)
+        result["cards"] = cards
+        result["combined"] = combined
+        result["from_cache"] = all_cached
+    else:
+        _log(progress, "Resolving events…", 0.02)
+        try:
+            targets = resolve_event_targets(
+                event_query,
+                next_two=next_two,
+                include_adjacent_week=not next_two and event_query is not None,
+            )
+        except SystemExit as exc:
+            result["errors"].append(str(exc) or "Could not resolve events.")
+            return result
 
-    result["event_label"] = " + ".join(name for _, name in targets)
-    fights = load_or_refresh_data(refresh=False)
-    n = len(targets)
-    all_cached = bool(use_cache)
+        result["event_label"] = " + ".join(name for _, name in targets)
+        fights = load_or_refresh_data(refresh=False)
+        n = len(targets)
+        all_cached = bool(use_cache)
 
-    for idx, (event_index, event_name) in enumerate(targets):
-        base_pct = 0.05 + (idx / n) * 0.5
-        span = 0.5 / n
-        _log(progress, f"Card {idx + 1}/{n}: {event_name}", base_pct)
-        card = fetch_event_card(event_index, refresh=False)
-        if use_cache:
-            hit = load_event_cache(event_name, card)
-            if not hit or hit["meta"].get("explain") != explain:
+        for idx, (event_index, event_name) in enumerate(targets):
+            base_pct = 0.05 + (idx / n) * 0.5
+            span = 0.5 / n
+            _log(progress, f"Card {idx + 1}/{n}: {event_name}", base_pct)
+            card = fetch_event_card(event_index, refresh=False)
+            if use_cache:
+                hit = load_event_cache(event_name, card)
+                if not hit or hit["meta"].get("explain") != explain:
+                    all_cached = False
+            else:
                 all_cached = False
-        else:
-            all_cached = False
-        preds = predict_card_cached(
-            card,
-            fights,
-            event_name,
-            explain=explain,
-            use_cache=use_cache,
-            progress=progress,
-            step_pct=base_pct,
-            step_span=span,
-        )
-        result["cards"].append({"event_name": event_name, "predictions": preds})
+            preds = predict_card_cached(
+                card,
+                fights,
+                event_name,
+                explain=explain,
+                use_cache=use_cache,
+                progress=progress,
+                step_pct=base_pct,
+                step_span=span,
+            )
+            result["cards"].append({"event_name": event_name, "predictions": preds})
 
-    combined = pd.concat(
-        [c["predictions"] for c in result["cards"] if not c["predictions"].empty],
-        ignore_index=True,
-    )
-    result["combined"] = combined
-    result["from_cache"] = all_cached
+        combined = pd.concat(
+            [c["predictions"] for c in result["cards"] if not c["predictions"].empty],
+            ignore_index=True,
+        )
+        result["combined"] = combined
+        result["from_cache"] = all_cached
+
+    bankroll = bankroll_from_budget(budget_state)
+    if budget_state is not None:
+        config.apply_budget_state(budget_state)
 
     _log(progress, "Loading odds…", 0.58)
     result["books"] = apply_books_to_predictions(
@@ -390,6 +581,13 @@ def run_full_analysis(
         force_refresh_odds=force_refresh_odds,
         event_label=result["event_label"],
         progress=progress,
+        budget_state=budget_state,
+    )
+    _ensure_book_props(
+        result["books"],
+        combined,
+        force_refresh_odds=force_refresh_odds,
+        budget_state=budget_state,
     )
 
     _log(progress, "Risk analysis…", 0.92)
@@ -397,7 +595,7 @@ def run_full_analysis(
         dk = result["books"].get("DraftKings", {}).get("predictions", combined)
         result["risk_metrics"] = assess_upcoming_card_risk(
             dk,
-            bankroll=float(config.INITIAL_BANKROLL),
+            bankroll=bankroll,
             simulations=min(config.MC_CARD_SIMULATIONS, 3000),
         )
     except Exception as exc:
@@ -407,7 +605,7 @@ def run_full_analysis(
     overview = result["books"].get("Overview", {}).get("predictions", combined)
     result["threshold_ctx"] = threshold_context_for_alerts(
         overview,
-        bankroll=float(config.INITIAL_BANKROLL),
+        bankroll=bankroll,
     )
     if config.ENABLE_PROPS:
         try:
