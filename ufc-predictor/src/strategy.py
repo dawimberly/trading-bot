@@ -513,6 +513,9 @@ def attach_prop_stakes(
 
     plan = allocate_card_budget_per_book(budget_state)
     info = plan.get(book, {})
+    if not info.get("enabled"):
+        return [{**s, "suggested_stake": 0.0, "book_disabled": True} for s in singles]
+
     pool = float(info.get("allocation") or 0)
     if pool <= 0 and info.get("enabled"):
         pool = available_card_budget_usd(budget_state) / max(
@@ -591,11 +594,120 @@ def available_card_budget_text(budget_state: dict[str, Any]) -> str:
         if budget_state.get(use_key, True):
             enabled.append(book_display_name(book))
     if not enabled:
-        return f"Available this card: $0.00 (no books selected)"
+        return "Available this card: $0.00 (no books selected)"
     book_txt = ", ".join(enabled)
-    n = len(enabled)
-    suffix = f"{n} selected book{'s' if n != 1 else ''}"
-    return f"Available this card: ${total:,.2f} across {book_txt} ({suffix})"
+    return f"Available this card: ${total:,.2f} across {book_txt}"
+
+
+MAX_SAFE_BANKROLL_FRACTION = 0.005  # 0.5% hard cap for "max safe" single bet
+
+
+def budget_availability_badge_style(
+    total_usd: float,
+    *,
+    books_enabled: bool,
+) -> tuple[str, str]:
+    """Background and text colors for the Available-this-card badge."""
+    if not books_enabled:
+        return "#451a1a", "#fca5a5"
+    if total_usd > 50:
+        return "#14532d", "#86efac"
+    if total_usd >= 20:
+        return "#713f12", "#fde047"
+    return "#451a1a", "#fca5a5"
+
+
+def bet_sizing_metrics(
+    bankroll: float,
+    *,
+    prob: float | None,
+    decimal_odds: float | None,
+    edge: float,
+    config: StrategyConfig,
+) -> dict[str, float]:
+    """Kelly stake, Kelly % of bankroll, and max-safe bet (min 0.5% bankroll vs Kelly)."""
+    kelly_usd = 0.0
+    kelly_pct = 0.0
+    half_pct_cap = max(bankroll * MAX_SAFE_BANKROLL_FRACTION, 0.0)
+    if (
+        prob is not None
+        and decimal_odds is not None
+        and bankroll > 0
+        and float(edge) >= config.min_edge
+    ):
+        kelly_usd = kelly_stake(
+            bankroll,
+            prob=float(prob),
+            decimal_odds=float(decimal_odds),
+            edge=float(edge),
+            config=config,
+        )
+        if kelly_usd > 0:
+            kelly_pct = kelly_usd / bankroll * 100.0
+    max_safe = min(half_pct_cap, kelly_usd) if kelly_usd > 0 else half_pct_cap
+    return {
+        "kelly_stake_usd": round(kelly_usd, 2),
+        "kelly_pct": round(kelly_pct, 2),
+        "max_safe_bet_usd": round(max_safe, 2),
+    }
+
+
+def bankroll_from_budget(budget_state: dict[str, Any] | None) -> float:
+    import config as _cfg
+
+    if not budget_state:
+        return float(_cfg.INITIAL_BANKROLL)
+    return float(budget_state.get("total_bankroll") or _cfg.INITIAL_BANKROLL)
+
+
+def scale_alerts_to_book_pool(
+    alerts: dict[str, Any],
+    budget_state: dict[str, Any] | None,
+    book: str,
+) -> dict[str, Any]:
+    """Scale singles/parlay suggested stakes to the book's card allocation pool."""
+    if not alerts or not budget_state:
+        return alerts
+
+    if book == "Overview":
+        pool = available_card_budget_usd(budget_state)
+    else:
+        plan = allocate_card_budget_per_book(budget_state)
+        info = plan.get(book, {})
+        if not info.get("enabled"):
+            return {**alerts, "singles": [], "parlays": [], "book_disabled": True}
+        pool = float(info.get("allocation") or 0)
+    out = dict(alerts)
+    singles = list(alerts.get("singles") or [])
+    if singles and pool > 0:
+        stakes = distribute_stakes_to_pool(singles, pool)
+        out["singles"] = [
+            {**s, "suggested_stake": round(float(st), 2), "book_pool_usd": pool}
+            for s, st in zip(singles, stakes)
+        ]
+    elif singles:
+        out["singles"] = [{**s, "suggested_stake": 0.0, "book_pool_usd": 0.0} for s in singles]
+
+    parlays = list(alerts.get("parlays") or [])
+    if parlays and pool > 0:
+        parlay_pool = pool * 0.25
+        stakes = distribute_stakes_to_pool(parlays, parlay_pool)
+        out["parlays"] = [
+            {**p, "suggested_stake": round(float(st), 2), "book_pool_usd": pool}
+            for p, st in zip(parlays, stakes)
+        ]
+    return out
+
+
+def budget_aware_alerts(
+    alerts: dict[str, Any],
+    budget_state: dict[str, Any] | None,
+    book: str,
+) -> dict[str, Any]:
+    """Apply book enablement and card-budget stake scaling to an alert payload."""
+    if not budget_state:
+        return alerts
+    return scale_alerts_to_book_pool(alerts, budget_state, book)
 
 
 def collect_dashboard_risk_warnings(
@@ -750,6 +862,8 @@ def aggregate_top_recommended_bets(
         for book in _cfg.BUDGET_BOOKS
         if budget_state.get(_cfg.BUDGET_USE_KEYS[book], True)
     ]
+    bankroll = bankroll_from_budget(budget_state)
+    strategy = strategy_from_profile(bankroll=bankroll)
     best_by_fight: dict[str, dict[str, Any]] = {}
 
     for book in enabled:
@@ -770,6 +884,18 @@ def aggregate_top_recommended_bets(
             pick = str(single.get("pick") or "")
             fight = str(single.get("fight") or "")
             dec = decimal_odds_for_pick(row, pick) if row is not None else None
+            prob_val = single.get("prob")
+            prob_f = float(prob_val) if prob_val is not None else None
+            confidence = str(single.get("confidence") or "").strip()
+            if not confidence and row is not None:
+                confidence = str(row.get("confidence_label") or "").strip()
+            sizing = bet_sizing_metrics(
+                bankroll,
+                prob=prob_f,
+                decimal_odds=dec,
+                edge=edge,
+                config=strategy,
+            )
             best_by_fight[fid] = {
                 "fight_id": fid,
                 "fight": fight,
@@ -777,9 +903,13 @@ def aggregate_top_recommended_bets(
                 "pick_line": format_pick_over_opponent(fight, pick),
                 "bet_type": "Moneyline Single",
                 "description": str(single.get("brief") or single.get("reasoning") or "").strip(),
-                "prob": single.get("prob"),
+                "prob": prob_f,
                 "edge": edge,
                 "edge_pct": float(single.get("edge_pct") or edge * 100),
+                "confidence": confidence or "—",
+                "kelly_pct": sizing["kelly_pct"],
+                "kelly_stake_usd": sizing["kelly_stake_usd"],
+                "max_safe_bet_usd": sizing["max_safe_bet_usd"],
                 "book": book_display_name(book),
                 "book_key": book,
                 "decimal_odds": dec,
