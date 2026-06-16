@@ -28,6 +28,15 @@ IPO_MIN_TRADING_DAYS = int(__import__("os").getenv("PAPER_UNIVERSE_IPO_MIN_DAYS"
 MAX_UNIVERSE_SIZE = int(__import__("os").getenv("PAPER_UNIVERSE_MAX_TICKERS", "28"))
 MAX_IPO_SLOTS = int(__import__("os").getenv("PAPER_UNIVERSE_MAX_IPO", "5"))
 IPO_POSITION_SCALE = float(__import__("os").getenv("PAPER_UNIVERSE_IPO_SCALE", "0.50"))
+IPO_SAFETY_MAX_POSITION_PCT = float(
+    __import__("os").getenv("PAPER_IPO_MAX_POSITION_PCT", "0.02")
+)
+IPO_SAFETY_TRIM_TARGET_PCT = float(
+    __import__("os").getenv("PAPER_IPO_TRIM_TARGET_PCT", "0.01")
+)
+IPO_SAFETY_TRIM_GAIN_PCT = float(
+    __import__("os").getenv("PAPER_IPO_TRIM_GAIN_PCT", "0.20")
+)
 HIGH_VOL_ATR_PCT = float(__import__("os").getenv("PAPER_UNIVERSE_HIGH_VOL_ATR", "0.08"))
 HIGH_VOL_POSITION_SCALE = float(
     __import__("os").getenv("PAPER_UNIVERSE_HIGH_VOL_SCALE", "0.75")
@@ -261,15 +270,106 @@ def load_screener_ticker_meta(*, force: bool = False) -> dict[str, dict]:
     return _meta_cache
 
 
+def ipo_safety_enabled() -> bool:
+    try:
+        return bool(config.effective_paper_ipo_safety_enabled())
+    except AttributeError:
+        return False
+
+
+def trading_days_from_series(prices) -> int:
+    return int(len(prices.dropna()))
+
+
+def trading_days_at_bar(data, symbol: str, bar_idx: int) -> int:
+    """Trading days since first valid daily bar (listing proxy)."""
+    sym = config.normalize_symbol(symbol)
+    if sym not in getattr(data, "columns", []):
+        return 0
+    series = data[sym]
+    first = series.first_valid_index()
+    if first is None:
+        return 0
+    end = data.index[int(bar_idx)]
+    if end < first:
+        return 0
+    return trading_days_from_series(series.loc[first:end])
+
+
+def is_ipo_trading_days(trading_days: int) -> bool:
+    """IPO window: 5–30 trading days of history (exclusive upper bound at 30)."""
+    return IPO_MIN_TRADING_DAYS <= trading_days < IPO_MAX_TRADING_DAYS
+
+
+def is_ipo_symbol(
+    symbol: str, *, data=None, bar_idx: int | None = None
+) -> bool:
+    """True when symbol is in the IPO age window (5–29 trading days)."""
+    sym = config.normalize_symbol(symbol)
+    if data is not None and sym in getattr(data, "columns", []):
+        if bar_idx is not None:
+            td = trading_days_at_bar(data, sym, int(bar_idx))
+        else:
+            series = data[sym]
+            first = series.first_valid_index()
+            td = trading_days_from_series(series.loc[first:]) if first is not None else 0
+        return is_ipo_trading_days(td)
+    meta = load_screener_ticker_meta().get(sym, {})
+    td = meta.get("trading_days")
+    if td is not None:
+        return is_ipo_trading_days(int(td))
+    return bool(meta.get("is_ipo"))
+
+
+def ipo_max_position_notional(equity: float) -> float:
+    return round(float(equity) * IPO_SAFETY_MAX_POSITION_PCT, 2)
+
+
+def cap_ipo_buy_notional(
+    symbol: str,
+    notional: float,
+    equity: float,
+    *,
+    data=None,
+    bar_idx: int | None = None,
+) -> float:
+    if not ipo_safety_enabled() or not is_ipo_symbol(symbol, data=data, bar_idx=bar_idx):
+        return float(notional)
+    return round(min(float(notional), ipo_max_position_notional(equity)), 2)
+
+
+def ipo_trim_reduce_notional(
+    equity: float, cost_basis: float, market_value: float
+) -> float | None:
+    """Sell notional to reach 1% equity when unrealized gain >= 20%."""
+    if not ipo_safety_enabled() or cost_basis <= 0 or market_value <= 0:
+        return None
+    gain = (market_value - cost_basis) / cost_basis
+    if gain < IPO_SAFETY_TRIM_GAIN_PCT:
+        return None
+    target = float(equity) * IPO_SAFETY_TRIM_TARGET_PCT
+    if market_value <= target:
+        return None
+    return round(market_value - target, 2)
+
+
+def ipo_momentum_scale(
+    symbol: str, *, data=None, bar_idx: int | None = None
+) -> float:
+    if not ipo_safety_enabled():
+        return 1.0
+    if is_ipo_symbol(symbol, data=data, bar_idx=bar_idx):
+        return IPO_POSITION_SCALE
+    return 1.0
+
+
 def position_scale_for_symbol(symbol: str) -> float:
-    """Safe sizing multiplier for volatile / IPO names (paper only)."""
+    """Safe sizing multiplier for volatile names (paper only; IPO via ipo_momentum_scale)."""
     if not config.effective_paper_dynamic_universe():
         return 1.0
     meta = load_screener_ticker_meta().get(config.normalize_symbol(symbol), {})
     if meta.get("position_scale") is not None:
         return float(meta["position_scale"])
-    if meta.get("is_ipo"):
-        return IPO_POSITION_SCALE
     atr = float(meta.get("atr_pct") or 0)
     if atr >= HIGH_VOL_ATR_PCT:
         return HIGH_VOL_POSITION_SCALE

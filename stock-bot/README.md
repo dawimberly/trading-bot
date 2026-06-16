@@ -24,6 +24,72 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 ---
 
+## What the bot is set to do (runtime defaults)
+
+This section is the **authoritative summary** of what actually runs on **live and paper bots** vs what exists **only for backtests and research scripts**. Code defaults below; your `.env` can override opt-in flags (but not the hard-disabled research experiments).
+
+### Profile A — live (`run_all.py`, ~$100–$300)
+
+| Layer | Runtime default |
+|-------|-----------------|
+| **VTI core** | **90%** when equity &lt; $500; **80%** at ≥ $500 |
+| **Active sleeves** | SPY MA200 trend, NYSE MA50 momentum, **vol-gated crypto pairs** (24 majors) |
+| **Game plan** | Yield-gate-only — blocks new SPY buys on hostile rates |
+| **Risk / orders** | 1% per trade, **$10 max** (small account) |
+| **Overlap / chunk / co-fire** | **Off** |
+| **Dynamic NYSE screener** | **Off** (static universe from `market_data.db`) |
+| **IPO safety** | **Off** |
+| **Thinking engine** | **Off** |
+| **Social / macro adaptor** | **Off** |
+
+### Profile B — paper Sharpe chase (`run_paper_bot.py` / `PAPER_CHASE_MODE=1`)
+
+| Layer | Runtime default |
+|-------|-----------------|
+| **VTI core** | Dynamic **40–75%** (`PAPER_DYNAMIC_VTI=true`) |
+| **Active sleeves** | SPY / crypto / NYSE at 45/20/20 base caps × **1.40×** boost |
+| **Stat arb + vol overlay + options** | **On** |
+| **Overlap / chunk / co-fire** | **On** |
+| **Dynamic universe** | Weekly NYSE+NASDAQ screener refresh — **on** (`PAPER_DYNAMIC_UNIVERSE=true`) |
+| **Dynamic universe strict** | Quality screener (8–12 names) — **off** unless `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
+| **IPO safety** | **On** — 2% cap, 0.5× sizing, trim rules (`PAPER_IPO_SAFETY_ENABLED=true`) |
+| **Crypto** | Base **24-pair** universe; vol gate **off** on paper (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| **Thinking engine** | **Off** unless `PAPER_THINKING_ENGINE_ENABLED=true` |
+| **Social / macro / equity pairs** | **Locked off** by `enforce_best_paper_stack()` |
+
+### Hard-disabled on all bots (research / backtest only)
+
+These modules and flags stay in the repo for A/B tests. **Setting them in `.env` does not enable them on `run_all.py` or `run_paper_bot.py`.**
+
+| Experiment | Backtest command | Bot runtime |
+|------------|------------------|-------------|
+| **Expanded Alpaca crypto universe** | `python backtester.py --days 365 --paper-aggressive --compare-crypto-universe` | **Off** — uses 24 base pairs only |
+| **Profit target (+25% arm / trailing stop)** | `python backtester.py --days 365 --paper-aggressive --compare-profit-target` | **Off** |
+| **Crypto sleeve v3 filters** | `python scripts/research/improve_crypto_sleeve_v3.py` | **Off** — not adopted |
+| **Crypto vol sleeve (isolated book)** | `scripts/research/backtest_crypto_vol_v5.py` | **Off** — `CRYPTO_VOL_SLEEVE_ENABLED=false` |
+
+Other research compares (safe to run; do not wire to bots without re-backtesting): `--compare-dynamic-universe`, `--compare-ipo-rules`, `--compare-final`, `--compare-thinking`.
+
+### Sharing this doc with Grok (or another LLM)
+
+**Yes, mostly** — this README (especially the section above) tells Grok **how the system is designed** and **which features are on by default** for live vs paper.
+
+**Grok still will not know** unless you paste it separately:
+
+- Your actual `.env` overrides (e.g. strict dynamic universe, thinking engine)
+- Current equity tier (90% vs 80% VTI), open positions, or today's regime
+- Whether a bot process is running and which profile is active
+
+**Best bundle to paste into Grok:**
+
+1. This **“What the bot is set to do”** section (or the whole README)
+2. Output of `python status.py` from `stock-bot/` (live + paper flags as of that moment)
+3. Optional: [`data/bot_manifest.txt`](data/bot_manifest.txt) for a shorter architecture index
+
+That combination is enough for Grok to answer “what should my bot be doing?” and “what experiments are research-only?” without access to your machine.
+
+---
+
 ## System overview
 
 One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → VTI core rebalance → sleeve strategies → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`, `launch.bat`) and **`status.py`** read heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
@@ -149,7 +215,13 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
 | **Overlap / chunk / co-fire** | **On** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
 | **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
+| **Dynamic universe strict** | **Off** unless opted in — 8–12 quality names | `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
+| **IPO safety** | **On** — caps / trim / 0.5× sizing on new listings | `PAPER_IPO_SAFETY_ENABLED=true` |
 | **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
+
+#### Hard-disabled on bots (research only)
+
+Expanded crypto universe and profit target are **not applied** on live or paper bots even if env vars are `true`. Use `--compare-crypto-universe` and `--compare-profit-target` in `backtester.py` only. See [runtime defaults](#what-the-bot-is-set-to-do-runtime-defaults).
 
 Enable thinking in `.env`, then restart `run_paper_bot.py`. LLM runs in a **background thread** (main loop never blocks on Ollama). First cycle uses cached/heuristic tilt until refresh completes. Audit: `logs/thinking_engine.log`, snapshot: `thinking_engine_last.json`.
 
@@ -1074,6 +1146,10 @@ python backtester.py --days 365 --crypto-slippage-bps 10  # +10 bps crypto slipp
 python backtester.py --days 365 --fast-mode
 python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode
 python backtester.py --days 365 --paper-aggressive --compare-final --no-parallel
+python backtester.py --days 365 --paper-aggressive --compare-dynamic-universe
+python backtester.py --days 365 --paper-aggressive --compare-ipo-rules
+python backtester.py --days 365 --paper-aggressive --compare-crypto-universe   # research only — not on bots
+python backtester.py --days 365 --paper-aggressive --compare-profit-target    # research only — not on bots
 python backtester.py --days 365 --paper-aggressive --walk-forward 3
 python backtester.py --days 365 --paper-aggressive --slippage-sensitivity
 python backtester.py --days 365 --paper-aggressive --report-html

@@ -45,6 +45,7 @@ from modules.pipeline_strategies import (
     run_crypto_strategy,
     run_equity_strategy,
     run_equity_pairs_strategy,
+    run_ipo_safety_trims,
     run_spy_exits,
     run_spy_strategy,
 )
@@ -361,17 +362,50 @@ class BacktestExecutor:
         target = config.normalize_symbol(symbol)
 
         class _Pos:
-            def __init__(self, sym, qty, price):
+            def __init__(self, sym, qty, avg_entry, current_price):
                 self.symbol = sym
                 self.qty = qty
-                self.current_price = price
-                self.avg_entry_price = price
+                self.avg_entry_price = avg_entry
+                self.current_price = current_price
 
         for sym, qty in self.portfolio.positions.items():
             if config.normalize_symbol(sym) == target:
                 price = self.prices.get(sym) or 0.0
-                return _Pos(sym, qty, float(price) if price is not None else 0.0)
+                current = float(price) if price is not None else 0.0
+                avg_entry = current
+                total_cost = self.portfolio.entry_cost.get(sym)
+                if total_cost and float(qty) > 0:
+                    avg_entry = float(total_cost) / float(qty)
+                return _Pos(sym, qty, avg_entry, current)
         return None
+
+    def execute_reduce_notional(self, symbol, reduce_notional, *, reason="reduce", sleeve=None):
+        pos = self._find_position(symbol)
+        if pos is None or pos.qty <= 0:
+            return None
+        price = self.prices.get(pos.symbol)
+        if price is None or not np.isfinite(price) or price <= 0:
+            return None
+        sell_notional = min(float(reduce_notional), float(pos.qty) * float(price))
+        if sell_notional < 1:
+            return None
+        return self.execute_order(
+            pos.symbol,
+            "sell",
+            notional=round(sell_notional, 2),
+            reason=reason,
+            sleeve=sleeve,
+        )
+
+    def profit_rebuy_blocked(self, symbol, now, *, cooldown_bars=None) -> bool:
+        from modules.profit_target import profit_rebuy_blocked as _blocked
+
+        return _blocked(self, symbol, now, cooldown_bars=cooldown_bars)
+
+    def run_profit_target_exits(self, **kwargs) -> int:
+        from modules.profit_target import run_profit_target_exits
+
+        return run_profit_target_exits(self, **kwargs)
 
     def execute_full_exit(self, symbol, **kwargs):
         pos = self._find_position(symbol)
@@ -411,6 +445,7 @@ class BacktestPortfolio:
         self.cash = initial_capital
         self.initial_capital = initial_capital
         self.positions = {}
+        self.entry_cost = {}
         self.execution_cost_usd = 0.0
 
     def equity(self, prices):
@@ -484,7 +519,12 @@ class BacktestPortfolio:
                 return None
             qty = notional / price
             self.cash -= cost
-            self.positions[symbol] = self.positions.get(symbol, 0) + qty
+            prev_qty = self.positions.get(symbol, 0.0)
+            if prev_qty > 0:
+                self.entry_cost[symbol] = self.entry_cost.get(symbol, 0.0) + cost
+            else:
+                self.entry_cost[symbol] = cost
+            self.positions[symbol] = prev_qty + qty
             self._track_execution_cost(raw_price, price, qty, tx_cost)
             return {"symbol": symbol, "side": "buy", "qty": qty, "notional": notional}
         if side == "sell":
@@ -531,9 +571,13 @@ class BacktestPortfolio:
             sell_qty = sell_notional / price
             proceeds = sell_notional * (1 - tx_cost)
             self.cash += proceeds
+            total_cost = self.entry_cost.get(symbol, 0.0)
+            if qty > 0 and total_cost > 0:
+                self.entry_cost[symbol] = total_cost * (1.0 - sell_qty / qty)
             self.positions[symbol] = qty - sell_qty
             if self.positions[symbol] < 1e-9:
                 del self.positions[symbol]
+                self.entry_cost.pop(symbol, None)
             self._track_execution_cost(raw_price, price, sell_qty, tx_cost)
             return {"symbol": symbol, "side": "sell", "qty": sell_qty, "notional": sell_notional}
         return None
@@ -788,6 +832,8 @@ def run_backtest(
     paper_vol_live_parity: bool = False,
     paper_dynamic_universe: bool | None = None,
     paper_dynamic_universe_strict: bool | None = None,
+    paper_ipo_safety: bool | None = None,
+    paper_profit_target: bool | None = None,
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
@@ -819,6 +865,8 @@ def run_backtest(
     saved_paper_vol_trading = config.PAPER_VOL_TRADING_ENABLED
     saved_paper_dynamic_univ = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
     saved_paper_dynamic_univ_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
+    saved_paper_ipo_safety = config.PAPER_IPO_SAFETY_ENABLED
+    saved_paper_profit_target = config.PAPER_PROFIT_TARGET_ENABLED
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     saved_live_thinking_ctx = config.live_thinking_sim_context()
     config.set_paper_aggressive_context(paper_aggressive)
@@ -870,6 +918,10 @@ def run_backtest(
         config.PAPER_DYNAMIC_UNIVERSE_ENABLED = bool(paper_dynamic_universe)
     if paper_dynamic_universe_strict is not None:
         config.PAPER_DYNAMIC_UNIVERSE_STRICT = bool(paper_dynamic_universe_strict)
+    if paper_ipo_safety is not None:
+        config.PAPER_IPO_SAFETY_ENABLED = bool(paper_ipo_safety)
+    if paper_profit_target is not None:
+        config.PAPER_PROFIT_TARGET_ENABLED = bool(paper_profit_target)
     if RUN_OPTIONS.fast_mode:
         apply_run_options_to_config()
     if paper_aggressive and not any(
@@ -1316,6 +1368,15 @@ def run_backtest(
         ):
             pairs_traded += crypto_n
         spy_exit_n = run_spy_exits(window, executor, regime)
+        from modules.profit_target import run_profit_target_exits
+
+        run_profit_target_exits(
+            executor,
+            bar_idx=i,
+            full_data=data,
+            now=i,
+            equity_session_open=True,
+        )
         spy_entry_n = run_spy_strategy(
             window,
             executor,
@@ -1341,6 +1402,7 @@ def run_backtest(
             total_equity += eq_pairs
             pairs_traded += eq_pairs
         else:
+            run_ipo_safety_trims(data, executor, bar_idx=i)
             total_equity += run_equity_strategy(
                 window,
                 executor,
@@ -1349,6 +1411,8 @@ def run_backtest(
                 pair_cooldown,
                 cooldown_bars=cooldown_bars,
                 yield_gated=yield_gated,
+                full_data=data,
+                bar_idx=i,
             )
         pair_val = executor.pair_sleeve_value()
         pair_daily_pnl.append(pair_val - prev_pair_sleeve_value)
@@ -1535,6 +1599,12 @@ def run_backtest(
         "pairs_traded": pairs_traded,
         "pair_pnl_correlation": pair_pnl_corr,
     }
+    ipo_stats = getattr(last_executor, "ipo_stats", None) if last_executor else None
+    if ipo_stats:
+        result["ipo_safety"] = dict(ipo_stats)
+    pt_stats = getattr(last_executor, "profit_target_stats", None) if last_executor else None
+    if pt_stats:
+        result["profit_target"] = dict(pt_stats)
     if macro_portfolio is not None and macro_curve:
         macro_init = macro_portfolio.initial_capital
         macro_final = round(macro_curve[-1], 2)
@@ -1708,6 +1778,8 @@ def run_backtest(
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_paper_dynamic_univ
     config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_paper_dynamic_univ_strict
+    config.PAPER_IPO_SAFETY_ENABLED = saved_paper_ipo_safety
+    config.PAPER_PROFIT_TARGET_ENABLED = saved_paper_profit_target
     store_last_result(result)
     return result
 
@@ -2659,6 +2731,89 @@ def _high_impact_news_samples(result: dict, *, max_samples: int = 5) -> list[dic
     return [e for e in ranked if float(e.get("news_impact_score") or 0.0) >= 0.35][
         :max_samples
     ]
+
+
+def run_simulate_live_vti_levels_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+    *,
+    start_equity: float | None = None,
+    thinking: bool = False,
+) -> None:
+    """Live Profile A ($300): sweep fixed VTI core levels with crypto OFF, optional thinking."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    eq_start = start_equity or 300.0
+    bench = _benchmark_return(data, MIN_HISTORY)
+    rows: list[dict] = []
+    for vti_pct, level_label in VTI_LEVELS_COMPARE:
+        kwargs = {
+            "small_account": True,
+            "vti_core_pct": vti_pct,
+            "live_thinking_start_equity": eq_start,
+            "simulate_live_thinking": True,
+            "paper_thinking": bool(thinking),
+            "track_metrics": True,
+        }
+        result = run_backtest(data, track_active_exposure=True, **kwargs)
+        rows.append(
+            {
+                "label": level_label,
+                "vti_pct": vti_pct,
+                "return_pct": result["total_return_pct"],
+                "sharpe": result["sharpe"],
+                "max_dd_pct": result["max_drawdown_pct"],
+                "vs_vti": round(result["total_return_pct"] - bench, 2),
+            }
+        )
+        release_backtest_memory()
+
+    thinking_note = "thinking ON" if thinking else "thinking OFF"
+    print("--- LIVE PROFILE A: VTI ALLOCATION SWEEP ---")
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> "
+        f"{data.index[-1].date()} ({len(data) - MIN_HISTORY} sim bars) | "
+        f"start ${eq_start:,.0f} | crypto OFF | {thinking_note} | "
+        f"1% risk | ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max order | "
+        f"VTI B&H: {bench:+.2f}%"
+    )
+    print(f"{'VTI level':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} {'vsVTI':>7}")
+    print("-" * 62)
+    for row in rows:
+        print(
+            f"{row['label']:<28} "
+            f"{row['return_pct']:>+7.2f}% "
+            f"{row['sharpe']:>7.2f} "
+            f"{row['max_dd_pct']:>7.2f}% "
+            f"{row['vs_vti']:>+6.2f}pp"
+        )
+    print("-" * 62)
+    best_sharpe = max(rows, key=lambda r: r["sharpe"])
+    best_return = max(rows, key=lambda r: r["return_pct"])
+    shallowest = max(rows, key=lambda r: r["max_dd_pct"])
+    print(
+        f"Best Sharpe: {best_sharpe['label']} ({best_sharpe['sharpe']:.2f}) | "
+        f"Best return: {best_return['label']} ({best_return['return_pct']:+.2f}%) | "
+        f"Shallowest MaxDD: {shallowest['label']} ({shallowest['max_dd_pct']:.2f}%)"
+    )
+    print("\n--- Live $300–$1000 recommendation ---")
+    print(
+        f"For real small live accounts, {best_sharpe['label']} leads on risk-adjusted return "
+        f"(Sharpe {best_sharpe['sharpe']:.2f}, {best_sharpe['return_pct']:+.2f}%, "
+        f"MaxDD {best_sharpe['max_dd_pct']:.2f}%). "
+        f"Shallowest drawdown: {shallowest['label']} ({shallowest['max_dd_pct']:.2f}%). "
+        f"Keep thinking OFF until paper logs match baseline."
+    )
 
 
 def run_simulate_live_thinking_compare(
@@ -3690,6 +3845,245 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
     print("-" * 82)
 
 
+def run_ipo_rules_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare dynamic strict universe with vs without IPO safety rules."""
+    saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
+    saved_ipo = config.PAPER_IPO_SAFETY_ENABLED
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
+    config.set_paper_aggressive_context(True)
+    config.set_backtest_paper_sleeves_context(True)
+
+    sim_days = days or config.BACKTEST_DAYS
+    from modules.dynamic_universe import (
+        IPO_SAFETY_MAX_POSITION_PCT,
+        IPO_SAFETY_TRIM_GAIN_PCT,
+        IPO_SAFETY_TRIM_TARGET_PCT,
+    )
+
+    need_strict_file = True
+    try:
+        from modules.dynamic_universe import screener_universe_meta
+
+        filters = (screener_universe_meta().get("filters") or {})
+        need_strict_file = filters.get("strict_mode") is not True
+    except ImportError:
+        pass
+    _prefetch_screener_for_backtest(
+        sim_days, refresh=refresh or need_strict_file, use_max=use_max
+    )
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
+    config.PAPER_IPO_SAFETY_ENABLED = saved_ipo
+
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_stat_arb": True,
+        "paper_dynamic_universe": True,
+        "paper_dynamic_universe_strict": True,
+        "track_active_exposure": True,
+    }
+    configs = [
+        (
+            "Strict dynamic (no IPO rules)",
+            {**base_kwargs, "paper_ipo_safety": False},
+        ),
+        (
+            "Strict dynamic (+ IPO rules)",
+            {**base_kwargs, "paper_ipo_safety": True},
+        ),
+    ]
+
+    print("--- PAPER IPO SAFETY A/B (dynamic strict universe) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "IPO rules when ON: "
+        f"max {IPO_SAFETY_MAX_POSITION_PCT:.0%} equity | "
+        f"0.5x sizing | trim to {IPO_SAFETY_TRIM_TARGET_PCT:.0%} at "
+        f"+{IPO_SAFETY_TRIM_GAIN_PCT:.0%} gain | IPO window 5–29 trading days"
+    )
+    print(
+        f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'IPO':>5} {'Trim':>5}"
+    )
+    print("-" * 88)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, **kwargs)
+        results.append((label, result))
+        ipo = result.get("ipo_safety") or {}
+        print(
+            f"{label:<34} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{ipo.get('buys', 0):>5} "
+            f"{ipo.get('trims', 0):>5}"
+        )
+        release_backtest_memory()
+
+    print("-" * 88)
+    if len(results) == 2:
+        _, off_r = results[0]
+        _, on_r = results[1]
+        ipo_on = on_r.get("ipo_safety") or {}
+        print(
+            f"Delta (IPO rules ON - OFF): "
+            f"return {on_r['total_return_pct'] - off_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {on_r['sharpe'] - off_r['sharpe']:+.2f} | "
+            f"MaxDD {on_r['max_drawdown_pct'] - off_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {on_r.get('nyse_signals', 0) - off_r.get('nyse_signals', 0):+d}"
+        )
+        print(
+            f"IPO activity (rules ON): {ipo_on.get('buys', 0)} buys | "
+            f"{ipo_on.get('trims', 0)} trims | "
+            f"${ipo_on.get('trim_notional', 0):,.0f} trimmed notional"
+        )
+        if on_r["sharpe"] >= off_r["sharpe"] and on_r["max_drawdown_pct"] >= off_r["max_drawdown_pct"]:
+            print("Recommendation: ENABLE PAPER_IPO_SAFETY_ENABLED on paper (default). Live: keep OFF unless validated.")
+        elif ipo_on.get("buys", 0) == 0:
+            print("Recommendation: IPO rules neutral (no IPO-window trades in window). Safe to leave enabled on paper.")
+        else:
+            print("Recommendation: Review IPO trim impact; consider paper ON, live OFF until more data.")
+    print("-" * 88)
+
+
+def run_profit_target_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without trailing profit targets."""
+    from modules.profit_target import (
+        PROFIT_TARGET_ARM_GAIN_PCT,
+        PROFIT_TARGET_REBUY_COOLDOWN_DAYS,
+        PROFIT_TARGET_TRAIL_PCT,
+    )
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_stat_arb": True,
+        "paper_dynamic_universe": True,
+        "track_active_exposure": True,
+    }
+    configs = [
+        ("Paper aggressive (no profit target)", {**base_kwargs, "paper_profit_target": False}),
+        ("Paper aggressive (+ profit target)", {**base_kwargs, "paper_profit_target": True}),
+    ]
+
+    print("--- PAPER PROFIT TARGET A/B (NYSE + SPY, non-IPO) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Rules when ON: "
+        f"+{PROFIT_TARGET_ARM_GAIN_PCT:.0%} arms 10% trailing stop | "
+        f"{PROFIT_TARGET_REBUY_COOLDOWN_DAYS}d rebuy cooldown | IPOs excluded"
+    )
+    print(
+        f"{'Config':<36} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Exit':>5} {'Arm':>5}"
+    )
+    print("-" * 88)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, **kwargs)
+        results.append((label, result))
+        pt = result.get("profit_target") or {}
+        print(
+            f"{label:<36} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{pt.get('exits', 0):>5} "
+            f"{pt.get('armed', 0):>5}"
+        )
+        release_backtest_memory()
+
+    print("-" * 88)
+    if len(results) == 2:
+        _, off_r = results[0]
+        _, on_r = results[1]
+        pt_on = on_r.get("profit_target") or {}
+        print(
+            f"Delta (profit target ON - OFF): "
+            f"return {on_r['total_return_pct'] - off_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {on_r['sharpe'] - off_r['sharpe']:+.2f} | "
+            f"MaxDD {on_r['max_drawdown_pct'] - off_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {on_r.get('nyse_signals', 0) - off_r.get('nyse_signals', 0):+d}"
+        )
+        print(
+            f"Profit target activity: {pt_on.get('exits', 0)} trailing exits | "
+            f"{pt_on.get('armed', 0)} positions armed | "
+            f"{pt_on.get('rebuy_blocks', 0)} rebuy blocks"
+        )
+        if (
+            on_r["sharpe"] >= off_r["sharpe"] + 0.03
+            and on_r["max_drawdown_pct"] >= off_r["max_drawdown_pct"]
+        ):
+            print(
+                "Recommendation: ENABLE PAPER_PROFIT_TARGET_ENABLED=true on paper after "
+                "1–2 weeks live-paper observation. Keep OFF on live $300."
+            )
+        elif pt_on.get("exits", 0) == 0 and pt_on.get("armed", 0) == 0:
+            print(
+                "Recommendation: Rules had no effect this window (no positions reached +25%). "
+                "Safe to trial on paper; keep default OFF until validated."
+            )
+        elif pt_on.get("exits", 0) == 0:
+            print(
+                f"Recommendation: {pt_on.get('armed', 0)} positions armed but no trailing exits "
+                "this window — rules are wired; keep default OFF until exits prove beneficial."
+            )
+        elif on_r["total_return_pct"] < off_r["total_return_pct"] - 5:
+            print(
+                "Recommendation: KEEP PAPER_PROFIT_TARGET_ENABLED=false for now — "
+                "trailing exits cut winners materially in this window."
+            )
+        else:
+            print(
+                "Recommendation: Marginal impact — optional on paper; keep OFF on live."
+            )
+    print("-" * 88)
+
+
 def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
     """Compare fixed 20% VTI vs dynamic 40-75% VTI on paper aggressive profile."""
     if use_max:
@@ -4135,6 +4529,16 @@ if __name__ == "__main__":
         help="Compare static UNIVERSE vs strict dynamic screener (paper aggressive)",
     )
     parser.add_argument(
+        "--compare-ipo-rules",
+        action="store_true",
+        help="Compare dynamic strict with vs without IPO safety rules (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-profit-target",
+        action="store_true",
+        help="Compare paper aggressive with vs without trailing profit targets",
+    )
+    parser.add_argument(
         "--compare-dynamic-vti",
         action="store_true",
         help="Compare fixed 20%% VTI vs dynamic 40-75%% VTI (paper aggressive)",
@@ -4233,8 +4637,9 @@ if __name__ == "__main__":
         "--compare-vti-levels",
         action="store_true",
         help=(
-            "Best Paper Bot + thinking at fixed VTI levels "
-            "(90/80/70/60%%; requires --paper-aggressive)"
+            "Fixed VTI levels (90/80/75/70%%). With --simulate-live-thinking: "
+            "Live Profile A sweep (crypto OFF; default thinking OFF). "
+            "Alone: requires --paper-aggressive (paper bot + thinking)."
         ),
     )
     parser.add_argument(
@@ -4389,6 +4794,20 @@ if __name__ == "__main__":
         run_dynamic_universe_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_ipo_rules:
+        if not args.paper_aggressive:
+            print("--compare-ipo-rules requires --paper-aggressive")
+            sys.exit(1)
+        run_ipo_rules_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_profit_target:
+        if not args.paper_aggressive:
+            print("--compare-profit-target requires --paper-aggressive")
+            sys.exit(1)
+        run_profit_target_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
     elif args.compare_dynamic_vti:
         run_dynamic_vti_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
@@ -4451,9 +4870,21 @@ if __name__ == "__main__":
         run_compare_crypto_universe(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_vti_levels and args.simulate_live_thinking:
+        eq = args.start_equity or 300.0
+        run_simulate_live_vti_levels_compare(
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            start_equity=eq,
+            thinking=False,
+        )
     elif args.compare_vti_levels:
         if not args.paper_aggressive:
-            print("--compare-vti-levels requires --paper-aggressive")
+            print(
+                "--compare-vti-levels requires --paper-aggressive "
+                "(or use with --simulate-live-thinking for Live Profile A)"
+            )
             sys.exit(1)
         run_compare_vti_levels(
             days=args.days, refresh=args.refresh, use_max=args.max

@@ -2,7 +2,20 @@
 
 Monorepo for local trading and betting tools. Clone once, run what you need on your own PC.
 
-**Repo:** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)
+**Repo (personal):** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)  
+**Repo (group / infinite-robots):** [github.com/infinite-robots/python-trading](https://github.com/infinite-robots/python-trading)
+
+Both remotes were synced to the same commits on `main` and all cursor branches (starting point: `03abb6c`). They are **independent from here on** — updates to one are not automatic on the other.
+
+| Remote | GitHub | Who |
+|--------|--------|-----|
+| `origin` | `dawimberly/trading-bot` | Your sandbox — default `git push` / `git pull` |
+| `infinite-robots` | `infinite-robots/python-trading` | Group clone — push when you want to share |
+
+**You (after clone with both remotes):** `git pull origin main` · `git push origin main` · share to group: `git push infinite-robots main`  
+**Group:** `git clone https://github.com/infinite-robots/python-trading.git` only — do not use the personal URL.
+
+Add the org remote once: `git remote add infinite-robots https://github.com/infinite-robots/python-trading.git`
 
 | Folder | What it is | Get started |
 |--------|------------|-------------|
@@ -24,4 +37,4 @@ friend_setup.bat
 
 Root launchers (`launch.bat`, `friend_setup.bat`) forward into `stock-bot/` for backward compatibility.
 
-Full docs: [stock-bot/README.md](stock-bot/README.md)
+Full docs: [stock-bot/README.md](stock-bot/README.md) — see **“What the bot is set to do (runtime defaults)”** for live vs paper vs research-only features (good to paste into Grok with `python status.py` output).

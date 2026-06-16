@@ -1,0 +1,29 @@
+{
+  "symbols": [
+    "AAVE-USD",
+    "AVAX-USD",
+    "BAT-USD",
+    "BCH-USD",
+    "BTC-USD",
+    "CRV-USD",
+    "DOGE-USD",
+    "DOT-USD",
+    "ETH-USD",
+    "GRT-USD",
+    "LINK-USD",
+    "LTC-USD",
+    "PAXG-USD",
+    "PEPE-USD",
+    "SHIB-USD",
+    "SKY-USD",
+    "SOL-USD",
+    "SUSHI-USD",
+    "TRUMP-USD",
+    "UNI-USD",
+    "XRP-USD",
+    "XTZ-USD",
+    "YFI-USD"
+  ],
+  "updated_at": "2026-06-16T03:50:18.978898+00:00",
+  "source": "alpaca"
+}

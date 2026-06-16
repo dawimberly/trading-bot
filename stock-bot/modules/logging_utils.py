@@ -4,9 +4,40 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
+
+
+class _YfinanceNoiseFilter(logging.Filter):
+    """Downgrade yfinance rate-limit/delisted noise and throttle repeats."""
+
+    _last_logged: dict[str, float] = {}
+    _interval_sec = 300.0
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not record.name.startswith("yfinance"):
+            return True
+        msg = record.getMessage().lower()
+        noisy = (
+            "rate limit" in msg
+            or "possibly delisted" in msg
+            or "no data found" in msg
+            or "failed download" in msg
+        )
+        if not noisy:
+            return True
+        if record.levelno >= logging.ERROR:
+            record.levelno = logging.INFO
+            record.levelname = "INFO"
+        key = record.name + ":" + msg[:96]
+        now = time.monotonic()
+        last = self._last_logged.get(key)
+        if last is not None and (now - last) < self._interval_sec:
+            return False
+        self._last_logged[key] = now
+        return True
 
 
 def _add_daily_handler(
@@ -27,6 +58,7 @@ def _add_daily_handler(
     )
     fh.suffix = "%Y-%m-%d"
     fh.setFormatter(fmt)
+    fh.addFilter(_YfinanceNoiseFilter())
     root.addHandler(fh)
 
 
@@ -52,7 +84,11 @@ def setup_logging(
 
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
+    sh.addFilter(_YfinanceNoiseFilter())
     root.addHandler(sh)
+
+    for yf_logger in ("yfinance", "yfinance.scrapers", "yfinance.scrapers.quote"):
+        logging.getLogger(yf_logger).setLevel(logging.WARNING)
 
     if log_dir:
         try:

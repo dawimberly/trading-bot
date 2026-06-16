@@ -140,3 +140,10 @@ def trim_long_sleeves_to_cash_target(
         need -= proceeds
         sells += 1
     return sells
+
+
+def run_profit_target_exits(executor, **kwargs):
+    """Delegate to modules.profit_target (paper optional trailing stops)."""
+    from modules.profit_target import run_profit_target_exits as _run
+
+    return _run(executor, **kwargs)

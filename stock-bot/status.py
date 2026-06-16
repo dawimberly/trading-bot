@@ -154,6 +154,19 @@ def _live_profile_line() -> str:
     )
 
 
+def _crypto_sleeve_status(*, paper: bool = False) -> str:
+    if paper:
+        was = config.paper_aggressive_context()
+        config.set_paper_aggressive_context(True)
+        try:
+            enabled = config.effective_crypto_enabled()
+        finally:
+            config.set_paper_aggressive_context(was)
+    else:
+        enabled = config.effective_crypto_enabled()
+    return "ON" if enabled else "OFF (disabled)"
+
+
 def _live_flags() -> str:
     parts = [
         _flag("dyn_vti", False),
@@ -425,6 +438,7 @@ def main() -> None:
     _emit(f"LIVE  Profile A (~$300)   equity {_fmt_equity(live_eq)}   regime {live_regime}")
     _emit(f"      source: {live_eq_src}")
     _emit(f"      {_live_profile_line()}")
+    _emit(f"      Crypto: {_crypto_sleeve_status()}")
     _emit(f"      flags: {_live_flags()}")
     _emit(f"      heartbeat: {_heartbeat_ts(live_hb)}")
     if live_hb_age is not None:
@@ -440,6 +454,7 @@ def main() -> None:
     _emit(f"PAPER Profile B (Best Paper Bot v2.1)   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
     if paper_eq_err:
         _emit(f"      source: {paper_eq_err}")
+    _emit(f"      Crypto: {_crypto_sleeve_status(paper=True)}")
     _emit(f"      ON:  {paper_on}")
     _emit(f"      OFF (locked): {paper_off}")
     _emit(f"      universe: {_universe_line()}")

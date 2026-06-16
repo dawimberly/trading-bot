@@ -17,7 +17,7 @@ from modules.logging_utils import setup_logging, log_event, log_subsystem_warnin
 
 import config
 from modules.safe_io import install_safe_stdout, write_json_atomic
-from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError
+from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError, AlpacaValidationError
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
@@ -902,17 +902,20 @@ def main():
         yield_gated=yield_gated,
         market_open=equity_scans,
     )
-    c = run_crypto_strategy(
-        data,
-        executor,
-        regime,
-        now,
-        pair_cooldown,
-        log_fn=_crypto_log,
-        portfolio_manager=portfolio_manager,
-        volatility=vol,
-        spacex_snapshot=spacex_snapshot,
-    )
+    if config.effective_crypto_enabled():
+        c = run_crypto_strategy(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            log_fn=_crypto_log,
+            portfolio_manager=portfolio_manager,
+            volatility=vol,
+            spacex_snapshot=spacex_snapshot,
+        )
+    else:
+        c = 0
     s = 0
     nyse_trades = 0
     gp_result = {"enabled": False, "signals": gp_signals, "actions": []}
@@ -943,6 +946,9 @@ def main():
                 yield_gated=yield_gated,
             )
         else:
+            from modules.pipeline_strategies import run_ipo_safety_trims
+
+            run_ipo_safety_trims(data, executor)
             nyse_trades = run_equity_strategy(
                 data,
                 executor,
@@ -952,6 +958,7 @@ def main():
                 log_fn=_equity_log,
                 portfolio_manager=portfolio_manager,
                 yield_gated=yield_gated,
+                full_data=data,
             )
         gp_result = run_game_plan_cycle(
             executor,
@@ -991,7 +998,10 @@ def main():
                 signals=gp_signals,
             )
     else:
-        print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
+        if config.effective_crypto_enabled():
+            print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
+        else:
+            print("--- Overnight: equity scans off (crypto sleeve disabled) ---")
         if config.game_plan_active():
             gp_result = run_game_plan_cycle(
                 executor,
@@ -1409,9 +1419,16 @@ if __name__ == "__main__":
             sys.exit(1)
         except AlpacaCriticalError as e:
             log_event("alpaca_critical", error=str(e))
-            logger.critical("Alpaca API failure: %s", e)
-            trade_journal.log_event("error", notes=f"Alpaca critical: {e}")
-            sys.exit(1)
+            _record_cycle_error(str(e))
+            logger.warning(
+                "Alpaca API failure after retries (skipping cycle, bot continues): %s",
+                e,
+            )
+            trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
+        except AlpacaValidationError as e:
+            log_event("alpaca_validation", error=str(e))
+            logger.info("Alpaca order validation skipped (cycle continues): %s", e)
+            trade_journal.log_event("error", notes=f"Alpaca validation skip: {e}")
         except Exception as e:
             tb = traceback.format_exc()
             _record_cycle_error(str(e))

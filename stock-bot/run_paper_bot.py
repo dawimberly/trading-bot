@@ -94,6 +94,8 @@ def main() -> None:
     env.setdefault("PAPER_AGGRESSIVE", "true")
     env.setdefault("HEARTBEAT_FILE", "paper_chase_heartbeat.json")
     env.setdefault("PAPER_JOURNAL_CSV", "paper_chase_journal.csv")
+    if env.get("PAPER_APCA_API_KEY_ID") and env.get("PAPER_APCA_API_SECRET_KEY"):
+        env.setdefault("PAPER_CHASE_USE_RESEARCH_KEYS", "yes")
 
     crypto_enabled = _crypto_vol_enabled(env)
     crypto_cycle_sec = _crypto_vol_cycle_sec(env)

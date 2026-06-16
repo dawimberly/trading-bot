@@ -110,8 +110,8 @@ PAPER_CRYPTO_V2_SYMBOLS = [
     "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
     "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
 ]
-# Path B: expanded Alpaca crypto universe (paper default on; live Profile A off)
-_paper_crypto_expanded_default = "true" if PAPER_TRADING else "false"
+# Path B: expanded Alpaca crypto universe (research/backtest only — never on bots)
+_paper_crypto_expanded_default = "false"
 PAPER_CRYPTO_UNIVERSE_EXPANDED = os.getenv(
     "PAPER_CRYPTO_UNIVERSE_EXPANDED", _paper_crypto_expanded_default
 ).lower() in ("1", "true", "yes")
@@ -135,6 +135,13 @@ _paper_dyn_univ = os.getenv("PAPER_DYNAMIC_UNIVERSE_ENABLED") or os.getenv(
 PAPER_DYNAMIC_UNIVERSE_ENABLED = _paper_dyn_univ.lower() in ("1", "true", "yes")
 PAPER_DYNAMIC_UNIVERSE_STRICT = os.getenv(
     "PAPER_DYNAMIC_UNIVERSE_STRICT", "false"
+).lower() in ("1", "true", "yes")
+PAPER_IPO_SAFETY_ENABLED = os.getenv(
+    "PAPER_IPO_SAFETY_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+# Research/backtest only (--compare-profit-target); never on live or paper bots
+PAPER_PROFIT_TARGET_ENABLED = os.getenv(
+    "PAPER_PROFIT_TARGET_ENABLED", "false"
 ).lower() in ("1", "true", "yes")
 PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
 PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
@@ -310,6 +317,17 @@ NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "false").lowe
 # Max Tech names in top-3 momentum when SPY on (0 = disabled; 1 = sector test variant)
 NYSE_SECTOR_TECH_CAP = int(os.getenv("NYSE_SECTOR_TECH_CAP", "0"))
 CRYPTO_SLEEVE_CAP_PCT = 0.20
+# Crypto sleeve disabled — underperformed in all backtests (set true to re-enable)
+CRYPTO_SLEEVE_ENABLED = os.getenv("CRYPTO_SLEEVE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_CRYPTO_ENABLED = os.getenv("PAPER_CRYPTO_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 CRYPTO_VOL_ONLY = True  # crypto pairs only when cross-asset volatility is High
 
 # --- SPY sleeve settings ---
@@ -996,17 +1014,26 @@ def trading_profile() -> str:
 
 
 CRYPTO_SLEEVE_DISABLED_MSG = (
-    "Crypto sleeve disabled for Profile A (Alpaca crypto not enabled)"
+    "Crypto sleeve disabled - underperformed in all backtests"
 )
 
 
+def effective_crypto_enabled() -> bool:
+    """Crypto pairs / stat-arb sleeve — default off on live and paper bots."""
+    if paper_only_sleeves_active() or paper_aggressive_context():
+        return PAPER_CRYPTO_ENABLED
+    if PAPER_TRADING and paper_chase_mode_enabled():
+        return PAPER_CRYPTO_ENABLED
+    return CRYPTO_SLEEVE_ENABLED
+
+
 def crypto_sleeve_enabled() -> bool:
-    """Alpaca crypto orders — on for paper Profile B; off for Profile A / small live."""
-    if PAPER_TRADING or paper_only_sleeves_active():
-        return True
-    if is_small_account() or trading_profile() == "A":
-        return False
-    return True
+    """Alias for effective_crypto_enabled() — keeps legacy call sites working."""
+    return effective_crypto_enabled()
+
+
+def _alloc_crypto_cap_pct() -> float:
+    return CRYPTO_SLEEVE_CAP_PCT if effective_crypto_enabled() else 0.0
 
 
 def set_dynamic_risk_context(
@@ -1133,11 +1160,9 @@ def crypto_universe() -> list[str]:
 
 
 def effective_crypto_universe_expanded() -> bool:
-    """Paper expanded Alpaca crypto universe; off on live Profile A by default."""
+    """Research/backtest only — never on live or paper bots."""
     if not PAPER_CRYPTO_UNIVERSE_EXPANDED:
         return False
-    if paper_only_sleeves_active() or PAPER_TRADING:
-        return True
     return bool(backtest_paper_sleeves_context())
 
 
@@ -1219,11 +1244,16 @@ def backtest_fetch_tickers() -> list[str]:
     return tickers
 
 
-def dynamic_equity_position_scale(symbol: str) -> float:
+def dynamic_equity_position_scale(
+    symbol: str, *, data=None, bar_idx: int | None = None
+) -> float:
     """Paper-only position scale for IPO / high-vol names from screener metadata."""
     try:
-        from modules.dynamic_universe import position_scale_for_symbol
+        from modules.dynamic_universe import ipo_momentum_scale, position_scale_for_symbol
 
+        ipo_scale = ipo_momentum_scale(symbol, data=data, bar_idx=bar_idx)
+        if ipo_scale < 1.0:
+            return ipo_scale
         return position_scale_for_symbol(symbol)
     except ImportError:
         return 1.0
@@ -1403,7 +1433,7 @@ def get_best_paper_bot_stack() -> dict[str, bool]:
         from config.best_paper_config import get_full_stack
 
         stack = get_full_stack()
-        stack["stat_arb"] = effective_stat_arb_enabled() or PAPER_STAT_ARB_ENABLED
+        stack["stat_arb"] = effective_stat_arb_enabled()
         stack["thinking_engine"] = PAPER_THINKING_ENGINE_ENABLED
         stack["vol_overlay"] = PAPER_VOL_TRADING_ENABLED
         stack["options_income"] = PAPER_OPTIONS_SLEEVE_ENABLED
@@ -1455,8 +1485,10 @@ def format_best_paper_status_lines() -> tuple[str, str]:
     try:
         stack = get_best_paper_bot_stack()
         chase = paper_chase_mode_enabled()
+        crypto_on = effective_crypto_enabled()
         on_parts = [
             f"chase={'on' if chase else 'off'}",
+            f"crypto={'on' if crypto_on else 'off (disabled)'}",
             f"dyn_vti={'on' if stack['dynamic_vti'] else 'off'}",
             f"dyn_risk={'on' if stack['dynamic_risk'] else 'off'}",
             f"stat_arb={'on' if stack['stat_arb'] else 'off'}",
@@ -1776,14 +1808,14 @@ def effective_cofire_budget_enabled() -> bool:
 
 def effective_stat_arb_enabled() -> bool:
     """Cointegration + z-score stat arb — paper aggressive only."""
-    if effective_crypto_v2_enabled():
+    if not effective_crypto_enabled() or effective_crypto_v2_enabled():
         return False
     return bool(paper_only_sleeves_active() and PAPER_STAT_ARB_ENABLED)
 
 
 def effective_crypto_v2_enabled() -> bool:
     """Dual-entry crypto sleeve (MR + breakout) — paper aggressive only, default off."""
-    if not paper_only_sleeves_active() or not PAPER_CRYPTO_V2_ENABLED:
+    if not effective_crypto_enabled() or not paper_only_sleeves_active() or not PAPER_CRYPTO_V2_ENABLED:
         return False
     return True
 
@@ -1798,6 +1830,16 @@ def effective_paper_dynamic_universe_strict() -> bool:
     return bool(
         effective_paper_dynamic_universe() and PAPER_DYNAMIC_UNIVERSE_STRICT
     )
+
+
+def effective_paper_ipo_safety_enabled() -> bool:
+    """IPO position caps / trim / 0.5x sizing — paper aggressive only (default on)."""
+    return bool(paper_only_sleeves_active() and PAPER_IPO_SAFETY_ENABLED)
+
+
+def effective_paper_profit_target_enabled() -> bool:
+    """Disabled on live + paper bots (research backtests only)."""
+    return False
 
 
 def paper_crypto_v2_symbols() -> list[str]:
@@ -2036,9 +2078,7 @@ def active_sleeve_scale() -> float:
     """Scale active SPY/crypto/NYSE caps (VTI core + metal/social reserves)."""
     af = active_fund_fraction()
     lf = long_fund_scale()
-    long_sum = (
-        SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
-    )
+    long_sum = SPY_SLEEVE_CAP_PCT + _alloc_crypto_cap_pct() + NYSE_SLEEVE_CAP_PCT
     if long_sum <= 0:
         return 0.0
     base_scale = round(lf * af, 6)
@@ -2073,7 +2113,7 @@ def effective_cash_buffer_pct() -> float:
     metal = METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0
     vti = vti_core_allocation_pct()
     long_caps = (
-        SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
+        SPY_SLEEVE_CAP_PCT + _alloc_crypto_cap_pct() + NYSE_SLEEVE_CAP_PCT
     ) * active_sleeve_scale()
     cash = round(1.0 - metal - vti - long_caps, 6)
     if cash < 0:
@@ -2089,7 +2129,7 @@ def fund_allocation_pct() -> dict[str, float]:
     return {
         "vti_core": vti_core_allocation_pct(),
         "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
-        "crypto": effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT),
+        "crypto": effective_sleeve_cap(_alloc_crypto_cap_pct()),
         "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),
         "metal": METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0,
         "cash_buffer": effective_cash_buffer_pct(),

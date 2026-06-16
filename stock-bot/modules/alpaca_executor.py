@@ -10,7 +10,11 @@ from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
 import config
 from modules import deployment_sizing
-from modules.alpaca_client import call_with_retry, get_trading_client
+from modules.alpaca_client import (
+    AlpacaValidationError,
+    call_with_retry,
+    get_trading_client,
+)
 from modules.cost_basis import underwater_sizing_scale
 from modules.logging_utils import log_event
 
@@ -112,6 +116,60 @@ class AlpacaExecutor:
 
     def _min_notional(self) -> float:
         return config.effective_min_notional(self._account_equity())
+
+    def _coerce_notional(self, notional: float | None) -> float | None:
+        if notional is None:
+            return None
+        return round(float(notional), 2)
+
+    def _skip_if_notional_invalid(
+        self,
+        notional: float | None,
+        *,
+        symbol: str,
+        op: str,
+    ) -> float | None:
+        """Return rounded notional when valid; log and return None when below min."""
+        n = self._coerce_notional(notional)
+        min_n = self._min_notional()
+        if n is None or n <= 0:
+            logger.info(
+                "Skip %s: notional $%.2f <= 0 (min $%.2f, symbol=%s)",
+                op,
+                float(notional or 0),
+                min_n,
+                symbol,
+            )
+            return None
+        if n < min_n:
+            logger.info(
+                "Skip %s: notional $%.2f < min $%.2f (symbol=%s)",
+                op,
+                n,
+                min_n,
+                symbol,
+            )
+            return None
+        return n
+
+    def _submit_order(self, order, *, symbol: str, op: str):
+        """Submit with pre-flight notional guard; validation errors return None."""
+        req_notional = getattr(order, "notional", None)
+        if req_notional is not None:
+            valid = self._skip_if_notional_invalid(req_notional, symbol=symbol, op=op)
+            if valid is None:
+                return None
+            if valid != req_notional:
+                order = MarketOrderRequest(
+                    symbol=order.symbol,
+                    notional=valid,
+                    side=order.side,
+                    time_in_force=order.time_in_force,
+                )
+        try:
+            return self._api("submit_order", self.client.submit_order, order_data=order)
+        except AlpacaValidationError:
+            return None
 
     def _max_notional(self) -> float:
         return config.effective_max_notional_per_order(self._account_equity())
@@ -571,7 +629,10 @@ class AlpacaExecutor:
         if qty > 0:
             mv = qty * price
             sell_notional = min(reduce_notional, mv)
-            if sell_notional < self._min_notional():
+            sell_notional = self._skip_if_notional_invalid(
+                sell_notional, symbol=symbol, op="execute_reduce_notional"
+            )
+            if sell_notional is None:
                 return None
             if is_crypto_sym:
                 sell_qty = min(qty, sell_notional / price)
@@ -587,7 +648,7 @@ class AlpacaExecutor:
             else:
                 order = MarketOrderRequest(
                     symbol=formatted_symbol,
-                    notional=round(sell_notional, 2),
+                    notional=sell_notional,
                     side=OrderSide.SELL,
                     time_in_force=tif,
                 )
@@ -595,7 +656,10 @@ class AlpacaExecutor:
             abs_qty = abs(qty)
             mv = abs_qty * price
             cover_notional = min(reduce_notional, mv)
-            if cover_notional < self._min_notional():
+            cover_notional = self._skip_if_notional_invalid(
+                cover_notional, symbol=symbol, op="execute_reduce_notional"
+            )
+            if cover_notional is None:
                 return None
             if is_crypto_sym:
                 buy_qty = min(abs_qty, cover_notional / price)
@@ -611,11 +675,15 @@ class AlpacaExecutor:
             else:
                 order = MarketOrderRequest(
                     symbol=formatted_symbol,
-                    notional=round(cover_notional, 2),
+                    notional=cover_notional,
                     side=OrderSide.BUY,
                     time_in_force=tif,
                 )
-        submitted = self._api("submit_order", self.client.submit_order, order_data=order)
+        submitted = self._submit_order(
+            order, symbol=symbol, op="execute_reduce_notional"
+        )
+        if submitted is None:
+            return None
         self._invalidate_cache()
         side_label = "Sell" if qty > 0 else "Buy"
         self._track_order(
@@ -652,9 +720,14 @@ class AlpacaExecutor:
                     time_in_force=tif,
                 )
             else:
+                exit_notional = self._skip_if_notional_invalid(
+                    qty * price, symbol=symbol, op="execute_full_exit"
+                )
+                if exit_notional is None:
+                    return None
                 order = MarketOrderRequest(
                     symbol=formatted_symbol,
-                    notional=round(qty * price, 2),
+                    notional=exit_notional,
                     side=OrderSide.SELL,
                     time_in_force=tif,
                 )
@@ -668,13 +741,20 @@ class AlpacaExecutor:
                     time_in_force=tif,
                 )
             else:
+                exit_notional = self._skip_if_notional_invalid(
+                    abs_qty * price, symbol=symbol, op="execute_full_exit"
+                )
+                if exit_notional is None:
+                    return None
                 order = MarketOrderRequest(
                     symbol=formatted_symbol,
-                    notional=round(abs_qty * price, 2),
+                    notional=exit_notional,
                     side=OrderSide.BUY,
                     time_in_force=tif,
                 )
-        submitted = self._api("submit_order", self.client.submit_order, order_data=order)
+        submitted = self._submit_order(order, symbol=symbol, op="execute_full_exit")
+        if submitted is None:
+            return None
         self._invalidate_cache()
         side_label = "Sell" if qty > 0 else "Buy"
         self._track_order(
@@ -724,7 +804,10 @@ class AlpacaExecutor:
             target_notional = deployment_sizing.apply_alpaca_crypto_fee_reserve(
                 target_notional, equity=self._account_equity()
             )
-        if target_notional is None or target_notional < self._min_notional():
+        target_notional = self._skip_if_notional_invalid(
+            target_notional, symbol=symbol, op="execute_order"
+        )
+        if target_notional is None:
             return None
 
         order_side = OrderSide.BUY if side_lower == "buy" else OrderSide.SELL
@@ -734,7 +817,9 @@ class AlpacaExecutor:
             side=order_side,
             time_in_force=tif,
         )
-        submitted = self._api("submit_order", self.client.submit_order, order_data=order)
+        submitted = self._submit_order(order, symbol=symbol, op="execute_order")
+        if submitted is None:
+            return None
         self._invalidate_cache()
         order_id = getattr(submitted, "id", None)
         self._track_order(
@@ -761,6 +846,16 @@ class AlpacaExecutor:
             order_id=order_id,
         )
         return submitted
+
+    def profit_rebuy_blocked(self, symbol, now, *, cooldown_bars=None) -> bool:
+        from modules.profit_target import profit_rebuy_blocked as _blocked
+
+        return _blocked(self, symbol, now, cooldown_bars=cooldown_bars)
+
+    def run_profit_target_exits(self, **kwargs) -> int:
+        from modules.profit_target import run_profit_target_exits
+
+        return run_profit_target_exits(self, **kwargs)
 
 
 def get_trading_client(paper=None, credentials_fn=None):

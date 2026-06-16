@@ -64,6 +64,15 @@ def reconcile_stat_arb_book(executor) -> dict:
     kept: list[str] = []
     removed: list[str] = []
     tracked_symbols: set[str] = set()
+    crypto_disabled = not config.crypto_sleeve_enabled()
+
+    if crypto_disabled:
+        for pair_key, position in list(book.items()):
+            long_sym = position.get("long_symbol") or ""
+            short_sym = position.get("short_symbol") or ""
+            if config.is_crypto(long_sym) or config.is_crypto(short_sym):
+                book.pop(pair_key, None)
+                removed.append(pair_key)
 
     for pair_key, position in list(book.items()):
         long_sym = position.get("long_symbol")
@@ -92,6 +101,15 @@ def reconcile_stat_arb_book(executor) -> dict:
                 continue
             if abs(float(pos.qty)) > 1e-9:
                 orphans.append(sym)
+
+    if crypto_disabled:
+        crypto_orphans = [s for s in orphans if config.is_crypto(s)]
+        if crypto_orphans:
+            logger.info(
+                "reconcile_stat_arb_book ignoring crypto orphans (sleeve disabled)",
+                extra={"orphans": crypto_orphans},
+            )
+            orphans = [s for s in orphans if not config.is_crypto(s)]
 
     if removed or orphans:
         _save_book(executor)
