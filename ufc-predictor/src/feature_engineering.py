@@ -977,9 +977,9 @@ def _weighted_recent_wins(wins: pd.Series, weights: np.ndarray = MOMENTUM_WEIGHT
     return wins.shift(1).rolling(len(weights), min_periods=1).apply(_score, raw=True)
 
 
-def _compute_elo_ratings(history: pd.DataFrame) -> pd.DataFrame:
+def _compute_elo_state(history: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float]]:
     """
-    Chronological Elo updates. Returns pre-fight ratings per appearance.
+    Chronological Elo updates. Returns pre-fight ratings per fight and final ratings.
     """
     fights = (
         history[history["side"] == 1][
@@ -1011,10 +1011,56 @@ def _compute_elo_ratings(history: pd.DataFrame) -> pd.DataFrame:
         ratings[f2] = r2 + ELO_K * (s2 - e2)
 
     elo_rows = [
-        {"fight_id": fid, "f1_elo": vals["f1_elo"], "f2_elo": vals["f2_elo"]}
+        {config.FIGHT_ID_COLUMN: fid, "f1_elo": vals["f1_elo"], "f2_elo": vals["f2_elo"]}
         for fid, vals in pre_fight.items()
     ]
-    return pd.DataFrame(elo_rows)
+    return pd.DataFrame(elo_rows), ratings
+
+
+def _compute_elo_ratings(history: pd.DataFrame) -> pd.DataFrame:
+    """Chronological Elo updates. Returns pre-fight ratings per appearance."""
+    elo_df, _ = _compute_elo_state(history)
+    return elo_df
+
+
+def elo_lookup_for_fights(
+    fights: pd.DataFrame,
+    ratings: dict[str, float],
+) -> pd.DataFrame:
+    """Pre-fight Elo for fights using cached post-history ratings (upcoming-safe)."""
+    side1 = (
+        fights.drop_duplicates(config.FIGHT_ID_COLUMN)
+        .sort_values(config.DATE_COLUMN)
+    )
+    rows: list[dict[str, Any]] = []
+    for _, row in side1.iterrows():
+        f1 = row.get("fighter_1", "")
+        f2 = row.get("fighter_2", "")
+        rows.append(
+            {
+                config.FIGHT_ID_COLUMN: row[config.FIGHT_ID_COLUMN],
+                "f1_elo": ratings.get(f1, ELO_START),
+                "f2_elo": ratings.get(f2, ELO_START),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _build_history_long_pipeline(fights: pd.DataFrame) -> pd.DataFrame:
+    """Long-format history with rolling, Greco, and similar-opponent stats."""
+    fights = _canonicalize_fighter_slots(fights)
+    history = _rolling_stats(_fighter_history(fights))
+    history = fill_history_from_greco(history, window=5)
+    history = _compute_similar_opponent_win_rates(history)
+    return history
+
+
+def _recompute_long_stats(long_df: pd.DataFrame) -> pd.DataFrame:
+    """Re-run rolling/Greco/similar-opp on a fighter subset (incremental cache)."""
+    out = _rolling_stats(long_df.copy())
+    out = fill_history_from_greco(out, window=5)
+    out = _compute_similar_opponent_win_rates(out)
+    return out
 
 
 def _rolling_stats(history: pd.DataFrame) -> pd.DataFrame:
@@ -1383,11 +1429,13 @@ def apply_historical_stat_fallbacks(
     features: pd.DataFrame,
     *,
     reference_year: int | None = None,
+    only_unlabeled: bool = False,
 ) -> pd.DataFrame:
     """
     Fill missing fighter stats from weight-class then global historical medians.
 
     Recomputes differential columns for rows that were imputed.
+    When ``only_unlabeled=True``, skip labeled training rows (inference speed-up).
     """
     if features.empty:
         return features
@@ -1424,7 +1472,13 @@ def apply_historical_stat_fallbacks(
     }
 
     imputed_rows: list[int] = []
-    for idx, row in out.iterrows():
+    target_col = config.TARGET_COLUMN
+    if only_unlabeled and target_col in out.columns:
+        row_iter = out.index[out[target_col].isna()]
+    else:
+        row_iter = out.index
+    for idx in row_iter:
+        row = out.loc[idx]
         touched = False
         wc = str(row.get("weight_class", ""))
         wc_vals = wc_fills.get(wc, global_fills)
@@ -1506,21 +1560,24 @@ def _apply_greco_to_feature_stats(features: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) -> pd.DataFrame:
-    """
-    Transform raw fights into a differential modeling matrix.
+def _assemble_wide_feature_matrix(
+    history: pd.DataFrame,
+    elo: pd.DataFrame,
+    *,
+    keep_unlabeled: bool = False,
+    target_fight_ids: set[str] | None = None,
+) -> pd.DataFrame:
+    """Merge long history sides into wide differential modeling matrix."""
+    work_history = history
+    if target_fight_ids:
+        work_history = history[
+            history[config.FIGHT_ID_COLUMN].isin(target_fight_ids)
+        ].copy()
+        if config.DATE_COLUMN in elo.columns:
+            elo = elo[elo[config.FIGHT_ID_COLUMN].isin(target_fight_ids)].copy()
 
-    Target ``f1_win`` is 1 when fighter_1 wins. All rolling/Elo features use
-    only information available before each fight.
-    """
-    fights = _canonicalize_fighter_slots(fights)
-    history = _rolling_stats(_fighter_history(fights))
-    history = fill_history_from_greco(history, window=5)
-    history = _compute_similar_opponent_win_rates(history)
-    elo = _compute_elo_ratings(history)
-
-    f1 = history[history["side"] == 1].copy()
-    f2 = history[history["side"] == 2].copy()
+    f1 = work_history[work_history["side"] == 1].copy()
+    f2 = work_history[work_history["side"] == 2].copy()
 
     f2_rename = {
         "win_rate": "f2_win_rate",
@@ -1584,6 +1641,7 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
     features = f1.rename(columns=f1_rename)
     features = features.merge(f2_subset, on=config.FIGHT_ID_COLUMN, how="inner")
     features = features.merge(elo, on=config.FIGHT_ID_COLUMN, how="left")
+    del f1, f2, f2_subset
     features["f1_elo"] = features["f1_elo"].fillna(ELO_START)
     features["f2_elo"] = features["f2_elo"].fillna(ELO_START)
 
@@ -1616,7 +1674,6 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
 
     features = _apply_greco_to_feature_stats(features)
 
-    # Legacy aliases for existing config consumers
     features["sig_strike_acc_diff"] = features["striking_acc_diff"]
     features["td_acc_diff"] = features["takedown_acc_diff"]
     if "f1_finish_rate" in features.columns and "f2_finish_rate" in features.columns:
@@ -1649,12 +1706,55 @@ def build_feature_matrix(fights: pd.DataFrame, *, keep_unlabeled: bool = False) 
     features = features.sort_values(config.DATE_COLUMN).reset_index(drop=True)
 
     log_feature_diff_coverage(features, year=2025, label="before fallback")
-    features = apply_historical_stat_fallbacks(features, reference_year=2025)
+    features = apply_historical_stat_fallbacks(
+        features, reference_year=2025, only_unlabeled=keep_unlabeled
+    )
     log_feature_diff_coverage(features, year=2025, label="after fallback")
 
     features = build_interaction_candidates(features)
 
-    assert_target_encoding(features)
+    if features[config.TARGET_COLUMN].notna().any():
+        assert_target_encoding(features)
+    elif not keep_unlabeled:
+        raise ValueError("No valid target rows.")
+
+    return features
+
+
+def build_feature_matrix(
+    fights: pd.DataFrame,
+    *,
+    keep_unlabeled: bool = False,
+    use_fighter_cache: bool = False,
+    target_fight_ids: set[str] | None = None,
+) -> pd.DataFrame:
+    """
+    Transform raw fights into a differential modeling matrix.
+
+    Target ``f1_win`` is 1 when fighter_1 wins. All rolling/Elo features use
+    only information available before each fight.
+
+    When ``use_fighter_cache`` is True (inference on upcoming cards), reuses
+    persisted per-fighter rolling stats and only recomputes fighters on the card.
+    """
+    if use_fighter_cache and keep_unlabeled and target_fight_ids:
+        from src.fighter_cache import build_features_with_cache
+
+        return build_features_with_cache(
+            fights,
+            target_fight_ids=target_fight_ids,
+            keep_unlabeled=keep_unlabeled,
+        )
+
+    history = _build_history_long_pipeline(fights)
+    elo = _compute_elo_ratings(history)
+    features = _assemble_wide_feature_matrix(
+        history,
+        elo,
+        keep_unlabeled=keep_unlabeled,
+        target_fight_ids=target_fight_ids,
+    )
+    del history, elo
     return features
 
 

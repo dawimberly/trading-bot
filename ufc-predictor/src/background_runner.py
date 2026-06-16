@@ -282,11 +282,14 @@ def run_full_job(*, trigger: str, profile: str = "research") -> int:
     logger.info("Full background run (Next Two Cards) — trigger=%s", trigger)
 
     try:
+        from src.fighter_cache import warm_fighter_cache
+
+        warm_fighter_cache()
         data = run_full_analysis(
             event_mode="Next Two Cards",
             profile=profile,
             force_refresh_odds=True,
-            explain=True,
+            explain=False,
             use_cache=True,
         )
         if data.get("errors") and data.get("combined", pd.DataFrame()).empty:

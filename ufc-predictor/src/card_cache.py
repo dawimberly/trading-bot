@@ -228,7 +228,9 @@ def predict_card_cached(
             progress(msg, pct)
 
     cached_bundle = load_event_cache(event_name, card) if use_cache else None
-    predictor = FightPredictor()
+    from src.model_cache import get_shared_predictor
+
+    predictor = get_shared_predictor()
 
     if cached_bundle and cached_bundle["meta"].get("explain") == explain:
         _log(f"Cache hit: {event_name}", step_pct + step_span)

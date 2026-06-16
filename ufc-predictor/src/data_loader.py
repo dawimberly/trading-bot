@@ -2083,7 +2083,7 @@ def load_processed_features(path: Path | str | None = None) -> pd.DataFrame:
         raise FileNotFoundError(
             f"Processed features not found: {csv_path}. Run feature engineering first."
         )
-    return pd.read_csv(csv_path, parse_dates=[config.DATE_COLUMN])
+    return pd.read_csv(csv_path, parse_dates=[config.DATE_COLUMN], low_memory=True)
 
 
 def validate_columns(columns: Iterable[str]) -> None:

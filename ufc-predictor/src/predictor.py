@@ -356,7 +356,12 @@ def build_card_features(
             upcoming[config.DATE_COLUMN] = upcoming[config.DATE_COLUMN].fillna(fill_val)
 
     combined = pd.concat([history, upcoming], ignore_index=True)
-    features = build_feature_matrix(combined, keep_unlabeled=True)
+    features = build_feature_matrix(
+        combined,
+        keep_unlabeled=True,
+        use_fighter_cache=True,
+        target_fight_ids=card_ids,
+    )
     card_features = features[features[config.FIGHT_ID_COLUMN].isin(card_ids)].copy()
     do_sentiment = (
         attach_sentiment
@@ -580,13 +585,12 @@ class FightPredictor:
         if prepared.empty:
             return features.iloc[0:0].copy()
         proba = self.model.predict_proba(prepared[self.feature_columns])[:, 1]
+        proba_raw = proba.copy()
         if apply_style_bonus:
             proba, bonuses = apply_style_calibration(prepared, proba)
             out = self._attach_predictions(prepared, proba, prepared=prepared)
             out["style_bonus"] = bonuses
-            out["prob_f1_win_raw"] = self.model.predict_proba(
-                prepared[self.feature_columns]
-            )[:, 1]
+            out["prob_f1_win_raw"] = proba_raw
         else:
             out = self._attach_predictions(prepared, proba, prepared=prepared)
         if explain:

@@ -75,7 +75,7 @@ def print_backtest_summary(result) -> None:
                 f"VaR ret {stats.get('var_return_pct', 0):+.1f}%"
             )
         for w in getattr(mc, "warnings", []) or []:
-            print(f"  ⚠ {w}")
+            print(f"  WARNING: {w}")
             logger.warning("Monte Carlo: %s", w)
 
     if not result.bankroll_sweep.empty:
