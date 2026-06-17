@@ -1028,12 +1028,33 @@ def resolve_analysis_targets(
     """Delegate to main.resolve_event_targets (multi-card CLI / EXE)."""
     from main import resolve_event_targets
 
-    return resolve_event_targets(
+    targets = resolve_event_targets(
         event_query,
         next_two=next_two,
         last_two=last_two,
         include_adjacent_week=include_adjacent_week,
     )
+    deduped: list[tuple[int, str]] = []
+    seen_idx: set[int] = set()
+    seen_names: set[str] = set()
+    for event_index, event_name in targets:
+        if event_index in seen_idx:
+            logger.warning("resolve_analysis_targets: skip duplicate index %d (%r)", event_index, event_name)
+            continue
+        if event_name in seen_names:
+            logger.warning("resolve_analysis_targets: skip duplicate name %r", event_name)
+            continue
+        seen_idx.add(event_index)
+        seen_names.add(event_name)
+        deduped.append((event_index, event_name))
+    for idx, (event_index, event_name) in enumerate(deduped):
+        logger.info(
+            "Loaded Card %d: %s - (resolved, index %d)",
+            idx,
+            event_name,
+            event_index,
+        )
+    return deduped
 
 
 def predict_analysis_cards(

@@ -49,6 +49,7 @@ hiddenimports = [
     "ufc_betting_bot.modules.edge",
     "ufc_betting_bot.modules.dynamic_thresholds",
     "src.grok_analysis",
+    "src.model_cache",
     "requests",
 ]
 hiddenimports += list(ctk_hidden) + list(shap_hidden) + list(mpl_hidden)

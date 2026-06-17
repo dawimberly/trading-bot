@@ -1265,8 +1265,18 @@ def _fetch_espn_scoreboard_url(url: str, *, completed_only: bool = False) -> pd.
     return pd.DataFrame(rows)
 
 
-def _fetch_espn_scoreboard() -> pd.DataFrame:
-    return _fetch_espn_scoreboard_url(config.ESPN_UFC_SCOREBOARD_URL)
+def _fetch_espn_scoreboard(*, event_index: int = 0) -> pd.DataFrame:
+    payload = _session().get(config.ESPN_UFC_SCOREBOARD_URL, timeout=config.REQUEST_TIMEOUT_SEC)
+    payload.raise_for_status()
+    data = payload.json()
+    events = data.get("events") or []
+    if not events:
+        raise DataLoaderError("ESPN scoreboard returned no events")
+    idx = max(0, min(event_index, len(events) - 1))
+    rows = _parse_espn_scoreboard_payload({"events": [events[idx]]}, completed_only=False)
+    if not rows:
+        raise DataLoaderError(f"ESPN scoreboard event_index={event_index} returned no fights")
+    return pd.DataFrame(rows)
 
 
 def _fetch_espn_historical(*, since: pd.Timestamp | None = None) -> pd.DataFrame:
@@ -1296,7 +1306,7 @@ def _fetch_espn_historical(*, since: pd.Timestamp | None = None) -> pd.DataFrame
     return _clean_fights_frame(pd.concat(frames, ignore_index=True), source="espn:historical")
 
 
-def _scrape_ufcstats_upcoming() -> pd.DataFrame:
+def _scrape_ufcstats_upcoming(*, event_index: int = 0) -> pd.DataFrame:
     html = _request_text(config.UFC_STATS_UPCOMING_URL)
     soup = BeautifulSoup(html, "lxml")
     table = soup.find("table", class_="b-statistics__table-events")
@@ -1320,8 +1330,9 @@ def _scrape_ufcstats_upcoming() -> pd.DataFrame:
     if not events:
         raise DataLoaderError("No upcoming events on ufcstats.")
 
-    # First upcoming event only for card detail
-    event = events[0]
+    # Upcoming event at requested index (0 = soonest)
+    pick = min(max(0, event_index), len(events) - 1)
+    event = events[pick]
     fights = _scrape_ufcstats_event_fights(event["event_url"], event["event_name"], event["event_date"])
     df = pd.DataFrame(fights)
     df["winner"] = ""
@@ -2032,13 +2043,13 @@ def get_upcoming_card(
 
     if card is None and source in {"auto", "espn"}:
         try:
-            card = _fetch_espn_scoreboard()
+            card = _fetch_espn_scoreboard(event_index=event_index)
         except DataLoaderError as exc:
             errors.append(f"espn: {exc}")
 
     if card is None and source in {"auto", "ufcstats"}:
         try:
-            card = _scrape_ufcstats_upcoming()
+            card = _scrape_ufcstats_upcoming(event_index=event_index)
         except (DataLoaderError, ScrapeBlockedError) as exc:
             errors.append(f"ufcstats: {exc}")
 

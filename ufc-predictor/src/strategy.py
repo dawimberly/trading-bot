@@ -889,11 +889,15 @@ def aggregate_top_recommended_bets(
     books: dict[str, dict[str, Any]],
     budget_state: dict[str, Any],
     *,
-    limit: int = 3,
+    limit: int = 5,
+    per_book_cap: int = 2,
     profile: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Best singles across enabled books, deduped by fight, stakes scaled to card budget.
+
+    Takes up to ``per_book_cap`` edges from each enabled book before global dedupe so
+    Overview is not dominated by a single sportsbook.
     """
     import config as _cfg
 
@@ -905,7 +909,7 @@ def aggregate_top_recommended_bets(
     ]
     bankroll = bankroll_from_budget(resolved)
     strategy = strategy_from_profile(bankroll=bankroll)
-    best_by_fight: dict[str, dict[str, Any]] = {}
+    pool_candidates: list[dict[str, Any]] = []
 
     for book in enabled:
         book_data = books.get(book, {})
@@ -913,13 +917,15 @@ def aggregate_top_recommended_bets(
         preds = book_data.get("predictions")
         if not isinstance(preds, pd.DataFrame):
             preds = pd.DataFrame()
-        for single in alerts.get("singles") or []:
+        book_singles = sorted(
+            alerts.get("singles") or [],
+            key=lambda x: float(x.get("edge") or 0),
+            reverse=True,
+        )[: max(1, per_book_cap)]
+        for single in book_singles:
             edge = float(single.get("edge") or 0)
             fid = str(single.get("fight_id") or single.get("fight") or "")
             if not fid:
-                continue
-            prev = best_by_fight.get(fid)
-            if prev is not None and float(prev.get("edge") or 0) >= edge:
                 continue
             row = _find_prediction_row(preds, single)
             pick = str(single.get("pick") or "")
@@ -937,27 +943,36 @@ def aggregate_top_recommended_bets(
                 edge=edge,
                 config=strategy,
             )
-            best_by_fight[fid] = {
-                "fight_id": fid,
-                "fight": fight,
-                "pick": pick,
-                "pick_line": format_pick_over_opponent(fight, pick),
-                "bet_type": "Moneyline Single",
-                "description": str(single.get("brief") or single.get("reasoning") or "").strip(),
-                "prob": prob_f,
-                "edge": edge,
-                "edge_pct": float(single.get("edge_pct") or edge * 100),
-                "confidence": confidence or "—",
-                "kelly_pct": sizing["kelly_pct"],
-                "kelly_stake_usd": sizing["kelly_stake_usd"],
-                "max_safe_bet_usd": sizing["max_safe_bet_usd"],
-                "book": book_display_name(book),
-                "book_key": book,
-                "decimal_odds": dec,
-                "odds_display": f"{dec:.2f}" if dec else "—",
-                "american_odds": _format_american_odds(dec),
-                "raw_stake": float(single.get("suggested_stake") or 0),
-            }
+            pool_candidates.append(
+                {
+                    "fight_id": fid,
+                    "fight": fight,
+                    "pick": pick,
+                    "pick_line": format_pick_over_opponent(fight, pick),
+                    "bet_type": "Moneyline Single",
+                    "description": str(single.get("brief") or single.get("reasoning") or "").strip(),
+                    "prob": prob_f,
+                    "edge": edge,
+                    "edge_pct": float(single.get("edge_pct") or edge * 100),
+                    "confidence": confidence or "—",
+                    "kelly_pct": sizing["kelly_pct"],
+                    "kelly_stake_usd": sizing["kelly_stake_usd"],
+                    "max_safe_bet_usd": sizing["max_safe_bet_usd"],
+                    "book": book_display_name(book),
+                    "book_key": book,
+                    "decimal_odds": dec,
+                    "odds_display": f"{dec:.2f}" if dec else "—",
+                    "american_odds": _format_american_odds(dec),
+                    "raw_stake": float(single.get("suggested_stake") or 0),
+                }
+            )
+
+    best_by_fight: dict[str, dict[str, Any]] = {}
+    for bet in pool_candidates:
+        fid = bet["fight_id"]
+        prev = best_by_fight.get(fid)
+        if prev is None or float(bet.get("edge") or 0) > float(prev.get("edge") or 0):
+            best_by_fight[fid] = bet
 
     ranked = sorted(best_by_fight.values(), key=lambda x: float(x.get("edge") or 0), reverse=True)[:limit]
     pool = available_card_budget_usd(resolved, profile=profile)
@@ -983,10 +998,43 @@ def aggregate_overview_recommendations(
     """
     cap = max(3, min(5, int(limit)))
     parlay = aggregate_best_parlay(books, budget_state, profile=profile)
+    if parlay is not None:
+        edge_val = parlay.get("edge_pct")
+        if edge_val is None:
+            edge_val = parlay.get("expected_value")
+        if edge_val is None or float(edge_val) <= 0:
+            parlay = None
     singles_limit = cap - 1 if parlay else cap
     singles = aggregate_top_recommended_bets(
-        books, budget_state, limit=singles_limit, profile=profile
+        books, budget_state, limit=singles_limit, per_book_cap=2, profile=profile
     )
+    # Fill remaining slots from Overview alerts if cross-book dedupe left gaps
+    if len(singles) < singles_limit:
+        overview_singles = (books.get("Overview", {}).get("alerts") or {}).get("singles") or []
+        seen = {s.get("fight_id") for s in singles}
+        for s in sorted(overview_singles, key=lambda x: float(x.get("edge") or 0), reverse=True):
+            fid = str(s.get("fight_id") or s.get("fight") or "")
+            if not fid or fid in seen:
+                continue
+            singles.append(
+                {
+                    "fight_id": fid,
+                    "fight": s.get("fight"),
+                    "pick": s.get("pick"),
+                    "pick_line": format_pick_over_opponent(str(s.get("fight") or ""), str(s.get("pick") or "")),
+                    "bet_type": "Moneyline Single",
+                    "edge": float(s.get("edge") or 0),
+                    "edge_pct": float(s.get("edge_pct") or float(s.get("edge") or 0) * 100),
+                    "book": "Overview",
+                    "book_key": "Overview",
+                    "suggested_stake": float(s.get("suggested_stake") or 0),
+                    "american_odds": "—",
+                    "odds_display": "—",
+                }
+            )
+            seen.add(fid)
+            if len(singles) >= singles_limit:
+                break
     for single in singles:
         pick = str(single.get("pick") or "").strip()
         single["display_label"] = f"{pick} ML" if pick else str(single.get("pick_line") or "—")

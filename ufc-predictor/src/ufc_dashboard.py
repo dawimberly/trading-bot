@@ -548,6 +548,211 @@ def _rows_for_table(
     return [r[:-1] for r in rows]
 
 
+def _norm_event_name(name: str) -> str:
+    return " ".join(str(name or "").strip().lower().split())
+
+
+def _display_cards(
+    payload: "DashboardPayload",
+    preds: pd.DataFrame | None = None,
+) -> list[dict[str, Any]]:
+    """Cards for grouped UI — payload.cards, else split preds/combined by event_name."""
+    seen: set[str] = set()
+    cleaned: list[dict[str, Any]] = []
+    for card in payload.cards or []:
+        ev = str(card.get("event_name") or "").strip()
+        if not ev or _norm_event_name(ev) in seen:
+            continue
+        cp = card.get("predictions", pd.DataFrame())
+        if not isinstance(cp, pd.DataFrame):
+            cp = pd.DataFrame()
+        cleaned.append({"event_name": ev, "predictions": cp})
+        seen.add(_norm_event_name(ev))
+    if len(cleaned) >= 2:
+        return cleaned
+
+    frame = preds if isinstance(preds, pd.DataFrame) and not preds.empty else payload.combined
+    if isinstance(frame, pd.DataFrame) and not frame.empty and "event_name" in frame.columns:
+        order: list[str] = []
+        for raw in frame["event_name"].dropna().astype(str):
+            ev = raw.strip()
+            key = _norm_event_name(ev)
+            if ev and key not in seen:
+                order.append(ev)
+                seen.add(key)
+        if len(order) >= 2:
+            return [
+                {
+                    "event_name": ev,
+                    "predictions": frame[frame["event_name"].astype(str).str.strip() == ev],
+                }
+                for ev in order
+            ]
+
+    label = str(payload.event_label or "")
+    if " + " in label:
+        names = [p.strip() for p in label.split(" + ") if p.strip()]
+        if len(names) >= 2 and isinstance(frame, pd.DataFrame) and not frame.empty:
+            out: list[dict[str, Any]] = []
+            for name in names:
+                chunk = frame
+                if "event_name" in frame.columns:
+                    exact = frame[frame["event_name"].astype(str).str.strip() == name]
+                    if not exact.empty:
+                        chunk = exact
+                    else:
+                        key = _norm_event_name(name)
+                        chunk = frame[
+                            frame["event_name"].astype(str).map(_norm_event_name) == key
+                        ]
+                out.append({"event_name": name, "predictions": chunk})
+            if len(out) >= 2 and all(not c["predictions"].empty for c in out):
+                return out
+    return cleaned if cleaned else list(payload.cards or [])
+
+
+def _dedupe_fight_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove duplicate bout rows (same fight_id or fighter pair)."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    if config.FIGHT_ID_COLUMN in out.columns:
+        return out.drop_duplicates(subset=[config.FIGHT_ID_COLUMN], keep="first").reset_index(drop=True)
+    f1 = "fighter_1" if "fighter_1" in out.columns else ("fighter1" if "fighter1" in out.columns else None)
+    f2 = "fighter_2" if "fighter_2" in out.columns else ("fighter2" if "fighter2" in out.columns else None)
+    if f1 and f2:
+        return out.drop_duplicates(subset=[f1, f2], keep="first").reset_index(drop=True)
+    return out.drop_duplicates().reset_index(drop=True)
+
+
+def _merge_fights_with_book_odds(card_df: pd.DataFrame, book_df: pd.DataFrame) -> pd.DataFrame:
+    """Attach this book's odds/edge columns onto card rows (by fight_id or fighter pair)."""
+    if card_df is None or card_df.empty:
+        return _dedupe_fight_rows(book_df)
+    if book_df is None or book_df.empty:
+        return _dedupe_fight_rows(card_df)
+    odds_cols = [
+        c
+        for c in (
+            "f1_odds",
+            "f2_odds",
+            "implied_prob_f1",
+            "implied_prob_f2",
+            "edge_f1",
+            "edge_f2",
+            "edge_pct",
+            "best_edge_side",
+            "odds_matched",
+            "bookmaker_count",
+        )
+        if c in book_df.columns
+    ]
+    if not odds_cols:
+        return _dedupe_fight_rows(card_df)
+    key = config.FIGHT_ID_COLUMN
+    if key in card_df.columns and key in book_df.columns:
+        base = card_df.drop(columns=odds_cols, errors="ignore")
+        merged = base.merge(book_df[[key, *odds_cols]], on=key, how="left")
+        if merged["odds_matched"].any() if "odds_matched" in merged.columns else True:
+            return _dedupe_fight_rows(merged)
+    f1 = "fighter_1" if "fighter_1" in card_df.columns else "fighter1"
+    f2 = "fighter_2" if "fighter_2" in card_df.columns else "fighter2"
+    if f1 in card_df.columns and f2 in card_df.columns and f1 in book_df.columns and f2 in book_df.columns:
+        base = card_df.drop(columns=odds_cols, errors="ignore")
+        merged = base.merge(book_df[[f1, f2, *odds_cols]], on=[f1, f2], how="left")
+        return _dedupe_fight_rows(merged)
+    return _dedupe_fight_rows(card_df)
+
+
+def _preds_for_card(
+    preds: pd.DataFrame,
+    card_preds: pd.DataFrame,
+    event_name: str,
+) -> pd.DataFrame:
+    """Rows for one card using this book's odds merged onto card fights."""
+    ev = str(event_name or "").strip()
+    norm_ev = _norm_event_name(ev)
+    book_slice = pd.DataFrame()
+    if isinstance(preds, pd.DataFrame) and not preds.empty:
+        if norm_ev and "event_name" in preds.columns:
+            col = preds["event_name"].astype(str).str.strip()
+            book_slice = preds[col.map(_norm_event_name) == norm_ev]
+            if book_slice.empty:
+                book_slice = preds[col == ev]
+        else:
+            book_slice = preds
+    if not book_slice.empty:
+        if isinstance(card_preds, pd.DataFrame) and not card_preds.empty:
+            return _merge_fights_with_book_odds(card_preds, book_slice)
+        return _dedupe_fight_rows(book_slice)
+    if isinstance(card_preds, pd.DataFrame) and not card_preds.empty:
+        return _merge_fights_with_book_odds(card_preds, preds)
+    return _dedupe_fight_rows(preds) if isinstance(preds, pd.DataFrame) else pd.DataFrame()
+
+
+def _render_grouped_fight_tables(
+    parent,
+    cards: list[dict[str, Any]],
+    preds: pd.DataFrame,
+    *,
+    bankroll: float,
+    strategy,
+    compact: bool = True,
+    table_height: int = 8,
+    payload: "DashboardPayload | None" = None,
+) -> None:
+    """Render one bordered section per upcoming card, or a single flat table."""
+    for w in parent.winfo_children():
+        w.destroy()
+
+    if payload is not None:
+        cards = _display_cards(payload, preds)
+    elif len(cards) < 2:
+        cards = _display_cards(
+            type("_P", (), {"cards": cards, "combined": preds, "event_label": ""})(),
+            preds,
+        )
+
+    multi = len(cards) > 1
+    _debug_log(f"Grouped fight tables: {len(cards)} card section(s), multi={multi}")
+
+    if not multi:
+        tbl = DataTable(parent, height=table_height, compact=compact)
+        tbl.pack(fill="both", expand=True)
+        flat = _dedupe_fight_rows(preds)
+        if cards:
+            flat = _preds_for_card(preds, cards[0].get("predictions", pd.DataFrame()), cards[0].get("event_name", ""))
+        tbl.load_rows(_rows_for_table(flat, bankroll, strategy, compact=compact))
+        return
+
+    border_colors = ("#fbbf24", "#38bdf8", "#a78bfa", "#34d399")
+    for idx, card in enumerate(cards):
+        ev = card.get("event_name") or f"Card {idx + 1}"
+        cp = card.get("predictions", pd.DataFrame())
+        sub_df = _preds_for_card(preds, cp, ev)
+        matched_n = int(sub_df.get("odds_matched", pd.Series(False)).sum()) if "odds_matched" in sub_df.columns else 0
+        border = border_colors[idx % len(border_colors)]
+        section = ctk.CTkFrame(
+            parent,
+            fg_color="#152238",
+            corner_radius=10,
+            border_width=2,
+            border_color=border,
+        )
+        section.pack(fill="x", padx=6, pady=(10 if idx else 4, 6))
+        ctk.CTkLabel(
+            section,
+            text=f"CARD {idx + 1}: {ev}  —  {len(sub_df)} fights  |  {matched_n} with book odds",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            anchor="w",
+            text_color=border,
+        ).pack(fill="x", padx=12, pady=(10, 4))
+        sub = DataTable(section, height=table_height, compact=compact)
+        sub.pack(fill="x", padx=8, pady=(0, 10))
+        sub.load_rows(_rows_for_table(sub_df, bankroll, strategy, compact=compact))
+        _debug_log(f"  Card section {idx}: {ev!r} -> {len(sub_df)} rows")
+
+
 # --- UI helpers ---------------------------------------------------------------
 
 
@@ -575,6 +780,44 @@ def _normalize_ranked_parlays(
         item["_leg_rows"] = format_recommended_parlay_legs(item)
         out.append(item)
     return out
+
+
+def _render_ranked_singles(
+    parent,
+    singles: list[dict[str, Any]],
+    *,
+    title: str = "Top singles",
+    preds: pd.DataFrame | None = None,
+) -> None:
+    """Compact ranked moneyline singles for a book tab."""
+    del preds
+    if not singles:
+        return
+    ctk.CTkLabel(
+        parent,
+        text=title,
+        font=ctk.CTkFont(size=13, weight="bold"),
+        anchor="w",
+    ).pack(fill="x", pady=(8, 4))
+    for i, s in enumerate(singles, start=1):
+        pick = str(s.get("pick") or "—")
+        fight = str(s.get("fight") or "—")
+        edge = float(s.get("edge_pct") or s.get("edge", 0) or 0)
+        if edge <= 1.0:
+            edge *= 100.0
+        stake = float(s.get("suggested_stake") or 0)
+        ctk.CTkLabel(
+            parent,
+            text=(
+                f"#{i}  {pick}  ·  {fight}  |  "
+                f"edge {edge:+.1f}%  |  stake ${stake:.2f}"
+            ),
+            anchor="w",
+            text_color="#34d399" if edge > 0 else "#d1d5db",
+            font=ctk.CTkFont(size=12),
+            wraplength=1050,
+            justify="left",
+        ).pack(fill="x", padx=(4, 0), pady=(0, 4))
 
 
 def _render_ranked_parlays(
@@ -1162,9 +1405,9 @@ class BookTab(_CTK_FRAME):
             text_color="#93c5fd",
         )
         self.stake_box.pack_forget()
-        self.table = DataTable(self, height=11, compact=True)
-        self.table.pack(fill="both", expand=True, padx=10, pady=4)
-        self.bets_frame = ctk.CTkScrollableFrame(self, height=88, label_text="Parlays")
+        self.fights_area = ctk.CTkFrame(self, fg_color="transparent")
+        self.fights_area.pack(fill="both", expand=True, padx=10, pady=4)
+        self.bets_frame = ctk.CTkScrollableFrame(self, height=140, label_text="Singles & parlays")
         self.bets_frame.pack(fill="x", padx=10, pady=(2, 8))
 
     def render(
@@ -1242,10 +1485,32 @@ class BookTab(_CTK_FRAME):
 
         self.summary.configure(text=summary_line)
 
-        self.table.load_rows(_rows_for_table(preds, bankroll, strategy, compact=True))
+        cards = book_data.get("cards") or []
+        payload_stub = book_data.get("_payload")
+        _render_grouped_fight_tables(
+            self.fights_area,
+            cards,
+            preds,
+            bankroll=bankroll,
+            strategy=strategy,
+            compact=True,
+            table_height=11,
+            payload=payload_stub,
+        )
 
         for w in self.bets_frame.winfo_children():
             w.destroy()
+        singles = alerts.get("singles") or []
+        max_singles = config.profile_int("max_singles_show")
+        if singles:
+            singles_box = ctk.CTkFrame(self.bets_frame, fg_color="transparent")
+            singles_box.pack(fill="x", pady=(0, 6))
+            _render_ranked_singles(
+                singles_box,
+                singles[:max_singles],
+                preds=preds,
+                title=f"Top singles ({source})",
+            )
         parlays = alerts.get("parlays") or []
         max_parlays = config.profile_int("max_parlays_show")
         _render_ranked_parlays(
@@ -1745,6 +2010,25 @@ class BookPropsTab(_CTK_FRAME):
         book = payload.books.get(self.book_name, {})
         props = book.get("props") or {}
         singles_all = props.get("singles") or []
+        if not singles_all and props_on and not book_disabled:
+            try:
+                from src.dashboard_service import _build_props_payload
+
+                book_preds = book.get("predictions", payload.combined)
+                if isinstance(book_preds, pd.DataFrame) and not book_preds.empty:
+                    props = _build_props_payload(
+                        book_preds,
+                        self.book_name,
+                        force_refresh_odds=False,
+                        budget_state=budget_state,
+                    )
+                    singles_all = props.get("singles") or []
+                    _debug_log(
+                        f"Props rebuild for {self.book_name}: {len(singles_all)} ranked "
+                        f"(live rows {props.get('prop_odds_rows', 0)})"
+                    )
+            except Exception as exc:
+                _debug_log(f"Props rebuild failed for {self.book_name}: {exc}")
         singles = self._filter_singles(singles_all)
         singles = attach_prop_stakes(singles, budget_state, self.book_name, profile=profile)
         meta = props.get("singles_meta") or {}
@@ -2056,7 +2340,12 @@ class BudgetManagerBar(_CTK_FRAME):
             payload = getattr(master, "_payload", None)
             if payload is not None:
                 n = len(payload.combined) if not payload.combined.empty else 0
-                _debug_log(f"BudgetManagerBar._refresh_live: current payload combined fights={n}")
+                _debug_log(f"BudgetManagerBar._refresh_live: payload combined fights={n}")
+                for idx, card in enumerate(payload.cards or []):
+                    ev = card.get("event_name", "?")
+                    cp = card.get("predictions")
+                    cn = len(cp) if isinstance(cp, pd.DataFrame) else 0
+                    _debug_log(f"BudgetManagerBar._refresh_live: Loaded Card {idx}: {ev} - {cn} fights")
             if notify_parent and self._on_change:
                 state = config.normalize_budget_state(self.get_state())
                 self._on_change(state)
@@ -2321,7 +2610,7 @@ class UFCDashboardApp(_CTK_BASE):
         config.apply_profile_overrides()
         self._budget_state = config.apply_budget_state()
 
-        self.show_all_props_var = ctk.BooleanVar(value=False)
+        self.show_all_props_var = ctk.BooleanVar(value=True)
         self.profile_var = ctk.StringVar(value="Paper")
         self.event_var = ctk.StringVar(value="Next Two Cards")
 
@@ -2359,7 +2648,7 @@ class UFCDashboardApp(_CTK_BASE):
         _debug_log("Controls enabled (state=normal)")
 
     def _load_background_cache_on_startup(self) -> None:
-        """Load midnight/startup background snapshot if fresh (<24h)."""
+        """Load background snapshot on startup (fresh 24h, then stale 7d)."""
         if self._busy or self._payload is not None:
             return
 
@@ -2369,12 +2658,17 @@ class UFCDashboardApp(_CTK_BASE):
 
                 data = load_background_snapshot(max_age_hours=24)
                 if data is None:
+                    data = load_background_snapshot(max_age_hours=168)
+                    if data:
+                        _debug_log("Startup: using stale background cache (>24h)")
+                if data is None:
                     self.after(
                         0,
                         lambda: self.status.configure(
-                            text="Ready — click Refresh to analyze (no recent background cache)."
+                            text='Ready — click "Refresh Next Two" (no background cache).'
                         ),
                     )
+                    self.after(800, self._auto_refresh_if_empty)
                     return
 
                 payload = _result_to_payload(data)
@@ -2385,6 +2679,7 @@ class UFCDashboardApp(_CTK_BASE):
                 def apply() -> None:
                     if self._payload is not None or self._busy:
                         return
+                    self.event_var.set("Next Two Cards")
                     if full_ts is not None:
                         self._last_full_refresh_ts = full_ts
                     if odds_ts is not None:
@@ -2404,11 +2699,20 @@ class UFCDashboardApp(_CTK_BASE):
                 self.after(
                     0,
                     lambda: self.status.configure(
-                        text=f"Ready — click Refresh Next Two (cache load failed: {exc})."
+                        text=f'Ready — click Refresh Next Two (cache load failed: {exc}).'
                     ),
                 )
+                self.after(800, self._auto_refresh_if_empty)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _auto_refresh_if_empty(self) -> None:
+        """First launch with no cache: run Next Two Cards refresh automatically."""
+        if self._payload is not None or self._busy:
+            return
+        _debug_log("No payload on startup — auto-running Refresh Next Two")
+        self.event_var.set("Next Two Cards")
+        self._on_refresh()
 
     @staticmethod
     def _iso_to_epoch(ts: str | None) -> float | None:
@@ -2534,16 +2838,37 @@ class UFCDashboardApp(_CTK_BASE):
         """Top 3–5 picks for Overview, respecting budget, books, profile, and Grok."""
         if self._payload is None:
             return []
-        from src.grok_analysis import apply_grok_kelly_adjustments
-        from src.strategy import aggregate_overview_recommendations
-
         profile = self._profile_from_menu(self.profile_var.get())
-        return apply_grok_kelly_adjustments(
-            aggregate_overview_recommendations(
+        try:
+            from src.grok_analysis import apply_grok_kelly_adjustments
+            from src.strategy import aggregate_overview_recommendations
+
+            recs = aggregate_overview_recommendations(
                 self._payload.books, self._budget_state, limit=5, profile=profile
-            ),
-            self._grok_result,
-        )
+            )
+            return apply_grok_kelly_adjustments(recs, self._grok_result)
+        except Exception as exc:
+            _debug_log(f"Overview recommendations fallback: {exc}")
+            overview = self._payload.books.get("Overview", {}).get("alerts") or {}
+            singles = overview.get("singles") or []
+            out: list[dict[str, Any]] = []
+            for i, s in enumerate(singles[:5], start=1):
+                fight = str(s.get("fight") or "")
+                pick = str(s.get("pick") or "")
+                out.append(
+                    {
+                        "rank": i,
+                        "pick_line": f"{pick} over {fight.split(' vs ')[-1] if ' vs ' in fight else fight}",
+                        "display_label": f"{pick} ML",
+                        "edge_pct": float(s.get("edge_pct") or float(s.get("edge") or 0) * 100),
+                        "book": "Overview",
+                        "american_odds": "—",
+                        "odds_display": "—",
+                        "suggested_stake": float(s.get("suggested_stake") or 0),
+                        "card_pool_usd": float(self._budget_state.get("total_bankroll") or 0),
+                    }
+                )
+            return out
 
     def _refresh_top_recommendations(self) -> None:
         if hasattr(self, "top_bets_panel"):
@@ -2705,8 +3030,12 @@ class UFCDashboardApp(_CTK_BASE):
             anchor="w",
             text_color="#cbd5e1",
         ).pack(fill="x", padx=12, pady=(4, 2))
-        self.overview_table = DataTable(self.tab_overview, compact=True, height=10)
-        self.overview_table.pack(fill="both", expand=True, padx=10, pady=6)
+        self.overview_fights_scroll = ctk.CTkScrollableFrame(
+            self.tab_overview,
+            label_text="Upcoming cards (scroll for both)",
+            fg_color="#0f172a",
+        )
+        self.overview_fights_scroll.pack(fill="both", expand=True, padx=10, pady=6)
 
         self.grok_panel = GrokAnalysisPanel(
             self.tab_grok,
@@ -2932,6 +3261,11 @@ class UFCDashboardApp(_CTK_BASE):
             for c in payload.cards
             if isinstance(c.get("predictions"), pd.DataFrame) and not c["predictions"].empty
         ]
+        for idx, card in enumerate(payload.cards):
+            ev = card.get("event_name", "?")
+            cp = card.get("predictions")
+            cn = len(cp) if isinstance(cp, pd.DataFrame) else 0
+            _debug_log(f"Loaded Card {idx}: {ev} - {cn} fights")
         _debug_log(
             f"{source}: fights loaded combined={n_combined} overview={n_overview} "
             f"cards={len(payload.cards)} per_card={card_counts} label={payload.event_label!r}"
@@ -2954,17 +3288,50 @@ class UFCDashboardApp(_CTK_BASE):
                     event_mode="Next Two Cards",
                     profile=self._profile_from_menu(self.profile_var.get()),
                     force_refresh_odds=True,
-                    explain=True,
+                    explain=False,
                     use_cache=True,
                     budget_state=self._current_budget_state(),
                     progress=lambda m, p=None: self.after(0, lambda msg=m, pct=p: self._on_progress(msg, pct)),
                 )
-                self.after(0, lambda: self._apply_payload(payload, full_refresh=True, odds_refresh=True))
+                if payload.combined.empty:
+                    from src.dashboard_service import _background_analysis_fallback
+
+                    fb = _background_analysis_fallback(
+                        profile=self._profile_from_menu(self.profile_var.get())
+                    )
+                    if fb:
+                        payload = _result_to_payload({**fb, "profile": payload.profile})
+                        _debug_log("Refresh: applied background cache fallback (live empty)")
+
+                def _done() -> None:
+                    self._apply_payload(payload, full_refresh=True, odds_refresh=True)
+                    self._finish_busy()
+
+                self.after(0, _done)
             except Exception as exc:
                 tb = traceback.format_exc()
                 _debug_log(tb)
+                try:
+                    from src.dashboard_service import _background_analysis_fallback
+
+                    fb = _background_analysis_fallback(
+                        profile=self._profile_from_menu(self.profile_var.get())
+                    )
+                    if fb:
+                        payload = _result_to_payload(fb)
+
+                        def _fallback_done() -> None:
+                            self._apply_payload(payload, full_refresh=True, odds_refresh=True)
+                            self.status.configure(
+                                text=f"Loaded cached fights — live refresh failed ({exc})"
+                            )
+                            self._finish_busy()
+
+                        self.after(0, _fallback_done)
+                        return
+                except Exception:
+                    pass
                 self.after(0, lambda: self._show_error(f"{exc}\n{tb}"))
-            finally:
                 self.after(0, self._finish_busy)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -3218,13 +3585,28 @@ class UFCDashboardApp(_CTK_BASE):
         _debug_log("Rendering overview + books (lazy tabs deferred)")
         props_enabled = _ensure_props_config()
         _debug_log(f"Rendering Props tabs: {'enabled' if props_enabled else 'disabled'}")
-        self._render_overview_section(payload)
-        self._rendered_sections.add("overview")
-        self._render_books_section(payload)
-        self._rendered_sections.add("books")
+
+        try:
+            self._render_overview_section(payload)
+            self._rendered_sections.add("overview")
+        except Exception as exc:
+            _debug_log(f"Overview render error: {traceback.format_exc()}")
+            self.status.configure(text=f"Overview render warning: {exc}")
+
+        try:
+            self._render_books_section(payload)
+            self._rendered_sections.add("books")
+        except Exception as exc:
+            _debug_log(f"Books render error: {traceback.format_exc()}")
+            self.status.configure(text=f"Book tabs render warning: {exc}")
+
         if props_enabled:
-            self._render_props_section(payload)
-            self._rendered_sections.add("props")
+            try:
+                self._render_props_section(payload)
+                self._rendered_sections.add("props")
+            except Exception as exc:
+                _debug_log(f"Props render error: {traceback.format_exc()}")
+
         current = self.tabs.get() if hasattr(self, "tabs") else "Overview"
         self.after(1, lambda: self._render_tab_lazy(current))
         self.after(800, lambda t=token: self._render_idle_deferred(t))
@@ -3261,7 +3643,17 @@ class UFCDashboardApp(_CTK_BASE):
         preds = overview.get("predictions", pd.DataFrame())
         if (preds is None or (isinstance(preds, pd.DataFrame) and preds.empty)) and not payload.combined.empty:
             preds = payload.combined
-        self.overview_table.load_rows(_rows_for_table(preds, bankroll, strategy, compact=True))
+        preds = _dedupe_fight_rows(preds) if isinstance(preds, pd.DataFrame) else pd.DataFrame()
+        _render_grouped_fight_tables(
+            self.overview_fights_scroll,
+            payload.cards or [],
+            preds,
+            bankroll=bankroll,
+            strategy=strategy,
+            compact=True,
+            table_height=8,
+            payload=payload,
+        )
 
         bs = self._budget_state
         from src.strategy import collect_dashboard_risk_warnings, format_risk_warnings
@@ -3308,10 +3700,19 @@ class UFCDashboardApp(_CTK_BASE):
         ctx = payload.threshold_ctx or {}
         bs = self._budget_state
         profile = self._profile_from_menu(self.profile_var.get())
-        self.betnow_tab.render(self._book_tab_data(payload, "BetNow.eu"), ctx, budget_state=bs, profile=profile)
-        self.dk_tab.render(self._book_tab_data(payload, "DraftKings"), ctx, budget_state=bs, profile=profile)
+        for tab, key in (
+            (self.betnow_tab, "BetNow.eu"),
+            (self.dk_tab, "DraftKings"),
+        ):
+            data = self._book_tab_data(payload, key)
+            data["cards"] = payload.cards
+            data["_payload"] = payload
+            tab.render(data, ctx, budget_state=bs, profile=profile)
         if config.MYBOOKIE_ENABLED:
-            self.mybookie_tab.render(self._book_tab_data(payload, "MyBookie"), ctx, budget_state=bs, profile=profile)
+            data = self._book_tab_data(payload, "MyBookie")
+            data["cards"] = payload.cards
+            data["_payload"] = payload
+            self.mybookie_tab.render(data, ctx, budget_state=bs, profile=profile)
         else:
             self.mybookie_tab.summary.configure(
                 text="MyBookie disabled — set MYBOOKIE_ENABLED=true in .env and refresh."
@@ -3326,30 +3727,32 @@ class UFCDashboardApp(_CTK_BASE):
 
         for w in self.next_two_scroll.winfo_children():
             w.destroy()
-        if not payload.cards:
+        if not payload.cards and payload.combined.empty:
             ctk.CTkLabel(
                 self.next_two_scroll,
                 text="No upcoming cards loaded — click Refresh Next Two.",
                 anchor="w",
             ).pack(fill="x", padx=8, pady=8)
-        for card in payload.cards:
+            return
+        dk = payload.books.get("DraftKings", {}).get("predictions", pd.DataFrame())
+        book_preds = dk if isinstance(dk, pd.DataFrame) and not dk.empty else payload.combined
+        display_cards = _display_cards(payload, book_preds)
+        if len(display_cards) < 2:
+            _debug_log(f"Next Two tab: only {len(display_cards)} card group(s) — run Refresh Next Two")
+        _render_grouped_fight_tables(
+            self.next_two_scroll,
+            payload.cards,
+            book_preds,
+            bankroll=bankroll,
+            strategy=strategy,
+            compact=False,
+            table_height=8,
+            payload=payload,
+        )
+        for card in display_cards:
             ev = card.get("event_name", "Card")
             cp = card.get("predictions", pd.DataFrame())
-            ctk.CTkLabel(
-                self.next_two_scroll,
-                text=f"▸ {ev}  ({len(cp)} fights)",
-                font=ctk.CTkFont(size=14, weight="bold"),
-                anchor="w",
-            ).pack(fill="x", pady=(8, 4))
-            sub = DataTable(self.next_two_scroll, height=8)
-            sub.pack(fill="x", padx=4, pady=4)
-            dk = payload.books.get("DraftKings", {}).get("predictions", cp)
-            if isinstance(dk, pd.DataFrame) and "event_name" in dk.columns:
-                sub_df = dk[dk["event_name"] == ev]
-            else:
-                sub_df = cp
-            sub.load_rows(_rows_for_table(sub_df, bankroll, strategy))
-
+            sub_df = _preds_for_card(book_preds, cp, ev)
             try:
                 from src.parlay_builder import ranked_parlays_for_card
 

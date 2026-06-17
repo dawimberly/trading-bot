@@ -1,7 +1,7 @@
 @echo off
 REM Register Windows Task Scheduler jobs for UFC background processing.
-REM   UFC Bot Midnight  — full Next Two Cards run daily at 12:00 AM
-REM   UFC Bot Startup   — auto run on user logon (full if stale, else odds-only)
+REM   UFC Bot Nightly  — full Next Two Cards run daily at 4:00 AM
+REM   UFC Bot Startup  — auto run on user logon (full if stale, else odds-only)
 
 setlocal EnableDelayedExpansion
 cd /d "%~dp0\.."
@@ -35,13 +35,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
-set "MIDNIGHT_CMD=cmd /c \"%RUNNER%\" full midnight"
+set "NIGHTLY_CMD=cmd /c \"%RUNNER%\" full scheduled"
 set "STARTUP_CMD=cmd /c \"%RUNNER%\" auto startup"
 
-echo Creating task: UFC Bot Midnight (daily 12:00 AM)...
-schtasks /Create /TN "UFC Bot Midnight" /TR "%MIDNIGHT_CMD%" /SC DAILY /ST 00:00 /RL LIMITED /F
+echo Removing legacy tasks (if present)...
+schtasks /Delete /TN "UFC Bot Midnight" /F >nul 2>&1
+schtasks /Delete /TN "UFC Bot Sunday" /F >nul 2>&1
+
+echo Creating task: UFC Bot Nightly (daily 4:00 AM)...
+schtasks /Create /TN "UFC Bot Nightly" /TR "%NIGHTLY_CMD%" /SC DAILY /ST 04:00 /RL LIMITED /F
 if errorlevel 1 (
-    echo [FAIL] Could not create UFC Bot Midnight task.
+    echo [FAIL] Could not create UFC Bot Nightly task — try Run as Administrator.
     exit /b 1
 )
 
@@ -67,13 +71,11 @@ echo === Setup complete ===
 echo   Tasks registered for: %ROOT%
 echo.
 echo   Verify:
-echo     schtasks /Query /TN "UFC Bot Midnight"
+echo     schtasks /Query /TN "UFC Bot Nightly" /V /FO LIST
 echo     schtasks /Query /TN "UFC Bot Startup"
-echo     dir "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\UFC-Bot-Background.bat"
 echo.
 echo   Manual test:
 echo     scripts\run_background.bat full manual
-echo     scripts\run_background.bat auto startup
 echo.
 echo   Logs: data\logs\background_runner.log
 echo.

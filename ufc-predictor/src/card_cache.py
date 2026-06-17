@@ -55,9 +55,23 @@ def _series_values(card: pd.DataFrame, column: str, default: list[Any] | None = 
     return list(vals)
 
 
-def card_fingerprint(card: pd.DataFrame) -> dict[str, Any]:
+def _card_fight_ids(card: pd.DataFrame) -> list[str]:
+    """Stable fight ids for cache keys; synthesize from fighters when fight_id is absent."""
     id_col = config.FIGHT_ID_COLUMN if config.FIGHT_ID_COLUMN in card.columns else "fight_id"
-    ids = sorted(str(x) for x in _series_values(card, id_col))
+    ids = [str(x) for x in _series_values(card, id_col) if str(x).strip()]
+    if ids:
+        return sorted(ids)
+    f1_col = "fighter_1" if "fighter_1" in card.columns else ("fighter1" if "fighter1" in card.columns else None)
+    f2_col = "fighter_2" if "fighter_2" in card.columns else ("fighter2" if "fighter2" in card.columns else None)
+    if not f1_col or not f2_col:
+        return []
+    date_col = config.DATE_COLUMN if config.DATE_COLUMN in card.columns else ("date" if "date" in card.columns else None)
+    dates = _series_values(card, date_col, [""] * len(card)) if date_col else [""] * len(card)
+    return sorted(f"{a}|{b}|{d}" for a, b, d in zip(card[f1_col], card[f2_col], dates))
+
+
+def card_fingerprint(card: pd.DataFrame) -> dict[str, Any]:
+    ids = _card_fight_ids(card)
     dates = []
     if config.DATE_COLUMN in card.columns:
         dates = sorted(str(x) for x in _series_values(card, config.DATE_COLUMN))
@@ -235,8 +249,7 @@ def predict_card_cached(
     if cached_bundle and cached_bundle["meta"].get("explain") == explain:
         _log(f"Cache hit: {event_name}", step_pct + step_span)
         preds = cached_bundle["predictions"].copy()
-        if "event_name" not in preds.columns:
-            preds["event_name"] = event_name
+        preds["event_name"] = event_name
         return preds
 
     partial_preds = pd.DataFrame()
@@ -253,6 +266,7 @@ def predict_card_cached(
 
     _log(f"Feature engineering: {event_name}…", step_pct + step_span * 0.2)
     features = build_card_features(card if not cached_ids else new_card, historical_fights=fights)
+    logger.info("build_card_features: %d rows for %r", len(features), event_name)
     if features.empty:
         if not partial_preds.empty:
             return partial_preds
@@ -271,8 +285,7 @@ def predict_card_cached(
         )
 
     preds = merge_cached_predictions(partial_preds, scored)
-    if "event_name" not in preds.columns:
-        preds["event_name"] = event_name
+    preds["event_name"] = event_name
 
     if use_cache:
         save_event_cache(event_name, card, predictions=preds, features=features, explain=explain)
