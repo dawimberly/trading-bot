@@ -128,7 +128,7 @@ def _build_props_payload(
     merged = enrich_predictions_with_props(predictions, book=book_name, prop_odds=prop_odds)
     bankroll = bankroll_from_budget(budget_state)
     strategy = strategy_from_profile(bankroll=bankroll)
-    singles, singles_meta = rank_prop_singles(
+    singles_raw = rank_prop_singles(
         merged,
         book=book_name,
         strategy=strategy,
@@ -136,6 +136,11 @@ def _build_props_payload(
         max_results=config.PROP_MAX_RESULTS,
         include_relaxed=True,
     )
+    if isinstance(singles_raw, dict):
+        singles = singles_raw.get("items") or []
+        singles_meta = singles_raw.get("meta") or {}
+    else:
+        singles, singles_meta = singles_raw
     return {
         "singles": singles,
         "singles_meta": singles_meta,
@@ -232,14 +237,6 @@ def _load_book_odds(
         bankroll=br,
     )
     alerts = budget_aware_alerts(alerts, budget_state, book_name)
-    props_payload: dict[str, Any] = {}
-    if config.ENABLE_PROPS:
-        props_payload = _build_props_payload(
-            merged,
-            book_name,
-            force_refresh_odds=force_refresh_odds,
-            budget_state=budget_state,
-        )
     return {
         "predictions": merged,
         "alerts": alerts,
@@ -247,8 +244,90 @@ def _load_book_odds(
         "odds_total": len(combined),
         "source": source,
         "warning": warning,
-        "props": props_payload,
+        "props": {},
     }
+
+
+def refresh_books_props(
+    books: dict[str, dict[str, Any]],
+    *,
+    force_refresh_odds: bool = True,
+    budget_state: dict[str, Any] | None = None,
+    progress: ProgressFn | None = None,
+) -> None:
+    """Rebuild prop rankings for each book from existing predictions (no ML re-run)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    _reload_config_flags()
+    if not config.ENABLE_PROPS:
+        return
+
+    enabled = config.enabled_books_from_budget(budget_state) if budget_state else None
+    targets: list[tuple[str, pd.DataFrame]] = []
+    for book_name in ("BetNow.eu", "DraftKings", "MyBookie"):
+        if book_name not in books:
+            continue
+        if enabled is not None and book_name not in enabled:
+            continue
+        if book_name == "MyBookie" and not config.MYBOOKIE_ENABLED:
+            continue
+        preds = books[book_name].get("predictions")
+        if not isinstance(preds, pd.DataFrame) or preds.empty:
+            continue
+        targets.append((book_name, preds))
+
+    if not targets:
+        logger.warning("Props refresh skipped — no book predictions loaded")
+        return
+
+    def _build_one(name: str, preds: pd.DataFrame) -> tuple[str, dict[str, Any]]:
+        logger.info("Props refresh: %s (%d fights)", name, len(preds))
+        payload = _build_props_payload(
+            preds,
+            name,
+            force_refresh_odds=force_refresh_odds,
+            budget_state=budget_state,
+        )
+        n = len(payload.get("singles") or [])
+        logger.info("Props refresh: %s -> %d ranked lines", name, n)
+        return name, payload
+
+    _log(progress, f"Props: fetching lines for {len(targets)} book(s)…", 0.72)
+    with ThreadPoolExecutor(max_workers=min(3, len(targets))) as pool:
+        futs = {
+            pool.submit(_build_one, name, preds): name
+            for name, preds in targets
+        }
+        done = 0
+        for fut in as_completed(futs):
+            name, props = fut.result()
+            books[name]["props"] = props
+            done += 1
+            pct = 0.72 + (0.25 * done / max(len(targets), 1))
+            _log(progress, f"Props: {name} ranked ({done}/{len(targets)})", pct)
+
+
+def run_quick_props_refresh(
+    books: dict[str, dict[str, Any]],
+    *,
+    progress: ProgressFn | None = None,
+    budget_state: dict[str, Any] | None = None,
+    force_refresh_odds: bool = True,
+) -> dict[str, Any]:
+    """Fast props-only path (~30–90s): uses cached predictions, parallel per book."""
+    _reload_config_flags()
+    if not config.ENABLE_PROPS:
+        return {"books": books, "props_updated_at": _utc_now(), "skipped": "ENABLE_PROPS=false"}
+
+    books = {k: dict(v) for k, v in books.items()}
+    refresh_books_props(
+        books,
+        force_refresh_odds=force_refresh_odds,
+        budget_state=budget_state,
+        progress=progress,
+    )
+    _log(progress, "Props refresh complete.", 1.0)
+    return {"books": books, "props_updated_at": _utc_now()}
 
 
 def apply_books_to_predictions(
@@ -308,6 +387,12 @@ def apply_books_to_predictions(
         "odds_matched": int(overview.get("odds_matched", pd.Series(False)).sum()),
         "odds_total": len(overview),
     }
+    refresh_books_props(
+        books,
+        force_refresh_odds=force_refresh_odds,
+        budget_state=budget_state,
+        progress=progress,
+    )
     return books
 
 
@@ -378,8 +463,13 @@ def run_quick_odds_refresh(
         "odds_total": len(overview),
     }
     threshold_ctx = threshold_context_for_alerts(overview, bankroll=bankroll)
-    _log(progress, "Quick odds complete.", 1.0)
-    return {"books": books, "threshold_ctx": threshold_ctx, "odds_updated_at": _utc_now()}
+    _log(progress, "Quick odds + props complete.", 1.0)
+    return {
+        "books": books,
+        "threshold_ctx": threshold_ctx,
+        "odds_updated_at": _utc_now(),
+        "props_updated_at": _utc_now(),
+    }
 
 
 def _fetch_card_for_analysis(event_index: int, event_name: str) -> pd.DataFrame:

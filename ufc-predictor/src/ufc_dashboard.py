@@ -153,7 +153,7 @@ def _load_dependencies(progress: Callable[[str], None] | None = None) -> None:
     global np, pd, matplotlib, FigureCanvasTkAgg, Figure, ttk, config
     global generate_alerts, parse_explanation_json, build_fight_brief
     global threshold_context_for_alerts, detect_card_change, run_full_analysis
-    global run_quick_odds_refresh, extract_bet_candidates, kelly_stake
+    global run_quick_odds_refresh, run_quick_props_refresh, extract_bet_candidates, kelly_stake
     global strategy_from_profile, example_threshold_table
 
     def _step(msg: str) -> None:
@@ -194,6 +194,7 @@ def _load_dependencies(progress: Callable[[str], None] | None = None) -> None:
             detect_card_change,
             run_full_analysis,
             run_quick_odds_refresh,
+            run_quick_props_refresh,
         )
         from src.strategy import extract_bet_candidates, kelly_stake, strategy_from_profile
         from ufc_betting_bot.modules.dynamic_thresholds import example_threshold_table
@@ -219,6 +220,7 @@ threshold_context_for_alerts = None
 detect_card_change = None
 run_full_analysis = None
 run_quick_odds_refresh = None
+run_quick_props_refresh = None
 extract_bet_candidates = None
 kelly_stake = None
 strategy_from_profile = None
@@ -2939,14 +2941,25 @@ class UFCDashboardApp(_CTK_BASE):
 
         self.quick_odds_btn = ctk.CTkButton(
             bar,
-            text="Quick Odds Refresh",
-            width=150,
+            text="Quick Odds + Props",
+            width=160,
             state="normal",
             fg_color="#2d6a4f",
             hover_color="#40916c",
-            command=self._wrap_button_click("Quick Odds Refresh", self._on_quick_odds),
+            command=self._wrap_button_click("Quick Odds + Props", self._on_quick_odds),
         )
         self.quick_odds_btn.pack(side="left", padx=4)
+
+        self.refresh_props_btn = ctk.CTkButton(
+            bar,
+            text="Refresh Props",
+            width=120,
+            state="normal",
+            fg_color="#0d9488",
+            hover_color="#14b8a6",
+            command=self._wrap_button_click("Refresh Props", self._on_refresh_props),
+        )
+        self.refresh_props_btn.pack(side="left", padx=4)
 
         self.new_card_btn = ctk.CTkButton(
             bar,
@@ -3235,9 +3248,11 @@ class UFCDashboardApp(_CTK_BASE):
 
         self.refresh_btn.configure(state=state)
         self.quick_odds_btn.configure(state=state)
+        self.refresh_props_btn.configure(state=state)
         self.new_card_btn.configure(state=state)
         if not busy:
             self.quick_odds_btn.configure(fg_color="#2d6a4f", hover_color="#40916c")
+            self.refresh_props_btn.configure(fg_color="#0d9488", hover_color="#14b8a6")
             self.new_card_btn.configure(fg_color="#7c3aed", hover_color="#8b5cf6")
         self.profile_menu.configure(state=state)
         self.event_menu.configure(state=state)
@@ -3407,6 +3422,57 @@ class UFCDashboardApp(_CTK_BASE):
             return
         self._run_quick_odds_async(auto=False)
 
+    def _on_refresh_props(self) -> None:
+        """Fast props-only refresh (~30–90s) using cached predictions."""
+        if self._busy:
+            self.status.configure(text="Already running — wait for the current operation to finish.")
+            return
+        if self._payload is None or self._payload.combined.empty:
+            self.status.configure(text="Load fights first — Refresh Next Two or wait for nightly cache.")
+            return
+        if not _ensure_props_config():
+            self.status.configure(text="Props disabled — set ENABLE_PROPS=true in .env")
+            return
+        self._run_quick_props_async()
+
+    def _run_quick_props_async(self) -> None:
+        if self._busy or self._payload is None:
+            return
+        self._set_busy(True)
+        self._on_progress("Props refresh (parallel, no ML re-run)…", 0.05)
+        books_in = self._payload.books
+
+        def worker() -> None:
+            try:
+                result = run_quick_props_refresh(
+                    books_in,
+                    budget_state=self._current_budget_state(),
+                    progress=lambda m, p=None: self.after(0, lambda msg=m, pct=p: self._on_progress(msg, pct)),
+                )
+                self.after(0, lambda: self._apply_quick_props(result))
+            except Exception as exc:
+                tb = traceback.format_exc()
+                _debug_log(tb)
+                self.after(0, lambda: self._show_error(str(exc)))
+            finally:
+                self.after(0, self._finish_busy)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_quick_props(self, result: dict[str, Any]) -> None:
+        if self._payload is None:
+            return
+        for name, data in (result.get("books") or {}).items():
+            if name not in self._payload.books:
+                self._payload.books[name] = data
+            else:
+                self._payload.books[name]["props"] = data.get("props") or {}
+        ts = result.get("props_updated_at") or "now"
+        self.status.configure(text=f"Props updated at {ts} — open Props tabs to review.")
+        self._render_props_section(self._payload)
+        self._rendered_sections.add("props")
+        _debug_log("Props tabs re-rendered after quick props refresh")
+
     def _run_quick_odds_async(self, *, auto: bool) -> None:
         if self._busy or self._payload is None:
             return
@@ -3477,7 +3543,7 @@ class UFCDashboardApp(_CTK_BASE):
         if payload.errors:
             self.status.configure(text="Done with warnings: " + "; ".join(payload.errors[:2]) + quick_note)
         elif quick:
-            self.status.configure(text=f"Quick odds updated at {payload.odds_updated_at or 'now'}.")
+            self.status.configure(text=f"Quick odds + props updated at {payload.odds_updated_at or 'now'}.")
         else:
             self.status.configure(text=f"Refresh complete — {payload.event_label}")
 
