@@ -1,0 +1,82 @@
+{
+  "enabled": true,
+  "dry_run": false,
+  "timestamp": "2026-06-16T19:36:39+00:00",
+  "paper_ok": true,
+  "paper_equity": 98847.39,
+  "sleeve_value": 0,
+  "sleeve_cap_pct": 0.15,
+  "position_pct": 0.05,
+  "max_positions": 3,
+  "universe": [
+    "WIF/USD",
+    "BONK/USD",
+    "RENDER/USD",
+    "SOL/USD",
+    "AVAX/USD"
+  ],
+  "filters": {
+    "spy_gate": false,
+    "spy_reason": null,
+    "hour_ok": true,
+    "rsi_band": [
+      32,
+      42
+    ],
+    "loss_cooldown_hours": 48
+  },
+  "cooldown_coins": [],
+  "active_positions": [],
+  "last_signal_time": "2026-06-16T16:59:24+00:00",
+  "today_pnl": 0.0,
+  "exit_actions": [],
+  "entry_actions": [],
+  "signals": [
+    {
+      "symbol": "WIF/USD",
+      "signal": false,
+      "close": 0.168305,
+      "ret_4h": 0.0054,
+      "rsi14": 49.94,
+      "below_sma10": true,
+      "in_cooldown": false
+    },
+    {
+      "symbol": "BONK/USD",
+      "signal": false,
+      "close": 5e-06,
+      "ret_4h": 0.0169,
+      "rsi14": 52.99,
+      "below_sma10": false,
+      "in_cooldown": false
+    },
+    {
+      "symbol": "RENDER/USD",
+      "signal": false,
+      "close": 1.73526,
+      "ret_4h": 0.0042,
+      "rsi14": 39.46,
+      "below_sma10": true,
+      "in_cooldown": false
+    },
+    {
+      "symbol": "SOL/USD",
+      "signal": false,
+      "close": 73.9871,
+      "ret_4h": 0.0103,
+      "rsi14": 53.28,
+      "below_sma10": false,
+      "in_cooldown": false
+    },
+    {
+      "symbol": "AVAX/USD",
+      "signal": false,
+      "close": 6.873555,
+      "ret_4h": 0.013,
+      "rsi14": 51.9,
+      "below_sma10": false,
+      "in_cooldown": false
+    }
+  ],
+  "cash": 37.69
+}

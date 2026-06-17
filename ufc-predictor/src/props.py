@@ -392,7 +392,8 @@ def enrich_predictions_with_props(
         return df
     from src.odds_providers.prop_odds_common import attach_prop_odds_to_predictions
 
-    out = attach_prop_odds_to_predictions(df, prop_odds or pd.DataFrame())
+    odds_df = prop_odds if prop_odds is not None else pd.DataFrame()
+    out = attach_prop_odds_to_predictions(df, odds_df)
     for key in config.PROP_MARKETS:
         col = f"prop_prob_{key}"
         out[col] = out.apply(lambda r: prop_model_prob(key, r), axis=1)

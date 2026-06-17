@@ -5,18 +5,25 @@
 The bot automatically applies **small-account safety** when equity &lt; $500:
 
 - **90% VTI core** (passive index anchor)
-- **~10% active sleeves** (SPY, NYSE momentum, vol-gated crypto)
+- **~10% active sleeves** (SPY + NYSE momentum only — **crypto OFF**)
 - **1% risk per trade** (~$1–$3 orders)
 - **$10 max per order**
 
-**Recommended live stack** (already default — no extra flags required):
+**Recommended live stack — Live Profile A** (already default — no extra flags required):
 
-- `WISDOM_MODE=dynamic`
+- **90% VTI core** on equity &lt; $500 (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
+- **Crypto sleeve OFF**, **thinking engine OFF**
 - Yield-gate-only game plan (`GAME_PLAN_YIELD_GATE_ONLY=true`)
-- **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
-- Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
+- Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off**
 
-**Paper research** (`paper_aggressive`): **Best Paper Bot v2.1** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
+**Recommended paper stack — Best Paper Bot v2.1 (crypto OFF)** (`PAPER_CHASE_MODE=1`):
+
+- Dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**
+- **Dynamic universe ON**, **IPO safety ON**
+- **Crypto OFF**, **ADR OFF**, **bond OFF** (locked defaults — see rationale below)
+- Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`); macro/social/risk parity **locked off**
+
+See [Final recommended configuration](#final-recommended-configuration) and [Profile B](#profile-b-best-paper-bot-v21-paper_aggressive).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -26,35 +33,94 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 ## What the bot is set to do (runtime defaults)
 
-This section is the **authoritative summary** of what actually runs on **live and paper bots** vs what exists **only for backtests and research scripts**. Code defaults below; your `.env` can override opt-in flags (but not the hard-disabled research experiments).
+This section is the **authoritative summary** of what actually runs on **live and paper bots** vs what exists **only for backtests and research scripts**. Code defaults in `config.py` and `config/best_paper_config.py`; your `.env` can override opt-in flags (but not hard-disabled crypto / profit-target / expanded-universe experiments).
 
-### Profile A — live (`run_all.py`, ~$100–$300)
+## Final recommended configuration
+
+> **Final lock (2026-06-17):** Best Paper Bot v2.1 defaults are enforced in `config/best_paper_config.py` on every paper-chase startup. Crypto is **locked OFF** (`.env` cannot re-enable). ADR and bond sleeves are **opt-in research only**. UFC betting stacks were removed from this repo — **trading bot only** under `stock-bot/`.
+
+| Target | VTI | Crypto | ADR | Thinking | Key sleeves | Start command |
+|--------|-----|--------|-----|----------|-------------|---------------|
+| **Live Profile A** ($300–$1,000) | **90%** (&lt;$500) | **OFF** | **OFF** | **OFF** | SPY + NYSE yield-gate | `python run_all.py` |
+| **Best Paper Bot v2.1** | Dynamic 40–75% | **OFF** | **OFF** | Opt-in | Stat arb + vol + options + overlap/chunk/co-fire + **dynamic universe** | `python run_paper_bot.py` |
+
+**Why crypto is disabled:** Across 365d grids (Live Profile A, paper aggressive, expanded universe, v2/v3 filters, vol sleeve), the crypto sleeve and stat-arb crypto pairs **did not improve Sharpe or Max DD** vs the equity-only stack. Crypto adds fee/slippage drag on small notionals and correlated beta without consistent alpha. Crypto code remains for **research** under `scripts/research/` and backtest flags (`--compare-crypto-universe`); `enforce_best_paper_stack()` keeps it **off on all bots** even if `.env` sets `PAPER_CRYPTO_ENABLED=true`.
+
+**Why international ADR is off by default:** Final 365d validation (`--compare-international-sleeve`, 2026-06-16) showed **-0.38pp return** and **-0.05 Sharpe** vs the v2.1 baseline, with deeper drawdown (14 ADR trades). The sleeve is **research opt-in** only (`PAPER_INTERNATIONAL_SLEEVE_ENABLED=true`); it is never enabled on Live Profile A.
+
+**Why bond sleeve is off by default:** Bond (TLT/GOVT) was **flat on return/Sharpe** vs baseline with only a modest MaxDD improvement (+0.04pp). Default OFF; enable via `PAPER_BOND_SLEEVE_ENABLED=true` only if you want a defensive hedge experiment.
+
+**Live Profile A ($300–$1,000):** Stay at **90% VTI**, crypto OFF, thinking OFF, ADR/bond OFF. Lower VTI (80/75/70%) did not improve drawdown in the latest 365d live sim.
+
+**Verify anytime:** `python status.py` — shows **FINAL CONFIG** banner, locked Best Paper v2.1 line, and restart commands at the bottom.
+
+**Profile B `.env` defaults** (copy into `stock-bot/.env`):
+
+```env
+PAPER_CHASE_MODE=1
+PAPER_TRADING=true
+PAPER_CRYPTO_ENABLED=false
+PAPER_INTERNATIONAL_SLEEVE_ENABLED=false
+PAPER_BOND_SLEEVE_ENABLED=false
+PAPER_THINKING_ENGINE_ENABLED=false
+PAPER_DYNAMIC_UNIVERSE_ENABLED=true
+PAPER_IPO_SAFETY_ENABLED=true
+```
+
+### Restart bots (after `.env` changes)
+
+**Live Profile A** (~$300, separate terminal):
+
+```powershell
+cd C:\Users\Owner\PythonTrading\stock-bot
+python scripts\account\preflight.py
+python run_all.py
+```
+
+Or use the desktop launcher: `..\launch.bat` from repo root (stop existing bot in dashboard first).
+
+**Paper Profile B** (Best Paper v2.1):
+
+```powershell
+cd C:\Users\Owner\PythonTrading\stock-bot
+python status.py
+python run_paper_bot.py
+```
+
+Verify paper stack: `python status.py` → `LOCKED Best Paper Bot v2.1 (crypto OFF)` and `v2.1 validated defaults: crypto OFF | ADR OFF | ...`
+
+**Both in parallel:** `python launch_bots.py` or `..\launch_both.bat` (live + paper on separate keys).
+
+### Profile A — live (`run_all.py`, ~$100–$1,000)
 
 | Layer | Runtime default |
 |-------|-----------------|
 | **VTI core** | **90%** when equity &lt; $500; **80%** at ≥ $500 |
-| **Active sleeves** | SPY MA200 trend, NYSE MA50 momentum, **vol-gated crypto pairs** (24 majors) |
+| **Active sleeves** | SPY MA200 trend, NYSE MA50 momentum (**crypto OFF**) |
 | **Game plan** | Yield-gate-only — blocks new SPY buys on hostile rates |
 | **Risk / orders** | 1% per trade, **$10 max** (small account) |
 | **Overlap / chunk / co-fire** | **Off** |
 | **Dynamic NYSE screener** | **Off** (static universe from `market_data.db`) |
 | **IPO safety** | **Off** |
-| **Thinking engine** | **Off** |
+| **Thinking engine** | **Off** (do not enable on live $300 until paper validates) |
 | **Social / macro adaptor** | **Off** |
+| **Crypto** | **Off** — `CRYPTO_SLEEVE_ENABLED=false`; not re-enabled via `.env` on bots |
 
 ### Profile B — paper Sharpe chase (`run_paper_bot.py` / `PAPER_CHASE_MODE=1`)
 
 | Layer | Runtime default |
 |-------|-----------------|
 | **VTI core** | Dynamic **40–75%** (`PAPER_DYNAMIC_VTI=true`) |
-| **Active sleeves** | SPY / crypto / NYSE at 45/20/20 base caps × **1.40×** boost |
+| **Active sleeves** | SPY / NYSE at 45/20 base caps × **1.40×** boost (**crypto cap 0%**) |
 | **Stat arb + vol overlay + options** | **On** |
 | **Overlap / chunk / co-fire** | **On** |
 | **Dynamic universe** | Weekly NYSE+NASDAQ screener refresh — **on** (`PAPER_DYNAMIC_UNIVERSE=true`) |
 | **Dynamic universe strict** | Quality screener (8–12 names) — **off** unless `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
 | **IPO safety** | **On** — 2% cap, 0.5× sizing, trim rules (`PAPER_IPO_SAFETY_ENABLED=true`) |
-| **Crypto** | Base **24-pair** universe; vol gate **off** on paper (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| **Crypto** | **Off (locked)** — `enforce_best_paper_stack()`; research in `scripts/research/` |
 | **Thinking engine** | **Off** unless `PAPER_THINKING_ENGINE_ENABLED=true` |
+| **International ADR sleeve** | **Off by default** — research opt-in via `PAPER_INTERNATIONAL_SLEEVE_ENABLED=true` (365d final: -0.38pp vs baseline) |
+| **Bond sleeve (TLT/GOVT)** | **Off by default** — optional risk-off hedge (`PAPER_BOND_SLEEVE_ENABLED=true`; 365d: flat return, +0.04pp MaxDD) |
 | **Social / macro / equity pairs** | **Locked off** by `enforce_best_paper_stack()` |
 
 ### Hard-disabled on all bots (research / backtest only)
@@ -67,6 +133,8 @@ These modules and flags stay in the repo for A/B tests. **Setting them in `.env`
 | **Profit target (+25% arm / trailing stop)** | `python backtester.py --days 365 --paper-aggressive --compare-profit-target` | **Off** |
 | **Crypto sleeve v3 filters** | `python scripts/research/improve_crypto_sleeve_v3.py` | **Off** — not adopted |
 | **Crypto vol sleeve (isolated book)** | `scripts/research/backtest_crypto_vol_v5.py` | **Off** — `CRYPTO_VOL_SLEEVE_ENABLED=false` |
+| **International ADR sleeve** | python backtester.py --days 365 --paper-aggressive --compare-international-sleeve | **Off by default** — opt-in research only |
+| **Bond + ADR combo** | python backtester.py --days 365 --paper-aggressive --compare-new-markets | ADR/bond **off by default** |
 
 Other research compares (safe to run; do not wire to bots without re-backtesting): `--compare-dynamic-universe`, `--compare-ipo-rules`, `--compare-final`, `--compare-thinking`.
 
@@ -105,8 +173,8 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 
 **Two profiles (do not mix on the same book without intent):**
 
-- **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
-- **Profile B — paper v2.1** (`paper_aggressive`): dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking engine opt-in.
+- **Profile A — live** (`current_dynamic`): **90% VTI**, **crypto OFF**, **thinking OFF**, yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
+- **Profile B — Best Paper Bot v2.1 (crypto OFF)** (`paper_aggressive`): dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**, dynamic universe **on**; thinking engine opt-in.
 
 ---
 
@@ -195,7 +263,7 @@ The repo supports **three deployment targets**. Live defaults stay conservative;
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Best Paper Bot v2.1 (`paper_aggressive`)
+### Profile B: Best Paper Bot v2.1 (`paper_aggressive`, crypto OFF)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
@@ -217,7 +285,10 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
 | **Dynamic universe strict** | **Off** unless opted in — 8–12 quality names | `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
 | **IPO safety** | **On** — caps / trim / 0.5× sizing on new listings | `PAPER_IPO_SAFETY_ENABLED=true` |
-| **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
+| **International ADR sleeve** | **Opt-in (research only)** | `PAPER_INTERNATIONAL_SLEEVE_ENABLED=false` default; 365d final: -0.38pp vs baseline |
+| **Bond sleeve (TLT/GOVT)** | **Off (defensive opt-in)** | `PAPER_BOND_SLEEVE_ENABLED=false`; modest MaxDD help when on |
+| **Crypto sleeve** | **Off (locked)** | `PAPER_CRYPTO_ENABLED=false` enforced |
+| **Active sleeves** | 45/20 caps × **1.40×** boost (no crypto allocation) | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
 
 #### Hard-disabled on bots (research only)
 
@@ -227,7 +298,7 @@ Enable thinking in `.env`, then restart `run_paper_bot.py`. LLM runs in a **back
 
 #### Locked OFF (enforced by `enforce_best_paper_stack()`)
 
-Macro regime adaptor, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit. Do not enable these on paper without re-backtesting.
+Macro regime adaptor, risk parity, stat arb optimized, social/Felix sleeve, equity pairs, SPY MA exit, **crypto sleeve**, expanded crypto universe, profit target. Do not enable these on paper bots without re-backtesting.
 
 Set `PAPER_CHASE_MODE=1` (portal sets this for paper users). Check stack anytime:
 
@@ -260,6 +331,34 @@ Default execution model: **5 bps equity slippage**, **10 bps crypto slippage**, 
 Quick compare: `python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode`
 
 Full accuracy: `python backtester.py --days 365 --paper-aggressive --compare-final`
+
+#### International ADR / bond sleeves (365d final validation, Best Paper v2.1, 2026-06-16)
+
+Window ~310 sim bars (2025-08-11 → 2026-06-16); VTI B&H **+19.63%**. Commands: `--compare-international-sleeve`, `--compare-new-markets`.
+
+| Config | Return | Sharpe | Max DD | Intl trades | Bond trades |
+|--------|--------|--------|--------|-------------|-------------|
+| Baseline (no new markets) | +30.92% | 1.61 | -7.54% | 0 | 0 |
+| + International ADR | +30.54% | 1.56 | -7.93% | 14 | 0 |
+| + Bond (TLT/GOVT) | +30.91% | 1.61 | -7.50% | 0 | 22 |
+| + Both | +30.54% | 1.56 | -7.91% | 14 | 22 |
+
+Top ADRs: **RIO (4), NMR (3), BP (2)**. Bond: **TLT (22)**, max cap 13.5%, 17 buys / 5 sells.
+
+**Paper defaults:** keep **ADR off** (`PAPER_INTERNATIONAL_SLEEVE_ENABLED=false`); bond optional for drawdown hedge only. Live Profile A: both off. Do not run ADR + bond together on this window.
+
+**Recommended paper `.env` snippet** (Profile B only; Live Profile A unchanged):
+
+```env
+PAPER_CHASE_MODE=1
+PAPER_INTERNATIONAL_SLEEVE_ENABLED=false
+PAPER_BOND_SLEEVE_ENABLED=false
+PAPER_THINKING_ENGINE_ENABLED=false
+```
+
+Set flags in **`stock-bot/.env`** (preferred) or repo-root `.env` (merged at startup). Restart `run_paper_bot.py` after changes; verify with `python status.py`.
+
+
 
 Full report: [`scripts/analysis/final_paper_bot_backtest.md`](scripts/analysis/final_paper_bot_backtest.md)
 
@@ -972,7 +1071,7 @@ Share this repo with programmer friends. Each person runs the bot **on their own
 
 **Repo:** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)
 
-**Full guide (stock + UFC):** [FRIENDS.md](FRIENDS.md)
+**Full guide:** [FRIENDS.md](../FRIENDS.md) (stock bot setup)
 
 ### Stock trading bot
 
@@ -1040,18 +1139,6 @@ Share URL + invite code. For most friends, **clone + `friend_setup.bat` on their
 | `friend_setup.bat` / `friend_setup.sh` | One-click install + open portal |
 | `portal.py` | Login, Alpaca keys, dashboard, bot |
 | `launch.bat` | Owner’s local desktop monitor + bot (not required for friends) |
-
-### UFC betting bot (same repo)
-
-Separate stack under `ufc-predictor/` + `ufc_betting_bot/`. Dry-run / paper only — no auto-betting.
-
-```powershell
-git clone https://github.com/dawimberly/trading-bot.git
-cd trading-bot\ufc_betting_bot
-friend_setup.bat
-```
-
-First run downloads fight data and trains the model (~15–30 min). Dashboard opens on **http://localhost:8502**. Optional `THE_ODDS_API_KEY` in `ufc_betting_bot\.env` for live lines. See [FRIENDS.md](FRIENDS.md).
 
 ## How to review bot performance
 

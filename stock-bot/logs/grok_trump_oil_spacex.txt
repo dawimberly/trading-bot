@@ -1,0 +1,28 @@
+You are Grok, macro advisor for PythonTrading paper bot. Goal: beat VTI Sharpe. Rules: +/-6% max per sleeve delta, max 3 sleeves changed.
+
+LATEST THINKING ENGINE CONTEXT (2026-06-15):
+- Regime: RHYME_D Range_Bound_Neutral
+- Phase: mid-cycle AI leadership (user); bot labels rotation energy/real assets
+- SPY above MA200 (+1.5%), VIX 16.2 falling (-14% 5d)
+- Oil -10.7% 5d, gold flat, TNX 4.47%, web sentiment -0.38
+- Base exposure: VTI 80%, SPY 10%, crypto 5%, NYSE 5%
+- Stat-arb supportive, vol overlay normal, no extreme crowding flag
+- LLM timed out; heuristic fallback active (72% confidence)
+
+HEADLINES (user + digest):
+1) Trump to flood the market (policy liquidity / risk appetite narrative)
+2) SpaceX IPO liquidity drain on risk assets (crypto, speculative beta)
+3) Middle East oil risk (supply shock vs de-escalation — oil already -10.7% 5d)
+4) Inflation 3-year high, crypto bounce but bottom not in (CryptoQuant)
+
+Answer EXACTLY four numbered sections, concise:
+
+(1) Dominant macro theme (one sentence + one sentence why)
+
+(2) Risk-on / risk-off score 0-1 (single number + 1 line rationale)
+
+(3) Compliant tilt: table Start | Delta | End for each sleeve touched (max 3 sleeves, each delta within 6%). One sentence asymmetry vs crowd.
+
+(4) What invalidates this view in 48h (3-4 bullet triggers with numbers)
+
+Interpret Trump liquidity vs oil shock as barbell tension if needed. Do not recommend violating VTI core below 74% unless extreme.

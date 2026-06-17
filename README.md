@@ -1,6 +1,6 @@
 # trading-bot
 
-Monorepo for local trading and betting tools. Clone once, run what you need on your own PC.
+**Alpaca stock fund bot** — clone once, run on your own PC. UFC betting files were removed; this repo is **trading bot only** (`stock-bot/`).
 
 **Repo (personal):** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)  
 **Repo (group / infinite-robots):** [github.com/infinite-robots/python-trading](https://github.com/infinite-robots/python-trading)
@@ -19,11 +19,9 @@ Add the org remote once: `git remote add infinite-robots https://github.com/infi
 
 | Folder | What it is | Get started |
 |--------|------------|-------------|
-| [`stock-bot/`](stock-bot/) | Alpaca stock/crypto fund bot + portal | `cd stock-bot` → `friend_setup.bat` |
-| [`ufc-predictor/`](ufc-predictor/) | UFC fight model + data pipeline | Used by UFC betting bot |
-| [`ufc_betting_bot/`](ufc_betting_bot/) | UFC value betting (dry-run) | `cd ufc_betting_bot` → `friend_setup.bat` |
+| [`stock-bot/`](stock-bot/) | Alpaca live + paper fund bot + portal | `cd stock-bot` → `friend_setup.bat` |
 
-**Friend setup guide:** [FRIENDS.md](FRIENDS.md)
+**Friend setup guide:** [FRIENDS.md](FRIENDS.md) (stock bot)
 
 **Environment:** copy [`stock-bot/.env.example`](stock-bot/.env.example) → `stock-bot/.env` (placeholders only — never commit real keys).
 
@@ -37,4 +35,4 @@ friend_setup.bat
 
 Root launchers (`launch.bat`, `friend_setup.bat`) forward into `stock-bot/` for backward compatibility.
 
-Full docs: [stock-bot/README.md](stock-bot/README.md) — see **“What the bot is set to do (runtime defaults)”** for live vs paper vs research-only features (good to paste into Grok with `python status.py` output).
+Full docs: [stock-bot/README.md](stock-bot/README.md) — see **“Final recommended configuration”** and **“What the bot is set to do”** for Live Profile A (90% VTI, crypto OFF, thinking OFF) vs Best Paper Bot v2.1 (crypto OFF, dynamic universe ON, thinking opt-in). Good to paste into Grok with `python status.py` output.

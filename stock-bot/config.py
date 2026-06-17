@@ -3,14 +3,22 @@
 import json
 import logging
 import os
+import importlib.util
 import warnings
+from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 
 _env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
 if _env_override and os.path.isfile(_env_override):
     load_dotenv(_env_override, override=True)
 else:
-    load_dotenv(find_dotenv())
+    _local_env = find_dotenv()
+    if _local_env:
+        load_dotenv(_local_env, override=True)
+    # Repo-root .env fills keys missing from stock-bot/.env (e.g. PAPER_INTERNATIONAL_SLEEVE_ENABLED)
+    _repo_root_env = Path(__file__).resolve().parent.parent / ".env"
+    if _repo_root_env.is_file() and str(_repo_root_env) != (_local_env or ""):
+        load_dotenv(_repo_root_env, override=False)
 
 try:
     from modules.ssl_certs import configure_ssl_certificates
@@ -117,7 +125,6 @@ PAPER_CRYPTO_UNIVERSE_EXPANDED = os.getenv(
 ).lower() in ("1", "true", "yes")
 CRYPTO_EXPANDED_MAX_SYMBOLS = int(os.getenv("CRYPTO_EXPANDED_MAX_SYMBOLS", "48"))
 CRYPTO_EXPANDED_MIN_BARS = int(os.getenv("CRYPTO_EXPANDED_MIN_BARS", "30"))
-_backtest_crypto_expanded_prefetch = False
 PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
 PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
     "1",
@@ -300,6 +307,19 @@ _paper_aggressive_ctx = False
 FUND_CASH_BUFFER_PCT = 0.15
 SPY_SLEEVE_CAP_PCT = 0.45
 NYSE_SLEEVE_CAP_PCT = 0.20
+INTERNATIONAL_SLEEVE_CAP_PCT = float(
+    os.getenv("INTERNATIONAL_SLEEVE_CAP_PCT", "0.10")
+)  # max 10% when triggered
+PAPER_INTERNATIONAL_SLEEVE_ENABLED = os.getenv(
+    "PAPER_INTERNATIONAL_SLEEVE_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+BOND_SLEEVE_CAP_PCT = float(os.getenv("BOND_SLEEVE_CAP_PCT", "0.15"))
+BOND_SLEEVE_SYMBOL = os.getenv("BOND_SLEEVE_SYMBOL", "TLT").strip().upper() or "TLT"
+BOND_VIX_TRIGGER_MIN = float(os.getenv("BOND_VIX_TRIGGER_MIN", "22"))
+BOND_VIX_HIGH_MIN = float(os.getenv("BOND_VIX_HIGH_MIN", "28"))
+PAPER_BOND_SLEEVE_ENABLED = os.getenv(
+    "PAPER_BOND_SLEEVE_ENABLED", "false"
+).lower() in ("1", "true", "yes")
 # NYSE picks vs SPY sleeve: skip high-beta / high-corr names when SPY is active
 _nyse_overlap_env = os.getenv("NYSE_OVERLAP_FILTER_ENABLED") or os.getenv(
     "NYSE_ANTI_OVERLAP_ENABLED", "false"
@@ -1166,6 +1186,11 @@ def effective_crypto_universe_expanded() -> bool:
     return bool(backtest_paper_sleeves_context())
 
 
+_backtest_crypto_expanded_prefetch = False
+_backtest_international_prefetch = False
+_backtest_bond_prefetch = False
+
+
 def set_backtest_crypto_expanded_prefetch(enabled: bool) -> None:
     """Include expanded crypto tickers in backtest_fetch_tickers() prefetch."""
     global _backtest_crypto_expanded_prefetch
@@ -1174,6 +1199,68 @@ def set_backtest_crypto_expanded_prefetch(enabled: bool) -> None:
 
 def backtest_crypto_expanded_prefetch() -> bool:
     return bool(_backtest_crypto_expanded_prefetch)
+
+
+def set_backtest_international_prefetch(active: bool) -> None:
+    global _backtest_international_prefetch
+    _backtest_international_prefetch = bool(active)
+
+
+def backtest_international_prefetch() -> bool:
+    return bool(_backtest_international_prefetch)
+
+
+def set_backtest_bond_prefetch(active: bool) -> None:
+    global _backtest_bond_prefetch
+    _backtest_bond_prefetch = bool(active)
+
+
+def backtest_bond_prefetch() -> bool:
+    return bool(_backtest_bond_prefetch)
+
+
+def is_international_adr(symbol: str) -> bool:
+    try:
+        from modules.international_sleeve import is_international_adr as _is_adr
+
+        return _is_adr(symbol)
+    except ImportError:
+        return False
+
+
+def refresh_paper_new_markets_flags_from_env() -> None:
+    """Re-read opt-in ADR/bond sleeve flags after dotenv or .env edits."""
+    global PAPER_INTERNATIONAL_SLEEVE_ENABLED, PAPER_BOND_SLEEVE_ENABLED
+    PAPER_INTERNATIONAL_SLEEVE_ENABLED = os.getenv(
+        "PAPER_INTERNATIONAL_SLEEVE_ENABLED", "false"
+    ).lower() in ("1", "true", "yes")
+    PAPER_BOND_SLEEVE_ENABLED = os.getenv(
+        "PAPER_BOND_SLEEVE_ENABLED", "false"
+    ).lower() in ("1", "true", "yes")
+
+
+def effective_international_sleeve_enabled() -> bool:
+    """Liquid ADR sleeve — paper aggressive / backtest only."""
+    if not paper_only_sleeves_active() and not backtest_paper_sleeves_context():
+        return False
+    return PAPER_INTERNATIONAL_SLEEVE_ENABLED
+
+
+def is_bond_symbol(symbol: str) -> bool:
+    try:
+        from modules.bond_sleeve import is_bond_symbol as _is_bond
+
+        return _is_bond(symbol)
+    except ImportError:
+        sym = normalize_symbol(symbol)
+        return sym in (BOND_SLEEVE_SYMBOL, "TLT", "GOVT")
+
+
+def effective_bond_sleeve_enabled() -> bool:
+    """Treasury ETF sleeve — paper aggressive / backtest only."""
+    if not paper_only_sleeves_active() and not backtest_paper_sleeves_context():
+        return False
+    return PAPER_BOND_SLEEVE_ENABLED
 
 
 def equity_universe():
@@ -1198,6 +1285,10 @@ def load_screener_universe_tickers() -> list[str] | None:
 
 
 def _nyse_eligible_symbol(symbol: str) -> bool:
+    if is_international_adr(symbol):
+        return False
+    if is_bond_symbol(symbol):
+        return False
     return (
         not is_crypto(symbol)
         and symbol != SPY_BOT_SYMBOL
@@ -1241,6 +1332,15 @@ def backtest_fetch_tickers() -> list[str]:
             tickers = sorted(set(tickers) | set(expanded_crypto_symbols()))
         except ImportError:
             pass
+    if effective_international_sleeve_enabled() or backtest_international_prefetch():
+        try:
+            from modules.international_sleeve import INTERNATIONAL_ADR_SYMBOLS
+
+            tickers = sorted(set(tickers) | set(INTERNATIONAL_ADR_SYMBOLS))
+        except ImportError:
+            pass
+    if effective_bond_sleeve_enabled() or backtest_bond_prefetch():
+        tickers = sorted(set(tickers) | {BOND_SLEEVE_SYMBOL, "TLT", "GOVT"})
     return tickers
 
 
@@ -1350,6 +1450,24 @@ def _game_plan_label() -> str:
 
 # === Best Paper Config Support ===
 _best_paper_applied = False
+_best_paper_config_mod = None
+
+
+def _load_best_paper_config():
+    """Load config/best_paper_config.py (config.py shadows the config/ package name)."""
+    global _best_paper_config_mod
+    if _best_paper_config_mod is not None:
+        return _best_paper_config_mod
+    path = Path(__file__).resolve().parent / "config" / "best_paper_config.py"
+    if not path.is_file():
+        raise ImportError(f"best_paper_config not found at {path}")
+    spec = importlib.util.spec_from_file_location("_best_paper_config", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load best_paper_config from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _best_paper_config_mod = mod
+    return mod
 
 
 def use_best_paper_config() -> bool:
@@ -1368,16 +1486,12 @@ def apply_best_paper_config_if_enabled() -> None:
     
     logger = logging.getLogger(__name__)
     try:
-        from config.best_paper_config import apply_best_paper_config, validate_best_paper_config
-        
-        # Check for deprecated features
-        _, warnings = validate_best_paper_config()
+        bpc = _load_best_paper_config()
+        _, warnings = bpc.validate_best_paper_config()
         if warnings:
             for w in warnings:
                 logger.warning("best_paper_config: %s", w)
-        
-        # Apply best paper defaults (disables deprecated features)
-        apply_best_paper_config()
+        bpc.apply_best_paper_config()
         _best_paper_applied = True
         
         logger.info("best_paper_config applied: simplified paper bot stack enabled")
@@ -1430,9 +1544,8 @@ def print_live_stack_flags() -> None:
 def get_best_paper_bot_stack() -> dict[str, bool]:
     """Locked Best Paper Bot v2 flags (paper aggressive only)."""
     try:
-        from config.best_paper_config import get_full_stack
-
-        stack = get_full_stack()
+        bpc = _load_best_paper_config()
+        stack = bpc.get_full_stack()
         stack["stat_arb"] = effective_stat_arb_enabled()
         stack["thinking_engine"] = PAPER_THINKING_ENGINE_ENABLED
         stack["vol_overlay"] = PAPER_VOL_TRADING_ENABLED
@@ -1472,7 +1585,67 @@ BEST_PAPER_LOCKED_OFF = (
     "social_sleeve",
     "equity_pairs",
     "spy_exit",
+    "crypto_sleeve",
+    "crypto_expanded",
+    "profit_target",
+    "international_adr",
+    "bond_sleeve",
 )
+
+
+def get_best_paper_validated_defaults_line() -> str:
+    """Validated v2.1 default policy (status.py / docs)."""
+    try:
+        return _load_best_paper_config().get_validated_defaults_line()
+    except ImportError:
+        return (
+            "v2.1 FINAL LOCK: crypto OFF | ADR OFF | bond OFF | "
+            "dyn_univ ON | IPO safety ON | thinking OFF (opt-in)"
+        )
+
+
+def get_best_paper_locked_header() -> str:
+    """Final locked Profile B label for status.py."""
+    try:
+        return _load_best_paper_config().get_locked_stack_header()
+    except ImportError:
+        return "LOCKED Best Paper Bot v2.1 (crypto OFF)"
+
+
+def get_best_paper_final_lock_banner() -> str:
+    """One-line final lock banner for status.py."""
+    try:
+        return _load_best_paper_config().get_final_lock_banner()
+    except ImportError:
+        return "FINAL CONFIG: Best Paper Bot v2.1 (crypto OFF) locked"
+
+
+def get_best_paper_restart_lines() -> list[str]:
+    """Restart command block for status.py."""
+    try:
+        return _load_best_paper_config().get_restart_commands_block()
+    except ImportError:
+        return [
+            "=== Restart bots ===",
+            "Live: python run_all.py",
+            "Paper: python run_paper_bot.py",
+        ]
+
+
+def get_live_profile_defaults_line() -> str:
+    """Live Profile A default policy (status.py / docs)."""
+    try:
+        return _load_best_paper_config().get_live_profile_summary()
+    except ImportError:
+        return "Live Profile A: 90% VTI | crypto OFF | thinking OFF | static universe"
+
+
+def get_best_paper_display_name() -> str:
+    """Human label for status.py and docs."""
+    try:
+        return _load_best_paper_config().BEST_PAPER_DISPLAY_NAME
+    except ImportError:
+        return "Best Paper Bot v2.1 (crypto OFF)"
 
 
 def format_best_paper_status_lines() -> tuple[str, str]:
@@ -1499,6 +1672,7 @@ def format_best_paper_status_lines() -> tuple[str, str]:
             f"chunk={'on' if stack['adaptive_chunk'] else 'off'}",
             f"cofire={'on' if stack['cofire_budget'] else 'off'}",
             f"dyn_univ={'on' if stack.get('dynamic_universe') else 'off'}",
+            f"ipo={'on' if stack.get('ipo_safety') else 'off'}",
         ]
         off_parts = [
             "macro",
@@ -1507,6 +1681,11 @@ def format_best_paper_status_lines() -> tuple[str, str]:
             "social",
             "equity_pairs",
             "spy_exit",
+            "crypto",
+            "crypto_expanded",
+            "profit_target",
+            "intl_adr",
+            "bond",
         ]
         return " | ".join(on_parts), " | ".join(off_parts)
     finally:
@@ -1522,7 +1701,7 @@ def print_paper_research_stack_flags() -> None:
     try:
         alloc = fund_allocation_pct()
         stack = get_best_paper_bot_stack()
-        print("--- Best Paper Bot (paper_aggressive / Profile B) ---")
+        print("--- Best Paper Bot v2.1 (crypto OFF / paper_aggressive) ---")
         if paper_chase_mode_enabled():
             print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
         print(f"  game_plan:              {gp}")
@@ -1677,7 +1856,7 @@ def paper_only_sleeves_active() -> bool:
 
 
 def enforce_best_paper_stack() -> None:
-    """Disable weak/redundant paper sleeves (Profile B locked stack v2)."""
+    """Disable weak/redundant paper sleeves (Profile B locked stack v2.1)."""
     global PAPER_RISK_PARITY_ENABLED
     global PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     global PAPER_SOCIAL_SLEEVE_ENABLED
@@ -1686,6 +1865,10 @@ def enforce_best_paper_stack() -> None:
     global PAPER_STAT_ARB_OPTIMIZED
     global PAPER_SOCIAL_MACRO_BOOST_ENABLED
     global PAPER_CRYPTO_V2_ENABLED
+    global PAPER_CRYPTO_ENABLED
+    global PAPER_CRYPTO_UNIVERSE_EXPANDED
+    global PAPER_PROFIT_TARGET_ENABLED
+    global CRYPTO_SLEEVE_ENABLED
     PAPER_RISK_PARITY_ENABLED = False
     PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
     PAPER_SOCIAL_SLEEVE_ENABLED = False
@@ -1694,6 +1877,10 @@ def enforce_best_paper_stack() -> None:
     PAPER_STAT_ARB_OPTIMIZED = False
     PAPER_SOCIAL_MACRO_BOOST_ENABLED = False
     PAPER_CRYPTO_V2_ENABLED = False
+    PAPER_CRYPTO_ENABLED = False
+    PAPER_CRYPTO_UNIVERSE_EXPANDED = False
+    PAPER_PROFIT_TARGET_ENABLED = False
+    CRYPTO_SLEEVE_ENABLED = False
 
 
 def init_paper_chase_if_enabled() -> list[str]:
@@ -1705,9 +1892,7 @@ def init_paper_chase_if_enabled() -> list[str]:
         and PAPER_AGGRESSIVE_ENABLED
     ):
         try:
-            from config.best_paper_config import apply_best_paper_config
-
-            apply_best_paper_config()
+            _load_best_paper_config().apply_best_paper_config()
         except ImportError:
             enforce_best_paper_stack()
         set_paper_aggressive_context(True)

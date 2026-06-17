@@ -1,13 +1,15 @@
 # PythonTrading — Project Manifest
 
+**Final v2.1:** Live Profile A = 90% VTI, crypto OFF, thinking OFF (~$300–$1K). Paper Profile B = Best Paper Bot v2.1 locked (crypto OFF, ADR/bond opt-in only, dynamic universe ON, thinking opt-in) via `config/best_paper_config.py` + `apply_best_paper_config()`.
+
 ## 1. Core loop
 - **`run_all.py`**: 24/7 orchestrator — data refresh, wisdom regime, sleeve strategies, Alpaca execution, heartbeat JSON each cycle.
 - **`modules/pipeline_strategies.py`**: Shared crypto z-pair, SPY MA200, and NYSE MA50 logic (live + backtester).
 - **`backtester.py`**: Mirrors the live stack on historical daily bars; disk cache under `data/cache/backtest/`.
 
 ## 2. Profiles
-- **Profile A (live / `current_dynamic`)**: 90% VTI core (< $500), yield-gate-only, overlap/chunk/co-fire off, 1% / $10 small-account caps — default `run_all.py` + preflight live.
-- **Profile B (paper v2.1 / `paper_aggressive`)**: Dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire on — `run_paper_bot.py`, `PAPER_CHASE_MODE=1`, portal paper user.
+- **Profile A (live / `current_dynamic`)**: **90% VTI** (< $500), **crypto OFF**, **thinking OFF**, yield-gate-only, overlap/chunk/co-fire off, 1% / $10 small-account caps — default `run_all.py` + preflight live.
+- **Profile B (paper v2.1 / `paper_aggressive`)**: Dynamic VTI 40–75%, stat arb + vol + options, overlap/chunk/co-fire on, **dynamic universe ON**, **IPO safety ON**, **crypto OFF (locked)**, **ADR/bond OFF by default (opt-in)**, **thinking OFF (opt-in)** — `run_paper_bot.py`, `PAPER_CHASE_MODE=1`.
 
 ## 3. Monitor & ops
 - **`dashboard_app.py`**: CustomTkinter desktop monitor (primary) — 60s refresh, optional RSS via psutil, journal tail reads.

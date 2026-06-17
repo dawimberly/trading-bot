@@ -1,0 +1,30 @@
+{
+  "saved_at": "2026-06-15T05:31:56+00:00",
+  "run_type": "lightweight",
+  "trigger": "manual",
+  "status_exit": 0,
+  "heartbeat": {
+    "live_file": "bot_heartbeat.json",
+    "live_age_sec": null,
+    "live_stale": true,
+    "paper_file": "paper_chase_heartbeat.json",
+    "paper_age_sec": null,
+    "paper_stale": true,
+    "run_all_running": true,
+    "paper_bot_running": false
+  },
+  "safety": {
+    "live_tripped": false,
+    "live_limit_pct": 2.0,
+    "live_loss_pct": null,
+    "paper_tripped": false,
+    "paper_limit_pct": 4.0,
+    "paper_loss_pct": null,
+    "thinking_enabled": false,
+    "paper_chase": false,
+    "live_profile": true
+  },
+  "paper_supervisor": "skipped \u2014 live profile or ALLOW_LIVE_TRADING set",
+  "issues": [],
+  "status_snip": "2026-06-15 00:31:51 INFO [root] logging initialized (daily rotation, 7 days)"
+}

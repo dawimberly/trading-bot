@@ -148,7 +148,7 @@ scripts/analysis/trade_reconciliation.py|Match Alpaca fills to paper_journal sig
 scripts/analysis/universe_screener.py|Screen US equities from Alpaca and rank by momentum / liquidity / trend. Pulls active tradable NYSE/NASDAQ/ARCA symbols 
 scripts/analyze_thinking_engine.py|Analyze thinking engine regime detection and tilt accuracy.
 scripts/approve_thinking_tilt.py|Approve the pending Thinking Engine tilt for live trading. Reads decision_id from thinking_engine_last.json and writes t
-scripts/background_runner.py|Trading bot background runner — scheduled health checks and paper maintenance. Mirrors ufc-predictor/scripts/background_
+scripts/background_runner.py|Trading bot background runner — scheduled health checks and paper maintenance.
 scripts/db/__init__.py|SQLite database utilities.
 scripts/db/check_db.py|Inspect VTI table schema sample rows. Run: python scripts/db/check_db.py
 scripts/db/check_tables.py|List all tables in market_data.db. Run: python scripts/db/check_tables.py

@@ -719,6 +719,10 @@ def _record_ipo_buy(executor, symbol, *, data=None, bar_idx: int | None = None) 
 
 def _is_nyse_momentum_position(symbol: str) -> bool:
     sym = config.normalize_symbol(symbol)
+    if config.is_international_adr(sym):
+        return False
+    if config.is_bond_symbol(sym):
+        return False
     if config.is_crypto(sym):
         return False
     if sym == config.SPY_BOT_SYMBOL:
@@ -1290,3 +1294,341 @@ def nyse_mirror_intent(
         "pair_key": pair_key,
         "phase": "nyse_mirror",
     }
+
+
+def run_international_strategy(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    max_trades=MAX_EQUITY_TRADES,
+    log_fn=None,
+    portfolio_manager=None,
+    yield_gated=False,
+    full_data=None,
+    bar_idx: int | None = None,
+    cap_pct: float | None = None,
+    trigger_reason: str = "",
+    thinking_scales: dict | None = None,
+    market_summary: dict | None = None,
+) -> int:
+    """Buy top MA50 ADR momentum when international macro/thinking trigger is active."""
+    from modules.international_sleeve import (
+        ADR_RISK_NOTE,
+        international_trigger_context,
+        international_universe,
+        log_adr_risk_once,
+        record_international_trade,
+    )
+
+    if not config.effective_international_sleeve_enabled():
+        return 0
+    if regime_entries_paused(regime, data):
+        return 0
+
+    ipo_data = full_data if full_data is not None else data
+    active, resolved_cap, reason = international_trigger_context(
+        market_summary=market_summary,
+        thinking_scales=thinking_scales,
+        regime=regime,
+        data=ipo_data,
+        bar_idx=bar_idx,
+    )
+    if cap_pct is not None and cap_pct > 0:
+        active = True
+        resolved_cap = min(float(cap_pct), config.INTERNATIONAL_SLEEVE_CAP_PCT)
+    if not active or resolved_cap <= 0:
+        executor.international_cap_pct = 0.0
+        return 0
+
+    executor.international_cap_pct = resolved_cap
+    from modules.international_sleeve import note_international_active_bar
+
+    note_international_active_bar(executor)
+    log_adr_risk_once()
+
+    equity_cols = international_universe(data.columns)
+    ranked = _equity_momentum_ranked(
+        data,
+        equity_cols,
+        yield_gated=yield_gated,
+        regime=regime,
+        bar_idx=bar_idx,
+        full_data=ipo_data,
+    )
+    if config.effective_nyse_overlap_filter_enabled():
+        ranked = _filter_nyse_anti_overlap(data, ranked)
+    if not ranked:
+        return 0
+
+    trades = 0
+    equity = _executor_equity(executor)
+    min_n = config.effective_min_notional(equity)
+    note = trigger_reason or reason
+    for symbol in ranked:
+        if trades >= max_trades:
+            break
+        pair_key = symbol + "/MA50/ADR"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        notional = None
+        if hasattr(executor, "compute_international_notional"):
+            notional = executor.compute_international_notional()
+            if notional is None:
+                continue
+            if config.NYSE_BETA_SCALING_ENABLED:
+                _, beta = _spy_vs_equity_metrics(data, symbol)
+                scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
+                if scaled < min_n:
+                    continue
+                notional = scaled
+            vol_scale = config.dynamic_equity_position_scale(
+                symbol, data=ipo_data, bar_idx=bar_idx
+            )
+            if vol_scale < 1.0:
+                notional = round(float(notional) * vol_scale, 2)
+                if notional < min_n:
+                    continue
+        order = executor.execute_order(
+            symbol,
+            "buy",
+            notional=notional,
+            reason=pair_key,
+            sleeve="INTL",
+        )
+        if not _count_if_filled(executor, order):
+            continue
+        record_international_trade(executor, symbol)
+        pair_cooldown[pair_key] = now
+        trades += 1
+        if portfolio_manager:
+            portfolio_manager.add_position(pair_key, 0, 0)
+        if log_fn:
+            if notional is None:
+                notional = getattr(executor, "compute_notional", lambda: "")()
+            log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+        if trades == 1 and note:
+            import logging
+
+            logging.getLogger(__name__).info(
+                "International sleeve (%s cap %.1f%%): %s | %s",
+                symbol,
+                resolved_cap * 100,
+                note,
+                ADR_RISK_NOTE,
+            )
+    return trades
+
+
+def run_bond_strategy(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    log_fn=None,
+    volatility: str | None = None,
+    vol_score: float | None = None,
+    vix: float | None = None,
+    macro_stress: bool = False,
+    macro_window=None,
+    thinking_scales: dict | None = None,
+) -> int:
+    """Deploy TLT/GOVT up to cap in risk-off / high-VIX; exit when triggers clear."""
+    from modules.bond_sleeve import (
+        bond_trigger_context,
+        log_bond_note_once,
+        note_bond_active_bar,
+        record_bond_trade,
+        resolve_bond_symbol,
+    )
+
+    if not config.effective_bond_sleeve_enabled():
+        return 0
+
+    window = macro_window if macro_window is not None else data
+    active, resolved_cap, reason = bond_trigger_context(
+        window=window,
+        regime=regime,
+        volatility=volatility,
+        vol_score=vol_score,
+        vix=vix,
+        macro_stress=macro_stress,
+        thinking_scales=thinking_scales,
+    )
+    symbol = resolve_bond_symbol(data.columns)
+    pair_key = f"{symbol}/risk_off"
+
+    if not active:
+        executor.bond_cap_pct = 0.0
+        if _holds_symbol(executor, symbol):
+            if hasattr(executor, "execute_full_exit"):
+                order = executor.execute_full_exit(
+                    symbol, reason="bond_risk_on_exit", sleeve="BOND"
+                )
+            else:
+                order = executor.execute_order(
+                    symbol, "sell", reduce_only=True, reason="bond_risk_on_exit", sleeve="BOND"
+                )
+            if _count_if_filled(executor, order):
+                record_bond_trade(executor, symbol, side="sell")
+                if log_fn:
+                    log_fn(symbol, "sell", regime, "bond_risk_on_exit", 0.0, "")
+                return 1
+        return 0
+
+    executor.bond_cap_pct = resolved_cap
+    note_bond_active_bar(executor, resolved_cap)
+    log_bond_note_once()
+
+    if _on_cooldown(
+        pair_cooldown,
+        pair_key,
+        now,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+    ):
+        return 0
+
+    equity = _executor_equity(executor)
+    min_n = config.effective_min_notional(equity)
+    notional = None
+    if hasattr(executor, "compute_bond_notional"):
+        notional = executor.compute_bond_notional()
+    if notional is None or notional < min_n:
+        return 0
+
+    order = executor.execute_order(
+        symbol, "buy", notional=notional, reason=pair_key, sleeve="BOND"
+    )
+    if not _count_if_filled(executor, order):
+        return 0
+    record_bond_trade(executor, symbol, side="buy")
+    pair_cooldown[pair_key] = now
+    if log_fn:
+        log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+    if reason:
+        import logging
+
+        logging.getLogger(__name__).info(
+            "Bond sleeve (%s cap %.1f%%): %s",
+            symbol,
+            resolved_cap * 100,
+            reason,
+        )
+    return 1
+
+
+def run_bond_strategy(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    log_fn=None,
+    volatility: str | None = None,
+    vol_score: float | None = None,
+    vix: float | None = None,
+    macro_stress: bool = False,
+    macro_window=None,
+    thinking_scales: dict | None = None,
+) -> int:
+    """Deploy TLT/GOVT up to cap in risk-off / high-VIX; exit when triggers clear."""
+    from modules.bond_sleeve import (
+        bond_trigger_context,
+        log_bond_note_once,
+        note_bond_active_bar,
+        record_bond_trade,
+        resolve_bond_symbol,
+    )
+
+    if not config.effective_bond_sleeve_enabled():
+        return 0
+
+    window = macro_window if macro_window is not None else data
+    active, resolved_cap, reason = bond_trigger_context(
+        window=window,
+        regime=regime,
+        volatility=volatility,
+        vol_score=vol_score,
+        vix=vix,
+        macro_stress=macro_stress,
+        thinking_scales=thinking_scales,
+    )
+    symbol = resolve_bond_symbol(data.columns)
+    pair_key = f"{symbol}/risk_off"
+
+    if not active:
+        executor.bond_cap_pct = 0.0
+        if _holds_symbol(executor, symbol):
+            if hasattr(executor, "execute_full_exit"):
+                order = executor.execute_full_exit(
+                    symbol, reason="bond_risk_on_exit", sleeve="BOND"
+                )
+            else:
+                order = executor.execute_order(
+                    symbol, "sell", reduce_only=True, reason="bond_risk_on_exit", sleeve="BOND"
+                )
+            if _count_if_filled(executor, order):
+                record_bond_trade(executor, symbol, side="sell")
+                if log_fn:
+                    log_fn(symbol, "sell", regime, "bond_risk_on_exit", 0.0, "")
+                return 1
+        return 0
+
+    executor.bond_cap_pct = resolved_cap
+    note_bond_active_bar(executor, resolved_cap)
+    log_bond_note_once()
+
+    if _on_cooldown(
+        pair_cooldown,
+        pair_key,
+        now,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+    ):
+        return 0
+
+    equity = _executor_equity(executor)
+    min_n = config.effective_min_notional(equity)
+    notional = None
+    if hasattr(executor, "compute_bond_notional"):
+        notional = executor.compute_bond_notional()
+    if notional is None or notional < min_n:
+        return 0
+
+    order = executor.execute_order(
+        symbol, "buy", notional=notional, reason=pair_key, sleeve="BOND"
+    )
+    if not _count_if_filled(executor, order):
+        return 0
+    record_bond_trade(executor, symbol, side="buy")
+    pair_cooldown[pair_key] = now
+    if log_fn:
+        log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+    if reason:
+        import logging
+
+        logging.getLogger(__name__).info(
+            "Bond sleeve (%s cap %.1f%%): %s",
+            symbol,
+            resolved_cap * 100,
+            reason,
+        )
+    return 1

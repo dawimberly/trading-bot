@@ -27,6 +27,8 @@ from modules.pipeline_strategies import (
     run_crypto_strategy,
     run_equity_strategy,
     run_equity_pairs_strategy,
+    run_international_strategy,
+    run_bond_strategy,
     run_spy_exits,
     run_spy_strategy,
     resolve_cycle_deploy,
@@ -960,6 +962,42 @@ def main():
                 yield_gated=yield_gated,
                 full_data=data,
             )
+            if config.effective_international_sleeve_enabled():
+                nyse_trades += run_international_strategy(
+                    data,
+                    executor,
+                    regime,
+                    now,
+                    pair_cooldown,
+                    log_fn=_equity_log,
+                    portfolio_manager=portfolio_manager,
+                    yield_gated=yield_gated,
+                    full_data=data,
+                )
+            if config.effective_bond_sleeve_enabled():
+                from modules.macro_signals import evaluate, load_daily_matrix
+                from modules.options_sleeve import current_vix_level
+
+                try:
+                    macro_daily = load_daily_matrix(days=450)
+                    macro_window = macro_daily
+                    macro_eval = evaluate(macro_daily, regime)
+                    macro_stress_flag = bool(macro_eval.get("stress"))
+                except Exception:
+                    macro_window = data
+                    macro_stress_flag = False
+                nyse_trades += run_bond_strategy(
+                    data,
+                    executor,
+                    regime,
+                    now,
+                    pair_cooldown,
+                    log_fn=_equity_log,
+                    volatility=vol,
+                    vix=current_vix_level(),
+                    macro_stress=macro_stress_flag,
+                    macro_window=macro_window,
+                )
         gp_result = run_game_plan_cycle(
             executor,
             regime,

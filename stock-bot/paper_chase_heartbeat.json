@@ -1,0 +1,187 @@
+{
+  "timestamp": "2026-06-17T11:58:21.218605",
+  "regime": "RHYME_D: Range_Bound_Neutral",
+  "equity": 98986.4,
+  "cash": -1469.86,
+  "crypto_trades_last_cycle": 0,
+  "equity_trades_last_cycle": 0,
+  "spy_trades_last_cycle": 0,
+  "sleeve_caps": {
+    "vti_core": 0.7954,
+    "spy": 0.123556,
+    "crypto": 0.0,
+    "nyse": 0.063084,
+    "metal": 0.0,
+    "cash_buffer": 0.01796
+  },
+  "crypto_vol_only": true,
+  "equity_session_open": true,
+  "halted": false,
+  "paper": true,
+  "last_cycle_error": null,
+  "last_cycle_error_at": null,
+  "dynamic_vol_score": 0.00167,
+  "thinking_engine": {
+    "model": "deepseek-r1:8b",
+    "confidence": 0.65,
+    "suggested_tilt": {
+      "vti": 0.2713,
+      "spy": 0.3643,
+      "cash": 0.2171,
+      "crypto": 0.1473
+    },
+    "applied_deltas": {
+      "vti_core": -0.0046,
+      "spy": -0.000554,
+      "crypto": 0.0,
+      "nyse": 0.007924,
+      "metal": 0.0,
+      "cash_buffer": -0.00277
+    },
+    "apply_log": "Thinking Engine: Policy liquidity push into a geopolitical oil shock \u2014 barbell VTI/cash with energy overlay, trim beta -> +1% Energy | Why this tilt? Asymmetry (The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignori | headlines (0.54): Policy / rates / tariffs (trump, fed) | Geopolitics / supply shock (midd | neutral regime \u2014 reduced size | consolidated to max 3 sleeves | -> NYSE/Energy +0.8%",
+    "regime_narrative": "Defensive range-bound market with falling VIX; focus on preserving capital via cash/bonds while trimming tech/growth exposure ahead of Fed d | Edge: The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignorin | conf 65% | spy 36%, vti 27%",
+    "narrative": "Defensive range-bound market with falling VIX; focus on preserving capital via cash/bonds while trimming tech/growth exposure ahead of Fed decision uncertainty.",
+    "asymmetry": "The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignoring the technical weakness in SPY and energy pullback despite low vol context. Energy's recent performance suggests a potential rotation reversal or profit-taking pressure after its 5-day gain.",
+    "reasoning_preview": "NARRATIVE: Defensive range-bound market with falling VIX; focus on preserving capital via cash/bonds while trimming tech/growth exposure ahead of Fed decision uncertainty.\nASYMMETRY: The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignoring the technical weakness in SPY and energy pullback despite low vol context. Energy's recent performance suggests a potential r"
+  },
+  "scan_schedule": {
+    "enabled": true,
+    "phase": "session",
+    "crypto_only": false,
+    "equity_prep": false,
+    "equity_scans": true,
+    "market_open": true,
+    "session_open": "2026-06-16T09:30:00-04:00",
+    "session_close": "2026-06-17T16:00:00-04:00",
+    "orders_start": "2026-06-16T09:35:00-04:00"
+  },
+  "sleeve_exposure": {
+    "equity": 98986.4,
+    "spy_value": 0.004358,
+    "spy_cap": 12230.363638399998,
+    "crypto_value": 0.0,
+    "crypto_cap": 0.0,
+    "nyse_value": 9786.844733000002,
+    "nyse_cap": 6244.4580576,
+    "vti_core_value": 79050.353052,
+    "vti_core_cap": 78733.78255999999
+  },
+  "wisdom": {
+    "mode": "dynamic",
+    "web_sentiment": -0.3032,
+    "price_sentiment": 0.00014995433385345258,
+    "gap": -0.3054493150078018,
+    "paused": false,
+    "governor_stress": false,
+    "gap_tier": "normal",
+    "sizing_multiplier": 1.0,
+    "headline_web_sentiment": -0.3333,
+    "felix_sentiment": -0.2128,
+    "felix_video_id": "NLMbtCZeUrc",
+    "felix_video_title": "Trump to FLOOD the Market on THIS Date (Most Aren\u2019t Ready)"
+  },
+  "spacex_ipo": {
+    "narrative": "hot_btc_narrative",
+    "headline_count": 266,
+    "btc_linked_count": 202,
+    "spcx_perp_count": 76,
+    "avg_sentiment": 0.1767,
+    "alert": true,
+    "top_headline": "Tesla SpaceX bitcoin holdings: Musk\u2019s merger talk tees up $3.3B BTC treasury - The Cryptonomist",
+    "top_spcx_perp": "Hyperliquid Lists SpaceX Pre-IPO Perpetual ($SPCX) \u2014 Whales Accumulate Millions in HYPE - Binance",
+    "crypto_override": false,
+    "crypto_allowed": true
+  },
+  "spacex_ipo_listing": {
+    "stage": "trading_live",
+    "days_until_expected": -5,
+    "ready_to_buy": true,
+    "ready_to_buy_alpaca": true,
+    "ready_to_buy_kraken": true,
+    "expected_listing_date": null,
+    "alpaca_tradable": null,
+    "kraken_tradable": null,
+    "kraken_pair": null
+  },
+  "game_plan_state": {
+    "enabled": true,
+    "signals": {
+      "ok": true,
+      "stress": false,
+      "yield_gate": false,
+      "bond_stress": false,
+      "spy_below_ma200": false
+    },
+    "metal_value": 11619.06,
+    "metal_cap": 9898.64,
+    "blend": {
+      "GLD": 0.5,
+      "SLV": 0.3,
+      "CPER": 0.2
+    },
+    "actions": []
+  },
+  "macro_event": {
+    "active": false,
+    "event": null,
+    "sizing_scale": 1.0,
+    "next": {
+      "name": "FOMC",
+      "date": "2026-06-18",
+      "release_et": "2026-06-18T14:00:00-04:00",
+      "hours_until": 25.03
+    },
+    "upcoming_2d": [
+      {
+        "name": "FOMC",
+        "date": "2026-06-18",
+        "release_et": "2026-06-18T14:00:00-04:00",
+        "hours_until": 25.03
+      }
+    ]
+  },
+  "sleeve_pnl": {
+    "spy": {
+      "cost": 0.0044,
+      "value": 0.0044,
+      "unrealized_pnl": -0.0,
+      "unrealized_pnl_pct": -0.0086,
+      "underwater": true,
+      "positions": 1
+    },
+    "crypto": {
+      "cost": 0.0,
+      "value": 0.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "underwater": false,
+      "positions": 0
+    },
+    "nyse": {
+      "cost": 88510.7711,
+      "value": 88837.1978,
+      "unrealized_pnl": 326.4267,
+      "unrealized_pnl_pct": 0.0037,
+      "underwater": false,
+      "positions": 20
+    },
+    "metal": {
+      "cost": 11520.0312,
+      "value": 11619.0617,
+      "unrealized_pnl": 99.0304,
+      "unrealized_pnl_pct": 0.0086,
+      "underwater": false,
+      "positions": 3
+    }
+  },
+  "vti_core": {
+    "target_pct": 0.8,
+    "target_value": 79189.12,
+    "current_value": 79050.35,
+    "drift_pct": 0.0014,
+    "last_action": null
+  },
+  "game_plan": {
+    "enabled": true,
+    "yield_gate_only": true,
+    "yield_gate_enabled": tru

@@ -8,6 +8,7 @@ Uses run_all.py with PAPER_CHASE_MODE and enforce_best_paper_stack():
 
 Run:
     python run_paper_bot.py
+    python run_paper_bot.py --cycles 3   # short smoke test
 
 Requires Alpaca **paper** keys (APCA_* + PAPER_TRADING=true) or research book
 (PAPER_APCA_* + PAPER_CHASE_USE_RESEARCH_KEYS=yes).
@@ -17,6 +18,7 @@ Backtests peak ~1.0–1.8 Sharpe by window — 3.0 is the chase target, not prov
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -83,6 +85,15 @@ def _run_crypto_vol_cycle() -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Paper Sharpe-chase bot (Best Paper v2.1)")
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=0,
+        help="Exit after N main-loop cycles (0 = run forever; forwarded to run_all.py)",
+    )
+    args = parser.parse_args()
+
     from modules.logging_utils import setup_project_logging
 
     setup_project_logging()
@@ -124,8 +135,11 @@ def main() -> None:
         print("--- Crypto vol sleeve: OFF (set CRYPTO_VOL_SLEEVE_ENABLED=true) ---")
 
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    run_all_cmd = [python, str(RUN_ALL)]
+    if args.cycles:
+        run_all_cmd.extend(["--cycles", str(args.cycles)])
     proc = subprocess.Popen(
-        [python, str(RUN_ALL)],
+        run_all_cmd,
         cwd=str(ROOT),
         env=env,
         creationflags=flags,

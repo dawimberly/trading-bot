@@ -1,6 +1,6 @@
 """Trading bot background runner — scheduled health checks and paper maintenance.
 
-Mirrors ufc-predictor/scripts/background_runner pattern for PythonTrading:
+Scheduled tasks for PythonTrading:
 
   midnight  — full health check, optional data refresh, paper cycle when safe
   startup   — quick status, safety, ensure paper supervisor if configured

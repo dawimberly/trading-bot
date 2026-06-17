@@ -167,6 +167,60 @@ def _crypto_sleeve_status(*, paper: bool = False) -> str:
     return "ON" if enabled else "OFF (disabled)"
 
 
+def _sync_paper_stack_for_status() -> None:
+    """Match status display to Best Paper v2.1 + .env opt-in sleeves."""
+    config.refresh_paper_new_markets_flags_from_env()
+    try:
+        config._load_best_paper_config().apply_best_paper_config()
+    except ImportError:
+        config.enforce_best_paper_stack()
+
+
+def _paper_validated_defaults_line() -> str:
+    """Validated Best Paper v2.1 policy line."""
+    return config.get_best_paper_validated_defaults_line()
+
+
+def _paper_env_override_note() -> str | None:
+    """Call out .env overrides that differ from validated defaults."""
+    notes: list[str] = []
+    if config.PAPER_INTERNATIONAL_SLEEVE_ENABLED:
+        notes.append("ADR env override (research)")
+    if config.PAPER_BOND_SLEEVE_ENABLED:
+        notes.append("bond env override")
+    if config.PAPER_THINKING_ENGINE_ENABLED:
+        notes.append("thinking env override")
+    return f"Overrides: {', '.join(notes)}" if notes else None
+
+
+def _paper_new_markets_sleeve_line() -> str:
+    """International ADR + bond sleeves (paper-only; never live Profile A)."""
+    was_ctx = config.paper_aggressive_context()
+    config.set_paper_aggressive_context(True)
+    try:
+        intl_on = config.effective_international_sleeve_enabled()
+        bond_on = config.effective_bond_sleeve_enabled()
+    finally:
+        config.set_paper_aggressive_context(was_ctx)
+    intl_cap = config.INTERNATIONAL_SLEEVE_CAP_PCT
+    bond_cap = config.BOND_SLEEVE_CAP_PCT
+    sym = config.BOND_SLEEVE_SYMBOL
+    intl_env = config.PAPER_INTERNATIONAL_SLEEVE_ENABLED
+    if intl_on:
+        intl_s = f"ADR ON (research opt-in, cap {intl_cap:.0%}, USD ADRs)"
+    elif intl_env:
+        intl_s = "ADR env=true but inactive (needs paper chase / Profile B context)"
+    else:
+        intl_s = (
+            "ADR off (365d: no Sharpe edge vs baseline — opt-in research only)"
+        )
+    if bond_on:
+        bond_s = f"Bond ON ({sym} cap {bond_cap:.0%}, risk-off hedge)"
+    else:
+        bond_s = "Bond off (365d: flat return, modest DD help when on)"
+    return f"{intl_s} | {bond_s}"
+
+
 def _live_flags() -> str:
     parts = [
         _flag("dyn_vti", False),
@@ -356,16 +410,21 @@ def _thinking_status_lines() -> list[str]:
 
 
 def _profile_table_lines() -> list[str]:
+    paper_label = config.get_best_paper_display_name()
     return [
         "=== Profiles ===",
-        "| | Live Profile A (~$300) | Paper Profile B (Best v2) |",
+        f"| | Live Profile A (~$300) | Paper {paper_label} |",
         "|--|------------------------|---------------------------|",
         f"| VTI core | {config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} (<$500) / 80% | dynamic 40-75% |",
         f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
+        "| Crypto sleeve | OFF (disabled) | OFF (locked) |",
         "| Stat arb / vol / options | off | on (locked stack) |",
-        "| Thinking engine | off (approval if enabled) | opt-in Ollama (non-blocking) |",
+        "| Dynamic universe | off (static) | on (weekly screener) |",
+        "| Thinking engine | off (live locked) | opt-in Ollama |",
+        "| International ADR | off (live locked) | off by default (365d: no edge) |",
+        "| Bond sleeve | off (live locked) | opt-in hedge (365d: flat return) |",
         "| Macro / social / risk parity | off | locked off |",
-        "| Best Paper Bot version | n/a | v2.1 locked |",
+        f"| Stack version | Profile A | v2.1 locked |",
     ]
 
 
@@ -396,6 +455,7 @@ from modules.console_output import safe_print as _emit
 
 def main() -> None:
     setup_project_logging()
+    _sync_paper_stack_for_status()
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
 
@@ -427,6 +487,7 @@ def main() -> None:
         f"QUICK: Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
         f"Regime {regime} | Daily breaker {safety_tag}{quick_extra}"
     )
+    _emit(config.get_best_paper_final_lock_banner())
     _emit("=" * 72)
 
     if _is_live_book_active():
@@ -436,6 +497,7 @@ def main() -> None:
     _emit("-" * 72)
 
     _emit(f"LIVE  Profile A (~$300)   equity {_fmt_equity(live_eq)}   regime {live_regime}")
+    _emit(f"      {config.get_live_profile_defaults_line()}")
     _emit(f"      source: {live_eq_src}")
     _emit(f"      {_live_profile_line()}")
     _emit(f"      Crypto: {_crypto_sleeve_status()}")
@@ -451,10 +513,17 @@ def main() -> None:
     _emit()
 
     paper_on, paper_off = config.format_best_paper_status_lines()
-    _emit(f"PAPER Profile B (Best Paper Bot v2.1)   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
+    paper_label = config.get_best_paper_display_name()
+    _emit(f"PAPER {paper_label}   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
+    _emit(f"      {config.get_best_paper_locked_header()}")
     if paper_eq_err:
         _emit(f"      source: {paper_eq_err}")
+    _emit(f"      {_paper_validated_defaults_line()}")
+    override = _paper_env_override_note()
+    if override:
+        _emit(f"      {override}")
     _emit(f"      Crypto: {_crypto_sleeve_status(paper=True)}")
+    _emit(f"      New markets: {_paper_new_markets_sleeve_line()}")
     _emit(f"      ON:  {paper_on}")
     _emit(f"      OFF (locked): {paper_off}")
     _emit(f"      universe: {_universe_line()}")
@@ -495,6 +564,9 @@ def main() -> None:
     _emit("4. logs/thinking_engine.log - background refresh + tilt apply audit")
     _emit("5. trading_safety_state.json - daily loss breaker not tripped")
     _emit("6. Restart paper bot if thinking env changed: python run_paper_bot.py")
+    _emit()
+    for line in config.get_best_paper_restart_lines():
+        _emit(line)
 
 
 if __name__ == "__main__":

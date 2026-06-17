@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEDULE_STATE_FILE = ROOT / "thinking_news_schedule.json"
 NEWS_CACHE_FILE = ROOT / "thinking_news_cache.json"
 MANUAL_NEWS_FILE = ROOT / "thinking_news_manual.txt"
-ET = ZoneInfo("America/New_York")
+ET_TZ = ZoneInfo("America/New_York")
 
 # Lightweight Google News RSS (no API key)
 RSS_FEEDS = (
@@ -32,6 +32,15 @@ SLOT_LABELS = {
     "postmarket": "6:00 PM ET post-close",
 }
 SLOT_HOUR_ET = {"premarket": 8, "postmarket": 18}
+
+# Live-like tilt gates (365d Profile A validation)
+NEWS_IMPACT_MIN_FOR_CAP_DELTAS = 0.40
+NEWS_IMPACT_MIN_FOR_LIVE_TILT = 0.38
+NEWS_IMPACT_MIN_FOR_PAPER_TILT = 0.36
+NEWS_IMPACT_NEUTRAL_REGIME_MIN = 0.44
+NEWS_IMPACT_NEUTRAL_PAPER_MIN = 0.42
+NEWS_IMPACT_SKIP_BELOW = 0.30
+NEUTRAL_REGIME_MARKERS = ("RHYME_D", "RANGE_BOUND", "NEUTRAL")
 
 _run_lock = threading.Lock()
 _bg_running = False
@@ -246,6 +255,101 @@ _THINKING_MAX_ACTIVE_SLEEVES = 3
 _THINKING_MAX_TOTAL_DELTA = 0.12
 
 
+def is_neutral_thinking_regime(regime: str | None) -> bool:
+    """Range-bound / neutral regimes — reduce tilt churn on live-like profiles."""
+    text = str(regime or "").upper()
+    return any(marker in text for marker in NEUTRAL_REGIME_MARKERS)
+
+
+def news_impact_allows_tilt(
+    summary: dict | None,
+    *,
+    live_like: bool = False,
+) -> bool:
+    """True when any tilt scale should apply (see news_tilt_scale_for_impact)."""
+    return news_tilt_scale_for_impact(summary, live_like=live_like) > 0.0
+
+
+def news_tilt_scale_for_impact(
+    summary: dict | None,
+    *,
+    live_like: bool = False,
+    paper_mode: bool = False,
+) -> float:
+    """
+    Graduated tilt scale from headline evidence.
+
+    Returns 0.0 to skip, 0.25-0.50 for marginal/neutral, 1.0 when strong + non-neutral.
+    """
+    if not summary or not (live_like or paper_mode):
+        return 1.0
+    impact = _news_impact_from_summary(summary)
+    has_news = bool(
+        summary.get("news_headlines")
+        or summary.get("news_digest")
+        or summary.get("news_theme_summary")
+    )
+    if not has_news:
+        if paper_mode and is_neutral_thinking_regime(str(summary.get("regime") or "")):
+            return 0.35
+        return 1.0
+    if impact < NEWS_IMPACT_SKIP_BELOW:
+        return 0.0
+    neutral = is_neutral_thinking_regime(str(summary.get("regime") or ""))
+    if live_like:
+        min_impact = NEWS_IMPACT_NEUTRAL_REGIME_MIN if neutral else NEWS_IMPACT_MIN_FOR_LIVE_TILT
+    else:
+        min_impact = NEWS_IMPACT_NEUTRAL_PAPER_MIN if neutral else NEWS_IMPACT_MIN_FOR_PAPER_TILT
+    if impact >= min_impact:
+        if neutral:
+            return 0.45 if live_like else 0.50
+        return 1.0
+    return 0.25 if neutral else 0.40
+
+
+def build_tilt_why_rationale(
+    market_summary: dict | None,
+    cap_deltas: dict[str, float],
+    *,
+    tilt_rationale: str = "",
+    consolidated: bool = False,
+) -> str:
+    """Human-readable 'Why this tilt?' line for logs and audit."""
+    cap_labels = {
+        "vti_core": "VTI",
+        "spy": "SPY",
+        "crypto": "Crypto",
+        "nyse": "NYSE/Energy",
+        "metal": "Gold",
+        "cash_buffer": "Cash",
+    }
+    parts: list[str] = []
+    summary = market_summary or {}
+    impact = _news_impact_from_summary(summary)
+    regime = str(summary.get("regime") or "")
+    if tilt_rationale.strip():
+        parts.append(tilt_rationale.strip()[:100])
+    themes = str(summary.get("news_theme_summary") or "").strip()
+    if themes and "No dominant" not in themes:
+        parts.append(f"headlines ({impact:.2f}): {themes[:72]}")
+    elif impact >= NEWS_IMPACT_MIN_FOR_CAP_DELTAS:
+        parts.append(f"news impact {impact:.2f}")
+    if is_neutral_thinking_regime(regime):
+        parts.append("neutral regime — reduced size")
+    if consolidated:
+        parts.append("consolidated to max 3 sleeves")
+    moves = [
+        f"{cap_labels.get(k, k)} {v * 100:+.1f}%"
+        for k, v in cap_deltas.items()
+        if abs(float(v)) >= 0.005
+    ]
+    if moves:
+        parts.append("-> " + ", ".join(moves[:3]))
+    if not parts:
+        return "Why this tilt? macro/heuristic rebalance (no strong headline trigger)"
+    return "Why this tilt? " + " | ".join(parts)
+
+
 def _theme_active(themes: dict, key: str) -> bool:
     block = themes.get(key) if isinstance(themes.get(key), dict) else {}
     return bool(block.get("active"))
@@ -306,11 +410,13 @@ def _news_impact_from_summary(summary: dict | None) -> float:
 
 
 def _sleeve_rank_score(delta: float, impact: float) -> float:
-    """Rank sleeves by |delta| * news_impact_score (fallback to |delta| when no news)."""
+    """Rank sleeves by |delta| weighted by headline impact (high-impact first)."""
     magnitude = abs(float(delta))
+    if impact >= NEWS_IMPACT_MIN_FOR_CAP_DELTAS:
+        return magnitude * (impact ** 1.25 + 0.10)
     if impact > 0:
-        return magnitude * impact
-    return magnitude
+        return magnitude * impact * 0.65
+    return magnitude * 0.35
 
 
 def _clamp_cap_deltas(
@@ -355,9 +461,6 @@ def consolidate_news_deltas(
         raw["crypto"] = 0.0
     material = {k: v for k, v in raw.items() if abs(v) >= 0.005}
 
-    if len(material) <= max_sleeves:
-        return _clamp_cap_deltas(raw, max_per_sleeve=max_per_sleeve)
-
     impact = _news_impact_from_summary(market_summary)
     has_news = bool(
         market_summary
@@ -367,15 +470,40 @@ def consolidate_news_deltas(
             or market_summary.get("news_theme_summary")
         )
     )
+
+    # Weak headline evidence: fold to VTI/cash barbell (max 2 sleeves) on live-like paths.
+    if has_news and impact < NEWS_IMPACT_MIN_FOR_CAP_DELTAS:
+        barbell = ("vti_core", "cash_buffer")
+        folded = {k: 0.0 for k in _CAP_KEYS}
+        for key, val in material.items():
+            target = key if key in barbell else "vti_core"
+            folded[target] = folded.get(target, 0.0) + val
+        return _clamp_cap_deltas(folded, max_per_sleeve=max_per_sleeve)
+
+    if len(material) <= max_sleeves:
+        return _clamp_cap_deltas(raw, max_per_sleeve=max_per_sleeve)
+
     theme_top3 = (
         _news_priority_sleeves(market_summary)
         if has_news and market_summary
         else ("vti_core", "cash_buffer", "nyse")
     )
 
+    def _theme_boost(key: str) -> float:
+        if key in theme_top3:
+            return 1.15
+        themes = (market_summary or {}).get("news_themes") or {}
+        if key == "nyse" and _theme_active(themes, "sector_energy"):
+            return 1.10
+        if key == "spy" and _theme_active(themes, "sector_tech"):
+            return 1.08
+        if key == "cash_buffer" and _theme_active(themes, "geopolitics"):
+            return 1.08
+        return 1.0
+
     scored: list[tuple[str, float, float]] = []
     for key, val in material.items():
-        score = _sleeve_rank_score(val, impact)
+        score = _sleeve_rank_score(val, impact) * _theme_boost(key)
         scored.append((key, val, score))
     scored.sort(key=lambda row: row[2], reverse=True)
 
@@ -583,7 +711,7 @@ def synthesize_backtest_news(
             "Analysts warn tariff headlines may whipsaw small-cap beta before Fed speak; "
             "AI/datacenter demand still supports semis"
         )
-    if str(regime).startswith("RHYME") and vix_f <= 16 and tech_leading:
+    if str(regime).startswith("RHYME") and vix_f <= 16 and tech_leading and oil >= 2.5:
         headlines.append("Mid-cycle AI leadership persists — selective SPY tilt vs passive VTI")
     crowded = str(summary.get("crowded_trade_warning") or "")
     if crowded.startswith("CROWDED"):
@@ -614,7 +742,7 @@ def _save_schedule_state(state: dict) -> None:
 
 def due_news_slot(now_et: datetime.datetime | None = None) -> str | None:
     """Return premarket/postmarket slot due today (max 2/day), or None."""
-    now_et = now_et or datetime.datetime.now(ET)
+    now_et = now_et or datetime.datetime.now(ET_TZ)
     today = now_et.date().isoformat()
     state = _schedule_state()
     if state.get("date") != today:
@@ -634,7 +762,7 @@ def due_news_slot(now_et: datetime.datetime | None = None) -> str | None:
 
 def mark_slot_started(slot: str) -> None:
     state = _schedule_state()
-    today = datetime.datetime.now(ET).date().isoformat()
+    today = datetime.datetime.now(ET_TZ).date().isoformat()
     if state.get("date") != today:
         state = {"date": today, "runs": [], "in_progress": None}
     state["in_progress"] = slot
@@ -643,7 +771,7 @@ def mark_slot_started(slot: str) -> None:
 
 def mark_slot_completed(slot: str) -> None:
     state = _schedule_state()
-    today = datetime.datetime.now(ET).date().isoformat()
+    today = datetime.datetime.now(ET_TZ).date().isoformat()
     if state.get("date") != today:
         state = {"date": today, "runs": [], "in_progress": None}
     runs = list(state.get("runs") or [])

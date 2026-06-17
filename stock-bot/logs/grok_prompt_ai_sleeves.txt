@@ -1,0 +1,18 @@
+You are Grok advising a systematic paper bot (PythonTrading, ~$98k Best Paper v2.1). Goal: beat VTI Sharpe. Hard rules: plus/minus 6% per sleeve delta max, max 3 sleeves changed per day. Base: VTI core 80%, SPY about 10%, crypto/NYSE about 5% each.
+
+User view: Semis and AI leaders are strong on price action. Mid-cycle AI leadership phase.
+
+Headlines / context from bot digest:
+- Bitcoin/crypto bounce as US inflation hits 3-year high; CryptoQuant says crypto bottom not in; SpaceX IPO may drain risk-asset liquidity
+- Macro: RHYME_D range-bound neutral, SPY above MA200 (+1.5%), VIX 16.2 falling (-14% 5d), web sentiment -0.38
+- Oil -10.7% (5d), gold flat; yield curve TNX 4.47%
+- Bot tape (5d): NVDA -0.13%, QQQ -0.10%, SMCI -0.63% (laggard) vs energy flat — tension with user AI-strong view
+- Stat-arb regime: supportive; vol overlay: normal; no extreme crowding flag
+- Tariff / policy overhang in headlines
+
+Give clear guidance:
+1) Should we add more SPY, hold VTI core, or raise cash? Pick primary action with reasoning.
+2) Thresholds to watch (VIX, oil % move, tariff escalation, breadth, etc.) — specific numbers/triggers.
+3) ONE specific sleeve tilt recommendation respecting 6% per sleeve and max 3 sleeves changed. Include starting weights and deltas.
+
+Focus on asymmetry and crowd positioning. Be concise but actionable. Flag if AI leadership is already crowded (Mag7 passive flows, semis ETF inflows).

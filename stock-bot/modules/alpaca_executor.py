@@ -477,7 +477,19 @@ class AlpacaExecutor:
             return False
         if AlpacaExecutor._is_vti_core_position(pos):
             return False
+        if config.is_international_adr(pos.symbol):
+            return False
+        if config.is_bond_symbol(pos.symbol):
+            return False
         return True
+
+    @staticmethod
+    def _is_bond_sleeve_position(pos):
+        return config.is_bond_symbol(pos.symbol)
+
+    @staticmethod
+    def _is_international_sleeve_position(pos):
+        return config.is_international_adr(pos.symbol)
 
     def _sleeve_exposure(self, predicate):
         total = 0.0
@@ -494,6 +506,12 @@ class AlpacaExecutor:
 
     def nyse_sleeve_value(self):
         return self._sleeve_exposure(self._is_nyse_sleeve_position)
+
+    def international_sleeve_value(self):
+        return self._sleeve_exposure(self._is_international_sleeve_position)
+
+    def bond_sleeve_value(self):
+        return self._sleeve_exposure(self._is_bond_sleeve_position)
 
     def metal_sleeve_value(self):
         return self._sleeve_exposure(self._is_metal_position)
@@ -543,6 +561,26 @@ class AlpacaExecutor:
             self._sleeve_cap_pct("nyse", config.NYSE_SLEEVE_CAP_PCT),
             self.nyse_sleeve_value(),
             "nyse",
+        )
+
+    def compute_international_notional(self):
+        cap_pct = float(getattr(self, "international_cap_pct", 0.0) or 0.0)
+        if cap_pct <= 0:
+            return None
+        return self._compute_capped_notional(
+            cap_pct,
+            self.international_sleeve_value(),
+            "international",
+        )
+
+    def compute_bond_notional(self):
+        cap_pct = float(getattr(self, "bond_cap_pct", 0.0) or 0.0)
+        if cap_pct <= 0:
+            return None
+        return self._compute_capped_notional(
+            cap_pct,
+            self.bond_sleeve_value(),
+            "bond",
         )
 
     def spy_position_value(self):

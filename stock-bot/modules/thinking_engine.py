@@ -131,10 +131,13 @@ def _should_consolidate_news_deltas(
     market_summary: dict | None,
     *,
     live_like: bool = False,
+    practical_mode: bool = False,
 ) -> bool:
     """True when consolidation should run before the 3-sleeve safety guard."""
     material_n = _material_sleeve_count(cap_deltas)
     if material_n > THINKING_MAX_ACTIVE_SLEEVES:
+        return True
+    if (live_like or practical_mode) and material_n >= 2:
         return True
     if not market_summary:
         return False
@@ -146,7 +149,7 @@ def _should_consolidate_news_deltas(
     if not has_news:
         return False
     impact = _news_impact(market_summary)
-    if live_like or impact >= 0.15:
+    if live_like or impact >= 0.20:
         return True
     return material_n > 1
 
@@ -706,8 +709,10 @@ def _news_text_blob(summary: dict) -> str:
 
 def _apply_news_cap_deltas(deltas: dict[str, float], summary: dict, conf: float) -> None:
     """Headline themes scaled by news_impact_score (0-1)."""
+    from modules.thinking_news import NEWS_IMPACT_MIN_FOR_CAP_DELTAS
+
     impact = _news_impact(summary)
-    if impact < 0.25:
+    if impact < NEWS_IMPACT_MIN_FOR_CAP_DELTAS:
         return
     scale = impact * conf
     geo = _news_theme_active(summary, "geopolitics")
@@ -811,6 +816,12 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
         if tech_leading and not crowded.startswith("CROWDED"):
             deltas["spy"] += 0.04 * conf
             deltas["vti_core"] -= 0.03 * conf
+
+    from modules.thinking_news import is_neutral_thinking_regime
+
+    if is_neutral_thinking_regime(str(summary.get("regime") or "")):
+        for key in list(deltas.keys()):
+            deltas[key] = round(float(deltas[key]) * 0.40, 6)
 
     _apply_news_cap_deltas(deltas, summary, conf)
 
@@ -1588,6 +1599,7 @@ def apply_thinking_tilt_to_caps(
     equity: float | None = None,
     max_sleeve_delta: float | None = None,
     allow_small_account: bool = False,
+    tilt_rationale: str = "",
 ) -> tuple[dict[str, float], dict[str, float], str]:
     """Apply LLM/heuristic tilt to sleeve caps (±max_sleeve_delta per sleeve)."""
     if (
@@ -1615,10 +1627,41 @@ def apply_thinking_tilt_to_caps(
         if max_sleeve_delta is not None
         else config.effective_thinking_max_sleeve_delta()
     )
+    live_like = bool(allow_small_account or max_sleeve_delta is not None)
+    practical_mode = bool(
+        live_like
+        or config.paper_aggressive_context()
+        or config.backtest_paper_sleeves_context()
+    )
+    paper_mode = practical_mode and not live_like
+    consolidated_flag = False
+
+    from modules.thinking_news import build_tilt_why_rationale, news_tilt_scale_for_impact
+
+    if practical_mode and market_summary:
+        tilt_scale = news_tilt_scale_for_impact(
+            market_summary,
+            live_like=live_like,
+            paper_mode=paper_mode,
+        )
+        if tilt_scale <= 0.0:
+            _audit_thinking(
+                "tilt_skipped_low_news_impact",
+                news_impact_score=_news_impact(market_summary),
+                regime=market_summary.get("regime"),
+                why=build_tilt_why_rationale(market_summary, {}, tilt_rationale=tilt_rationale),
+            )
+            return dict(base_caps), {}, ""
+        if tilt_scale < 1.0:
+            cap_deltas = {
+                k: round(float(v) * tilt_scale, 6) for k, v in cap_deltas.items()
+            }
+
     if _should_consolidate_news_deltas(
         cap_deltas,
         market_summary,
-        live_like=allow_small_account or max_sleeve_delta is not None,
+        live_like=live_like,
+        practical_mode=practical_mode,
     ):
         before = dict(cap_deltas)
         cap_deltas = _consolidate_news_deltas(
@@ -1627,6 +1670,7 @@ def apply_thinking_tilt_to_caps(
             max_per_sleeve=max_delta,
         )
         if cap_deltas != before:
+            consolidated_flag = True
             _audit_thinking(
                 "news_deltas_consolidated",
                 news_impact_score=_news_impact(market_summary),
@@ -1646,9 +1690,27 @@ def apply_thinking_tilt_to_caps(
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
 
+    why_line = build_tilt_why_rationale(
+        market_summary,
+        actual_deltas,
+        tilt_rationale=tilt_rationale or _infer_tilt_rationale(
+            market_summary or {},
+            _caps_to_tilt(merged),
+            str((market_summary or {}).get("asymmetry") or ""),
+        ),
+        consolidated=consolidated_flag,
+    )
     log_line = _format_thinking_log(_infer_narrative(market_summary), actual_deltas)
     if any(v != 0 for v in actual_deltas.values()):
-        log_event("thinking_tilt_applied", confidence=conf, deltas=actual_deltas, log_line=log_line)
+        log_line = f"{log_line} | {why_line}"
+        log_event(
+            "thinking_tilt_applied",
+            confidence=conf,
+            deltas=actual_deltas,
+            log_line=log_line,
+            why=why_line,
+        )
+        _audit_thinking("tilt_applied", why=why_line, deltas=actual_deltas)
     return merged, actual_deltas, log_line
 
 
@@ -1665,6 +1727,7 @@ def apply_thinking_to_sleeve_caps(
         confidence=float(thinking_result.get("confidence", 0.65)),
         market_summary=thinking_result.get("market_summary"),
         equity=equity,
+        tilt_rationale=str(thinking_result.get("tilt_rationale") or ""),
         **_thinking_tilt_apply_kwargs(equity),
     )
 
@@ -1746,7 +1809,7 @@ def build_backtest_thinking_result(
     asymmetry = _infer_asymmetry(summary)
     news_impact = _news_impact(summary)
     conf = 0.78 if force_decision else 0.70
-    if news_impact >= 0.35:
+    if news_impact >= 0.40:
         conf = round(min(0.88, conf + 0.10 * news_impact), 2)
     base = {
         "reasoning": f"Force-decision proxy: {narrative}",
@@ -1810,7 +1873,7 @@ def build_heuristic_reasoning_result(
 ) -> dict[str, Any]:
     """Rule-based tilt when Ollama is unavailable or all LLM attempts fail."""
     news_impact = _news_impact(market_summary)
-    confidence = round(min(0.88, 0.70 + 0.18 * news_impact), 2) if news_impact >= 0.35 else 0.70
+    confidence = round(min(0.88, 0.70 + 0.18 * news_impact), 2) if news_impact >= 0.40 else 0.70
     base = {
         "reasoning": f"Rule-based fallback ({reason}): {_infer_narrative(market_summary)}",
         "narrative": _infer_narrative(market_summary),
@@ -2379,10 +2442,11 @@ Top headline: {market_summary['top_headline']}
         "HIGH-IMPACT NEWS: move at most 3 sleeves vs prior day (strict live cap). "
         "Rank by conviction: keep VTI/cash barbell, SPY liquidity, NYSE energy as custodians; "
         "merge smaller sleeve nudges into those three (e.g. gold->cash, crypto->SPY, metal->cash).\n"
-        if float(market_summary.get("news_impact_score") or 0.0) >= 0.35
+        if float(market_summary.get("news_impact_score") or 0.0) >= 0.40
         else (
-            "When news_impact_score >= 0.25, prefer <=3 sleeve moves — consolidate minor tilts.\n"
-            if float(market_summary.get("news_impact_score") or 0.0) >= 0.25
+            "Do NOT tilt on weak headlines — news_impact_score must be >= 0.42 live "
+            "(>= 0.50 in neutral/range-bound regimes).\n"
+            if market_summary.get("news_headlines")
             else ""
         )
     )

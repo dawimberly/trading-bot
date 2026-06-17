@@ -1,0 +1,2367 @@
+2026-06-14 00:03:19 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=511d)
+2026-06-14 00:03:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:03:19 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=511d)
+2026-06-14 00:03:19 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=511d)
+2026-06-14 00:03:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:03:19 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=511d)
+2026-06-14 00:14:07 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:14:07 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:07 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:14:07 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:08 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:08 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:14:08 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:10 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:10 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:14:10 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:10 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:14:10 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:14:10 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:44 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:29:44 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:44 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:29:44 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:45 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:29:45 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:48 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:48 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:29:48 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:48 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:29:48 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:29:48 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:03 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:45:03 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:04 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:04 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:45:04 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:04 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:04 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:45:04 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:07 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:45:07 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:07 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 00:45:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 00:45:07 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:23 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:00:23 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:23 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:00:23 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:24 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:00:24 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:27 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:27 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:00:27 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:27 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:00:27 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:00:27 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:42 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:15:42 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:43 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:15:43 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:43 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:15:43 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:46 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:15:46 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:46 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:15:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:15:46 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:02 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:31:02 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:02 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:31:02 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:03 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:31:03 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:06 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:06 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:31:06 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:06 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:31:06 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:31:06 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:21 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:46:21 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:22 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:46:22 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:23 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:46:23 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:25 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:46:25 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:25 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 01:46:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 01:46:25 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:41 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:01:41 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:41 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:01:41 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:42 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:01:42 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:45 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:01:45 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:45 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:01:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:01:45 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:01 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:17:01 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:01 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:17:01 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:02 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:17:02 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:05 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:17:05 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:05 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:17:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:17:05 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:20 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:32:20 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:21 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:32:21 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:21 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:32:21 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:24 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:32:24 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:24 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:32:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:32:24 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:40 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:47:40 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:40 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:47:40 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:41 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:47:41 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:43 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:47:44 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:44 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 02:47:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 02:47:44 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:02:59 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:02:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:02:59 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:02:59 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:02:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:02:59 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:03:00 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:03:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:03:00 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:03:03 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:03:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:03:03 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:03:03 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:03:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:03:03 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:19 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:18:19 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:19 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:18:19 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:20 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:18:20 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:22 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:18:22 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:23 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:18:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:18:23 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:43 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:33:43 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:44 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:33:44 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:45 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:33:45 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:47 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:47 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:33:47 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:47 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:33:47 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:33:47 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:03 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:49:03 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:03 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:49:03 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:04 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:04 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:49:04 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:07 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:49:07 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:07 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 03:49:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 03:49:07 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:22 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:04:22 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:23 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:04:23 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:23 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:04:23 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:26 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:04:26 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:26 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:04:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:04:26 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:42 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:19:42 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:43 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:19:43 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:44 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:19:44 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:46 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:19:46 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:46 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:19:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:19:46 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:02 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:35:02 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:03 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:35:03 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:03 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:35:03 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:06 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:06 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:35:06 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:06 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:35:06 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:35:06 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:22 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:50:22 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:22 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:50:22 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:23 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:50:23 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:26 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:50:26 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:26 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 04:50:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 04:50:26 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:42 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:05:42 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:42 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:05:42 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:43 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:05:43 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:46 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:05:46 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:46 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:05:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:05:46 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:01 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:21:01 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:02 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:21:02 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:02 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:21:02 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:05 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:21:05 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:05 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:21:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:21:05 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:21 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:36:21 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:22 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:36:22 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:22 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:36:22 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:25 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:36:25 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:25 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:36:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:36:25 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:41 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:51:41 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:41 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:51:41 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:42 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:51:42 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:45 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:51:45 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:45 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 05:51:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 05:51:45 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:00 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:07:00 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:00 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:07:00 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:01 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:07:01 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:04 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:04 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:07:04 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:04 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:07:04 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:07:04 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:20 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:22:20 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:20 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:22:20 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:21 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:22:21 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:24 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:22:24 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:24 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:22:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:22:24 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:39 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:37:39 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:40 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:37:40 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:40 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:37:40 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:43 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:37:43 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:43 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:37:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:37:43 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:52:59 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:52:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:52:59 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:52:59 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:52:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:52:59 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:53:00 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:53:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:53:00 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:53:02 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:53:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:53:02 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:53:03 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 06:53:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 06:53:03 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:18 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:08:18 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:19 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:08:19 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:20 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:08:20 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:22 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:08:22 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:22 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:08:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:08:22 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:38 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:23:38 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:23:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:39 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:23:39 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:23:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:23:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:23:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:38:57 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:38:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:38:57 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:38:58 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:38:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:38:58 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:38:58 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:38:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:38:58 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:10 ERROR [yfinance] $SHIB-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:10 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:39:10 ERROR [yfinance] ['SHIB-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:20 ERROR [yfinance] $RENDER-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:39:20 ERROR [yfinance] ['RENDER-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:30 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:30 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:39:30 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:40 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:39:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:39:40 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:15 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:15 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:55:15 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:15 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:15 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:55:15 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:16 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:16 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:55:16 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:18 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:55:18 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:18 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 07:55:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 07:55:18 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:34 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:34 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:10:34 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:35 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:35 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:10:35 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:36 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:36 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:10:36 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:38 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:10:38 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:39 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:10:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:10:39 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:54 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:54 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:25:54 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:55 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:55 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:25:55 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:56 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:56 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:25:56 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:59 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:25:59 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:59 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:25:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:25:59 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:14 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:14 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:41:14 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:15 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:15 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:41:15 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:16 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:16 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:41:16 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:18 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:41:18 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:18 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:41:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:41:18 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:35 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:35 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:56:35 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:36 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:36 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:56:36 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:37 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:37 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:56:37 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:39 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:56:39 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:40 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 08:56:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 08:56:40 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:11:55 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:11:55 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:11:55 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:11:56 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:11:56 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:11:56 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:11:57 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:11:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:11:57 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:12:00 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:12:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:12:00 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:12:00 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:12:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:12:00 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:21 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:27:21 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:21 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:27:21 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:22 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:27:22 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:25 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:27:25 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:25 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:27:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:27:25 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:41 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:42:41 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:41 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:42:41 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:42 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:42:42 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:45 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:42:45 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:45 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:42:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:42:45 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:01 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:58:01 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:01 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:58:01 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:02 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:58:02 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:05 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:58:05 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:05 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 09:58:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 09:58:05 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:20 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:13:20 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:21 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:13:21 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:21 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:13:21 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:24 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:13:24 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:24 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:13:24 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:13:24 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:39 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:28:39 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:40 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:28:40 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:40 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:28:40 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:43 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:28:43 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:43 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:28:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:28:43 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:43:59 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:43:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:43:59 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:43:59 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:43:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:43:59 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:44:00 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:44:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:44:00 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:44:02 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:44:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:44:02 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:44:02 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:44:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:44:02 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:18 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:59:18 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:19 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:59:19 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:20 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:59:20 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:22 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:59:22 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:22 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 10:59:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 10:59:22 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:38 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:14:38 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:39 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:14:39 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:39 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:14:39 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:14:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:14:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:14:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:29:58 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:29:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:29:58 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:29:58 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:29:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:29:58 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:29:59 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:29:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:29:59 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:30:02 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:30:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:30:02 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:30:02 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:30:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:30:02 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:18 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:45:18 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:18 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:45:18 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:19 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:45:19 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:22 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:45:22 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:22 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 11:45:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 11:45:22 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:38 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:00:38 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:00:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:39 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:00:39 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:00:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:00:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:00:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:15:57 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:15:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:15:57 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:15:58 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:15:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:15:58 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:15:59 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:15:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:15:59 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:16:01 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:16:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:16:01 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:16:02 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:16:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:16:02 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:18 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:31:18 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:18 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:31:18 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:19 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:31:19 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:22 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:31:22 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:22 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:31:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:31:22 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:38 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:46:38 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:46:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:39 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:46:39 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:46:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 12:46:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 12:46:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:01:57 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:01:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:01:57 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:01:58 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:01:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:01:58 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:01:58 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:01:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:01:58 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:02:01 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:02:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:02:01 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:02:01 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:02:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:02:01 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:17 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:17 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:17:17 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:17 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:17 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:17:17 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:18 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:17:18 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:21 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:17:21 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:21 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:17:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:17:21 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:37 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:37 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:32:37 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:32:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:38 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:32:38 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:41 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:32:41 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:41 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:32:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:32:41 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:47:58 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:47:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:47:58 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:47:58 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:47:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:47:58 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:47:59 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:47:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:47:59 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:48:01 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:48:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:48:01 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:48:01 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 13:48:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 13:48:01 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:17 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:17 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:03:17 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:18 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:03:18 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:18 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:03:18 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:21 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:03:21 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:21 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:03:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:03:21 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:37 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:37 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:18:37 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:18:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:38 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:18:38 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:41 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:18:41 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:41 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:18:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:18:41 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:33:58 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:33:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:33:58 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:33:58 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:33:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:33:58 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:33:59 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:33:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:33:59 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:34:01 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:34:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:34:01 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:34:01 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:34:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:34:01 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:18 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:49:18 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:19 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:49:19 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:19 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:49:19 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:22 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:49:22 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:22 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 14:49:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 14:49:22 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:38 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:04:38 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:04:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:39 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:04:39 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:04:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:04:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:04:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:19 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:20:19 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:19 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:20:19 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:20 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:20:20 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:23 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:20:23 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:23 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:20:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:20:23 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:49 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:49 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:35:49 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:49 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:49 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:35:49 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:50 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:50 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:35:50 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:53 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:53 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:35:53 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:53 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:35:53 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:35:53 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:09 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:51:09 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:09 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:51:09 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:10 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:10 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:51:10 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:12 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:12 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:51:12 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:13 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 15:51:13 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 15:51:13 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:35 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:35 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:06:35 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:35 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:35 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:06:35 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:36 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:36 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:06:36 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:38 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:06:38 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:38 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:06:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:06:38 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:14:49 INFO [root] logging initialized (daily rotation, 7 days)
+2026-06-14 16:14:49 INFO [__main__] Background runner start — root=C:\Users\Owner\PythonTrading mode=lightweight trigger=manual
+2026-06-14 16:14:49 INFO [__main__] Lightweight health check — trigger=manual
+2026-06-14 16:14:50 INFO [root] logging initialized (daily rotation, 7 days)
+2026-06-14 16:14:56 INFO [__main__] Lightweight check OK (no auto-start)
+2026-06-14 16:21:56 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:21:56 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:21:56 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:21:56 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:21:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:21:57 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:21:57 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:21:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:21:57 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:22:00 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:22:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:22:00 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:22:00 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:22:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:22:00 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:17 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:17 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:37:17 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:17 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:17 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:37:17 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:18 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:37:18 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:21 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:37:21 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:21 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:37:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:37:21 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:38 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:52:38 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:39 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:52:39 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:39 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:52:39 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:52:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 16:52:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 16:52:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:07:59 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:07:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:07:59 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:00 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:08:00 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:00 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:00 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:08:00 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:03 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:08:03 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:03 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:08:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:08:03 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:21 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:23:21 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:22 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:23:22 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:22 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:22 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:23:22 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:25 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:23:25 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:25 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:23:25 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:23:25 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:34:37 INFO [root] logging initialized (daily rotation, 7 days)
+2026-06-14 17:35:49 INFO [root] logging initialized (daily rotation, 7 days)
+2026-06-14 17:38:45 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:38:45 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:45 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:38:45 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:46 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:38:46 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:48 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:48 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:38:48 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:48 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:38:48 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:38:48 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:05 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:54:05 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:05 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:54:05 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:06 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:06 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:54:06 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:09 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:54:09 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:09 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 17:54:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 17:54:09 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:26 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:09:26 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:26 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:09:26 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:27 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:27 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:09:27 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:29 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:29 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:09:29 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:30 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:09:30 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:09:30 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:46 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:24:46 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:46 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:24:46 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:47 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:47 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:24:47 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:50 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:50 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:24:50 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:50 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:24:50 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:24:50 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:12 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:12 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:40:12 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:13 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:13 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:40:13 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:14 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:14 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:40:14 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:18 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:18 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:40:18 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:19 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:40:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:40:19 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:48:21 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 18:53:23 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 18:58:26 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:58:26 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:26 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:26 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:58:26 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:27 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:27 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:58:27 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:30 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:30 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:58:30 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:30 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:30 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 18:58:30 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 18:58:32 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:03:34 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:08:36 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:13:39 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:13:39 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:39 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:39 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:13:39 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:40 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:40 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:13:40 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:42 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:13:42 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:42 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:13:42 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:13:44 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:18:46 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:23:48 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:28:51 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:51 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:28:51 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:51 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:51 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:28:51 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:52 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:52 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:28:52 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:54 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:54 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:28:54 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:54 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:54 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:28:54 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:28:56 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:33:58 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:39:00 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:44:03 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:44:03 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:03 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:44:03 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:04 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:04 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:44:04 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:07 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:44:07 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:07 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:44:07 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:44:09 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:49:11 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:54:13 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 19:59:16 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:16 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:59:16 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:16 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:16 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:59:16 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:17 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:17 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:59:17 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:19 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:59:19 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:19 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:19 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 19:59:19 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 19:59:21 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:04:24 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:09:26 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:14:29 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:29 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:14:29 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:29 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:29 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:14:29 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:30 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:30 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:14:30 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:32 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:32 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:14:32 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:33 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:33 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:14:33 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:14:35 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:19:38 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:24:40 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:29:42 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:29:42 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:43 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:29:43 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:44 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:44 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:29:44 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:46 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:29:46 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:46 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:29:46 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:29:48 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:34:50 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:39:52 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:44:55 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:55 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:44:55 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:55 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:55 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:44:55 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:56 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:56 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:44:56 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:59 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:44:59 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:59 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:44:59 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 20:44:59 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 20:45:00 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:50:03 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 20:55:05 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:00:08 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:08 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:00:08 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:08 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:08 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:00:08 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:09 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:00:09 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:21 ERROR [yfinance] $RENDER-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:00:21 ERROR [yfinance] ['RENDER-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:31 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:31 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:00:31 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:41 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:00:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:00:41 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:06:37 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:11:39 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:16:42 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:42 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:16:42 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:43 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:16:43 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:43 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:43 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:16:43 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:46 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:16:46 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:46 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:16:46 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:16:48 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:21:50 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:26:52 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:31:55 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:55 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:31:55 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:55 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:55 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:31:55 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:56 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:56 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:31:56 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:58 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:31:58 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:58 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:31:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:31:58 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:32:00 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:37:02 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:42:04 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:47:07 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:47:07 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:07 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:07 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:47:07 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:08 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:08 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:47:08 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:11 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:11 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:47:11 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:11 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:11 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 21:47:11 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 21:47:12 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:52:15 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 21:57:17 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:02:20 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:02:20 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:20 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:20 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:02:20 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:21 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:21 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:02:21 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:23 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:02:23 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:23 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:23 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:02:23 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:02:25 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:07:28 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:12:30 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:17:33 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:33 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:17:33 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:33 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:33 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:17:33 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:34 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:34 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:17:34 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:36 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:36 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:17:36 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:36 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:36 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:17:36 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:17:38 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:22:40 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:27:42 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:32:45 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:32:45 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:45 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:45 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:32:45 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:46 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:46 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:32:46 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:48 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:48 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:32:48 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:48 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:48 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:32:48 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:32:50 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:37:52 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:42:54 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:47:57 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:47:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:47:57 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:47:57 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:47:57 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:47:57 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:47:58 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:47:58 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:47:58 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:48:01 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:48:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:48:01 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:48:01 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:48:01 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 22:48:01 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 22:48:02 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:53:04 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 22:58:06 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:03:09 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:03:09 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:09 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:09 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:03:09 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:10 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:10 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:03:10 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:13 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:13 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:03:13 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:13 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:13 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:03:13 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:03:14 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:08:16 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:13:18 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:22:37 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:37 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:22:37 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:38 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:22:38 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:38 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:38 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:22:38 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:41 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:22:41 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:41 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:41 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:22:41 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:22:42 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:27:44 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:32:46 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:37:49 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:49 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:37:49 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:49 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:49 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:37:49 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:50 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:50 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:37:50 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:53 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:53 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:37:53 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:53 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:53 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:37:53 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:37:54 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:42:57 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:47:59 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:53:02 ERROR [yfinance] $MATIC-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:53:02 ERROR [yfinance] ['MATIC-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:02 ERROR [yfinance] $UNI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:02 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:53:02 ERROR [yfinance] ['UNI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:03 ERROR [yfinance] $APT-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:03 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:53:03 ERROR [yfinance] ['APT-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:05 ERROR [yfinance] $SUI-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:53:05 ERROR [yfinance] ['SUI-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:05 ERROR [yfinance] $PEPE-USD: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:05 ERROR [yfinance] 
+1 Failed download:
+2026-06-14 23:53:05 ERROR [yfinance] ['PEPE-USD']: possibly delisted; no price data found  (period=5d)
+2026-06-14 23:53:07 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+2026-06-14 23:58:09 ERROR [__main__] Cycle error: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 1354, in <module>
+  File "C:\Users\Owner\PythonTrading\run_all.py", line 515, in main
+  File "C:\Users\Owner\PythonTrading\modules\wisdom_sentiment.py", line 196, in resolve_wisdom_regime
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 99, in get_live_web_sentiment
+  File "C:\Users\Owner\PythonTrading\modules\web_sentiment_live.py", line 49, in _save_cache
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\Owner\\PythonTrading\\sentiment\\live\\web_sentiment_live.json'

@@ -1,0 +1,2 @@
+2026-06-12 23:30:11 INFO [root] logging initialized (daily rotation, 7 days)
+2026-06-12 23:30:16 CRITICAL [modules.alpaca_client] Alpaca auth failed during get_account (HTTP 401): {"code":40110000,"message":"request is not authorized"}
