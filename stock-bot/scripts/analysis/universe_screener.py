@@ -1,10 +1,9 @@
-"""Screen US equities from Alpaca and rank by momentum / liquidity / trend.
+"""Dynamic NYSE/NASDAQ universe screener (paper-first, standalone).
 
-Pulls active tradable NYSE/NASDAQ/ARCA symbols from Alpaca, filters by price,
-dollar volume, and volatility; detects recent IPOs; writes top names to
-data/screener_universe.json.
+Pulls active US equities from Alpaca, filters by liquidity, scores by
+momentum / volatility / trend, writes top 75 to data/screener_universe.json.
 
-Run from repo root:
+Run from stock-bot/:
   python scripts/analysis/universe_screener.py
 """
 
@@ -14,6 +13,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,44 +27,32 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 import config
-from modules.dynamic_universe import (
-    ALLOWED_EXCHANGES,
-    HIGH_VOL_ATR_PCT,
-    HIGH_VOL_POSITION_SCALE,
-    IPO_MAX_TRADING_DAYS,
-    IPO_MIN_TRADING_DAYS,
-    IPO_POSITION_SCALE,
-    MAX_ATR_PCT,
-    MAX_IPO_SLOTS,
-    MAX_UNIVERSE_SIZE,
-    MIN_AVG_DOLLAR_VOLUME,
-    MIN_PRICE,
-    MIN_SHARE_VOLUME,
-    MOMENTUM_LOOKBACK,
-    STRICT_MAX_PER_SECTOR,
-    STRICT_MAX_UNIVERSE_SIZE,
-    STRICT_MIN_MOMENTUM_RANK,
-    STRICT_MIN_UNIVERSE_SIZE,
-    apply_sector_balance,
-    effective_max_ipo_slots,
-    effective_max_universe_size,
-    effective_min_dollar_volume,
-    effective_min_share_volume,
-    effective_momentum_lookback,
-    sector_for_symbol,
-    strict_mode_active,
-)
 
-OUTPUT_PATH = ROOT / "data" / "screener_universe.json"
+OUTPUT_PATH = ROOT / config.SCREENER_UNIVERSE_PATH
 LOOKBACK = 20
 MA_WINDOW = 50
+MIN_PRICE = 5.0
+MIN_AVG_SHARE_VOLUME = 500_000
+TOP_N = 75
 PRINT_TOP = 20
-BATCH_SIZE = 80
+BATCH_SIZE = 40
 YFINANCE_PERIOD = "120d"
-WEIGHT_LIQUIDITY = 0.30
-WEIGHT_MOMENTUM = 0.35
-WEIGHT_TREND = 0.25
-WEIGHT_VOLATILITY = 0.10
+YFINANCE_BATCH_SLEEP_SEC = 1.5
+
+EXCLUDED = frozenset(
+    {"SPY", "QQQ", "IWM", "VTI", "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX"}
+)
+ALLOWED_EXCHANGES = frozenset({"NYSE", "NASDAQ", "ARCA"})
+
+# Common-stock tickers only (skip preferreds, warrants, units, class shares)
+def _is_common_equity(symbol: str) -> bool:
+    if not symbol or len(symbol) > 5:
+        return False
+    return symbol.isalpha()
+
+WEIGHT_MOMENTUM = 0.40
+WEIGHT_VOLATILITY = 0.30
+WEIGHT_TREND = 0.30
 
 
 def _load_env() -> None:
@@ -76,27 +64,23 @@ def _load_env() -> None:
 
 
 def _alpaca_credentials() -> tuple[str, str, bool]:
-    apca_key = os.getenv("APCA_API_KEY_ID", "").strip() or os.getenv("ALPACA_API_KEY", "").strip()
-    apca_secret = (
-        os.getenv("APCA_API_SECRET_KEY", "").strip()
-        or os.getenv("ALPACA_SECRET_KEY", "").strip()
-    )
-    if apca_key and apca_secret:
-        paper = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
-        return apca_key, apca_secret, paper
-
+    paper = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
     paper_key = os.getenv("PAPER_APCA_API_KEY_ID", "").strip()
     paper_secret = os.getenv("PAPER_APCA_API_SECRET_KEY", "").strip()
+    if paper and paper_key and paper_secret:
+        return paper_key, paper_secret, True
+    try:
+        key, secret = config.get_alpaca_credentials()
+        return key, secret, paper
+    except ValueError:
+        pass
     if paper_key and paper_secret:
         return paper_key, paper_secret, True
-
-    raise ValueError(
-        "Alpaca credentials missing. Set APCA_* or PAPER_APCA_* in .env"
-    )
+    raise ValueError("Alpaca credentials missing. Set APCA_* or PAPER_APCA_* in .env")
 
 
 def fetch_alpaca_assets() -> dict[str, dict]:
-    """Active tradable US equities on NYSE, NASDAQ, or ARCA with borrow metadata."""
+    """Active tradable US equities (asset_class=us_equity, status=active)."""
     from alpaca.trading.client import TradingClient
     from alpaca.trading.enums import AssetClass, AssetStatus
     from alpaca.trading.requests import GetAssetsRequest
@@ -117,13 +101,9 @@ def fetch_alpaca_assets() -> dict[str, dict]:
         if exch not in ALLOWED_EXCHANGES:
             continue
         symbol = str(getattr(asset, "symbol", "") or "").strip().upper()
-        if not symbol:
+        if not symbol or symbol in EXCLUDED or not _is_common_equity(symbol):
             continue
-        etb = getattr(asset, "easy_to_borrow", None)
-        out[symbol] = {
-            "exchange": exch,
-            "easy_to_borrow": None if etb is None else bool(etb),
-        }
+        out[symbol] = {"exchange": exch}
     return out
 
 
@@ -146,17 +126,142 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame | None:
             rename[col] = "Close"
         elif low == "volume":
             rename[col] = "Volume"
+        elif low == "date":
+            rename[col] = "Date"
     df = df.rename(columns=rename)
-    needed = {"Open", "High", "Low", "Close", "Volume"}
+    if "Date" in df.columns:
+        df = df.set_index("Date")
+    needed = {"Close", "Volume"}
     if not needed.issubset(df.columns):
         return None
-    out = df[list(needed)].copy()
-    out.index = pd.to_datetime(out.index)
-    out = out.sort_index().dropna(how="all")
-    for col in needed:
-        out[col] = pd.to_numeric(out[col], errors="coerce")
-    out = out.dropna(subset=["Close", "Volume"])
-    return out if len(out) >= IPO_MIN_TRADING_DAYS else None
+    out = df.copy()
+    out.index = pd.to_datetime(out.index, errors="coerce")
+    out = out.sort_index().dropna(subset=["Close", "Volume"])
+    for col in ("Open", "High", "Low", "Close", "Volume"):
+        if col in out.columns:
+            out[col] = pd.to_numeric(out[col], errors="coerce")
+    if "Open" not in out.columns:
+        out["Open"] = out["Close"]
+    if "High" not in out.columns:
+        out["High"] = out["Close"]
+    if "Low" not in out.columns:
+        out["Low"] = out["Close"]
+    return out if len(out) >= LOOKBACK + 1 else None
+
+
+def _load_from_db(symbol: str) -> pd.DataFrame | None:
+    """Load daily OHLCV from market_data.db when available."""
+    db_path = ROOT / config.DB_PATH
+    if not db_path.is_file():
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        for table in (f"{symbol}_daily", symbol):
+            try:
+                info = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+            except sqlite3.Error:
+                continue
+            if not info:
+                continue
+            cols = {row[1] for row in info}
+            close_col = next((c for c in cols if c.lower() == "close"), None)
+            vol_col = next((c for c in cols if c.lower() == "volume"), None)
+            if not close_col:
+                continue
+            date_col = "Date" if "Date" in cols else next(
+                (c for c in cols if c.lower() in ("date", "datetime", "timestamp")), None
+            )
+            if not date_col:
+                continue
+            select = [f'"{date_col}" AS Date', f'"{close_col}" AS Close']
+            for src, alias in (("Open", "Open"), ("High", "High"), ("Low", "Low")):
+                col = next((c for c in cols if c.lower() == alias.lower()), None)
+                if col:
+                    select.append(f'"{col}" AS {alias}')
+            if vol_col:
+                select.append(f'"{vol_col}" AS Volume')
+            df = pd.read_sql(f'SELECT {", ".join(select)} FROM "{table}"', conn)
+            if df.empty:
+                continue
+            frame = _normalize_ohlcv(df)
+            if frame is not None and len(frame) >= LOOKBACK + 1:
+                if table == symbol and len(frame) > LOOKBACK * 4:
+                    daily = frame.resample("D").agg(
+                        {
+                            "Open": "first",
+                            "High": "max",
+                            "Low": "min",
+                            "Close": "last",
+                            "Volume": "sum",
+                        }
+                    ).dropna(subset=["Close", "Volume"])
+                    frame = _normalize_ohlcv(daily)
+                if frame is not None:
+                    return frame
+    finally:
+        conn.close()
+    return None
+
+
+def _fetch_alpaca_bars_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
+    """Daily OHLCV from Alpaca data API (preferred over yfinance at scale)."""
+    if not symbols:
+        return {}
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        from datetime import datetime, timedelta, timezone
+
+        api_key, secret_key, paper = _alpaca_credentials()
+        client = StockHistoricalDataClient(api_key, secret_key)
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=130)
+        request = StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=TimeFrame(1, TimeFrameUnit.Day),
+            start=start,
+            end=end,
+        )
+        bars = client.get_stock_bars(request)
+        df = bars.df
+        if df is None or df.empty:
+            return {}
+        out: dict[str, pd.DataFrame] = {}
+        if isinstance(df.index, pd.MultiIndex):
+            for sym in symbols:
+                if sym not in df.index.get_level_values(0):
+                    continue
+                chunk = df.xs(sym, level=0).copy()
+                chunk = chunk.rename(
+                    columns={
+                        "open": "Open",
+                        "high": "High",
+                        "low": "Low",
+                        "close": "Close",
+                        "volume": "Volume",
+                    }
+                )
+                frame = _normalize_ohlcv(chunk)
+                if frame is not None:
+                    out[sym] = frame
+        else:
+            sym = symbols[0]
+            chunk = df.rename(
+                columns={
+                    "open": "Open",
+                    "high": "High",
+                    "low": "Low",
+                    "close": "Close",
+                    "volume": "Volume",
+                }
+            )
+            frame = _normalize_ohlcv(chunk)
+            if frame is not None:
+                out[sym] = frame
+        return out
+    except Exception:
+        return {}
 
 
 def _fetch_yfinance_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
@@ -173,7 +278,6 @@ def _fetch_yfinance_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
         except Exception:
             pass
         return out
-
     try:
         raw = yf.download(
             symbols,
@@ -185,27 +289,32 @@ def _fetch_yfinance_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
         )
     except Exception:
         return out
-
     if raw is None or raw.empty:
         return out
-
     if isinstance(raw.columns, pd.MultiIndex):
         for sym in symbols:
             if sym not in raw.columns.get_level_values(0):
                 continue
             try:
-                chunk = raw[sym].copy()
-                frame = _normalize_ohlcv(chunk)
+                frame = _normalize_ohlcv(raw[sym].copy())
                 if frame is not None:
                     out[sym] = frame
             except Exception:
                 continue
     else:
-        sym = symbols[0]
         frame = _normalize_ohlcv(raw)
         if frame is not None:
-            out[sym] = frame
+            out[symbols[0]] = frame
     return out
+
+
+def _fetch_bars_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
+    """Alpaca daily bars first, then yfinance for misses."""
+    frames = _fetch_alpaca_bars_batch(symbols)
+    missing = [s for s in symbols if s not in frames]
+    if missing:
+        frames.update(_fetch_yfinance_batch(missing))
+    return frames
 
 
 def _atr_pct(frame: pd.DataFrame, window: int = LOOKBACK) -> float:
@@ -224,61 +333,31 @@ def _atr_pct(frame: pd.DataFrame, window: int = LOOKBACK) -> float:
     return float(atr / price)
 
 
-def _metrics(
-    frame: pd.DataFrame, asset_meta: dict, *, symbol: str = ""
-) -> dict[str, float | int | bool | str] | None:
-    trading_days = len(frame)
-    if trading_days < IPO_MIN_TRADING_DAYS:
-        return None
+def _metrics(frame: pd.DataFrame, *, symbol: str, exchange: str) -> dict | None:
     close = frame["Close"]
     volume = frame["Volume"]
     price = float(close.iloc[-1])
     if price <= MIN_PRICE:
         return None
-    mom_lookback = effective_momentum_lookback()
-    vol_lookback = max(LOOKBACK, mom_lookback)
-    avg_shares = float(volume.tail(vol_lookback).mean())
-    min_share_vol = effective_min_share_volume()
-    if avg_shares < min_share_vol:
+    avg_shares = float(volume.tail(LOOKBACK).mean())
+    if avg_shares < MIN_AVG_SHARE_VOLUME:
         return None
-    avg_dollar_vol = avg_shares * price
-    min_dollar_vol = effective_min_dollar_volume()
-    if avg_dollar_vol < min_dollar_vol:
+    if len(close) < LOOKBACK + 1:
         return None
-    atr_pct = _atr_pct(frame, LOOKBACK)
-    is_ipo = trading_days < IPO_MAX_TRADING_DAYS
-    if atr_pct > MAX_ATR_PCT and not is_ipo:
-        return None
-    if strict_mode_active():
-        etb = asset_meta.get("easy_to_borrow")
-        if etb is False:
-            return None
-    if len(close) < mom_lookback + 1:
-        return None
-    momentum = float(close.iloc[-1] / close.iloc[-mom_lookback - 1] - 1.0)
+    momentum = float(close.iloc[-1] / close.iloc[-LOOKBACK - 1] - 1.0)
     ma50 = float(close.rolling(min(MA_WINDOW, len(close))).mean().iloc[-1])
     if ma50 <= 0:
         return None
     trend = float(price / ma50 - 1.0)
-    position_scale = 1.0
-    if is_ipo:
-        position_scale = IPO_POSITION_SCALE
-    elif atr_pct >= HIGH_VOL_ATR_PCT:
-        position_scale = HIGH_VOL_POSITION_SCALE
+    atr_pct = _atr_pct(frame, LOOKBACK)
     return {
+        "ticker": symbol,
+        "exchange": exchange,
         "price": price,
         "avg_volume": int(avg_shares),
-        "avg_dollar_volume": round(avg_dollar_vol, 0),
         "momentum": momentum,
-        "momentum_30d": momentum if mom_lookback >= 30 else None,
         "atr_pct": atr_pct,
         "trend": trend,
-        "trading_days": trading_days,
-        "is_ipo": is_ipo,
-        "exchange": asset_meta.get("exchange", ""),
-        "easy_to_borrow": asset_meta.get("easy_to_borrow"),
-        "sector": sector_for_symbol(symbol),
-        "position_scale": position_scale,
     }
 
 
@@ -290,40 +369,53 @@ def _percentile_rank(values: np.ndarray) -> np.ndarray:
     return order / (n - 1)
 
 
+def _discover_db_symbols() -> list[str]:
+    """Tickers with daily (or intraday) tables in market_data.db."""
+    db_path = ROOT / config.DB_PATH
+    if not db_path.is_file():
+        return []
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    finally:
+        conn.close()
+    out: set[str] = set()
+    for (name,) in rows:
+        if name.endswith("_daily"):
+            out.add(name[: -len("_daily")].upper())
+        elif _is_common_equity(name.upper()) and name.upper() not in EXCLUDED:
+            out.add(name.upper())
+    return sorted(out)
+
+
+def _build_symbol_list(asset_map: dict[str, dict], *, full_scan: bool) -> list[str]:
+    seed = set(config.equity_universe()) | set(_discover_db_symbols())
+    seed = {s for s in seed if s not in EXCLUDED and _is_common_equity(s)}
+    if full_scan:
+        symbols = sorted(set(asset_map.keys()) | seed)
+    else:
+        extra = [s for s in asset_map if s not in seed][: max(0, 2500 - len(seed))]
+        symbols = sorted(seed | set(extra))
+    return symbols
+
+
 def score_candidates(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
-    dollar_vol = np.array([r["avg_dollar_volume"] for r in rows], dtype=float)
     momentum = np.array([r["momentum"] for r in rows], dtype=float)
     atr_pct = np.array([r["atr_pct"] for r in rows], dtype=float)
     trend = np.array([r["trend"] for r in rows], dtype=float)
 
-    liq_rank = _percentile_rank(dollar_vol)
     mom_rank = _percentile_rank(momentum)
     vol_rank = 1.0 - _percentile_rank(atr_pct)
     trend_rank = _percentile_rank(trend)
 
-    if strict_mode_active():
-        keep = mom_rank >= STRICT_MIN_MOMENTUM_RANK
-        if not keep.any():
-            keep = np.ones(len(rows), dtype=bool)
-        rows = [r for r, ok in zip(rows, keep) if ok]
-        if not rows:
-            return []
-        dollar_vol = np.array([r["avg_dollar_volume"] for r in rows], dtype=float)
-        momentum = np.array([r["momentum"] for r in rows], dtype=float)
-        atr_pct = np.array([r["atr_pct"] for r in rows], dtype=float)
-        trend = np.array([r["trend"] for r in rows], dtype=float)
-        liq_rank = _percentile_rank(dollar_vol)
-        mom_rank = _percentile_rank(momentum)
-        vol_rank = 1.0 - _percentile_rank(atr_pct)
-        trend_rank = _percentile_rank(trend)
-
     scored = []
     for i, row in enumerate(rows):
         composite = (
-            WEIGHT_LIQUIDITY * liq_rank[i]
-            + WEIGHT_MOMENTUM * mom_rank[i]
+            WEIGHT_MOMENTUM * mom_rank[i]
             + WEIGHT_VOLATILITY * vol_rank[i]
             + WEIGHT_TREND * trend_rank[i]
         )
@@ -332,136 +424,112 @@ def score_candidates(rows: list[dict]) -> list[dict]:
                 "ticker": row["ticker"],
                 "score": round(float(composite), 6),
                 "momentum": round(float(row["momentum"]), 6),
-                "momentum_30d": round(float(row["momentum"]), 6)
-                if effective_momentum_lookback() >= 30
-                else None,
                 "momentum_rank": round(float(mom_rank[i]), 6),
-                "momentum_30d_rank": round(float(mom_rank[i]), 6)
-                if effective_momentum_lookback() >= 30
-                else None,
                 "atr_pct": round(float(row["atr_pct"]), 6),
+                "volatility_rank": round(float(vol_rank[i]), 6),
                 "trend": round(float(row["trend"]), 6),
+                "trend_rank": round(float(trend_rank[i]), 6),
                 "price": round(float(row["price"]), 4),
                 "avg_volume": int(row["avg_volume"]),
-                "avg_dollar_volume": int(row["avg_dollar_volume"]),
-                "trading_days": int(row["trading_days"]),
-                "is_ipo": bool(row["is_ipo"]),
                 "exchange": row.get("exchange", ""),
-                "sector": row.get("sector", "Other"),
-                "easy_to_borrow": row.get("easy_to_borrow"),
-                "position_scale": round(float(row["position_scale"]), 2),
             }
         )
     scored.sort(key=lambda r: r["score"], reverse=True)
     return scored
 
 
-def _select_universe(scored: list[dict]) -> list[dict]:
-    max_size = effective_max_universe_size()
-    max_ipo = effective_max_ipo_slots()
-    if strict_mode_active():
-        established = [r for r in scored if not r["is_ipo"]]
-        ipos = [r for r in scored if r["is_ipo"]]
-        ipos.sort(key=lambda r: (r["avg_dollar_volume"], r["score"]), reverse=True)
-        max_established = max(0, max_size - min(len(ipos), max_ipo))
-        pool = established[:max_established] + ipos[:max_ipo]
-        selected = apply_sector_balance(
-            pool,
-            max_size=max_size,
-            max_per_sector=STRICT_MAX_PER_SECTOR,
-        )
-        if len(selected) < STRICT_MIN_UNIVERSE_SIZE:
-            seen = {r["ticker"] for r in selected}
-            for row in scored:
-                if row["ticker"] in seen:
-                    continue
-                selected.append(row)
-                seen.add(row["ticker"])
-                if len(selected) >= STRICT_MIN_UNIVERSE_SIZE:
-                    break
-        return selected[:max_size]
-
-    established = [r for r in scored if not r["is_ipo"]]
-    ipos = [r for r in scored if r["is_ipo"]]
-    ipos.sort(key=lambda r: (r["avg_dollar_volume"], r["score"]), reverse=True)
-    max_established = max(0, max_size - min(len(ipos), max_ipo))
-    selected = established[:max_established] + ipos[:max_ipo]
-    return selected[:max_size]
-
-
-def run_screener(*, asset_map: dict[str, dict] | None = None) -> dict:
+def run_screener(*, asset_map: dict[str, dict] | None = None, full_scan: bool = False) -> dict:
     _load_env()
     asset_map = asset_map or fetch_alpaca_assets()
-    symbols = sorted(asset_map.keys())
-    print(f"Alpaca universe: {len(symbols)} active tradable symbols (NYSE+NASDAQ+ARCA)")
+    symbols = _build_symbol_list(asset_map, full_scan=full_scan)
+    mode = "full Alpaca" if full_scan else "paper-first (UNIVERSE + DB + capped Alpaca)"
+    print(f"Screener mode: {mode} | symbols to scan: {len(symbols)}")
 
     candidates: list[dict] = []
+    db_hits = 0
     for start in range(0, len(symbols), BATCH_SIZE):
         batch = symbols[start : start + BATCH_SIZE]
         print(
-            f"Fetching batch {start // BATCH_SIZE + 1}/"
-            f"{(len(symbols) + BATCH_SIZE - 1) // BATCH_SIZE} "
-            f"({len(batch)} symbols)..."
+            f"Batch {start // BATCH_SIZE + 1}/"
+            f"{(len(symbols) + BATCH_SIZE - 1) // BATCH_SIZE} ({len(batch)} symbols)..."
         )
-        frames = _fetch_yfinance_batch(batch)
+        yf_needed: list[str] = []
+        frames: dict[str, pd.DataFrame] = {}
+        for sym in batch:
+            frame = _load_from_db(sym)
+            if frame is not None:
+                frames[sym] = frame
+                db_hits += 1
+            else:
+                yf_needed.append(sym)
+        if yf_needed:
+            frames.update(_fetch_yfinance_batch(yf_needed))
+            time.sleep(YFINANCE_BATCH_SLEEP_SEC)
         for sym in batch:
             frame = frames.get(sym)
             if frame is None:
                 continue
-            metrics = _metrics(frame, {**asset_map.get(sym, {}), "symbol": sym}, symbol=sym)
-            if metrics is None:
-                continue
-            candidates.append({"ticker": sym, **metrics})
+            metrics = _metrics(
+                frame,
+                symbol=sym,
+                exchange=asset_map.get(sym, {}).get("exchange", ""),
+            )
+            if metrics is not None:
+                candidates.append(metrics)
 
     print(
-        f"Passed filters (price>${MIN_PRICE}, ${effective_min_dollar_volume()/1e6:.0f}M avg daily $vol"
-        f"{', strict ETB' if strict_mode_active() else ''}): "
-        f"{len(candidates)}"
+        f"Passed filters (price>${MIN_PRICE}, {MIN_AVG_SHARE_VOLUME/1e3:.0f}k avg share vol, "
+        f"{LOOKBACK}d): {len(candidates)} | db bars used: {db_hits}"
     )
     score_table = score_candidates(candidates)
-    top = _select_universe(score_table)
-    ipo_count = sum(1 for row in top if row.get("is_ipo"))
+    top = score_table[:TOP_N]
     payload = {
         "tickers": [row["ticker"] for row in top],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "score_table": top,
-        "ipo_count": ipo_count,
         "filters": {
             "min_price": MIN_PRICE,
-            "min_avg_dollar_volume": effective_min_dollar_volume(),
-            "min_share_volume": effective_min_share_volume(),
-            "momentum_lookback": effective_momentum_lookback(),
-            "max_atr_pct": MAX_ATR_PCT,
-            "ipo_max_trading_days": IPO_MAX_TRADING_DAYS,
-            "max_tickers": effective_max_universe_size(),
-            "strict_mode": strict_mode_active(),
-            "max_per_sector": STRICT_MAX_PER_SECTOR if strict_mode_active() else None,
-            "min_momentum_rank": STRICT_MIN_MOMENTUM_RANK if strict_mode_active() else None,
+            "min_avg_share_volume": MIN_AVG_SHARE_VOLUME,
+            "lookback_days": LOOKBACK,
+            "weights": {
+                "momentum": WEIGHT_MOMENTUM,
+                "volatility": WEIGHT_VOLATILITY,
+                "trend": WEIGHT_TREND,
+            },
+            "excluded_etfs": sorted(EXCLUDED),
+            "top_n": TOP_N,
         },
     }
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
-    print(f"Wrote {len(top)} tickers ({ipo_count} IPO) to {OUTPUT_PATH}")
-    print(f"\nTop {PRINT_TOP} by composite score:")
+    OUTPUT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"Wrote {len(top)} tickers to {OUTPUT_PATH}")
+    print(f"\nTop {PRINT_TOP} by composite score (40% mom / 30% low-vol / 30% trend):")
     print(
-        f"{'Rank':<5} {'Ticker':<8} {'Exch':<7} {'Score':>7} {'$VolM':>7} "
-        f"{'IPO':>4} {'Scale':>6}"
+        f"{'Rank':<5} {'Ticker':<8} {'Score':>7} {'Mom%':>8} {'ATR%':>7} "
+        f"{'Trend%':>8} {'AvgVolK':>8}"
     )
     for i, row in enumerate(top[:PRINT_TOP], 1):
-        ipo = "Y" if row.get("is_ipo") else ""
         print(
-            f"{i:<5} {row['ticker']:<8} {row.get('exchange',''):<7} "
-            f"{row['score']:>7.4f} {row['avg_dollar_volume']/1e6:>6.1f}M "
-            f"{ipo:>4} {row.get('position_scale', 1):>6.2f}"
+            f"{i:<5} {row['ticker']:<8} {row['score']:>7.4f} "
+            f"{row['momentum'] * 100:>7.2f} {row['atr_pct'] * 100:>6.2f} "
+            f"{row['trend'] * 100:>7.2f} {row['avg_volume'] / 1000:>7.0f}k"
         )
     return payload
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Dynamic NYSE/NASDAQ universe screener")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Scan all Alpaca common equities (~10k; slow, yfinance rate limits)",
+    )
+    args = parser.parse_args()
     warnings.filterwarnings("ignore", category=FutureWarning)
     try:
-        run_screener()
+        run_screener(full_scan=args.full)
         return 0
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

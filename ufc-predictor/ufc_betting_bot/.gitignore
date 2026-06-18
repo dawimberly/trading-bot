@@ -1,9 +1,0 @@
-.env
-__pycache__/
-*.pyc
-.pytest_cache/
-data/cache/
-data/reports/
-data/plots/
-data/bankroll_state.json
-data/live_signals.csv

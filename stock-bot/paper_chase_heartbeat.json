@@ -1,18 +1,18 @@
 {
-  "timestamp": "2026-06-17T11:58:21.218605",
+  "timestamp": "2026-06-17T13:25:25.920439",
   "regime": "RHYME_D: Range_Bound_Neutral",
-  "equity": 98986.4,
-  "cash": -1469.86,
+  "equity": 98289.22,
+  "cash": -1533.27,
   "crypto_trades_last_cycle": 0,
   "equity_trades_last_cycle": 0,
   "spy_trades_last_cycle": 0,
   "sleeve_caps": {
-    "vti_core": 0.7954,
-    "spy": 0.123556,
+    "vti_core": 0.791543,
+    "spy": 0.128396,
     "crypto": 0.0,
-    "nyse": 0.063084,
+    "nyse": 0.050538,
     "metal": 0.0,
-    "cash_buffer": 0.01796
+    "cash_buffer": 0.029523
   },
   "crypto_vol_only": true,
   "equity_session_open": true,
@@ -20,29 +20,32 @@
   "paper": true,
   "last_cycle_error": null,
   "last_cycle_error_at": null,
-  "dynamic_vol_score": 0.00167,
+  "dynamic_vol_score": 0.001689,
   "thinking_engine": {
-    "model": "deepseek-r1:8b",
-    "confidence": 0.65,
+    "model": "heuristic-backtest",
+    "confidence": 0.78,
     "suggested_tilt": {
-      "vti": 0.2713,
-      "spy": 0.3643,
-      "cash": 0.2171,
-      "crypto": 0.1473
+      "vti": 0.5051,
+      "spy": 0.1616,
+      "energy": 0.0505,
+      "gold": 0.0505,
+      "cash": 0.0808,
+      "crypto": 0.101,
+      "bonds": 0.0505
     },
     "applied_deltas": {
-      "vti_core": -0.0046,
-      "spy": -0.000554,
+      "vti_core": -0.008457,
+      "spy": 0.004286,
       "crypto": 0.0,
-      "nyse": 0.007924,
+      "nyse": -0.004622,
       "metal": 0.0,
-      "cash_buffer": -0.00277
+      "cash_buffer": 0.008793
     },
-    "apply_log": "Thinking Engine: Policy liquidity push into a geopolitical oil shock \u2014 barbell VTI/cash with energy overlay, trim beta -> +1% Energy | Why this tilt? Asymmetry (The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignori | headlines (0.54): Policy / rates / tariffs (trump, fed) | Geopolitics / supply shock (midd | neutral regime \u2014 reduced size | consolidated to max 3 sleeves | -> NYSE/Energy +0.8%",
-    "regime_narrative": "Defensive range-bound market with falling VIX; focus on preserving capital via cash/bonds while trimming tech/growth exposure ahead of Fed d | Edge: The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignorin | conf 65% | spy 36%, vti 27%",
-    "narrative": "Defensive range-bound market with falling VIX; focus on preserving capital via cash/bonds while trimming tech/growth exposure ahead of Fed decision uncertainty.",
-    "asymmetry": "The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignoring the technical weakness in SPY and energy pullback despite low vol context. Energy's recent performance suggests a potential rotation reversal or profit-taking pressure after its 5-day gain.",
-    "reasoning_preview": "NARRATIVE: Defensive range-bound market with falling VIX; focus on preserving capital via cash/bonds while trimming tech/growth exposure ahead of Fed decision uncertainty.\nASYMMETRY: The crowd is likely overweighting speculative assets (tech/crypto) due to AI hype, ignoring the technical weakness in SPY and energy pullback despite low vol context. Energy's recent performance suggests a potential r"
+    "apply_log": "Thinking Engine: Risk-off / safe-haven bid -> -1% VTI, +1% Cash | Why this tilt? Asymmetry (AI/Tech leadership persists \u2014 laggards forced to chase beta on dips) -> vti 51%; spy 16%; | neutral regime \u2014 reduced size | consolidated to max 3 sleeves | -> VTI -0.8%, Cash +0.9%",
+    "regime_narrative": "Risk-off / safe-haven bid | Edge: AI/Tech leadership persists \u2014 laggards forced to chase beta on dips | conf 78% | vti 51%, spy 16%",
+    "narrative": "Risk-off / safe-haven bid",
+    "asymmetry": "AI/Tech leadership persists \u2014 laggards forced to chase beta on dips",
+    "reasoning_preview": "Force-decision proxy: Risk-off / safe-haven bid"
   },
   "scan_schedule": {
     "enabled": true,
@@ -56,21 +59,21 @@
     "orders_start": "2026-06-16T09:35:00-04:00"
   },
   "sleeve_exposure": {
-    "equity": 98986.4,
-    "spy_value": 0.004358,
-    "spy_cap": 12230.363638399998,
+    "equity": 98289.22,
+    "spy_value": 0.004333,
+    "spy_cap": 12619.94269112,
     "crypto_value": 0.0,
     "crypto_cap": 0.0,
-    "nyse_value": 9786.844733000002,
-    "nyse_cap": 6244.4580576,
-    "vti_core_value": 79050.353052,
-    "vti_core_cap": 78733.78255999999
+    "nyse_value": 9733.182959,
+    "nyse_cap": 4967.34060036,
+    "vti_core_value": 78585.455215,
+    "vti_core_cap": 77800.14406646
   },
   "wisdom": {
     "mode": "dynamic",
     "web_sentiment": -0.3032,
-    "price_sentiment": 0.00014995433385345258,
-    "gap": -0.3054493150078018,
+    "price_sentiment": -0.002757998717907717,
+    "gap": -0.26183001923138427,
     "paused": false,
     "governor_stress": false,
     "gap_tier": "normal",
@@ -112,8 +115,8 @@
       "bond_stress": false,
       "spy_below_ma200": false
     },
-    "metal_value": 11619.06,
-    "metal_cap": 9898.64,
+    "metal_value": 11503.84,
+    "metal_cap": 9828.92,
     "blend": {
       "GLD": 0.5,
       "SLV": 0.3,
@@ -129,23 +132,23 @@
       "name": "FOMC",
       "date": "2026-06-18",
       "release_et": "2026-06-18T14:00:00-04:00",
-      "hours_until": 25.03
+      "hours_until": 23.58
     },
     "upcoming_2d": [
       {
         "name": "FOMC",
         "date": "2026-06-18",
         "release_et": "2026-06-18T14:00:00-04:00",
-        "hours_until": 25.03
+        "hours_until": 23.58
       }
     ]
   },
   "sleeve_pnl": {
     "spy": {
       "cost": 0.0044,
-      "value": 0.0044,
-      "unrealized_pnl": -0.0,
-      "unrealized_pnl_pct": -0.0086,
+      "value": 0.0043,
+      "unrealized_pnl": -0.0001,
+      "unrealized_pnl_pct": -0.0143,
       "underwater": true,
       "positions": 1
     },
@@ -159,29 +162,31 @@
     },
     "nyse": {
       "cost": 88510.7711,
-      "value": 88837.1978,
-      "unrealized_pnl": 326.4267,
-      "unrealized_pnl_pct": 0.0037,
-      "underwater": false,
+      "value": 88318.6382,
+      "unrealized_pnl": -192.1329,
+      "unrealized_pnl_pct": -0.0022,
+      "underwater": true,
       "positions": 20
     },
     "metal": {
-      "cost": 11520.0312,
-      "value": 11619.0617,
-      "unrealized_pnl": 99.0304,
-      "unrealized_pnl_pct": 0.0086,
-      "underwater": false,
+      "cost": 11583.4412,
+      "value": 11503.8446,
+      "unrealized_pnl": -79.5967,
+      "unrealized_pnl_pct": -0.0069,
+      "underwater": true,
       "positions": 3
     }
   },
   "vti_core": {
     "target_pct": 0.8,
-    "target_value": 79189.12,
-    "current_value": 79050.35,
-    "drift_pct": 0.0014,
+    "target_value": 78631.38,
+    "current_value": 78585.46,
+    "drift_pct": 0.0005,
     "last_action": null
   },
   "game_plan": {
     "enabled": true,
     "yield_gate_only": true,
-    "yield_gate_enabled": tru
+    "yield_gate_enabled": true
+  }
+}

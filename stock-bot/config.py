@@ -1267,6 +1267,22 @@ def equity_universe():
     return [t for t in UNIVERSE if not is_crypto(t) and t not in METAL_SYMBOLS]
 
 
+def get_nyse_universe() -> list[str]:
+    """Return dynamic screener universe if enabled, else fallback to fixed equity candidates."""
+    if USE_DYNAMIC_UNIVERSE:
+        try:
+            path = Path(SCREENER_UNIVERSE_PATH)
+            if path.is_file():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                tickers = data.get("tickers") or []
+                if tickers:
+                    return [str(t).strip().upper() for t in tickers if str(t).strip()]
+        except Exception:
+            pass
+    exclude = {"SPY", "QQQ", "IWM", "VTI", "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX"}
+    return [t for t in UNIVERSE if "-USD" not in t and t not in exclude]
+
+
 _screener_fallback_warned = False
 
 
