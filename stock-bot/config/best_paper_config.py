@@ -1,15 +1,16 @@
-"""Best Paper Bot v2.1 — locked Profile B stack for paper aggressive trading.
+"""Best Paper Bot v2.2 — locked Profile B stack for paper aggressive trading.
 
 Single source of truth for the validated paper research profile. Applied automatically
 on ``PAPER_CHASE_MODE=1`` via ``apply_best_paper_config()`` (called from
 ``config.init_paper_chase_if_enabled()`` and ``run_paper_bot.py`` → ``run_all.py``).
 
-Live Profile A (~$300) is unchanged — 90% VTI, crypto OFF, thinking OFF.
+Live Profile A (~$300) is unchanged — 90% VTI, crypto OFF, thinking OFF, sector rotation OFF.
 
-Validated stack (365d, ``--paper-aggressive``, 2026-06-16):
-  Baseline: +30.92% return | Sharpe 1.61 | MaxDD -7.54% (VTI B&H +19.63%)
-  Compare: ``backtester.py --days 365 --paper-aggressive --compare-final``
-           ``--compare-new-markets`` / ``--compare-international-sleeve``
+Validated stack (365d, ``--paper-aggressive --strict-pit``, 2026-06-18):
+  Conservative blend + thinking+news: +59.60% return | Sharpe 2.05 | 45 quality tilts
+  Sector rotation: OFF by default (-17.8pp vs blend)
+  Dynamic universe: ON (sticky screener, $7 min price, liquidity filters)
+  Compare: ``backtester.py --days 365 --paper-aggressive --strict-pit --compare-blended-conservative``
 """
 
 from __future__ import annotations
@@ -17,13 +18,15 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-BEST_PAPER_VERSION = "2.1"
-BEST_PAPER_DISPLAY_NAME = f"Best Paper Bot v{BEST_PAPER_VERSION} (crypto OFF)"
+BEST_PAPER_VERSION = "2.2"
+BEST_PAPER_DISPLAY_NAME = (
+    f"Best Paper Bot v{BEST_PAPER_VERSION} (conservative blend + thinking ON)"
+)
 BEST_PAPER_LOCKED = True  # enforced via enforce_best_paper_stack() on every paper path
 BEST_PAPER_FINAL_LOCKED = True  # final validated state — do not change without 365d re-backtest
-BEST_PAPER_LOCK_DATE = "2026-06-17"
+BEST_PAPER_LOCK_DATE = "2026-06-18"
 BEST_PAPER_LOCK_NOTE = (
-    "Final lock after UFC cleanup — trading bot only; Profile B defaults enforced in code."
+    "v2.2 lock — strict PIT, conservative Top1 blend, quality thinking tilts, stable dyn_univ."
 )
 
 # Canonical Profile B .env (opt-in flags only when experimenting)
@@ -34,19 +37,31 @@ BEST_PAPER_RECOMMENDED_ENV: dict[str, str] = {
     "PAPER_CRYPTO_ENABLED": "false",
     "PAPER_INTERNATIONAL_SLEEVE_ENABLED": "false",
     "PAPER_BOND_SLEEVE_ENABLED": "false",
-    "PAPER_THINKING_ENGINE_ENABLED": "false",
+    "PAPER_THINKING_ENGINE_ENABLED": "true",
     "PAPER_DYNAMIC_UNIVERSE_ENABLED": "true",
     "PAPER_IPO_SAFETY_ENABLED": "true",
+    "PAPER_TECH_GUARD_ENABLED": "true",
+    "PAPER_SECTOR_ROTATION_ENABLED": "false",
+    "SECTOR_ROTATION_HYBRID_MODE": "false",
+    "PAPER_VOL_POSITION_SIZING_ENABLED": "true",
+    "PAPER_LOSS_CUTTING_ENABLED": "true",
+    "TOP1_VOL_SIZING_CONSERVATIVE": "true",
+    "TOP1_LOSS_CUT_CONSERVATIVE": "true",
+    "STRICT_PIT_BACKTEST": "true",
+    "PAPER_SCALING_STRATEGY_ENABLED": "false",
+    "PAPER_PATTERN_AWARENESS_ENABLED": "false",
+    "PAPER_PROFIT_TARGET_ENABLED": "false",
 }
 
-# --- 365d validation snapshot (Best Paper v2.1 baseline, realistic costs) ---
+# --- 365d validation snapshot (Best Paper v2.2 conservative blend, strict PIT) ---
 BEST_PAPER_VALIDATION = {
-    "window": "2025-08-11 → 2026-06-16 (~310 bars)",
-    "vti_buy_hold_pct": 19.63,
-    "baseline_return_pct": 30.92,
-    "baseline_sharpe": 1.61,
-    "baseline_max_dd_pct": -7.54,
-    "validated_at": "2026-06-16",
+    "window": "2025-08-13 → 2026-06-18 (~310 bars)",
+    "vti_buy_hold_pct": 16.15,
+    "baseline_return_pct": 59.60,
+    "baseline_sharpe": 2.05,
+    "baseline_max_dd_pct": -7.12,
+    "thinking_tilt_events": 45,
+    "validated_at": "2026-06-18",
 }
 
 # --- Why defaults stay OFF (long-term policy; do not enable without re-backtest) ---
@@ -64,6 +79,16 @@ BEST_PAPER_OFF_RATIONALE: dict[str, str] = {
     "bond_sleeve": (
         "Bond sleeve (TLT/GOVT) is flat on return/Sharpe vs baseline (+0.04pp MaxDD help only). "
         "Default OFF; optional PAPER_BOND_SLEEVE_ENABLED=true for risk-off hedge experiments."
+    ),
+    "sector_rotation": (
+        "Inter-sector rotation (365d): rules-only -7.9pp vs no rotation; hybrid -21.5pp. "
+        "Trimmed tech during a tech-led window without validated edge. Default OFF; "
+        "opt-in via PAPER_SECTOR_ROTATION_ENABLED=true after rule tuning."
+    ),
+    "tech_guard": (
+        "Tech concentration guard ON by default on paper — zero performance drag when "
+        "exposure stays below 45%; blocks tech pile-on in momentum rallies. "
+        "Live $300 stays OFF (TECH_CONCENTRATION_LIVE_ENABLED=false)."
     ),
 }
 
@@ -83,12 +108,13 @@ BEST_PAPER_CORE_ON: dict[str, bool] = {
     "stat_arb": True,
     "vol_overlay": True,
     "options_income": True,
-    "thinking_engine": False,  # opt-in via PAPER_THINKING_ENGINE_ENABLED
+    "thinking_engine": True,  # quality tilts ON (cooldown + deadband)
     "nyse_overlap": True,
     "adaptive_chunk": True,
     "cofire_budget": True,
     "dynamic_universe": True,
     "ipo_safety": True,
+    "tech_guard": True,  # PAPER_TECH_GUARD_ENABLED default true
 }
 
 # Locked OFF — weak, redundant, or underperforming vs validated v2.1 baseline
@@ -103,13 +129,17 @@ BEST_PAPER_LOCKED_OFF: dict[str, bool] = {
     "crypto_sleeve": False,
     "crypto_expanded": False,
     "profit_target": False,
+    "scaling_strategy": False,
+    "pattern_awareness": False,
     "international_adr": False,
     "bond_sleeve": False,
+    "sector_rotation": False,
 }
 
 # Opt-in features — never forced ON by apply_best_paper_config()
 BEST_PAPER_OPT_IN: dict[str, str] = {
     "thinking_engine": "PAPER_THINKING_ENGINE_ENABLED",
+    "sector_rotation": "PAPER_SECTOR_ROTATION_ENABLED",
 }
 
 # Opt-in new-market sleeves — default false
@@ -130,6 +160,7 @@ BEST_PAPER_ENV_MAP: dict[str, str] = {
     "cofire_budget": "BEST_PAPER_COFIRE_BUDGET",
     "dynamic_universe": "BEST_PAPER_DYNAMIC_UNIVERSE",
     "ipo_safety": "BEST_PAPER_IPO_SAFETY",
+    "tech_guard": "BEST_PAPER_TECH_GUARD",
 }
 
 
@@ -175,11 +206,31 @@ def get_full_stack() -> dict[str, bool]:
 
 
 def get_validated_defaults_line() -> str:
-    """One-line summary for status.py — validated v2.1 defaults."""
+    """One-line summary for status.py — validated v2.2 defaults."""
+    v = BEST_PAPER_VALIDATION
     return (
-        f"v2.1 FINAL LOCK ({BEST_PAPER_LOCK_DATE}): crypto OFF | ADR OFF | bond OFF | "
-        "dyn_univ ON | IPO safety ON | thinking OFF (opt-in)"
+        f"v2.2 ({BEST_PAPER_LOCK_DATE}): strict PIT | conservative Top1 blend | "
+        f"thinking ON | dyn_univ ON | rotation/ADR/bond/crypto OFF | "
+        f"365d {v['baseline_return_pct']:+.2f}% Sharpe {v['baseline_sharpe']:.2f}"
     )
+
+
+def get_v22_config_summary_lines() -> list[str]:
+    """Multi-line Best Paper v2.2 config summary for status.py."""
+    v = BEST_PAPER_VALIDATION
+    return [
+        "=== Best Paper v2.2 (locked defaults) ===",
+        "Research validation: 365d strict PIT | conservative blend + thinking+news",
+        (
+            f"  Return {v['baseline_return_pct']:+.2f}% | Sharpe {v['baseline_sharpe']:.2f} | "
+            f"MaxDD {v['baseline_max_dd_pct']:.2f}% | tilts {v.get('thinking_tilt_events', 45)}"
+        ),
+        "  ON:  strict PIT | spec 0.5% vol cap + mild ATR | spec -4% stop only",
+        "       thinking (cooldown/deadband) | dyn_univ (sticky, $7+, liquidity)",
+        "       dyn VTI/risk | stat arb | vol overlay | options | tech guard | IPO safety",
+        "  OFF: crypto | sector rotation | ADR | bond | scaling | patterns | profit target",
+        "       macro | social | risk parity | equity pairs | SPY MA exit",
+    ]
 
 
 def get_final_lock_banner() -> str:
@@ -196,7 +247,7 @@ def get_restart_commands_block() -> list[str]:
         "  python scripts\\account\\preflight.py",
         "  python run_all.py",
         "",
-        "Paper Best Paper v2.1:",
+        "Paper Best Paper v2.2:",
         "  cd stock-bot",
         "  python status.py",
         "  python run_paper_bot.py",
@@ -231,7 +282,7 @@ def get_core_on_summary() -> str:
 
 def get_recommended_env_block() -> str:
     """Copy-paste .env block for Profile B defaults."""
-    lines = ["# Best Paper Bot v2.1 — validated defaults"]
+    lines = ["# Best Paper Bot v2.2 — validated defaults"]
     for key, val in BEST_PAPER_RECOMMENDED_ENV.items():
         lines.append(f"{key}={val}")
     return "\n".join(lines)
@@ -270,10 +321,24 @@ def validate_best_paper_config() -> tuple[bool, list[str]]:
             "PAPER_BOND_SLEEVE_ENABLED=true overrides validated default "
             "(365d: flat return — defensive hedge experiments only)"
         )
-    if config.PAPER_THINKING_ENGINE_ENABLED:
+    if not config.PAPER_THINKING_ENGINE_ENABLED:
         warnings.append(
-            "PAPER_THINKING_ENGINE_ENABLED=true — thinking is opt-in; "
-            "validate on paper before any live enable"
+            "PAPER_THINKING_ENGINE_ENABLED=false overrides v2.2 default "
+            "(thinking ON validated +6pp vs OFF on conservative blend)"
+        )
+    if config.PAPER_SECTOR_ROTATION_ENABLED:
+        warnings.append(
+            "PAPER_SECTOR_ROTATION_ENABLED=true overrides validated default "
+            "(365d: -7.9pp rules-only vs baseline — opt-in research only)"
+        )
+    if config.PAPER_SCALING_STRATEGY_ENABLED:
+        warnings.append("PAPER_SCALING_STRATEGY_ENABLED should be off (locked OFF v2.2)")
+    if config.PAPER_PATTERN_AWARENESS_ENABLED:
+        warnings.append("PAPER_PATTERN_AWARENESS_ENABLED should be off (locked OFF v2.2)")
+    if not config.PAPER_TECH_GUARD_ENABLED:
+        warnings.append(
+            "PAPER_TECH_GUARD_ENABLED=false overrides validated default "
+            "(tech guard ON is zero-cost safety net on paper)"
         )
     return len(warnings) == 0, warnings
 
@@ -294,6 +359,19 @@ def _apply_core_on_flags(config, flags: dict[str, bool]) -> None:
     config.PAPER_COFIRE_BUDGET_ENABLED = flags["cofire_budget"]
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = flags["dynamic_universe"]
     config.PAPER_IPO_SAFETY_ENABLED = flags["ipo_safety"]
+    config.PAPER_TECH_GUARD_ENABLED = _env_bool(
+        "PAPER_TECH_GUARD_ENABLED", flags.get("tech_guard", True)
+    )
+
+
+def _apply_rotation_and_guard_defaults(config) -> None:
+    """Sector rotation OFF by default; hybrid mode OFF; tech guard ON on paper."""
+    config.PAPER_SECTOR_ROTATION_ENABLED = _env_bool(
+        "PAPER_SECTOR_ROTATION_ENABLED", False
+    )
+    config.SECTOR_ROTATION_HYBRID_MODE = _env_bool("SECTOR_ROTATION_HYBRID_MODE", False)
+    if os.getenv("PAPER_TECH_GUARD_ENABLED") is None:
+        config.PAPER_TECH_GUARD_ENABLED = True
 
 
 def _apply_locked_off_flags(config) -> None:
@@ -315,7 +393,7 @@ def _apply_opt_in_sleeves(config) -> None:
 
 
 def apply_best_paper_config() -> None:
-    """Apply validated Best Paper Bot v2.1 stack to config module (paper chase startup)."""
+    """Apply validated Best Paper Bot v2.2 stack to config module (paper chase startup)."""
     import config
 
     if os.getenv("BEST_PAPER_SKIP_DEFAULTS"):
@@ -326,6 +404,7 @@ def apply_best_paper_config() -> None:
     _apply_core_on_flags(config, flags)
     _apply_locked_off_flags(config)
     _apply_opt_in_sleeves(config)
+    _apply_rotation_and_guard_defaults(config)
 
 
 if __name__ == "__main__":
@@ -344,9 +423,10 @@ if __name__ == "__main__":
     print("\nLocked OFF:")
     for k in BEST_PAPER_LOCKED_OFF:
         print(f"  [ ] {k}")
-    print("\nOff-by-default rationale (crypto / ADR / bond):")
-    for key in ("crypto_sleeve", "international_adr", "bond_sleeve"):
+    print("\nOff-by-default rationale (crypto / ADR / bond / rotation):")
+    for key in ("crypto_sleeve", "international_adr", "bond_sleeve", "sector_rotation"):
         print(f"  {key}: {BEST_PAPER_OFF_RATIONALE[key][:72]}...")
+    print(f"  tech_guard: {BEST_PAPER_OFF_RATIONALE['tech_guard'][:72]}...")
     _, warns = validate_best_paper_config()
     if warns:
         print("\nWarnings:")

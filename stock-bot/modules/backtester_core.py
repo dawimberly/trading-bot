@@ -50,6 +50,7 @@ class BacktestRunOptions:
     export_csv: Path | None = None
     slippage_sensitivity: bool = False
     slippage_levels_bps: tuple[int, ...] = (0, 5, 10, 25)
+    strict_pit: bool = False
 
 
 RUN_OPTIONS = BacktestRunOptions()

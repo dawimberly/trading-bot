@@ -810,6 +810,7 @@ def _equity_momentum_ranked(
     regime=None,
     bar_idx: int | None = None,
     full_data=None,
+    executor=None,
 ):
     ranked = _equity_momentum_candidates(
         data, equity_cols, bar_idx=bar_idx, full_data=full_data
@@ -818,11 +819,35 @@ def _equity_momentum_ranked(
         return ranked
     if config.effective_paper_dynamic_universe_strict():
         ranked = _apply_screener_momentum_order(ranked)
+    if config.effective_sector_rotation_enabled():
+        from modules.sector_rotation import (
+            apply_rotation_to_ranked,
+            build_backtest_rotation_summary,
+        )
+
+        rot_summary = build_backtest_rotation_summary(
+            data, bar_idx=bar_idx, full_data=full_data
+        )
+        ranked = apply_rotation_to_ranked(ranked, rot_summary)
     if _spy_sleeve_active(data, yield_gated=yield_gated, regime=regime):
         if config.NYSE_SECTOR_TECH_CAP > 0:
             ranked = _apply_sector_tech_cap(ranked)
         if config.effective_nyse_overlap_filter_enabled():
             ranked = _filter_nyse_anti_overlap(data, ranked)
+    if config.effective_tech_guard_enabled():
+        from modules.tech_concentration_guard import apply_guard_to_ranked
+
+        ranked = apply_guard_to_ranked(ranked, config.fund_allocation_pct())
+    if config.effective_pattern_awareness_enabled():
+        from modules.chart_patterns import apply_patterns_to_ranked
+
+        ranked = apply_patterns_to_ranked(
+            ranked,
+            data,
+            bar_idx=bar_idx,
+            full_data=full_data,
+            executor=executor,
+        )
     return ranked
 
 
@@ -1176,6 +1201,7 @@ def run_equity_strategy(
         regime=regime,
         bar_idx=bar_idx,
         full_data=ipo_data,
+        executor=executor,
     )
     if not ranked:
         return 0
@@ -1193,6 +1219,18 @@ def run_equity_strategy(
             now,
             cooldown_seconds=cooldown_seconds,
             cooldown_bars=cooldown_bars,
+        ):
+            continue
+        from modules.tech_concentration_guard import should_skip_tech_nyse_buy, _prices_mapping
+
+        positions = getattr(getattr(executor, "portfolio", None), "positions", None)
+        raw_prices = getattr(executor, "prices", None)
+        prices = _prices_mapping(raw_prices)
+        if should_skip_tech_nyse_buy(
+            symbol,
+            config.fund_allocation_pct(),
+            positions=positions,
+            prices=prices,
         ):
             continue
         notional = None
@@ -1218,6 +1256,35 @@ def run_equity_strategy(
             )
             if notional < min_n:
                 continue
+            try:
+                from modules.vol_position_sizing import apply_top1_nyse_notional
+
+                notional = apply_top1_nyse_notional(
+                    symbol,
+                    notional,
+                    equity,
+                    executor,
+                    data=data,
+                    bar_idx=bar_idx,
+                    full_data=ipo_data,
+                )
+                if notional is None or notional < min_n:
+                    continue
+            except ImportError:
+                pass
+            try:
+                from modules.scaling_strategy import (
+                    apply_speculative_size_mult,
+                    scaling_strategy_blocks_buy,
+                )
+
+                if scaling_strategy_blocks_buy(executor, symbol, bar_idx or 0):
+                    continue
+                notional = apply_speculative_size_mult(symbol, float(notional))
+                if notional < min_n:
+                    continue
+            except ImportError:
+                pass
         order = executor.execute_order(
             symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
         )
@@ -1359,6 +1426,7 @@ def run_international_strategy(
         regime=regime,
         bar_idx=bar_idx,
         full_data=ipo_data,
+        executor=executor,
     )
     if config.effective_nyse_overlap_filter_enabled():
         ranked = _filter_nyse_anti_overlap(data, ranked)

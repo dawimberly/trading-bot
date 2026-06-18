@@ -27,9 +27,14 @@ class AlpacaExecutor:
     """Submit market orders via alpaca-py with shared credential loading."""
 
     def __init__(self, paper=None, credentials_fn=None):
-        cred_fn = credentials_fn or config.get_alpaca_credentials
+        use_paper = config.PAPER_TRADING if paper is None else bool(paper)
+        if credentials_fn is None:
+            cred_fn = lambda paper_mode=use_paper: config.get_alpaca_credentials(
+                paper=paper_mode
+            )
+        else:
+            cred_fn = credentials_fn
         self._credentials_fn = cred_fn
-        use_paper = config.PAPER_TRADING if paper is None else paper
         if not use_paper and not config.ALLOW_LIVE_TRADING:
             raise RuntimeError(
                 "Live trading is disabled. Use Alpaca paper keys with PAPER_TRADING=true, "
@@ -805,6 +810,50 @@ class AlpacaExecutor:
         logger.info(
             "execute_full_exit submitted",
             extra={"symbol": symbol, "order_id": getattr(submitted, "id", None)},
+        )
+        return submitted
+
+    def execute_full_exit_qty(self, symbol, *, reason="exit", sleeve=None):
+        """Close full position using exact share qty (avoids notional rounding on fractionals)."""
+        if not self._equity_trading_allowed(symbol):
+            return None
+        pos = self._find_position(symbol)
+        if pos is None:
+            return None
+        formatted_symbol, tif, _is_crypto_sym = self.get_order_params(symbol)
+        self._cancel_open_orders_for(symbol)
+        qty = float(pos.qty)
+        if qty == 0:
+            return None
+        if qty > 0:
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                qty=abs(qty),
+                side=OrderSide.SELL,
+                time_in_force=tif,
+            )
+        else:
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                qty=abs(qty),
+                side=OrderSide.BUY,
+                time_in_force=tif,
+            )
+        submitted = self._submit_order(order, symbol=symbol, op="execute_full_exit_qty")
+        if submitted is None:
+            return None
+        self._invalidate_cache()
+        side_label = "Sell" if qty > 0 else "Buy"
+        self._track_order(
+            submitted,
+            symbol=symbol,
+            side=side_label,
+            reason=reason,
+            sleeve=sleeve,
+        )
+        logger.info(
+            "execute_full_exit_qty submitted",
+            extra={"symbol": symbol, "qty": abs(qty), "order_id": getattr(submitted, "id", None)},
         )
         return submitted
 

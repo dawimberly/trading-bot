@@ -34,11 +34,11 @@ SLOT_LABELS = {
 SLOT_HOUR_ET = {"premarket": 8, "postmarket": 18}
 
 # Live-like tilt gates (365d Profile A validation)
-NEWS_IMPACT_MIN_FOR_CAP_DELTAS = 0.40
+NEWS_IMPACT_MIN_FOR_CAP_DELTAS = 0.44
 NEWS_IMPACT_MIN_FOR_LIVE_TILT = 0.38
 NEWS_IMPACT_MIN_FOR_PAPER_TILT = 0.36
 NEWS_IMPACT_NEUTRAL_REGIME_MIN = 0.44
-NEWS_IMPACT_NEUTRAL_PAPER_MIN = 0.42
+NEWS_IMPACT_NEUTRAL_PAPER_MIN = 0.44
 NEWS_IMPACT_SKIP_BELOW = 0.30
 NEUTRAL_REGIME_MARKERS = ("RHYME_D", "RANGE_BOUND", "NEUTRAL")
 
@@ -676,8 +676,25 @@ def synthesize_backtest_news(
     vol: str,
     *,
     slot: str = "premarket",
+    bar_ts: pd.Timestamp | None = None,
+    bar_index: int | None = None,
 ) -> dict[str, Any]:
     """Historical headline proxy for backtest (simulates 8 AM / 6 PM digest from macro tape)."""
+    if (
+        config.effective_strict_pit_backtest()
+        and bar_ts is not None
+        and bar_index is not None
+    ):
+        from modules.pit_replay import synthesize_pit_news
+
+        return synthesize_pit_news(
+            data,
+            regime,
+            vol,
+            bar_ts=bar_ts,
+            bar_index=int(bar_index),
+            slot=slot,
+        )
     from modules.thinking_engine import build_market_summary
 
     summary = build_market_summary(data, regime, vol)

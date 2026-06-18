@@ -65,6 +65,8 @@ def get_live_web_sentiment(force_refresh: bool = False) -> float | None:
     Return [-1, 1] web sentiment from finance headlines.
     Cached for WEB_SENTIMENT_CACHE_HOURS (default 24h).
     """
+    if config.backtest_strict_pit_context():
+        return None
     if not force_refresh:
         cached = _load_cache()
         if cached and _cache_fresh(cached):

@@ -1,10 +1,11 @@
-"""24/7 paper Sharpe-chase bot — Best Paper Bot stack, isolated from live ~$100.
+"""24/7 paper Sharpe-chase bot — Best Paper Bot v2.2 stack, isolated from live ~$100.
 
 Uses run_all.py with PAPER_CHASE_MODE and enforce_best_paper_stack():
-  - Dynamic VTI (40-75%), dynamic risk (1-3%), original stat arb, vol overlay, options
-  - Overlap filter, adaptive chunk, co-fire budget
-  - Thinking engine opt-in (PAPER_THINKING_ENGINE_ENABLED=true + Ollama)
-  - Locked OFF: macro regime, risk parity, stat arb optimized, social, equity pairs, SPY MA exit
+  - Strict PIT research standard | conservative Top1 blend (spec vol + -4% stop)
+  - Thinking engine ON (quality tilts: cooldown, deadband, material delta gates)
+  - Dynamic universe ON (sticky screener, liquidity filters)
+  - Dynamic VTI (40-75%), dynamic risk (1-3%), stat arb, vol overlay, options
+  - Locked OFF: crypto, sector rotation, ADR, bond, scaling, patterns, profit target
 
 Run:
     python run_paper_bot.py
@@ -28,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
+
+from modules.env_loader import load_project_dotenv
 
 ROOT = Path(__file__).resolve().parent
 RUN_ALL = ROOT / "run_all.py"
@@ -85,7 +88,7 @@ def _run_crypto_vol_cycle() -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Paper Sharpe-chase bot (Best Paper v2.1)")
+    parser = argparse.ArgumentParser(description="Paper Sharpe-chase bot (Best Paper v2.2)")
     parser.add_argument(
         "--cycles",
         type=int,
@@ -97,12 +100,23 @@ def main() -> None:
     from modules.logging_utils import setup_project_logging
 
     setup_project_logging()
-    load_dotenv(find_dotenv())
+    load_project_dotenv(force=True)
     os.environ["PAPER_TRADING"] = "true"
     os.environ["PAPER_CHASE_MODE"] = "1"
 
     env = os.environ.copy()
     env.setdefault("PAPER_AGGRESSIVE", "true")
+    env.setdefault("PAPER_THINKING_ENGINE_ENABLED", "true")
+    env.setdefault("PAPER_DYNAMIC_UNIVERSE_ENABLED", "true")
+    env.setdefault("PAPER_SECTOR_ROTATION_ENABLED", "false")
+    env.setdefault("STRICT_PIT_BACKTEST", "true")
+    env.setdefault("PAPER_VOL_POSITION_SIZING_ENABLED", "true")
+    env.setdefault("PAPER_LOSS_CUTTING_ENABLED", "true")
+    env.setdefault("TOP1_VOL_SIZING_CONSERVATIVE", "true")
+    env.setdefault("TOP1_LOSS_CUT_CONSERVATIVE", "true")
+    env.setdefault("PAPER_SCALING_STRATEGY_ENABLED", "false")
+    env.setdefault("PAPER_PATTERN_AWARENESS_ENABLED", "false")
+    env.setdefault("PAPER_PROFIT_TARGET_ENABLED", "false")
     env.setdefault("HEARTBEAT_FILE", "paper_chase_heartbeat.json")
     env.setdefault("PAPER_JOURNAL_CSV", "paper_chase_journal.csv")
     if env.get("PAPER_APCA_API_KEY_ID") and env.get("PAPER_APCA_API_SECRET_KEY"):

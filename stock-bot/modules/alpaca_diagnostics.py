@@ -9,9 +9,12 @@ from typing import Callable
 from alpaca.common.exceptions import APIError
 
 import config
+from modules.env_loader import LOCAL_ENV, dotenv_search_paths, ensure_dotenv_loaded
 from modules.alpaca_client import get_trading_client, is_auth_alpaca_error
 
-ENV_FILE = Path(".env")
+ensure_dotenv_loaded()
+
+ENV_FILE = LOCAL_ENV
 MISSING = "-"
 
 
@@ -22,17 +25,34 @@ def _env_present(name: str) -> bool:
 
 def alpaca_env_status(*, paper: bool | None = None) -> dict:
     """Summarize which Alpaca env vars are set (values never returned)."""
+    ensure_dotenv_loaded()
     use_paper = config.PAPER_TRADING if paper is None else bool(paper)
-    key_vars = ("APCA_API_KEY_ID", "ALPACA_API_KEY")
-    secret_vars = ("APCA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
+    key_vars = ("APCA_API_KEY_ID", "ALPACA_API_KEY", "PAPER_APCA_API_KEY_ID", "SOCIAL_APCA_API_KEY_ID")
+    secret_vars = (
+        "APCA_API_SECRET_KEY",
+        "ALPACA_SECRET_KEY",
+        "PAPER_APCA_API_SECRET_KEY",
+        "SOCIAL_APCA_API_SECRET_KEY",
+    )
     has_key = any(_env_present(v) for v in key_vars)
     has_secret = any(_env_present(v) for v in secret_vars)
+    cred_source = "unknown"
+    try:
+        if use_paper and config.get_research_alpaca_credentials():
+            cred_source = "PAPER_APCA_*"
+        else:
+            config.get_alpaca_credentials(paper=use_paper)
+            cred_source = "APCA_*"
+    except ValueError:
+        cred_source = "missing"
     return {
         "paper_mode": use_paper,
         "env_file_exists": ENV_FILE.is_file(),
+        "env_search_paths": [str(p) for p in dotenv_search_paths()],
         "has_api_key": has_key,
         "has_api_secret": has_secret,
         "credentials_ready": has_key and has_secret,
+        "credential_source": cred_source,
         "base_url": config.get_alpaca_base_url(paper=use_paper),
     }
 

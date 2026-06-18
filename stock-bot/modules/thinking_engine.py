@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
 import logging
 import re
 import time
@@ -13,6 +14,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 import threading
+
+import pandas as pd
 
 import config
 from modules.safe_io import read_json_file, write_json_file
@@ -27,6 +30,23 @@ APPROVAL_FILE = ROOT / config.THINKING_APPROVAL_FILE
 AUDIT_LOG = ROOT / "logs" / "thinking_engine.log"
 THINKING_MAX_TOTAL_DELTA = 0.12
 THINKING_MAX_ACTIVE_SLEEVES = 3
+THINKING_MIN_MATERIAL_DELTA = float(os.getenv("THINKING_MIN_MATERIAL_DELTA", "0.008"))
+THINKING_TILT_COOLDOWN_BARS = int(os.getenv("THINKING_TILT_COOLDOWN_BARS", "5"))
+THINKING_COOLDOWN_BREAK_IMPACT = float(os.getenv("THINKING_COOLDOWN_BREAK_IMPACT", "0.52"))
+THINKING_DELTA_DEADBAND = float(os.getenv("THINKING_DELTA_DEADBAND", "0.006"))
+
+_DEFENSE_SPACE_NARRATIVE_KEYWORDS = (
+    "spacex",
+    "space force",
+    "rocket",
+    "satellite",
+    "starlink",
+    "defense",
+    "pentagon",
+    "aerospace",
+    "missile",
+    "nasa",
+)
 
 _TILT_KEYS = ("vti", "spy", "energy", "gold", "cash", "crypto", "bonds")
 _CAP_KEYS = ("vti_core", "spy", "crypto", "nyse", "metal", "cash_buffer")
@@ -185,6 +205,78 @@ def _clamp_tilt_deltas(
     )
 
 
+def regime_tilt_bucket(regime: str) -> str:
+    """Collapse regime labels so minor suffix churn does not re-tilt daily."""
+    raw = str(regime or "").strip().upper()
+    if not raw:
+        return "UNKNOWN"
+    base = raw.split(":")[0].strip()
+    for prefix in ("RHYME_", "TREND_", "VOL_", "MACRO_"):
+        if base.startswith(prefix):
+            parts = base.split("_")
+            if len(parts) >= 2:
+                return f"{parts[0]}_{parts[1]}"
+    return base[:32]
+
+
+def _apply_delta_deadband(
+    deltas: dict[str, float],
+    floor: float | None = None,
+) -> dict[str, float]:
+    lo = THINKING_DELTA_DEADBAND if floor is None else float(floor)
+    return {k: (0.0 if abs(float(v)) < lo else float(v)) for k, v in deltas.items()}
+
+
+def deltas_materially_changed(
+    prev: dict[str, float] | None,
+    new: dict[str, float],
+    *,
+    threshold: float | None = None,
+) -> bool:
+    if not prev:
+        return any(abs(float(v)) >= (threshold or THINKING_MIN_MATERIAL_DELTA) for v in new.values())
+    thr = threshold if threshold is not None else THINKING_MIN_MATERIAL_DELTA
+    return any(
+        abs(float(new.get(k, 0.0)) - float(prev.get(k, 0.0))) >= thr for k in _CAP_KEYS
+    )
+
+
+def _defense_space_leading(summary: dict) -> bool:
+    for row in summary.get("sector_leaders") or []:
+        sector = str(row.get("sector", ""))
+        if any(k in sector for k in ("Defense", "Aerospace", "Space")):
+            if float(row.get("change_5d_pct") or 0.0) > 0:
+                return True
+    return False
+
+
+def _score_backtest_confidence(summary: dict) -> float:
+    """Evidence-weighted confidence for heuristic backtest (not flat 0.78)."""
+    news = _news_impact(summary)
+    phase = str(summary.get("ai_cycle_phase") or "").lower()
+    score = 0.54
+    if news >= 0.50:
+        score += 0.14
+    elif news >= 0.42:
+        score += 0.08
+    elif news >= 0.36:
+        score += 0.04
+    if _defense_space_leading(summary):
+        score += 0.07
+    if "mid-cycle" in phase and "ai" in phase:
+        score += 0.06
+    elif "rotation" in phase and "energy" in phase:
+        score += 0.05
+    elif "exhaustion" in phase or "risk-off" in phase:
+        score += 0.03
+    if _strong_new_evidence(summary, {"narrative": _infer_narrative(summary), "asymmetry": _infer_asymmetry(summary)}):
+        score += 0.06
+    crowded = str(summary.get("crowded_trade_warning") or "")
+    if crowded.startswith("CROWDED"):
+        score -= 0.05
+    return round(max(0.52, min(0.86, score)), 2)
+
+
 _GEO_KEYWORDS = (
     "iran",
     "israel",
@@ -213,7 +305,8 @@ _TILT_ALIASES = {
     "infrastructure": "spy",
     "datacenter": "spy",
     "robotics": "spy",
-    "defense": "energy",
+    "defense": "nyse",
+    "aerospace": "nyse",
     "financials": "spy",
     "financial": "spy",
 }
@@ -358,31 +451,35 @@ def _series_trend_desc(series, *, days: int = 5) -> str:
     return f"stable ({ch:+.1f}% {days}d)"
 
 
-def _load_macro_close(col: str, cache: dict | None = None):
+def _load_macro_close(col: str, cache: dict | None = None, *, as_of: pd.Timestamp | None = None):
     from modules.macro_regime_adaptor import _load_daily_close
+    from modules.pit_replay import slice_series_as_of
 
     if cache is not None:
         if col not in cache:
             cache[col] = _load_daily_close(col)
-        return cache[col]
+        series = cache[col]
+    else:
+        now = time.monotonic()
+        hit = _MACRO_SERIES_CACHE.get(col)
+        if hit and now - hit[0] < _MACRO_CACHE_TTL_SEC:
+            series = hit[1]
+        else:
+            series = _load_daily_close(col)
+            if len(_MACRO_SERIES_CACHE) >= _MACRO_CACHE_MAX:
+                oldest = min(_MACRO_SERIES_CACHE, key=lambda k: _MACRO_SERIES_CACHE[k][0])
+                del _MACRO_SERIES_CACHE[oldest]
+            _MACRO_SERIES_CACHE[col] = (now, series)
 
-    now = time.monotonic()
-    hit = _MACRO_SERIES_CACHE.get(col)
-    if hit and now - hit[0] < _MACRO_CACHE_TTL_SEC:
-        return hit[1]
-
-    series = _load_daily_close(col)
-    if len(_MACRO_SERIES_CACHE) >= _MACRO_CACHE_MAX:
-        oldest = min(_MACRO_SERIES_CACHE, key=lambda k: _MACRO_SERIES_CACHE[k][0])
-        del _MACRO_SERIES_CACHE[oldest]
-    _MACRO_SERIES_CACHE[col] = (now, series)
+    if as_of is not None and config.effective_strict_pit_backtest():
+        return slice_series_as_of(series, as_of)
     return series
 
 
-def _yield_curve_summary(macro_cache: dict | None = None) -> str:
+def _yield_curve_summary(macro_cache: dict | None = None, *, as_of: pd.Timestamp | None = None) -> str:
     """TLT/TNX levels and 5d moves; yield stress when TNX rising + TLT weak."""
-    tlt = _load_macro_close("TLT", macro_cache)
-    tnx = _load_macro_close("TNX", macro_cache)
+    tlt = _load_macro_close("TLT", macro_cache, as_of=as_of)
+    tnx = _load_macro_close("TNX", macro_cache, as_of=as_of)
     if tlt.empty and tnx.empty:
         return "n/a"
     parts: list[str] = []
@@ -417,23 +514,39 @@ def _format_bot_exposure(base_caps: dict[str, float] | None = None) -> str:
     return ", ".join(parts) if parts else "n/a"
 
 
-def _symbol_5d_pct(data, symbol: str, macro_cache: dict) -> float | None:
+def _symbol_5d_pct(
+    data,
+    symbol: str,
+    macro_cache: dict,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> float | None:
     if data is not None and hasattr(data, "columns") and symbol in data.columns:
         try:
-            return _pct_change(data[symbol])
+            series = data[symbol].dropna()
+            if as_of is not None and config.effective_strict_pit_backtest():
+                from modules.pit_replay import slice_series_as_of
+
+                series = slice_series_as_of(series, as_of)
+            return _pct_change(series)
         except (TypeError, ValueError, IndexError):
             pass
-    series = _load_macro_close(symbol, macro_cache)
+    series = _load_macro_close(symbol, macro_cache, as_of=as_of)
     if series is not None and not series.empty:
         return _pct_change(series)
     return None
 
 
-def _build_sector_leadership(data, macro_cache: dict | None = None) -> dict[str, Any]:
+def _build_sector_leadership(
+    data,
+    macro_cache: dict | None = None,
+    *,
+    as_of: pd.Timestamp | None = None,
+) -> dict[str, Any]:
     macro_cache = macro_cache or {}
     rows: list[dict[str, Any]] = []
     for label, sym in _SECTOR_PROXIES:
-        ch = _symbol_5d_pct(data, sym, macro_cache)
+        ch = _symbol_5d_pct(data, sym, macro_cache, as_of=as_of)
         if ch is not None:
             rows.append({"sector": label, "symbol": sym, "change_5d_pct": ch})
     rows.sort(key=lambda r: float(r["change_5d_pct"]), reverse=True)
@@ -519,7 +632,12 @@ def _infer_ai_cycle_phase(summary: dict) -> str:
         for r in leaders[:2]
     )
     energy_leading = any("Energy" in _sector_name(r) for r in leaders[:1])
+    defense_leading = _defense_space_leading(summary)
 
+    if defense_leading and not tech_leading:
+        return "defense/space leadership"
+    if defense_leading and tech_leading:
+        return "dual theme: defense/space + AI beta"
     if "below MA" in spy_trend and vix_f >= 22:
         return "exhaustion / risk-off"
     if "rising" in vix_trend and tech_leading and vix_f >= 18:
@@ -545,10 +663,22 @@ def build_market_summary(
     news_headlines: str | list | None = None,
     news_slot: str | None = None,
     base_caps: dict[str, float] | None = None,
+    as_of: pd.Timestamp | None = None,
+    pit_slot: str | None = None,
 ) -> dict[str, Any]:
     """Assemble context for the PM-style reasoning prompt."""
     from modules.pipeline_strategies import _spy_market_up_signal
     from modules.thinking_news import normalize_news_headlines
+
+    slot = pit_slot or news_slot or "close"
+    if as_of is None and len(data):
+        bar_ts = pd.Timestamp(data.index[-1])
+        if config.effective_strict_pit_backtest():
+            from modules.pit_replay import effective_as_of_ts
+
+            as_of = effective_as_of_ts(bar_ts, slot=slot, strict=True)
+        else:
+            as_of = bar_ts
 
     macro_cache: dict = {}
     spy_sym = config.SPY_BOT_SYMBOL
@@ -558,19 +688,25 @@ def build_market_summary(
     else:
         spy_trend = f"below MA{config.SPY_MA_WINDOW}"
 
-    vix_series = _load_macro_close("VIX", macro_cache)
+    vix_series = _load_macro_close("VIX", macro_cache, as_of=as_of)
     vix_val = float(vix_series.iloc[-1]) if len(vix_series) else None
     vix_trend = _series_trend_desc(vix_series)
-    yield_curve = _yield_curve_summary(macro_cache)
+    yield_curve = _yield_curve_summary(macro_cache, as_of=as_of)
     caps = base_caps or config.fund_allocation_pct()
     bot_exposure = {k: round(float(caps.get(k, 0.0)), 4) for k in _CAP_KEYS}
 
-    oil_series = _load_macro_close("USO", macro_cache)
+    oil_series = _load_macro_close("USO", macro_cache, as_of=as_of)
     if oil_series.empty:
-        oil_series = _load_macro_close("XOM", macro_cache)
-    gold_series = _load_macro_close("GLD", macro_cache)
+        oil_series = _load_macro_close("XOM", macro_cache, as_of=as_of)
+    gold_series = _load_macro_close("GLD", macro_cache, as_of=as_of)
 
     web = (wisdom or {}).get("web_sentiment")
+    if web is None and config.effective_strict_pit_backtest() and as_of is not None:
+        from modules.pit_replay import pit_web_sentiment
+
+        pit_web = pit_web_sentiment(as_of)
+        if pit_web is not None:
+            web = pit_web
     price = (wisdom or {}).get("price_sentiment")
     macro_sentiment = f"regime={regime}, vol={vol}"
     if web is not None:
@@ -582,7 +718,7 @@ def build_market_summary(
     news_text = normalize_news_headlines(news_headlines)
     if news_text:
         headline = news_text.split("\n", 1)[0][:240]
-    elif headline == "n/a":
+    elif headline == "n/a" and not config.effective_strict_pit_backtest():
         try:
             from modules.web_sentiment_live import get_live_web_sentiment
 
@@ -591,7 +727,7 @@ def build_market_summary(
         except Exception:
             pass
 
-    sector = _build_sector_leadership(data, macro_cache)
+    sector = _build_sector_leadership(data, macro_cache, as_of=as_of)
     summary = {
         "spy_trend": spy_trend,
         "vix": round(vix_val, 1) if vix_val is not None else "n/a",
@@ -611,6 +747,9 @@ def build_market_summary(
         "sector_laggards": sector["laggards"],
         "sector_detail": sector["sectors"],
     }
+    if as_of is not None and config.effective_strict_pit_backtest():
+        summary["pit_as_of"] = str(pd.Timestamp(as_of).date())
+        summary["pit_slot"] = slot
     summary["ai_cycle_phase"] = _infer_ai_cycle_phase(summary)
     summary["vol_overlay_regime"] = _vol_overlay_regime(summary)
     summary["stat_arb_regime"] = _stat_arb_regime(summary)
@@ -629,6 +768,12 @@ def build_market_summary(
         summary["news_digest"] = news_analysis.get("digest_text")
     else:
         summary["news_impact_score"] = 0.0
+    from modules.sector_rotation import enrich_summary_with_rotation
+
+    enrich_summary_with_rotation(summary, data)
+    from modules.chart_patterns import enrich_summary_with_patterns
+
+    enrich_summary_with_patterns(summary, data)
     return summary
 
 
@@ -821,7 +966,7 @@ def _rule_based_cap_deltas(summary: dict, confidence: float) -> dict[str, float]
 
     if is_neutral_thinking_regime(str(summary.get("regime") or "")):
         for key in list(deltas.keys()):
-            deltas[key] = round(float(deltas[key]) * 0.40, 6)
+            deltas[key] = round(float(deltas[key]) * 0.30, 6)
 
     _apply_news_cap_deltas(deltas, summary, conf)
 
@@ -860,8 +1005,23 @@ def compute_cap_deltas(
     if market_summary:
         for k, v in _rule_based_cap_deltas(market_summary, confidence).items():
             deltas[k] += v
+    if market_summary and config.effective_sector_rotation_enabled():
+        from modules.sector_rotation import cap_deltas_from_rotation
+
+        narrative = str(market_summary.get("narrative") or "")
+        for k, v in cap_deltas_from_rotation(
+            market_summary,
+            confidence,
+            suggested_tilt=suggested_tilt,
+            narrative=narrative or None,
+        ).items():
+            deltas[k] += v
     for k, v in _llm_nudge_deltas(base_caps, suggested_tilt, confidence).items():
         deltas[k] += v
+    if config.effective_tech_guard_enabled():
+        from modules.tech_concentration_guard import apply_guard_to_cap_deltas
+
+        deltas = apply_guard_to_cap_deltas(deltas, base_caps)
     max_delta = (
         float(max_sleeve_delta)
         if max_sleeve_delta is not None
@@ -1549,6 +1709,23 @@ def _infer_narrative_from_news(summary: dict) -> str:
 def _infer_narrative(summary: dict | None) -> str:
     if not summary:
         return "Macro reassessment"
+    rot_narr = str(summary.get("sector_rotation_narrative") or "").strip()
+    pat_narr = str(summary.get("pattern_awareness_narrative") or "").strip()
+    if pat_narr and "no high-confidence" not in pat_narr.lower():
+        if rot_narr and "neutral" not in rot_narr.lower():
+            news_narrative = _infer_narrative_from_news(summary)
+            if news_narrative:
+                return f"{news_narrative} — {rot_narr} | {pat_narr}"
+            return f"{rot_narr} | {pat_narr}"
+        news_narrative = _infer_narrative_from_news(summary)
+        if news_narrative:
+            return f"{news_narrative} — {pat_narr}"
+        return pat_narr
+    if rot_narr and "neutral" not in rot_narr.lower():
+        news_narrative = _infer_narrative_from_news(summary)
+        if news_narrative:
+            return f"{news_narrative} — {rot_narr}"
+        return rot_narr
     news_narrative = _infer_narrative_from_news(summary)
     if news_narrative:
         return news_narrative
@@ -1571,6 +1748,11 @@ def _infer_narrative(summary: dict | None) -> str:
         return "Risk-off / safe-haven bid"
     if "below MA" in str(summary.get("spy_trend", "")):
         return "Equity trend weakening — AI beta vulnerable"
+    if _defense_space_leading(summary):
+        blob = _news_text_blob(summary) or headline
+        if any(k in blob for k in _DEFENSE_SPACE_NARRATIVE_KEYWORDS):
+            return "Defense/space boom — favor aerospace/defense, trim crowded AI beta"
+        return "Defense/space sector leadership — rotate active sleeve toward industrials"
     phase = str(summary.get("ai_cycle_phase") or "")
     if "mid-cycle" in phase:
         return "Mid-cycle AI leadership — stay with winners, trim laggards"
@@ -1689,6 +1871,18 @@ def apply_thinking_tilt_to_caps(
     actual_deltas = {
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
+    actual_deltas = _apply_delta_deadband(actual_deltas)
+    if not any(abs(v) >= THINKING_MIN_MATERIAL_DELTA for v in actual_deltas.values()):
+        _audit_thinking(
+            "tilt_skipped_immaterial",
+            why="deltas below material threshold after deadband",
+            deltas=actual_deltas,
+        )
+        return dict(base_caps), {}, ""
+
+    merged = dict(base)
+    for key in _CAP_KEYS:
+        merged[key] = round(base.get(key, 0.0) + actual_deltas.get(key, 0.0), 6)
 
     why_line = build_tilt_why_rationale(
         market_summary,
@@ -1755,6 +1949,8 @@ def derive_heuristic_tilt(summary: dict) -> dict[str, float]:
             vti_w = 0.50
 
     spy_w = 0.16 if tech_leading and not crowded.startswith("CROWDED") else 0.10
+    if _defense_space_leading(summary):
+        spy_w = max(0.08, spy_w - 0.03)
     if "late-cycle" in phase or "exhaustion" in phase:
         spy_w = max(0.08, spy_w - 0.04)
 
@@ -1771,6 +1967,9 @@ def derive_heuristic_tilt(summary: dict) -> dict[str, float]:
         "bonds": 0.05 if _gold_momentum_ok(summary) else 0.08,
     }
     deltas = _rule_based_cap_deltas(summary, 0.7)
+    if _defense_space_leading(summary):
+        tilt["energy"] = max(float(tilt.get("energy", 0.0)), 0.07)
+        tilt["spy"] = max(0.06, float(tilt.get("spy", 0.0)) - 0.02)
     if deltas.get("nyse", 0) > 0.03:
         tilt["energy"] += 0.06
         tilt["spy"] -= 0.04
@@ -1795,6 +1994,8 @@ def build_backtest_thinking_result(
     news_headlines: str | list | None = None,
     news_slot: str | None = None,
     force_decision: bool = True,
+    as_of: pd.Timestamp | None = None,
+    pit_slot: str | None = None,
 ) -> dict:
     """Decisive thinking proxy for historical backtests (always produces a tilt)."""
     summary = build_market_summary(
@@ -1803,14 +2004,16 @@ def build_backtest_thinking_result(
         vol,
         news_headlines=news_headlines,
         news_slot=news_slot,
+        as_of=as_of,
+        pit_slot=pit_slot,
     )
     tilt = derive_heuristic_tilt(summary)
     narrative = _infer_narrative(summary)
     asymmetry = _infer_asymmetry(summary)
     news_impact = _news_impact(summary)
-    conf = 0.78 if force_decision else 0.70
-    if news_impact >= 0.40:
-        conf = round(min(0.88, conf + 0.10 * news_impact), 2)
+    conf = _score_backtest_confidence(summary)
+    if force_decision:
+        conf = max(conf, 0.58)
     base = {
         "reasoning": f"Force-decision proxy: {narrative}",
         "narrative": narrative,

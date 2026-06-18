@@ -12,6 +12,8 @@ Satellite research scripts (shared helpers in modules/backtest_common.py):
 Run:  python backtester.py
        python backtester.py --days 180
        python backtester.py --days 365 --paper-aggressive --compare-final
+       python backtester.py --days 365 --paper-aggressive --strict-pit --compare-pit
+       python backtester.py --days 365 --paper-aggressive --strict-pit --compare-blended-conservative
        python backtester.py --days 365 --paper-aggressive --fast-mode
        python backtester.py --days 365 --vti-core 0.80 --no-thinking
        python fetch_data.py --daily --days 365
@@ -461,6 +463,11 @@ class BacktestExecutor:
 
         return run_profit_target_exits(self, **kwargs)
 
+    def run_scaling_strategy(self, **kwargs) -> int:
+        from modules.scaling_strategy import run_scaling_strategy
+
+        return run_scaling_strategy(self, **kwargs)
+
     def execute_full_exit(self, symbol, **kwargs):
         pos = self._find_position(symbol)
         if pos is None or pos.qty <= 0:
@@ -632,6 +639,12 @@ class BacktestPortfolio:
             if self.positions[symbol] < 1e-9:
                 del self.positions[symbol]
                 self.entry_cost.pop(symbol, None)
+            try:
+                from modules.vol_position_sizing import release_top1_risk_on_sell
+
+                release_top1_risk_on_sell(self, symbol, qty, sell_qty)
+            except ImportError:
+                pass
             self._track_execution_cost(raw_price, price, sell_qty, tx_cost)
             return {"symbol": symbol, "side": "sell", "qty": sell_qty, "notional": sell_notional}
         return None
@@ -709,19 +722,26 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
 
 def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
     """Ensure screener tickers exist in SQLite for dynamic-universe backtests."""
-    from modules.dynamic_universe import maybe_refresh_screener_universe
+    from modules.dynamic_universe import (
+        ensure_screener_prices_loaded,
+        maybe_refresh_screener_universe,
+    )
 
-    maybe_refresh_screener_universe(force=refresh)
-    screener = config.load_screener_universe_tickers() or []
-    extra = [t for t in screener if t not in config.UNIVERSE]
-    if extra:
+    saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
+    config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
+    config.set_paper_aggressive_context(True)
+    try:
+        maybe_refresh_screener_universe(force=refresh)
+        screener = config.load_screener_universe_tickers() or []
         fetch_days = _calendar_days_to_fetch(days or config.BACKTEST_DAYS)
-        fetch_daily_history_for_tickers(
-            extra,
+        ensure_screener_prices_loaded(
             days=fetch_days if not use_max else None,
             use_max=use_max,
         )
-    return screener
+        reset_caches(disk=False)
+        return screener
+    finally:
+        config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
 
 
 def _static_equity_universe(data_columns) -> list[str]:
@@ -734,11 +754,17 @@ def _dynamic_equity_universe(data_columns) -> list[str]:
 
 def _universe_sample_lines(data, screener: list[str]) -> list[str]:
     """Highlight NASDAQ / IPO names present in the dynamic pool."""
-    from modules.dynamic_universe import load_screener_ticker_meta
+    from modules.dynamic_universe import load_screener_ticker_meta, screener_coverage_report
 
+    cov = screener_coverage_report(data.columns)
     meta = load_screener_ticker_meta()
     watch = {"NVDA", "TSLA", "AMD", "AAPL", "SPCX", "META", "GOOGL", "AMZN", "MSFT"}
     lines: list[str] = []
+    if cov["screener_count"]:
+        lines.append(
+            f"  Screener price coverage: {cov['present_count']}/{cov['screener_count']} "
+            f"({cov['coverage_pct']:.0f}%)"
+        )
     dyn = set(_dynamic_equity_universe(data.columns))
     for sym in sorted(watch & dyn):
         row = meta.get(sym, {})
@@ -754,56 +780,11 @@ def _universe_sample_lines(data, screener: list[str]) -> list[str]:
         lines.append(f"  IPO slots in pool: {', '.join(sorted(ipo_in_pool)[:8])}")
     if "SPCX" in watch and "SPCX" not in dyn and "SPCX" in screener:
         lines.append("  SPCX in screener file but no price column in backtest window")
-    return lines
-
-
-def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
-    """Ensure screener tickers exist in SQLite for dynamic-universe backtests."""
-    from modules.dynamic_universe import maybe_refresh_screener_universe
-
-    maybe_refresh_screener_universe(force=refresh)
-    screener = config.load_screener_universe_tickers() or []
-    extra = [t for t in screener if t not in config.UNIVERSE]
-    if extra:
-        fetch_days = _calendar_days_to_fetch(days or config.BACKTEST_DAYS)
-        fetch_daily_history_for_tickers(
-            extra,
-            days=fetch_days if not use_max else None,
-            use_max=use_max,
+    if cov["missing_count"] > 0:
+        lines.append(
+            f"  Missing prices: {', '.join(cov['missing'][:6])}"
+            + (f" (+{cov['missing_count'] - 6})" if cov["missing_count"] > 6 else "")
         )
-    return screener
-
-
-def _static_equity_universe(data_columns) -> list[str]:
-    return [c for c in data_columns if config._nyse_eligible_symbol(c)]
-
-
-def _dynamic_equity_universe(data_columns) -> list[str]:
-    return config.nyse_momentum_universe(data_columns)
-
-
-def _universe_sample_lines(data, screener: list[str]) -> list[str]:
-    """Highlight NASDAQ / IPO names present in the dynamic pool."""
-    from modules.dynamic_universe import load_screener_ticker_meta
-
-    meta = load_screener_ticker_meta()
-    watch = {"NVDA", "TSLA", "AMD", "AAPL", "SPCX", "META", "GOOGL", "AMZN", "MSFT"}
-    lines: list[str] = []
-    dyn = set(_dynamic_equity_universe(data.columns))
-    for sym in sorted(watch & dyn):
-        row = meta.get(sym, {})
-        ipo = " IPO" if row.get("is_ipo") else ""
-        exch = row.get("exchange") or "?"
-        lines.append(f"  {sym} ({exch}{ipo})")
-    ipo_in_pool = [
-        row["ticker"]
-        for row in meta.values()
-        if row.get("is_ipo") and row.get("ticker") in dyn
-    ]
-    if ipo_in_pool:
-        lines.append(f"  IPO slots in pool: {', '.join(sorted(ipo_in_pool)[:8])}")
-    if "SPCX" in watch and "SPCX" not in dyn and "SPCX" in screener:
-        lines.append("  SPCX in screener file but no price column in backtest window")
     return lines
 
 
@@ -890,6 +871,18 @@ def run_backtest(
     paper_international_sleeve: bool | None = None,
     paper_bond_sleeve: bool | None = None,
     paper_profit_target: bool | None = None,
+    paper_scaling_strategy: bool | None = None,
+    paper_sector_rotation: bool | None = None,
+    paper_pattern_awareness: bool | None = None,
+    paper_pattern_bearish_only: bool | None = None,
+    paper_vol_position_sizing: bool | None = None,
+    paper_loss_cutting: bool | None = None,
+    top1_vol_conservative: bool | None = None,
+    top1_loss_conservative: bool | None = None,
+    top1_sector_rotation_conservative: bool | None = None,
+    paper_sector_rotation_hybrid: bool | None = None,
+    strict_pit: bool | None = None,
+    paper_tech_guard: bool | None = None,
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
@@ -925,6 +918,33 @@ def run_backtest(
     saved_paper_international = config.PAPER_INTERNATIONAL_SLEEVE_ENABLED
     saved_paper_bond = config.PAPER_BOND_SLEEVE_ENABLED
     saved_paper_profit_target = config.PAPER_PROFIT_TARGET_ENABLED
+    saved_paper_scaling = config.PAPER_SCALING_STRATEGY_ENABLED
+    saved_paper_sector_rotation = config.PAPER_SECTOR_ROTATION_ENABLED
+    saved_paper_pattern_awareness = config.PAPER_PATTERN_AWARENESS_ENABLED
+    saved_paper_pattern_bearish_only = config.PAPER_PATTERN_BEARISH_ONLY
+    saved_paper_vol_position_sizing = config.PAPER_VOL_POSITION_SIZING_ENABLED
+    saved_paper_loss_cutting = config.PAPER_LOSS_CUTTING_ENABLED
+    from modules.vol_position_sizing import (
+        set_vol_sizing_conservative,
+        vol_sizing_conservative_mode,
+    )
+    from modules.loss_cutting import (
+        loss_cutting_conservative_mode,
+        set_loss_cutting_conservative,
+    )
+    from modules.sector_rotation import (
+        sector_rotation_conservative_active,
+        set_sector_rotation_conservative,
+    )
+
+    saved_top1_vol_conservative = vol_sizing_conservative_mode()
+    saved_top1_loss_conservative = loss_cutting_conservative_mode()
+    saved_top1_sector_rotation_conservative = sector_rotation_conservative_active()
+    saved_sector_rotation_hybrid = config.SECTOR_ROTATION_HYBRID_MODE
+    saved_sector_rotation_conservative_cfg = config.SECTOR_ROTATION_CONSERVATIVE_MODE
+    saved_strict_pit = config.backtest_strict_pit_context()
+    saved_sector_rotation = config.SECTOR_ROTATION_ENABLED
+    saved_paper_tech_guard = config.PAPER_TECH_GUARD_ENABLED
     saved_intl_prefetch = config.backtest_international_prefetch()
     saved_bond_prefetch = config.backtest_bond_prefetch()
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
@@ -932,6 +952,12 @@ def run_backtest(
     config.set_paper_aggressive_context(paper_aggressive)
     config.set_backtest_paper_sleeves_context(paper_aggressive)
     config.set_backtest_small_account_context(small_account)
+    pit_on = bool(strict_pit if strict_pit is not None else RUN_OPTIONS.strict_pit)
+    config.set_backtest_strict_pit_context(pit_on)
+    if pit_on:
+        from modules.pit_replay import apply_strict_pit_execution_costs
+
+        apply_strict_pit_execution_costs(RUN_OPTIONS)
     if simulate_live_thinking and small_account:
         config.set_live_thinking_sim_context(True)
         if paper_thinking is not False:
@@ -988,6 +1014,31 @@ def run_backtest(
         config.set_backtest_bond_prefetch(bool(paper_bond_sleeve))
     if paper_profit_target is not None:
         config.PAPER_PROFIT_TARGET_ENABLED = bool(paper_profit_target)
+    if paper_scaling_strategy is not None:
+        config.PAPER_SCALING_STRATEGY_ENABLED = bool(paper_scaling_strategy)
+    if paper_pattern_awareness is not None:
+        config.PAPER_PATTERN_AWARENESS_ENABLED = bool(paper_pattern_awareness)
+    if paper_pattern_bearish_only is not None:
+        config.PAPER_PATTERN_BEARISH_ONLY = bool(paper_pattern_bearish_only)
+    if paper_vol_position_sizing is not None:
+        config.PAPER_VOL_POSITION_SIZING_ENABLED = bool(paper_vol_position_sizing)
+    if paper_loss_cutting is not None:
+        config.PAPER_LOSS_CUTTING_ENABLED = bool(paper_loss_cutting)
+    if top1_vol_conservative is not None:
+        set_vol_sizing_conservative(bool(top1_vol_conservative))
+    if top1_loss_conservative is not None:
+        set_loss_cutting_conservative(bool(top1_loss_conservative))
+    if top1_sector_rotation_conservative is not None:
+        config.SECTOR_ROTATION_CONSERVATIVE_MODE = bool(top1_sector_rotation_conservative)
+        set_sector_rotation_conservative(bool(top1_sector_rotation_conservative))
+    if paper_sector_rotation_hybrid is not None:
+        config.SECTOR_ROTATION_HYBRID_MODE = bool(paper_sector_rotation_hybrid)
+    if paper_sector_rotation is not None:
+        config.PAPER_SECTOR_ROTATION_ENABLED = bool(paper_sector_rotation)
+        if not paper_aggressive:
+            config.SECTOR_ROTATION_ENABLED = bool(paper_sector_rotation)
+    if paper_tech_guard is not None:
+        config.PAPER_TECH_GUARD_ENABLED = bool(paper_tech_guard)
     if RUN_OPTIONS.fast_mode:
         apply_run_options_to_config()
     if paper_aggressive and not any(
@@ -1054,6 +1105,7 @@ def run_backtest(
     exposure_samples = []
     vti_core_samples = []
     active_exposure_samples = []
+    tech_exposure_samples = []
     spy_exposure_samples = []
     nyse_exposure_samples = []
     crypto_exposure_samples = []
@@ -1141,7 +1193,10 @@ def run_backtest(
     sample_rp_meta: dict | None = None
     thinking_cache = {
         "regime": None,
+        "regime_bucket": None,
         "last_news_date": None,
+        "last_tilt_bar": None,
+        "last_deltas": {},
         "scales": {"spy_scale": 1.0, "nyse_scale": 1.0, "crypto_scale": 1.0},
         "vti_pct": None,
         "events": [],
@@ -1246,18 +1301,45 @@ def run_backtest(
         thinking_on = config.effective_thinking_engine_enabled() and (
             paper_aggressive or live_thinking
         )
+        pit_slot = "premarket" if with_news else "close"
+        if config.effective_strict_pit_backtest():
+            from modules.pit_replay import (
+                effective_as_of_ts,
+                pit_thinking_window,
+                set_pit_bar_context,
+            )
+
+            set_pit_bar_context(data.index[i], i, pit_slot)
         if thinking_on:
             from modules.thinking_engine import (
+                THINKING_COOLDOWN_BREAK_IMPACT,
+                THINKING_MIN_MATERIAL_DELTA,
+                THINKING_TILT_COOLDOWN_BARS,
                 apply_thinking_tilt_to_caps,
                 build_backtest_thinking_result,
+                deltas_materially_changed,
                 executor_scales_from_caps,
+                regime_tilt_bucket,
             )
 
             tilt_max_delta = (
                 config.LIVE_THINKING_MAX_SLEEVE_DELTA if live_thinking else None
             )
-            refresh = thinking_cache["regime"] != regime
+            regime_bucket = regime_tilt_bucket(regime)
+            refresh = thinking_cache.get("regime_bucket") != regime_bucket
+            last_tilt_bar = thinking_cache.get("last_tilt_bar")
             bar_date = data.index[i].date()
+            bar_ts = data.index[i]
+            think_window = window
+            pit_as_of = None
+            if config.effective_strict_pit_backtest():
+                think_window = pit_thinking_window(
+                    window,
+                    bar_index=i,
+                    slot=pit_slot,
+                    strict=True,
+                )
+                pit_as_of = effective_as_of_ts(bar_ts, slot=pit_slot, strict=True)
             news_digest: dict | None = None
             if with_news:
                 if thinking_cache.get("last_news_date") != bar_date:
@@ -1269,10 +1351,12 @@ def run_backtest(
                     )
 
                     peek = synthesize_backtest_news(
-                        window,
+                        think_window,
                         regime,
                         vol,
                         slot="premarket",
+                        bar_ts=bar_ts,
+                        bar_index=i,
                     )
                     thinking_cache["daily_news_peek"] = peek
                     impact_min = (
@@ -1299,6 +1383,17 @@ def run_backtest(
                 if impact < min_req:
                     refresh = False
                     thinking_cache["regime"] = regime
+                    thinking_cache["regime_bucket"] = regime_bucket
+            if refresh and last_tilt_bar is not None:
+                if (i - int(last_tilt_bar)) < THINKING_TILT_COOLDOWN_BARS:
+                    peek_impact = float(
+                        (thinking_cache.get("daily_news_peek") or {}).get(
+                            "news_impact_score"
+                        )
+                        or 0
+                    )
+                    if peek_impact < THINKING_COOLDOWN_BREAK_IMPACT:
+                        refresh = False
             if refresh:
                 vti_before = vti_core_pct
                 if with_news:
@@ -1307,20 +1402,30 @@ def run_backtest(
                     news_digest = thinking_cache.pop("daily_news_peek", None)
                     if news_digest is None:
                         news_digest = synthesize_backtest_news(
-                            window,
+                            think_window,
                             regime,
                             vol,
                             slot="premarket",
+                            bar_ts=bar_ts,
+                            bar_index=i,
                         )
                     thinking = build_backtest_thinking_result(
-                        window,
+                        think_window,
                         regime,
                         vol,
                         news_headlines=news_digest.get("headlines"),
                         news_slot="premarket",
+                        as_of=pit_as_of,
+                        pit_slot=pit_slot,
                     )
                 else:
-                    thinking = build_backtest_thinking_result(window, regime, vol)
+                    thinking = build_backtest_thinking_result(
+                        think_window,
+                        regime,
+                        vol,
+                        as_of=pit_as_of,
+                        pit_slot=pit_slot,
+                    )
                 base_caps = dict(config.fund_allocation_pct())
                 base_caps["vti_core"] = vti_core_pct
                 merged, deltas, log_line = apply_thinking_tilt_to_caps(
@@ -1334,19 +1439,30 @@ def run_backtest(
                     tilt_rationale=str(thinking.get("tilt_rationale") or ""),
                 )
                 thinking_cache["regime"] = regime
-                thinking_cache["vti_pct"] = merged["vti_core"]
-                thinking_cache["scales"] = {
-                    "spy_scale": executor_scales_from_caps(base_caps, merged).get(
-                        "spy", 1.0
-                    ),
-                    "nyse_scale": executor_scales_from_caps(base_caps, merged).get(
-                        "nyse", 1.0
-                    ),
-                    "crypto_scale": executor_scales_from_caps(base_caps, merged).get(
-                        "crypto", 1.0
-                    ),
+                thinking_cache["regime_bucket"] = regime_bucket
+                material = {
+                    k: v
+                    for k, v in deltas.items()
+                    if abs(float(v)) >= THINKING_MIN_MATERIAL_DELTA
                 }
-                if any(abs(v) > 0.001 for v in deltas.values()):
+                if material and deltas_materially_changed(
+                    thinking_cache.get("last_deltas"), deltas
+                ):
+                    thinking_cache["vti_pct"] = merged["vti_core"]
+                    thinking_cache["scales"] = {
+                        "spy_scale": executor_scales_from_caps(base_caps, merged).get(
+                            "spy", 1.0
+                        ),
+                        "nyse_scale": executor_scales_from_caps(base_caps, merged).get(
+                            "nyse", 1.0
+                        ),
+                        "crypto_scale": executor_scales_from_caps(
+                            base_caps, merged
+                        ).get("crypto", 1.0),
+                    }
+                    thinking_cache["last_thinking"] = thinking
+                    thinking_cache["last_tilt_bar"] = i
+                    thinking_cache["last_deltas"] = dict(deltas)
                     summary = thinking.get("market_summary") or {}
                     vix = summary.get("vix")
                     event: dict = {
@@ -1360,6 +1476,8 @@ def run_backtest(
                         "vti_before": round(vti_before, 4),
                         "vti_after": round(float(merged["vti_core"]), 4),
                         "log": log_line,
+                        "confidence": thinking.get("confidence"),
+                        "validation_score": thinking.get("validation_score"),
                     }
                     if news_digest:
                         event["news_slot"] = news_digest.get("slot")
@@ -1369,6 +1487,9 @@ def run_backtest(
                         event["news_impact_score"] = thinking.get("news_impact_score")
                         event["news_theme_summary"] = summary.get("news_theme_summary")
                     thinking_cache["events"].append(event)
+                elif not material:
+                    thinking_cache["regime"] = regime
+                    thinking_cache["regime_bucket"] = regime_bucket
             if thinking_cache["vti_pct"] is not None:
                 vti_core_pct = float(thinking_cache["vti_pct"])
             thinking_scales = dict(thinking_cache["scales"])
@@ -1393,6 +1514,17 @@ def run_backtest(
         if track_active_exposure or paper_aggressive:
             vti_core_samples.append(vti_core_pct)
             active_exposure_samples.append(max(0.0, 1.0 - vti_core_pct))
+        from modules.tech_concentration_guard import tech_weight, _prices_mapping
+
+        tw_caps = dict(config.fund_allocation_pct())
+        tw_caps["vti_core"] = vti_core_pct
+        tech_exposure_samples.append(
+            tech_weight(
+                tw_caps,
+                positions=portfolio.positions,
+                prices=_prices_mapping(prices),
+            )
+        )
 
         if vti_core_pct > 0:
             _rebalance_vti_core(portfolio, prices, vti_core_pct)
@@ -1416,6 +1548,10 @@ def run_backtest(
                 nyse_scale=macro_regime.get("nyse_scale", 1.0),
             )
         executor.set_thinking_sleeve_scales(**thinking_scales)
+        if config.effective_vol_position_sizing_enabled() or config.effective_loss_cutting_enabled():
+            from modules.vol_position_sizing import set_top1_sizing_context
+
+            set_top1_sizing_context(executor, thinking_cache.get("last_thinking"))
         if config.effective_risk_parity_enabled() and paper_aggressive:
             from modules.risk_parity_sleeve import apply_risk_parity_cycle
             from modules.thinking_engine import executor_scales_from_caps
@@ -1494,6 +1630,22 @@ def run_backtest(
             bar_idx=i,
             full_data=data,
             now=i,
+            equity_session_open=True,
+        )
+        from modules.scaling_strategy import run_scaling_strategy
+
+        run_scaling_strategy(
+            executor,
+            bar_idx=i,
+            full_data=data,
+            equity_session_open=True,
+        )
+        from modules.loss_cutting import run_loss_cutting_exits
+
+        run_loss_cutting_exits(
+            executor,
+            bar_idx=i,
+            full_data=data,
             equity_session_open=True,
         )
         spy_entry_n = run_spy_strategy(
@@ -1743,7 +1895,16 @@ def run_backtest(
         "avg_active_exposure_pct": round(float(np.mean(active_exposure_samples)) * 100, 2)
         if active_exposure_samples
         else round((1.0 - fixed_vti_core_pct) * 100, 2),
+        "avg_tech_exposure_pct": round(float(np.mean(tech_exposure_samples)) * 100, 2)
+        if tech_exposure_samples
+        else None,
         "paper_aggressive": paper_aggressive,
+        "strict_pit": config.backtest_strict_pit_context(),
+        "execution_costs": {
+            "equity_slippage_bps": RUN_OPTIONS.equity_slippage_bps,
+            "crypto_slippage_bps": RUN_OPTIONS.crypto_slippage_bps,
+            "equity_commission_bps": RUN_OPTIONS.equity_commission_bps,
+        },
         "paper_dynamic_vti": config.PAPER_DYNAMIC_VTI_ENABLED if paper_aggressive else False,
         "paper_dynamic_universe": config.PAPER_DYNAMIC_UNIVERSE_ENABLED if paper_aggressive else False,
         "equity_universe_size": len(config.nyse_momentum_universe(data.columns)),
@@ -1763,6 +1924,34 @@ def run_backtest(
     pt_stats = getattr(last_executor, "profit_target_stats", None) if last_executor else None
     if pt_stats:
         result["profit_target"] = dict(pt_stats)
+    sc_stats = getattr(getattr(last_executor, "portfolio", None), "scaling_strategy_stats", None)
+    if sc_stats is None and last_executor is not None:
+        sc_stats = getattr(last_executor, "scaling_strategy_stats", None)
+    if sc_stats:
+        result["scaling_strategy"] = dict(sc_stats)
+    pa_stats = getattr(
+        getattr(last_executor, "portfolio", None), "pattern_awareness_stats", None
+    )
+    if pa_stats is None and last_executor is not None:
+        pa_stats = getattr(last_executor, "pattern_awareness_stats", None)
+    if pa_stats:
+        by_pat = pa_stats.get("by_pattern") or {}
+        if hasattr(by_pat, "items") and not isinstance(by_pat, dict):
+            by_pat = dict(by_pat)
+        result["pattern_awareness"] = {
+            **{k: v for k, v in pa_stats.items() if k != "by_pattern"},
+            "by_pattern": by_pat,
+        }
+    vs_stats = getattr(
+        getattr(last_executor, "portfolio", None), "vol_position_sizing_stats", None
+    )
+    if vs_stats:
+        result["vol_position_sizing"] = dict(vs_stats)
+    lc_stats = getattr(
+        getattr(last_executor, "portfolio", None), "loss_cutting_stats", None
+    )
+    if lc_stats:
+        result["loss_cutting"] = dict(lc_stats)
     if last_executor is not None:
         from modules.international_sleeve import international_stats_summary
 
@@ -1960,6 +2149,25 @@ def run_backtest(
     config.PAPER_INTERNATIONAL_SLEEVE_ENABLED = saved_paper_international
     config.PAPER_BOND_SLEEVE_ENABLED = saved_paper_bond
     config.PAPER_PROFIT_TARGET_ENABLED = saved_paper_profit_target
+    config.PAPER_SCALING_STRATEGY_ENABLED = saved_paper_scaling
+    config.PAPER_SECTOR_ROTATION_ENABLED = saved_paper_sector_rotation
+    config.PAPER_PATTERN_AWARENESS_ENABLED = saved_paper_pattern_awareness
+    config.PAPER_PATTERN_BEARISH_ONLY = saved_paper_pattern_bearish_only
+    config.PAPER_VOL_POSITION_SIZING_ENABLED = saved_paper_vol_position_sizing
+    config.PAPER_LOSS_CUTTING_ENABLED = saved_paper_loss_cutting
+    set_vol_sizing_conservative(saved_top1_vol_conservative)
+    set_loss_cutting_conservative(saved_top1_loss_conservative)
+    set_sector_rotation_conservative(saved_top1_sector_rotation_conservative)
+    config.SECTOR_ROTATION_HYBRID_MODE = saved_sector_rotation_hybrid
+    config.SECTOR_ROTATION_CONSERVATIVE_MODE = saved_sector_rotation_conservative_cfg
+    config.set_backtest_strict_pit_context(saved_strict_pit)
+    from modules.pit_replay import clear_pit_bar_context, reset_pit_caches
+
+    clear_pit_bar_context()
+    if not saved_strict_pit:
+        reset_pit_caches()
+    config.SECTOR_ROTATION_ENABLED = saved_sector_rotation
+    config.PAPER_TECH_GUARD_ENABLED = saved_paper_tech_guard
     config.set_backtest_international_prefetch(saved_intl_prefetch)
     config.set_backtest_bond_prefetch(saved_bond_prefetch)
     store_last_result(result)
@@ -2516,6 +2724,399 @@ def run_thinking_compare(
                 print(f"  Suggested tilt: {ex.get('suggested_tilt')}")
     except Exception:
         pass
+
+
+def run_sector_rotation_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+    *,
+    with_news: bool = False,
+) -> None:
+    """Compare conservative blend vs +conservative sector rotation vs full hybrid."""
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    blend_base = {
+        **BLENDED_CONSERVATIVE_COMPARE_KWARGS,
+        "paper_vol_position_sizing": True,
+        "paper_loss_cutting": True,
+        "top1_vol_conservative": True,
+        "top1_loss_conservative": True,
+        "paper_sector_rotation": False,
+        "strict_pit": True,
+        "paper_thinking": True,
+        "with_news": True,
+    }
+    configs = [
+        (
+            "Conservative blend (no rotation)",
+            dict(blend_base),
+        ),
+        (
+            "Blend + conservative rotation",
+            {
+                **blend_base,
+                "paper_sector_rotation": True,
+                "top1_sector_rotation_conservative": True,
+                "paper_sector_rotation_hybrid": False,
+            },
+        ),
+        (
+            "Blend + full hybrid rotation",
+            {
+                **blend_base,
+                "paper_sector_rotation": True,
+                "top1_sector_rotation_conservative": False,
+                "paper_sector_rotation_hybrid": True,
+            },
+        ),
+    ]
+
+    print("--- SECTOR ROTATION A/B (conservative blend + strict PIT + thinking + news) ---")
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Conservative rotation: validated macro regimes (defense/space, oil, AI, rate cuts) | "
+        f"boost {config.SECTOR_ROTATION_CONSERVATIVE_BOOST:.0%} / "
+        f"trim {config.SECTOR_ROTATION_CONSERVATIVE_TRIM:.0%} | "
+        f"max {config.SECTOR_ROTATION_CONSERVATIVE_MAX_SECTORS} sector | "
+        f"sleeve delta cap {config.SECTOR_ROTATION_CONSERVATIVE_MAX_DELTA:.0%} | "
+        "no tech trim on defense unless lagging"
+    )
+    print(
+        "Full hybrid: rules + thinking bias | "
+        f"boost {config.SECTOR_ROTATION_SCORE_BOOST:.0%} / "
+        f"trim {config.SECTOR_ROTATION_SCORE_TRIM:.0%} | "
+        f"max {config.SECTOR_ROTATION_MAX_ACTIVE_SECTORS} sectors"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Tilts':>6}"
+    )
+    print("-" * 76)
+
+    results: list[tuple[str, dict]] = []
+    for label_cfg, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label_cfg, result))
+        release_backtest_memory()
+        print(
+            f"{label_cfg:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{_thinking_tilt_event_count(result):>6d}"
+        )
+
+    print("-" * 76)
+    if len(results) >= 2:
+        base_label, base_r = results[0]
+        by_label = {lbl: res for lbl, res in results}
+        cons_r = by_label.get("Blend + conservative rotation")
+        hybrid_r = by_label.get("Blend + full hybrid rotation")
+
+        print("\nDelta vs conservative blend (no rotation):")
+        for label_cfg, res in results[1:]:
+            print(
+                f"  {label_cfg}: "
+                f"return {res['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+                f"Sharpe {res['sharpe'] - base_r['sharpe']:+.2f} | "
+                f"MaxDD {res['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+                f"Trades {res.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+            )
+
+        if cons_r:
+            beats_base = (
+                cons_r["total_return_pct"] >= base_r["total_return_pct"] - 0.5
+                and cons_r["sharpe"] >= base_r["sharpe"] - 0.02
+            )
+            if beats_base and (
+                not hybrid_r
+                or cons_r["sharpe"] >= hybrid_r["sharpe"] - 0.02
+            ):
+                print(
+                    "\nPaper recommendation: ENABLE conservative sector rotation "
+                    "(PAPER_SECTOR_ROTATION_ENABLED=true + "
+                    "SECTOR_ROTATION_CONSERVATIVE_MODE=true) on top of Top1 conservative blend. "
+                    "Keep full hybrid OFF."
+                )
+            elif cons_r and hybrid_r and hybrid_r["total_return_pct"] > cons_r["total_return_pct"] + 1:
+                print(
+                    "\nPaper recommendation: conservative rotation mixed; full hybrid led return "
+                    "but may over-trade — validate conservative mode on paper first."
+                )
+            else:
+                print(
+                    "\nPaper recommendation: KEEP sector rotation OFF on paper — "
+                    "no clear edge vs conservative blend on this window."
+                )
+
+    try:
+        from modules.sector_rotation import build_rotation_narrative, demo_spacex_rotation
+
+        spacex = demo_spacex_rotation()
+        print("\n--- Macro narrative example (defense/space theme) ---")
+        print(f"  {build_rotation_narrative(spacex)}")
+        print(f"  Favored: {', '.join(sorted(spacex.favored)) or 'none'}")
+        print(f"  Trimmed: {', '.join(sorted(spacex.trimmed)) or 'none'}")
+    except Exception:
+        pass
+    print("-" * 76)
+
+
+def run_thinking_impact_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+) -> None:
+    """Isolate Thinking Engine + news impact on conservative blend (strict PIT)."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    blend_base = dict(CONSERVATIVE_BLEND_KWARGS)
+    configs = [
+        (
+            "Blend + thinking + news ON",
+            {**blend_base, "paper_thinking": True, "with_news": True},
+        ),
+        (
+            "Blend + thinking + news OFF",
+            {**blend_base, "paper_thinking": False, "with_news": False},
+        ),
+    ]
+
+    print("--- THINKING ENGINE IMPACT A/B (conservative blend + strict PIT) ---")
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    print(
+        "Prior best (pre-quality pass): +59.60% return | 2.05 Sharpe | 134 tilt events"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Held constant: Top1 conservative vol sizing (spec 0.5% + mild ATR) | "
+        "spec -4% stop only | sector rotation OFF | patterns OFF"
+    )
+    print(
+        "Variable: Thinking Engine sleeve tilts + synthetic news digest "
+        "(PAPER_THINKING_ENGINE_ENABLED / with_news)"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Tilts':>6} {'TiltMag':>8}"
+    )
+    print("-" * 84)
+
+    results: list[tuple[str, dict]] = []
+    for label_cfg, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label_cfg, result))
+        release_backtest_memory()
+        print(
+            f"{label_cfg:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{_thinking_tilt_event_count(result):>6d} "
+            f"{_avg_tilt_magnitude(result):>8.3f}"
+        )
+
+    print("-" * 84)
+    if len(results) == 2:
+        (_, on_r), (_, off_r) = results
+        print(
+            "\nDelta (thinking ON - OFF): "
+            f"return {on_r['total_return_pct'] - off_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {on_r['sharpe'] - off_r['sharpe']:+.2f} | "
+            f"MaxDD {on_r['max_drawdown_pct'] - off_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {on_r.get('nyse_signals', 0) - off_r.get('nyse_signals', 0):+d} | "
+            f"tilts {_thinking_tilt_event_count(on_r) - _thinking_tilt_event_count(off_r):+d}"
+        )
+        thinking_helps = (
+            on_r["total_return_pct"] >= off_r["total_return_pct"] - 0.5
+            and on_r["sharpe"] >= off_r["sharpe"] - 0.02
+        )
+        thinking_hurts = (
+            on_r["total_return_pct"] < off_r["total_return_pct"] - 2.0
+            or on_r["sharpe"] < off_r["sharpe"] - 0.05
+        )
+        if thinking_helps and not thinking_hurts:
+            print(
+                "\nRecommendation: KEEP Thinking + News ON for paper conservative blend "
+                "(PAPER_THINKING_ENGINE_ENABLED=true). Tilts add edge or match heuristic-only."
+            )
+        elif thinking_hurts:
+            print(
+                "\nRecommendation: DISABLE Thinking on paper for conservative blend "
+                "(PAPER_THINKING_ENGINE_ENABLED=false) — sleeve tilts hurt vs heuristic-only."
+            )
+        else:
+            print(
+                "\nRecommendation: OPTIONAL — Thinking impact is modest on this window; "
+                "keep ON if you value macro narrative / tilt audit logs."
+            )
+    print("-" * 84)
+
+
+def run_tech_guard_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+    *,
+    with_news: bool = False,
+) -> None:
+    """Compare paper aggressive with vs without tech concentration guard."""
+    from modules.macro_regime_adaptor import ensure_macro_regime_daily
+
+    ensure_macro_regime_daily()
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "paper_dynamic_risk": True,
+        "paper_vol_trading": True,
+        "paper_options_sleeve": True,
+        "paper_macro_regime": False,
+        "paper_stat_arb": True,
+        "paper_sector_rotation": False,
+    }
+    if with_news:
+        base_kwargs["paper_thinking"] = True
+        base_kwargs["with_news"] = True
+        title = "--- TECH GUARD A/B (paper + thinking + news) ---"
+    else:
+        base_kwargs["paper_thinking"] = True
+        title = "--- TECH GUARD A/B (paper aggressive + thinking) ---"
+    configs = [
+        (
+            "Paper (no tech guard)",
+            {**base_kwargs, "paper_tech_guard": False},
+        ),
+        (
+            "Paper (+ tech guard)",
+            {**base_kwargs, "paper_tech_guard": True},
+        ),
+    ]
+    print(title)
+    print(
+        f"Window ({label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    print(
+        f"Guard: limit {config.TECH_CONCENTRATION_LIMIT:.0%} tech exposure | "
+        f"max +{config.TECH_GUARD_MAX_SPY_TILT:.0%} SPY tilt when heavy | "
+        f"skip tech NYSE buys + boost non-tech"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'AvgTech%':>9} {'Tilts':>6}"
+    )
+    print("-" * 72)
+
+    baseline = None
+    with_guard = None
+    for label_cfg, kwargs in configs:
+        from modules.tech_concentration_guard import guard_stats, reset_guard_stats
+
+        reset_guard_stats()
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        stats = guard_stats()
+        result["tech_guard_stats"] = stats
+        release_backtest_memory()
+        if kwargs.get("paper_tech_guard"):
+            with_guard = result
+        else:
+            baseline = result
+        tech_avg = result.get("avg_tech_exposure_pct")
+        tech_s = f"{tech_avg:.1f}%" if tech_avg is not None else "—"
+        print(
+            f"{label_cfg:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{tech_s:>9} "
+            f"{_thinking_tilt_event_count(result):>6d}"
+        )
+    print("-" * 72)
+    if baseline and with_guard:
+        b_tech = baseline.get("avg_tech_exposure_pct")
+        g_tech = with_guard.get("avg_tech_exposure_pct")
+        print(
+            f"Tech guard vs baseline: return "
+            f"{with_guard['total_return_pct'] - baseline['total_return_pct']:+.2f}pp | "
+            f"Sharpe {with_guard['sharpe'] - baseline['sharpe']:+.2f} | "
+            f"MaxDD {with_guard['max_drawdown_pct'] - baseline['max_drawdown_pct']:+.2f}pp"
+        )
+        if b_tech is not None and g_tech is not None:
+            print(f"Avg tech exposure: {b_tech:.1f}% -> {g_tech:.1f}% ({g_tech - b_tech:+.1f}pp)")
+        gs = with_guard.get("tech_guard_stats") or {}
+        if gs:
+            print(
+                f"Guard actions (with guard): rank reorders {gs.get('rank_reorders', 0)} | "
+                f"NYSE tech skips {gs.get('nyse_skips', 0)} | tilt clamps {gs.get('tilt_clamps', 0)}"
+            )
+        delta_ret = with_guard["total_return_pct"] - baseline["total_return_pct"]
+        if abs(delta_ret) < 0.01 and not any(gs.values()):
+            print(
+                "Note: guard did not activate in this window (tech exposure stayed below 45% limits)."
+            )
+        elif (
+            with_guard["sharpe"] >= baseline["sharpe"] - 0.05
+            and with_guard["total_return_pct"] >= baseline["total_return_pct"] - 2.0
+        ):
+            print(
+                "Paper recommendation: keep PAPER_TECH_GUARD_ENABLED=true — "
+                "reduces tech concentration without large return drag."
+            )
+        else:
+            print(
+                "Paper recommendation: tech guard helps risk mix; evaluate return trade-off "
+                "before live. Live $300: keep OFF (TECH_CONCENTRATION_LIVE_ENABLED=false)."
+            )
 
 
 def _crypto_sleeve_stats(result: dict) -> dict:
@@ -3967,27 +4568,27 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
 
 
 def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare static UNIVERSE vs strict dynamic screener (paper aggressive)."""
+    """Compare static UNIVERSE vs dynamic screener on conservative blend + strict PIT."""
     saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
     saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
-    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
+    config.PAPER_DYNAMIC_UNIVERSE_STRICT = False
     config.set_paper_aggressive_context(True)
     config.set_backtest_paper_sleeves_context(True)
 
     sim_days = days or config.BACKTEST_DAYS
-    from modules.dynamic_universe import screener_universe_meta
+    from modules.dynamic_universe import screener_turnover_vs_prior, screener_universe_meta
 
-    filters = (screener_universe_meta().get("filters") or {})
-    need_strict_file = filters.get("strict_mode") is not True
     screener = _prefetch_screener_for_backtest(
-        sim_days, refresh=refresh or need_strict_file, use_max=use_max
+        sim_days, refresh=refresh, use_max=use_max
     )
 
     if use_max:
-        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        data = _ensure_daily_data(0, refresh=True, use_max=True)
+        win_label = "max"
     else:
-        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+        data = _ensure_daily_data(sim_days, refresh=True, use_max=False)
+        win_label = f"{sim_days}d"
 
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
     config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
@@ -3996,53 +4597,59 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
         print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
         return
 
+    turnover = screener_turnover_vs_prior(screener)
     static_size = len(_static_equity_universe(data.columns))
-    saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
-    saved_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = True
-    config.PAPER_DYNAMIC_UNIVERSE_STRICT = True
     dyn_size = len(_dynamic_equity_universe(data.columns))
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
-    config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
     bench = _benchmark_return(data, MIN_HISTORY)
-    base_kwargs = {
-        "paper_aggressive": True,
-        "paper_sleeve_features": True,
-        "paper_dynamic_vti": True,
-        "paper_dynamic_risk": True,
-        "paper_stat_arb": True,
-        "track_active_exposure": True,
+    blend_base = {
+        **CONSERVATIVE_BLEND_KWARGS,
+        "paper_thinking": True,
+        "with_news": True,
     }
     configs = [
         (
             f"Static equity ({static_size} names)",
-            {**base_kwargs, "paper_dynamic_universe": False, "paper_dynamic_universe_strict": False},
+            {
+                **blend_base,
+                "paper_dynamic_universe": False,
+                "paper_dynamic_universe_strict": False,
+            },
         ),
         (
-            f"Dynamic strict ({dyn_size} names)",
+            f"Dynamic screener ({dyn_size} names)",
             {
-                **base_kwargs,
+                **blend_base,
                 "paper_dynamic_universe": True,
-                "paper_dynamic_universe_strict": True,
+                "paper_dynamic_universe_strict": False,
             },
         ),
     ]
 
-    print("--- PAPER DYNAMIC UNIVERSE A/B (static vs strict screener, paper only) ---")
+    print("--- DYNAMIC UNIVERSE IMPACT A/B (conservative blend + strict PIT) ---")
     print(
-        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
     )
     if bench is not None:
         print(f"VTI buy & hold benchmark: {bench:+.2f}%")
-    from modules.dynamic_universe import STRICT_MIN_AVG_DOLLAR_VOLUME
-
+    print(
+        "Held constant: Top1 conservative vol sizing | spec -4% stop | "
+        "thinking ON | sector rotation OFF"
+    )
+    filters = (screener_universe_meta().get("filters") or {})
     print(
         f"Screener file: {len(screener)} tickers | "
-        f"static pool {static_size} | dynamic strict pool {dyn_size} | "
-        f"filters: 30d momentum rank, ${STRICT_MIN_AVG_DOLLAR_VOLUME/1e6:.0f}M $vol, "
-        f"sector cap, ETB-only (no short-interest feed)"
+        f"static pool {static_size} | dynamic pool {dyn_size} | "
+        f"min price ${filters.get('min_price', 7)} | "
+        f"min $vol ${float(filters.get('min_avg_dollar_volume', 50_000_000))/1e6:.0f}M"
     )
+    if turnover.get("prior_count"):
+        print(
+            f"Week-over-week universe churn: {turnover['changes']} ticker changes "
+            f"({turnover['overlap']} retained of {turnover['prior_count']})"
+        )
     samples = _universe_sample_lines(data, screener)
     if samples:
         print("Sample dynamic names in backtest window:")
@@ -4060,10 +4667,22 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
     )
     print("-" * 82)
 
+    import warnings
+
+    warning_count = 0
     results: list[tuple[str, dict]] = []
     for label, kwargs in configs:
-        result = run_backtest(data, **kwargs)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = run_backtest(data, track_metrics=True, **kwargs)
+            warning_count += sum(
+                1
+                for w in caught
+                if "screener tickers" in str(w.message).lower()
+                or "dynamic universe" in str(w.message).lower()
+            )
         results.append((label, result))
+        release_backtest_memory()
         print(
             f"{label:<32} "
             f"{result['total_return_pct']:>+7.2f}% "
@@ -4074,16 +4693,32 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
         )
 
     print("-" * 82)
+    print(f"Screener coverage warnings during runs: {warning_count}")
     if len(results) == 2:
         _, static_r = results[0]
         _, dyn_r = results[1]
         print(
-            f"Delta (dynamic strict - static): "
+            f"\nDelta (dynamic - static): "
             f"return {dyn_r['total_return_pct'] - static_r['total_return_pct']:+.2f}pp | "
             f"Sharpe {dyn_r['sharpe'] - static_r['sharpe']:+.2f} | "
             f"MaxDD {dyn_r['max_drawdown_pct'] - static_r['max_drawdown_pct']:+.2f}pp | "
-            f"Trades {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d}"
+            f"Trades {dyn_r.get('nyse_signals', 0) - static_r.get('nyse_signals', 0):+d} | "
+            f"universe size {dyn_r.get('equity_universe_size', 0) - static_r.get('equity_universe_size', 0):+d}"
         )
+        dyn_helps = (
+            dyn_r["total_return_pct"] >= static_r["total_return_pct"] - 0.5
+            and dyn_r["sharpe"] >= static_r["sharpe"] - 0.02
+        )
+        if dyn_helps:
+            print(
+                "\nRecommendation: KEEP dynamic universe ON for paper "
+                "(PAPER_DYNAMIC_UNIVERSE_ENABLED=true)."
+            )
+        else:
+            print(
+                "\nRecommendation: Static UNIVERSE outperformed on this window — "
+                "keep dyn_univ ON only if you value broader discovery."
+            )
     print("-" * 82)
 
 
@@ -4607,6 +5242,971 @@ def run_profit_target_compare(days=None, refresh=False, use_max=False) -> None:
     print("-" * 88)
 
 
+BEST_PAPER_V21_KWARGS = {
+    **FINAL_PAPER_BOT_KWARGS,
+    "paper_dynamic_universe": True,
+    "paper_ipo_safety": True,
+    "paper_tech_guard": True,
+    "paper_sector_rotation": False,
+    "paper_profit_target": False,
+    "paper_scaling_strategy": False,
+    "paper_pattern_awareness": False,
+    "paper_vol_position_sizing": False,
+    "paper_loss_cutting": False,
+    "track_active_exposure": True,
+}
+
+CONSERVATIVE_BLEND_KWARGS = {
+    **BEST_PAPER_V21_KWARGS,
+    "strict_pit": True,
+    "paper_pattern_awareness": False,
+    "paper_vol_position_sizing": True,
+    "paper_loss_cutting": True,
+    "top1_vol_conservative": True,
+    "top1_loss_conservative": True,
+    "paper_sector_rotation": False,
+}
+
+
+def run_scaling_strategy_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+    *,
+    focus_ticker: str | None = None,
+) -> None:
+    """Compare Best Paper v2.1 vs smaller-gains + dip-rebuy scaling rules."""
+    from modules.scaling_strategy import (
+        REBUY_PULLBACK,
+        TAKE_FRACTION,
+        TAKE_LEVELS,
+        format_symbol_report,
+    )
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    slippage_note = (
+        f"Costs: equity slippage {RUN_OPTIONS.equity_slippage_bps:.0f} bps | "
+        f"crypto slippage {RUN_OPTIONS.crypto_slippage_bps:.0f} bps | "
+        f"equity commission {RUN_OPTIONS.equity_commission_bps:.0f} bps"
+    )
+    configs = [
+        (
+            "Best Paper v2.1 (current)",
+            dict(BEST_PAPER_V21_KWARGS),
+        ),
+        (
+            "Best Paper v2.1 (+ scaling)",
+            {**BEST_PAPER_V21_KWARGS, "paper_scaling_strategy": True},
+        ),
+    ]
+
+    title = "--- SCALING STRATEGY A/B (smaller gains + dip rebuy) ---"
+    if focus_ticker:
+        title += f" [focus {focus_ticker.upper()}]"
+    print(title)
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(slippage_note)
+    print(
+        "Rules when ON: "
+        f"sell {TAKE_FRACTION:.0%} at {', '.join(f'+{x:.0%}' for x in TAKE_LEVELS)} | "
+        f"rebuy after {REBUY_PULLBACK:.0%} pullback (limit-style fill) | "
+        f"max {int(__import__('os').getenv('SCALING_MAX_ROUND_TRIPS_WEEK', '3'))} round trips/ticker/week | "
+        f"speculative size 50% on SPCX-class names"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Scale':>6} {'Rebuy':>6}"
+    )
+    print("-" * 88)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label, result))
+        sc = result.get("scaling_strategy") or {}
+        print(
+            f"{label:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{sc.get('partial_sells', 0):>6} "
+            f"{sc.get('rebuys', 0):>6}"
+        )
+        if sc:
+            print(
+                f"  scaling: partial sells {sc.get('partial_sells', 0)} | "
+                f"rebuys {sc.get('rebuys', 0)} | "
+                f"round trips {sc.get('round_trips', 0)} | "
+                f"blocked buys {sc.get('blocked_buys', 0)} | "
+                f"exec cost {result.get('execution_cost_pct', 0):.3f}%"
+            )
+        release_backtest_memory()
+
+    print("-" * 88)
+    if len(results) == 2:
+        _, base_r = results[0]
+        _, scale_r = results[1]
+        sc = scale_r.get("scaling_strategy") or {}
+        print(
+            f"Delta (scaling ON - current): "
+            f"return {scale_r['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {scale_r['sharpe'] - base_r['sharpe']:+.2f} | "
+            f"MaxDD {scale_r['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {scale_r.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+        )
+        tickers = []
+        if focus_ticker:
+            tickers.append(focus_ticker.upper())
+        tickers.extend(["SPCX", "COIN", "PLTR"])
+        seen: set[str] = set()
+        print("\nPer-ticker scaling activity (ON arm):")
+        for t in tickers:
+            tu = t.upper()
+            if tu in seen:
+                continue
+            seen.add(tu)
+            print(f"  {format_symbol_report(sc, tu)}")
+            if tu in data.columns:
+                print(f"    (price column present in backtest window)")
+            elif tu == focus_ticker:
+                print(f"    (WARNING: {tu} not in price matrix — no trades possible)")
+
+        if (
+            scale_r["sharpe"] >= base_r["sharpe"] + 0.05
+            and scale_r["max_drawdown_pct"] >= base_r["max_drawdown_pct"] - 0.5
+            and scale_r["total_return_pct"] >= base_r["total_return_pct"] - 1.0
+        ):
+            print(
+                "\nRecommendation: ADOPT on paper as opt-in research "
+                "(PAPER_SCALING_STRATEGY_ENABLED) after 2–4 weeks observation. "
+                "Keep Best Paper v2.1 Final locked defaults until validated."
+            )
+        elif sc.get("partial_sells", 0) == 0:
+            print(
+                "\nRecommendation: KEEP current logic — scaling rules never triggered "
+                "(positions may not have reached +4% tiers in this window)."
+            )
+        elif scale_r["total_return_pct"] < base_r["total_return_pct"] - 3:
+            print(
+                "\nRecommendation: KEEP current Best Paper v2.1 logic — "
+                "partial profit-taking + churn reduced total return materially."
+            )
+        else:
+            print(
+                "\nRecommendation: KEEP current logic as default — scaling adds turnover "
+                "without clear Sharpe/return edge on this window. "
+                "Optional paper experiment only."
+            )
+    print("-" * 88)
+
+
+def run_pattern_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+) -> None:
+    """Compare Best Paper v2.1 with vs without tuned chart pattern awareness."""
+    from modules.chart_patterns import PATTERN_LABELS, format_pattern_stats_report
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "Best Paper v2.1 (current)",
+            dict(BEST_PAPER_V21_KWARGS),
+        ),
+        (
+            "Best Paper v2.1 (+ patterns full)",
+            {
+                **BEST_PAPER_V21_KWARGS,
+                "paper_pattern_awareness": True,
+                "paper_pattern_bearish_only": False,
+            },
+        ),
+        (
+            "Best Paper v2.1 (+ bearish filter)",
+            {
+                **BEST_PAPER_V21_KWARGS,
+                "paper_pattern_awareness": True,
+                "paper_pattern_bearish_only": True,
+            },
+        ),
+    ]
+
+    print("--- CHART PATTERN AWARENESS A/B (tuned thresholds, research-only) ---")
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Tuned rules: cup/handle conf>="
+        f"{config.PATTERN_CUP_HANDLE_MIN_CONF:.0%}, flag conf>="
+        f"{config.PATTERN_FLAG_MIN_CONF:.0%}, min price ${config.PATTERN_MIN_PRICE:.0f}, "
+        f"min vol {config.PATTERN_MIN_AVG_VOLUME/1e3:.0f}k | "
+        f"boost={config.PATTERN_SCORE_BOOST:.0%} trim={config.PATTERN_SCORE_TRIM:.0%}"
+    )
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Det':>5} {'Bull':>5} {'Bear':>5}"
+    )
+    print("-" * 88)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label, result))
+        pa = result.get("pattern_awareness") or {}
+        print(
+            f"{label:<32} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{pa.get('detections', 0):>5} "
+            f"{pa.get('bullish', 0):>5} "
+            f"{pa.get('bearish', 0):>5}"
+        )
+        if pa:
+            print(f"  patterns: {format_pattern_stats_report(pa)}")
+        release_backtest_memory()
+
+    print("-" * 88)
+    if len(results) >= 2:
+        _, base_r = results[0]
+        best_return = base_r
+        best_sharpe = base_r
+        best_label_return = results[0][0]
+        best_label_sharpe = results[0][0]
+        pattern_results = results[1:]
+        for label, res in pattern_results:
+            if res["total_return_pct"] > best_return["total_return_pct"]:
+                best_return = res
+                best_label_return = label
+            if res["sharpe"] > best_sharpe["sharpe"]:
+                best_sharpe = res
+                best_label_sharpe = label
+
+        full_r = pattern_results[0][1] if len(pattern_results) >= 1 else None
+        bear_r = pattern_results[1][1] if len(pattern_results) >= 2 else None
+        if full_r:
+            pa = full_r.get("pattern_awareness") or {}
+            by_pat = pa.get("by_pattern") or {}
+            if by_pat:
+                top = sorted(by_pat.items(), key=lambda x: -x[1])[:6]
+                print("Most common patterns detected (full mode):")
+                for key, count in top:
+                    pat_label = PATTERN_LABELS.get(key, (key, ""))[0]
+                    print(f"  {pat_label}: {count}")
+
+        if full_r and bear_r:
+            print(
+                f"Delta full vs baseline: "
+                f"return {full_r['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+                f"Sharpe {full_r['sharpe'] - base_r['sharpe']:+.2f} | "
+                f"MaxDD {full_r['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+                f"Trades {full_r.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+            )
+            print(
+                f"Delta bearish vs baseline: "
+                f"return {bear_r['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+                f"Sharpe {bear_r['sharpe'] - base_r['sharpe']:+.2f} | "
+                f"MaxDD {bear_r['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+                f"Trades {bear_r.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+            )
+
+        bearish_ok = bear_r and (
+            bear_r["total_return_pct"] >= base_r["total_return_pct"] - 0.5
+            and bear_r["sharpe"] >= base_r["sharpe"]
+        )
+        full_ok = full_r and (
+            full_r["total_return_pct"] >= base_r["total_return_pct"] - 0.5
+            and full_r["sharpe"] >= base_r["sharpe"] + 0.02
+        )
+        if bearish_ok and not full_ok:
+            print(
+                "\nRecommendation: ENABLE as BEARISH FILTER ONLY on paper "
+                "(PAPER_PATTERN_BEARISH_ONLY=true) — trims weak setups without "
+                "bullish reorder drag. Keep PATTERN_AWARENESS_ENABLED=false by default."
+            )
+        elif full_ok:
+            print(
+                "\nRecommendation: OPTIONAL full mode on paper — tuned thresholds "
+                "deliver neutral/positive return with Sharpe benefit. Live stays OFF."
+            )
+        elif bear_r and bear_r["total_return_pct"] >= base_r["total_return_pct"]:
+            print(
+                "\nRecommendation: BEARISH FILTER ONLY — best return preservation on "
+                "this window. Skip full bullish+ bearish boosts."
+            )
+        else:
+            print(
+                "\nRecommendation: KEEP OFF by default — neither full nor bearish-only "
+                "met neutral return + Sharpe goal on this window."
+            )
+        print(
+            f"Best return arm: {best_label_return} ({best_return['total_return_pct']:+.2f}%) | "
+            f"Best Sharpe arm: {best_label_sharpe} ({best_sharpe['sharpe']:.2f})"
+        )
+    print("-" * 88)
+
+
+PIT_COMPARE_KWARGS = {
+    **BEST_PAPER_V21_KWARGS,
+    "paper_thinking": True,
+    "with_news": True,
+}
+
+
+def run_pit_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+) -> None:
+    """Compare relaxed (legacy) vs strict point-in-time backtest paths."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "Relaxed (legacy paths)",
+            {**PIT_COMPARE_KWARGS, "strict_pit": False},
+        ),
+        (
+            "Strict PIT",
+            {**PIT_COMPARE_KWARGS, "strict_pit": True},
+        ),
+    ]
+
+    print("--- POINT-IN-TIME BACKTEST A/B (thinking + news) ---")
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Strict PIT: Wayback web only (no live headlines), macro sliced to bar, "
+        "premarket thinking uses prior close; costs 8bps slip + 1bps comm equity"
+    )
+    print(f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} {'Trades':>7} {'Cost%':>7}")
+    print("-" * 72)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label, result))
+        cost_pct = float(result.get("execution_cost_pct") or 0.0)
+        print(
+            f"{label:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{cost_pct:>6.3f}%"
+        )
+        release_backtest_memory()
+
+    print("-" * 72)
+    if len(results) == 2:
+        _, base_r = results[0]
+        _, pit_r = results[1]
+        print(
+            f"Delta (strict - relaxed): "
+            f"return {pit_r['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {pit_r['sharpe'] - base_r['sharpe']:+.2f} | "
+            f"MaxDD {pit_r['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {pit_r.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+        )
+        if pit_r["total_return_pct"] <= base_r["total_return_pct"]:
+            print(
+                "\nRecommendation: Use --strict-pit for research validation; "
+                "relaxed mode overstates edge when live web/macro leak into history."
+            )
+        else:
+            print(
+                "\nRecommendation: Strict PIT is the default for --paper-aggressive; "
+                "relaxed mode is legacy comparison only."
+            )
+    print("-" * 72)
+
+
+POSITION_SIZING_COMPARE_KWARGS = {
+    **BEST_PAPER_V21_KWARGS,
+    "strict_pit": True,
+    "paper_thinking": True,
+    "with_news": True,
+}
+
+
+def run_position_sizing_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+) -> None:
+    """Compare baseline vs Top1 vol-based asymmetric position sizing (strict PIT)."""
+    from modules.vol_position_sizing import format_vol_sizing_report
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "v2.1 baseline sizing",
+            {**POSITION_SIZING_COMPARE_KWARGS, "paper_vol_position_sizing": False},
+        ),
+        (
+            "Top1 vol + asymmetric",
+            {
+                **POSITION_SIZING_COMPARE_KWARGS,
+                "paper_vol_position_sizing": True,
+                "top1_vol_conservative": False,
+            },
+        ),
+    ]
+
+    print("--- TOP1 VOL POSITION SIZING A/B (strict PIT, thinking + news) ---")
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Rules when ON: 1% base risk x ATR vol scale x conviction (max 2x) | "
+        "speculative max 0.5% | portfolio heat cap 7%"
+    )
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Sized':>6}"
+    )
+    print("-" * 72)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label, result))
+        vs = result.get("vol_position_sizing") or {}
+        print(
+            f"{label:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{vs.get('sized_buys', 0):>6}"
+        )
+        if vs:
+            print(f"  sizing: {format_vol_sizing_report(vs)}")
+        release_backtest_memory()
+
+    print("-" * 72)
+    if len(results) == 2:
+        _, base_r = results[0]
+        _, top_r = results[1]
+        vs = top_r.get("vol_position_sizing") or {}
+        by_sym = vs.get("by_symbol") or {}
+        print(
+            f"Delta (Top1 - baseline): "
+            f"return {top_r['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {top_r['sharpe'] - base_r['sharpe']:+.2f} | "
+            f"MaxDD {top_r['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {top_r.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+        )
+        if "SPCX" in by_sym:
+            s = by_sym["SPCX"]
+            print(
+                f"SPCX handling: {s.get('buys', 0)} sized buys, "
+                f"avg risk {float(s.get('avg_risk_pct', 0))*100:.2f}%, "
+                f"speculative caps {s.get('speculative', 0)}"
+            )
+        elif "SPCX" not in data.columns:
+            print(
+                "SPCX handling: no price column in backtest window "
+                "(screener-only / not traded)"
+            )
+        else:
+            print("SPCX handling: in universe but no Top1-sized buys this window")
+        if (
+            top_r["sharpe"] >= base_r["sharpe"]
+            and top_r["max_drawdown_pct"] >= base_r["max_drawdown_pct"] - 0.5
+        ):
+            print(
+                "\nRecommendation: ENABLE on paper research "
+                "(PAPER_VOL_POSITION_SIZING_ENABLED=true) under strict PIT; "
+                "live $300 account - trial with 0.5% speculative cap only after 2 weeks paper."
+            )
+        elif top_r["total_return_pct"] < base_r["total_return_pct"] - 2:
+            print(
+                "\nRecommendation: KEEP OFF — Top1 sizing reduced return on this window; "
+                "heat cap or speculative trims may be too tight for paper aggressive."
+            )
+        else:
+            print(
+                "\nRecommendation: OPTIONAL on paper — marginal impact; keep OFF on live $300 "
+                "until paper validates conviction boosts without return drag."
+            )
+    print("-" * 72)
+
+
+LOSS_CUTTING_COMPARE_KWARGS = {
+    **BEST_PAPER_V21_KWARGS,
+    "strict_pit": True,
+    "paper_thinking": True,
+    "with_news": True,
+}
+
+
+def run_loss_cutting_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+) -> None:
+    """Compare baseline vs Top1 asymmetric loss cutting (strict PIT)."""
+    from modules.loss_cutting import format_loss_cutting_report
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "v2.1 baseline exits",
+            {**LOSS_CUTTING_COMPARE_KWARGS, "paper_loss_cutting": False},
+        ),
+        (
+            "Top1 loss cutting",
+            {
+                **LOSS_CUTTING_COMPARE_KWARGS,
+                "paper_loss_cutting": True,
+                "top1_loss_conservative": False,
+            },
+        ),
+    ]
+
+    print("--- TOP1 LOSS CUTTING A/B (strict PIT, thinking + news) ---")
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Rules when ON: stop -7% normal / -4% speculative | "
+        "tighten to -5%/-3% on thinking/sector headwind | "
+        "scale out 30/30/40 at +6/+12/+20% | "
+        "conf>=0.7 uses 10% trailing stop after +6%"
+    )
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Stops':>6} {'Take':>5}"
+    )
+    print("-" * 72)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label, result))
+        lc = result.get("loss_cutting") or {}
+        print(
+            f"{label:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{lc.get('hard_stops', 0):>6} "
+            f"{lc.get('partial_takes', 0):>5}"
+        )
+        if lc:
+            print(f"  exits: {format_loss_cutting_report(lc)}")
+        release_backtest_memory()
+
+    print("-" * 72)
+    if len(results) == 2:
+        _, base_r = results[0]
+        _, cut_r = results[1]
+        lc = cut_r.get("loss_cutting") or {}
+        by_sym = lc.get("by_symbol") or {}
+        print(
+            f"Delta (loss cutting - baseline): "
+            f"return {cut_r['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+            f"Sharpe {cut_r['sharpe'] - base_r['sharpe']:+.2f} | "
+            f"MaxDD {cut_r['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+            f"Trades {cut_r.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+        )
+        spec_syms = ("SPCX", "SMCI", "COIN", "PLTR", "KTOS")
+        spec_lines = []
+        for s in spec_syms:
+            row = by_sym.get(s)
+            if row:
+                spec_lines.append(
+                    f"{s}: stops {row.get('hard_stops', 0)} "
+                    f"partials {row.get('partial_takes', 0)} "
+                    f"trails {row.get('trail_exits', 0)}"
+                )
+        if spec_lines:
+            print("Speculative-name exits: " + "; ".join(spec_lines))
+        elif "SPCX" not in data.columns:
+            print(
+                "SPCX-style impact: no SPCX price data in window; "
+                f"speculative rules applied to {lc.get('hard_stops', 0)} hard stops total"
+            )
+        else:
+            print("SPCX-style impact: no SPCX positions opened this window")
+        if (
+            cut_r["max_drawdown_pct"] >= base_r["max_drawdown_pct"]
+            and cut_r["sharpe"] >= base_r["sharpe"] - 0.02
+        ):
+            print(
+                "\nRecommendation: ENABLE on paper (PAPER_LOSS_CUTTING_ENABLED=true) "
+                "under strict PIT - capital protection improved or matched with "
+                "acceptable return tradeoff. Live $300: enable speculative -4% stop only "
+                "after paper validation."
+            )
+        elif cut_r["total_return_pct"] < base_r["total_return_pct"] - 3:
+            print(
+                "\nRecommendation: KEEP OFF - early stops/partials cut winners on this window."
+            )
+        else:
+            print(
+                "\nRecommendation: OPTIONAL on paper - modest impact; prioritize "
+                "speculative -4% cap for SPCX-class names on live $300."
+            )
+    print("-" * 72)
+
+
+BLENDED_CONSERVATIVE_COMPARE_KWARGS = {
+    **BEST_PAPER_V21_KWARGS,
+    "strict_pit": True,
+    "paper_thinking": True,
+    "with_news": True,
+    "paper_pattern_awareness": False,
+}
+
+# Prior conservative blend (spec -4%, no trailing) from 365d strict-PIT run
+PREVIOUS_CONSERVATIVE_BLEND = {
+    "total_return_pct": 58.62,
+    "sharpe": 2.04,
+    "max_drawdown_pct": -7.39,
+    "nyse_signals": 15,
+}
+
+
+def run_blended_conservative_compare(
+    days=None,
+    refresh=False,
+    use_max=False,
+) -> None:
+    """Compare v2.1 baseline vs conservative Top1 blend vs full individual features."""
+    from modules.loss_cutting import format_loss_cutting_report
+    from modules.vol_position_sizing import format_vol_sizing_report
+
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        win_label = "max"
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        win_label = f"{days}d"
+    if len(data) < MIN_HISTORY:
+        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        **BLENDED_CONSERVATIVE_COMPARE_KWARGS,
+        "paper_vol_position_sizing": False,
+        "paper_loss_cutting": False,
+        "top1_vol_conservative": False,
+        "top1_loss_conservative": False,
+    }
+    configs = [
+        (
+            "v2.1 baseline (no Top1)",
+            dict(base_kwargs),
+        ),
+        (
+            "Conservative blend",
+            {
+                **base_kwargs,
+                "paper_vol_position_sizing": True,
+                "paper_loss_cutting": True,
+                "top1_vol_conservative": True,
+                "top1_loss_conservative": True,
+            },
+        ),
+        (
+            "Full vol sizing only",
+            {
+                **base_kwargs,
+                "paper_vol_position_sizing": True,
+                "top1_vol_conservative": False,
+            },
+        ),
+        (
+            "Full loss cutting only",
+            {
+                **base_kwargs,
+                "paper_loss_cutting": True,
+                "top1_loss_conservative": False,
+            },
+        ),
+        (
+            "Full Top1 combined",
+            {
+                **base_kwargs,
+                "paper_vol_position_sizing": True,
+                "paper_loss_cutting": True,
+                "top1_vol_conservative": False,
+                "top1_loss_conservative": False,
+            },
+        ),
+    ]
+
+    print("--- TOP1 CONSERVATIVE BLEND COMPARE (strict PIT, thinking + news) ---")
+    print(
+        f"Window ({win_label}): {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        "Conservative blend: speculative 0.5% cap + mild ATR scale (0.75-1.25x) | "
+        "speculative -5% stop (ATR widen) | mild trail +8% conf>=0.65 (12% trail) | "
+        "NO heat cap | NO partials | patterns OFF"
+    )
+    print(
+        "Full vol sizing: 1% base x ATR x conviction | spec 0.5% | heat cap 7%"
+    )
+    print(
+        "Full loss cutting: -7%/-4% stops | tighten on headwind | "
+        "partials +6/+12/+20 | trailing after +6%"
+    )
+    print(
+        f"{'Config':<26} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Trades':>7} {'Sized':>6} {'Stops':>6}"
+    )
+    print("-" * 78)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_metrics=True, **kwargs)
+        results.append((label, result))
+        vs = result.get("vol_position_sizing") or {}
+        lc = result.get("loss_cutting") or {}
+        print(
+            f"{label:<26} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('nyse_signals', 0):>7} "
+            f"{vs.get('sized_buys', 0):>6} "
+            f"{lc.get('hard_stops', 0):>6}"
+        )
+        if vs:
+            print(f"  sizing: {format_vol_sizing_report(vs)}")
+        if lc:
+            print(f"  exits: {format_loss_cutting_report(lc)}")
+        release_backtest_memory()
+
+    print("-" * 78)
+    if len(results) >= 2:
+        base_label, base_r = results[0]
+        by_label = {label: res for label, res in results}
+        cons_r = by_label.get("Conservative blend")
+        full_vol_r = by_label.get("Full vol sizing only")
+        full_cut_r = by_label.get("Full loss cutting only")
+        full_combo_r = by_label.get("Full Top1 combined")
+
+        print("\nDelta vs v2.1 baseline:")
+        for label, res in results[1:]:
+            print(
+                f"  {label}: "
+                f"return {res['total_return_pct'] - base_r['total_return_pct']:+.2f}pp | "
+                f"Sharpe {res['sharpe'] - base_r['sharpe']:+.2f} | "
+                f"MaxDD {res['max_drawdown_pct'] - base_r['max_drawdown_pct']:+.2f}pp | "
+                f"Trades {res.get('nyse_signals', 0) - base_r.get('nyse_signals', 0):+d}"
+            )
+
+        if cons_r and full_vol_r and full_cut_r:
+            print("\nDelta conservative blend vs full individual features:")
+            print(
+                f"  vs full vol sizing: "
+                f"return {cons_r['total_return_pct'] - full_vol_r['total_return_pct']:+.2f}pp | "
+                f"Sharpe {cons_r['sharpe'] - full_vol_r['sharpe']:+.2f} | "
+                f"MaxDD {cons_r['max_drawdown_pct'] - full_vol_r['max_drawdown_pct']:+.2f}pp"
+            )
+            print(
+                f"  vs full loss cutting: "
+                f"return {cons_r['total_return_pct'] - full_cut_r['total_return_pct']:+.2f}pp | "
+                f"Sharpe {cons_r['sharpe'] - full_cut_r['sharpe']:+.2f} | "
+                f"MaxDD {cons_r['max_drawdown_pct'] - full_cut_r['max_drawdown_pct']:+.2f}pp"
+            )
+            if full_combo_r:
+                print(
+                    f"  vs full combined Top1: "
+                    f"return {cons_r['total_return_pct'] - full_combo_r['total_return_pct']:+.2f}pp | "
+                    f"Sharpe {cons_r['sharpe'] - full_combo_r['sharpe']:+.2f} | "
+                    f"MaxDD {cons_r['max_drawdown_pct'] - full_combo_r['max_drawdown_pct']:+.2f}pp"
+                )
+
+        if cons_r:
+            prev = PREVIOUS_CONSERVATIVE_BLEND
+            print(
+                "\nDelta refined conservative blend vs prior blend "
+                "(spec -4% stop, no trailing):"
+            )
+            print(
+                f"  return {cons_r['total_return_pct'] - prev['total_return_pct']:+.2f}pp | "
+                f"Sharpe {cons_r['sharpe'] - prev['sharpe']:+.2f} | "
+                f"MaxDD {cons_r['max_drawdown_pct'] - prev['max_drawdown_pct']:+.2f}pp | "
+                f"Trades {cons_r.get('nyse_signals', 0) - prev['nyse_signals']:+d}"
+            )
+            better_than_prev = (
+                cons_r["sharpe"] > prev["sharpe"]
+                or (
+                    cons_r["total_return_pct"] > prev["total_return_pct"]
+                    and cons_r["max_drawdown_pct"] >= prev["max_drawdown_pct"] - 0.3
+                )
+            )
+            better_than_base = cons_r["total_return_pct"] >= base_r["total_return_pct"] and (
+                cons_r["sharpe"] >= base_r["sharpe"] - 0.02
+            )
+            if better_than_prev and better_than_base:
+                print(
+                    "\nOverall: REFINED conservative blend is BETTER than prior blend "
+                    "and baseline on this window."
+                )
+            elif better_than_base:
+                print(
+                    "\nOverall: REFINED blend beats baseline but is mixed vs prior "
+                    "blend (-4% / no trail); prefer refined if Sharpe holds on paper."
+                )
+            elif better_than_prev:
+                print(
+                    "\nOverall: REFINED blend improved vs prior blend but still trails "
+                    "baseline; keep OFF until validated."
+                )
+            else:
+                print(
+                    "\nOverall: REFINED blend did NOT beat prior blend or baseline; "
+                    "revert to prior conservative settings or keep OFF."
+                )
+
+        cons_lc = (cons_r or {}).get("loss_cutting") or {}
+        cons_vs = (cons_r or {}).get("vol_position_sizing") or {}
+        by_sym = cons_lc.get("by_symbol") or {}
+        spec_syms = ("SPCX", "SMCI", "COIN", "PLTR", "KTOS")
+        spec_lines = []
+        for s in spec_syms:
+            row = by_sym.get(s)
+            vs_row = (cons_vs.get("by_symbol") or {}).get(s)
+            if row or vs_row:
+                parts = [s + ":"]
+                if vs_row:
+                    parts.append(
+                        f"sized {vs_row.get('buys', 0)} "
+                        f"spec={vs_row.get('speculative', 0)}"
+                    )
+                if row:
+                    parts.append(f"stops {row.get('hard_stops', 0)}")
+                spec_lines.append(" ".join(parts))
+        if spec_lines:
+            print("\nConservative blend speculative-name impact:")
+            for line in spec_lines:
+                print(f"  {line}")
+        elif cons_r:
+            print(
+                f"\nConservative blend speculative impact: "
+                f"{cons_vs.get('speculative_caps', 0)} spec caps | "
+                f"{cons_lc.get('hard_stops', 0)} speculative stops"
+            )
+
+        if cons_r:
+            beats_baseline = (
+                cons_r["sharpe"] >= base_r["sharpe"]
+                and cons_r["max_drawdown_pct"] >= base_r["max_drawdown_pct"] - 0.5
+            )
+            beats_full_vol = full_vol_r and cons_r["total_return_pct"] >= (
+                full_vol_r["total_return_pct"] - 0.5
+            )
+            beats_full_cut = full_cut_r and cons_r["sharpe"] >= (
+                full_cut_r["sharpe"] - 0.02
+            )
+            if beats_baseline and (beats_full_vol or beats_full_cut):
+                print(
+                    "\nRecommendation: ENABLE conservative blend on paper "
+                    "(TOP1_VOL_SIZING_CONSERVATIVE=true + TOP1_LOSS_CUT_CONSERVATIVE=true "
+                    "with PAPER_VOL_POSITION_SIZING_ENABLED and PAPER_LOSS_CUTTING_ENABLED). "
+                    "Partial Top1 rules improve or match baseline with less drag than full features."
+                )
+            elif cons_r["total_return_pct"] >= base_r["total_return_pct"] - 1.0:
+                print(
+                    "\nRecommendation: OPTIONAL on paper - conservative blend is near baseline; "
+                    "enable spec cap + spec -4% stop only after 2 weeks paper validation. "
+                    "Keep full Top1 features OFF."
+                )
+            else:
+                print(
+                    "\nRecommendation: KEEP OFF on paper - conservative blend underperformed "
+                    "baseline on this window. Revisit after screener adds more speculative names."
+                )
+    print("-" * 78)
+
+
 def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
     """Compare fixed 20% VTI vs dynamic 40-75% VTI on paper aggressive profile."""
     if use_max:
@@ -4875,6 +6475,7 @@ def run_performance_test(
         vti_core_pct=vti_core_pct,
         paper_aggressive=paper_aggressive,
         small_account=small_account,
+        strict_pit=RUN_OPTIONS.strict_pit,
     )
     curve_end = result["final_equity"]
     total_ret = result["total_return_pct"]
@@ -5075,6 +6676,54 @@ if __name__ == "__main__":
         help="Compare paper aggressive with vs without trailing profit targets",
     )
     parser.add_argument(
+        "--compare-scaling-strategy",
+        action="store_true",
+        help=(
+            "Compare Best Paper v2.1 vs partial take-profits + dip rebuy "
+            "(realistic slippage defaults)"
+        ),
+    )
+    parser.add_argument(
+        "--focus-ticker",
+        default=None,
+        metavar="SYMBOL",
+        help="Highlight ticker in --compare-scaling-strategy output (e.g. SPCX)",
+    )
+    parser.add_argument(
+        "--compare-patterns",
+        action="store_true",
+        help="Compare Best Paper v2.1 with vs without chart pattern awareness",
+    )
+    parser.add_argument(
+        "--strict-pit",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Point-in-time news/social/thinking (default ON with --paper-aggressive)",
+    )
+    parser.add_argument(
+        "--compare-pit",
+        action="store_true",
+        help="Compare relaxed vs strict point-in-time backtest (requires --paper-aggressive)",
+    )
+    parser.add_argument(
+        "--compare-position-sizing",
+        action="store_true",
+        help="Compare baseline vs Top1 vol-based asymmetric sizing (requires --paper-aggressive)",
+    )
+    parser.add_argument(
+        "--compare-loss-cutting",
+        action="store_true",
+        help="Compare baseline vs Top1 asymmetric loss cutting (requires --paper-aggressive)",
+    )
+    parser.add_argument(
+        "--compare-blended-conservative",
+        action="store_true",
+        help=(
+            "Compare v2.1 baseline vs conservative Top1 blend vs full vol/loss features "
+            "(requires --paper-aggressive)"
+        ),
+    )
+    parser.add_argument(
         "--compare-dynamic-vti",
         action="store_true",
         help="Compare fixed 20%% VTI vs dynamic 40-75%% VTI (paper aggressive)",
@@ -5125,11 +6774,35 @@ if __name__ == "__main__":
         help="Compare paper aggressive with vs without risk parity + pod limits",
     )
     parser.add_argument(
+        "--compare-sector-rotation",
+        action="store_true",
+        help=(
+            "Compare paper aggressive with vs without sector rotation "
+            "(use with --with-news for thinking+news A/B)"
+        ),
+    )
+    parser.add_argument(
+        "--compare-tech-guard",
+        action="store_true",
+        help=(
+            "Compare paper aggressive with vs without tech concentration guard "
+            "(use with --with-news for thinking+news A/B)"
+        ),
+    )
+    parser.add_argument(
         "--compare-thinking",
         action="store_true",
         help=(
             "Compare paper aggressive with vs without thinking-engine sleeve tilts "
             "(use with --with-news for news-aware paper A/B)"
+        ),
+    )
+    parser.add_argument(
+        "--compare-thinking-impact",
+        action="store_true",
+        help=(
+            "Isolate Thinking+News ON vs OFF on conservative blend "
+            "(requires --paper-aggressive, uses --strict-pit)"
         ),
     )
     parser.add_argument(
@@ -5289,6 +6962,10 @@ if __name__ == "__main__":
     RUN_OPTIONS.fast_mode = bool(args.fast_mode)
     RUN_OPTIONS.no_thinking = bool(args.no_thinking)
     RUN_OPTIONS.realistic_costs = not args.no_realistic_costs
+    if args.strict_pit is None:
+        RUN_OPTIONS.strict_pit = bool(args.paper_aggressive)
+    else:
+        RUN_OPTIONS.strict_pit = bool(args.strict_pit)
     if args.equity_slippage_bps is not None:
         RUN_OPTIONS.equity_slippage_bps = max(0.0, float(args.equity_slippage_bps))
     if args.crypto_slippage_bps is not None:
@@ -5296,6 +6973,10 @@ if __name__ == "__main__":
     RUN_OPTIONS.equity_commission_bps = max(0.0, float(args.equity_commission_bps))
     RUN_OPTIONS.crypto_commission_bps = max(0.0, float(args.crypto_commission_bps))
     apply_default_execution_costs()
+    if RUN_OPTIONS.strict_pit:
+        from modules.pit_replay import apply_strict_pit_execution_costs
+
+        apply_strict_pit_execution_costs(RUN_OPTIONS)
     RUN_OPTIONS.walk_forward_folds = max(0, int(args.walk_forward))
     RUN_OPTIONS.full_accuracy = not RUN_OPTIONS.fast_mode
     RUN_OPTIONS.parallel_arms = not args.no_parallel
@@ -5361,6 +7042,51 @@ if __name__ == "__main__":
         run_profit_target_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_pit:
+        if not args.paper_aggressive:
+            print("--compare-pit requires --paper-aggressive")
+            sys.exit(1)
+        run_pit_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_position_sizing:
+        if not args.paper_aggressive:
+            print("--compare-position-sizing requires --paper-aggressive")
+            sys.exit(1)
+        run_position_sizing_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_loss_cutting:
+        if not args.paper_aggressive:
+            print("--compare-loss-cutting requires --paper-aggressive")
+            sys.exit(1)
+        run_loss_cutting_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_blended_conservative:
+        if not args.paper_aggressive:
+            print("--compare-blended-conservative requires --paper-aggressive")
+            sys.exit(1)
+        run_blended_conservative_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_patterns:
+        if not args.paper_aggressive:
+            print("--compare-patterns requires --paper-aggressive")
+            sys.exit(1)
+        run_pattern_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_scaling_strategy:
+        if not args.paper_aggressive:
+            print("--compare-scaling-strategy requires --paper-aggressive")
+            sys.exit(1)
+        run_scaling_strategy_compare(
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            focus_ticker=args.focus_ticker,
+        )
     elif args.compare_dynamic_vti:
         run_dynamic_vti_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
@@ -5403,6 +7129,33 @@ if __name__ == "__main__":
         )
     elif args.compare_risk_parity:
         run_risk_parity_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_sector_rotation:
+        if not args.paper_aggressive:
+            print("--compare-sector-rotation requires --paper-aggressive")
+            sys.exit(1)
+        run_sector_rotation_compare(
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            with_news=True,
+        )
+    elif args.compare_tech_guard:
+        if not args.paper_aggressive:
+            print("--compare-tech-guard requires --paper-aggressive")
+            sys.exit(1)
+        run_tech_guard_compare(
+            days=args.days,
+            refresh=args.refresh,
+            use_max=args.max,
+            with_news=bool(args.with_news),
+        )
+    elif args.compare_thinking_impact:
+        if not args.paper_aggressive:
+            print("--compare-thinking-impact requires --paper-aggressive")
+            sys.exit(1)
+        run_thinking_impact_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_thinking:

@@ -1,8 +1,11 @@
 """At-a-glance bot status: live + paper equity, regime, safety, thinking.
 
-Run: python status.py
+Run:
+  python status.py
+  python status.py --positions
+  python status.py --positions --ticker AAPL
+  python scripts/cleanup_stale_positions.py --help
 """
-
 from __future__ import annotations
 
 import json
@@ -168,7 +171,7 @@ def _crypto_sleeve_status(*, paper: bool = False) -> str:
 
 
 def _sync_paper_stack_for_status() -> None:
-    """Match status display to Best Paper v2.1 + .env opt-in sleeves."""
+    """Match status display to Best Paper v2.2 + .env opt-in sleeves."""
     config.refresh_paper_new_markets_flags_from_env()
     try:
         config._load_best_paper_config().apply_best_paper_config()
@@ -177,19 +180,29 @@ def _sync_paper_stack_for_status() -> None:
 
 
 def _paper_validated_defaults_line() -> str:
-    """Validated Best Paper v2.1 policy line."""
+    """Validated Best Paper v2.2 policy line."""
     return config.get_best_paper_validated_defaults_line()
 
 
 def _paper_env_override_note() -> str | None:
-    """Call out .env overrides that differ from validated defaults."""
+    """Call out .env overrides that differ from validated v2.2 defaults."""
     notes: list[str] = []
     if config.PAPER_INTERNATIONAL_SLEEVE_ENABLED:
         notes.append("ADR env override (research)")
     if config.PAPER_BOND_SLEEVE_ENABLED:
         notes.append("bond env override")
-    if config.PAPER_THINKING_ENGINE_ENABLED:
-        notes.append("thinking env override")
+    if config.PAPER_SECTOR_ROTATION_ENABLED:
+        notes.append("sector rotation env override (research)")
+    if not config.PAPER_TECH_GUARD_ENABLED:
+        notes.append("tech guard env override (off)")
+    if not config.PAPER_THINKING_ENGINE_ENABLED:
+        notes.append("thinking env override (off)")
+    if not config.PAPER_DYNAMIC_UNIVERSE_ENABLED:
+        notes.append("dynamic universe env override (off)")
+    if config.PAPER_SCALING_STRATEGY_ENABLED:
+        notes.append("scaling strategy env override")
+    if config.PAPER_PATTERN_AWARENESS_ENABLED:
+        notes.append("pattern awareness env override")
     return f"Overrides: {', '.join(notes)}" if notes else None
 
 
@@ -292,7 +305,7 @@ def _safety_status_banner(*, live: bool) -> str:
 
 def _thinking_effective_label() -> str:
     if not config.PAPER_THINKING_ENGINE_ENABLED:
-        return "OFF"
+        return "OFF (v2.2 default is ON — set PAPER_THINKING_ENGINE_ENABLED=true)"
     was_ctx = config.paper_aggressive_context()
     was_bt = config.backtest_paper_sleeves_context()
     config.set_paper_aggressive_context(True)
@@ -419,12 +432,16 @@ def _profile_table_lines() -> list[str]:
         f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
         "| Crypto sleeve | OFF (disabled) | OFF (locked) |",
         "| Stat arb / vol / options | off | on (locked stack) |",
-        "| Dynamic universe | off (static) | on (weekly screener) |",
-        "| Thinking engine | off (live locked) | opt-in Ollama |",
+        "| Dynamic universe | off (static) | on (weekly screener, sticky) |",
+        "| Tech guard | off (live) | on by default |",
+        "| Sector rotation | off | off by default (opt-in) |",
+        "| Thinking engine | off (live locked) | on (quality tilts) |",
+        "| Conservative Top1 | off | on (spec 0.5% + -4% stop) |",
+        "| Strict PIT (research) | n/a | on by default |",
         "| International ADR | off (live locked) | off by default (365d: no edge) |",
         "| Bond sleeve | off (live locked) | opt-in hedge (365d: flat return) |",
         "| Macro / social / risk parity | off | locked off |",
-        f"| Stack version | Profile A | v2.1 locked |",
+        f"| Stack version | Profile A | v2.2 locked |",
     ]
 
 
@@ -439,7 +456,7 @@ def _safety_table_lines() -> list[str]:
         f"| Daily loss circuit breaker | {s['daily_loss_limit_live_pct']:.0f}% -> pause entries + tilts | {s['daily_loss_limit_paper_pct']:.0f}% |",
         f"| Thinking max tilt / sleeve | +/-{s['live_tilt_cap_pp']:.0f}% | +/-{s['max_sleeve_delta_pp']:.0f}% |",
         f"| Thinking manual approval | {'required' if s['manual_approval_live'] else 'off'} | auto when engine on |",
-        f"| Thinking engine default | off | {'on' if s['paper_thinking_enabled'] else 'off (opt-in)'} |",
+        f"| Thinking engine default | off | {'on (v2.2)' if s['paper_thinking_enabled'] else 'off (override)'} |",
         f"| Daily loss breaker enabled | {'yes' if s['daily_loss_breaker_enabled'] else 'no'} | same |",
         f"| Today circuit (live) | "
         f"{'TRIPPED' if live_dl.get('tripped') else 'ok'} "
@@ -451,10 +468,64 @@ def _safety_table_lines() -> list[str]:
 
 
 from modules.console_output import safe_print as _emit
+from modules import status_metrics as sm
+from modules.paper_journal import build_position_summary, format_positions_table
+
+
+def _print_positions(*, paper: bool = True, ticker: str | None = None, compact: bool = False) -> None:
+    rows, err = build_position_summary(paper=paper, ticker=ticker)
+    title = "Paper open positions" if paper else "Live open positions"
+    if compact and rows:
+        _emit(f"=== {title} ({len(rows)}) ===")
+        for row in rows[:8]:
+            from modules.paper_journal import format_position_row
+
+            _emit(f"  {format_position_row(row)}")
+        if len(rows) > 8:
+            _emit(f"  ... +{len(rows) - 8} more (python status.py --positions)")
+        return
+    if compact and err and not paper:
+        _emit(f"=== {title} ===")
+        _emit(f"  (unavailable: {err})")
+        return
+    for line in format_positions_table(rows, title=title, err=err):
+        _emit(line)
+
+
+def _live_positions_available() -> bool:
+    """True when live Alpaca credentials can be queried."""
+    if _is_live_book_active():
+        return True
+    rows, err = build_position_summary(paper=False)
+    return err is None or bool(rows)
+
+
+def _print_live_positions_summary(*, compact: bool = True) -> None:
+    if not _live_positions_available():
+        return
+    _print_positions(paper=False, compact=compact)
 
 
 def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Bot status: equity, regime, safety, positions")
+    parser.add_argument(
+        "--positions",
+        action="store_true",
+        help="Show open holdings (entry, unrealized P/L, days held) and exit",
+    )
+    parser.add_argument("--ticker", "-t", help="With --positions, filter to one ticker")
+    args = parser.parse_args()
+
     setup_project_logging()
+    if args.positions:
+        _print_positions(paper=True, ticker=args.ticker, compact=False)
+        if _is_live_book_active():
+            _emit()
+            _print_positions(paper=False, ticker=args.ticker, compact=False)
+        return
+
     _sync_paper_stack_for_status()
     live_hb = _load_json(LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT)
     paper_hb = _load_json(ROOT / PAPER_HEARTBEAT)
@@ -474,20 +545,41 @@ def main() -> None:
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     mode = "LIVE + PAPER" if _is_live_book_active() else "PAPER ONLY (.env)"
+    inception = sm.status_inception_date()
+    live_start, live_start_date, _ = sm.resolve_start_equity(
+        paper_chase=False,
+        live_only=True,
+        inception=inception,
+        env_override_key="STATUS_LIVE_START_EQUITY",
+    )
+    paper_start, paper_start_date, _ = sm.resolve_start_equity(
+        paper_chase=True,
+        live_only=False,
+        inception=inception,
+        env_override_key="STATUS_PAPER_START_EQUITY",
+    )
+    live_dl = _daily_loss_status(paper=False)
+    paper_dl = _daily_loss_status(paper=True)
+
     _emit(f"PythonTrading status - {now} ({mode})")
     _emit("=" * 72)
-    live_dl = _daily_loss_status(paper=False)
-    safety_tag = "CIRCUIT TRIPPED" if live_dl.get("tripped") else "OK"
-    quick_extra = ""
-    if live_phase and live_hb and not (live_hb.get("scan_schedule") or {}).get("market_open"):
-        quick_extra = f" | Live scan {live_phase}"
-    elif paper_phase and paper_hb and not (paper_hb.get("scan_schedule") or {}).get("market_open"):
-        quick_extra = f" | Paper scan {paper_phase}"
-    _emit(
-        f"QUICK: Live {_fmt_equity(live_eq)} | Paper {_fmt_equity(paper_eq)} | "
-        f"Regime {regime} | Daily breaker {safety_tag}{quick_extra}"
-    )
+    for line in sm.top_banner_lines(
+        live_eq=live_eq,
+        paper_eq=paper_eq,
+        live_start=live_start,
+        paper_start=paper_start,
+        inception=inception,
+        regime=regime,
+        live_active=_is_live_book_active(),
+        live_dl=live_dl,
+        paper_dl=paper_dl,
+        paper_hb=paper_hb,
+        live_hb=live_hb,
+    ):
+        _emit(line)
     _emit(config.get_best_paper_final_lock_banner())
+    for line in config.get_best_paper_v22_summary_lines():
+        _emit(line)
     _emit("=" * 72)
 
     if _is_live_book_active():
@@ -497,6 +589,14 @@ def main() -> None:
     _emit("-" * 72)
 
     _emit(f"LIVE  Profile A (~$300)   equity {_fmt_equity(live_eq)}   regime {live_regime}")
+    _emit(
+        sm.fmt_since_start_line(
+            current=live_eq,
+            start=live_start,
+            start_date=live_start_date,
+            inception=inception,
+        )
+    )
     _emit(f"      {config.get_live_profile_defaults_line()}")
     _emit(f"      source: {live_eq_src}")
     _emit(f"      {_live_profile_line()}")
@@ -515,10 +615,21 @@ def main() -> None:
     paper_on, paper_off = config.format_best_paper_status_lines()
     paper_label = config.get_best_paper_display_name()
     _emit(f"PAPER {paper_label}   equity {_fmt_equity(paper_eq)}   regime {paper_regime}")
+    _emit(
+        sm.fmt_since_start_line(
+            current=paper_eq,
+            start=paper_start,
+            start_date=paper_start_date,
+            inception=inception,
+        )
+    )
     _emit(f"      {config.get_best_paper_locked_header()}")
     if paper_eq_err:
         _emit(f"      source: {paper_eq_err}")
     _emit(f"      {_paper_validated_defaults_line()}")
+    _emit(f"      {config.get_top1_conservative_blend_line()}")
+    pit_on = config.STRICT_PIT_BACKTEST or config.backtest_strict_pit_context()
+    _emit(f"      Strict PIT backtest: {'ON' if pit_on else 'off (set STRICT_PIT_BACKTEST=true)'}")
     override = _paper_env_override_note()
     if override:
         _emit(f"      {override}")
@@ -535,6 +646,11 @@ def main() -> None:
         _emit(f"      scan phase: {paper_phase}")
     if paper_hb and paper_hb.get("last_cycle_error"):
         _emit(f"      last cycle error: {str(paper_hb['last_cycle_error'])[:120]}")
+    _emit()
+    _print_positions(paper=True, compact=True)
+    if _live_positions_available():
+        _emit()
+        _print_live_positions_summary(compact=True)
     _emit()
 
     for line in _thinking_engine_monitor_lines(live_eq):
@@ -558,12 +674,18 @@ def main() -> None:
     )
     _emit()
     _emit("=== Tomorrow checklist ===")
-    _emit("1. python status.py - equity, regime, safety banner, paper stack ON/OFF")
-    _emit("2. paper_chase_heartbeat.json timestamp fresh (<30 min if bot running)")
-    _emit("3. thinking_engine_last.json - validation score, narrative, suggested_tilt")
-    _emit("4. logs/thinking_engine.log - background refresh + tilt apply audit")
-    _emit("5. trading_safety_state.json - daily loss breaker not tripped")
-    _emit("6. Restart paper bot if thinking env changed: python run_paper_bot.py")
+    _emit("1. python status.py - banner (total, since start, regime, rotating insight) + ON/OFF stack")
+    _emit("2. python status.py --positions  |  python journal.py --ticker AAPL")
+    _emit("3. paper_chase_heartbeat.json timestamp fresh (<30 min if bot running)")
+    _emit("4. thinking_engine_last.json - validation score, narrative, suggested_tilt")
+    _emit("5. logs/thinking_engine.log - background refresh + tilt apply audit")
+    _emit("6. trading_safety_state.json - daily loss breaker not tripped")
+    _emit("7. Dust/stale paper positions: python scripts/cleanup_stale_positions.py --help")
+    if _live_positions_available():
+        _emit(
+            "   Live dust/stale: python scripts/cleanup_live_stale_positions.py --dry-run"
+        )
+    _emit("8. Restart paper bot after config changes: python run_paper_bot.py")
     _emit()
     for line in config.get_best_paper_restart_lines():
         _emit(line)

@@ -22,6 +22,21 @@ def run_position_exits(
     """
     exits = 0
     try:
+        from modules.loss_cutting import loss_cutting_enabled, run_loss_cutting_exits
+
+        if loss_cutting_enabled():
+            try:
+                lc = run_loss_cutting_exits(
+                    executor, equity_session_open=equity_session_open
+                )
+                if lc:
+                    exits += lc
+            except Exception as exc:
+                logger.warning("loss_cutting exits skipped: %s", exc)
+    except ImportError:
+        pass
+
+    try:
         positions = executor._get_positions()
     except Exception as e:
         if journal:

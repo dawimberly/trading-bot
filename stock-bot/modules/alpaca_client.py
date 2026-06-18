@@ -11,6 +11,9 @@ from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 
 import config
+from modules.env_loader import ensure_dotenv_loaded
+
+ensure_dotenv_loaded()
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +89,8 @@ def get_trading_client(
     credentials_fn: Callable[[], tuple[str, str]] | None = None,
 ) -> TradingClient:
     """Return a cached TradingClient using config credentials."""
-    cred_fn = credentials_fn or config.get_alpaca_credentials
+    ensure_dotenv_loaded()
+    cred_fn = credentials_fn or (lambda: config.get_alpaca_credentials(paper=paper))
     api_key, secret_key = cred_fn()
     use_paper = config.PAPER_TRADING if paper is None else bool(paper)
     if not use_paper and not config.ALLOW_LIVE_TRADING:
@@ -136,6 +140,14 @@ def call_with_retry(
             return func(*args, **kwargs)
         except APIError as exc:
             last_exc = exc
+            if is_skippable_order_error(exc):
+                logger.info(
+                    "Alpaca %s order rejected (HTTP %s): %s",
+                    op_name,
+                    getattr(exc, "status_code", "?"),
+                    exc,
+                )
+                raise AlpacaValidationError(str(exc)) from exc
             if is_auth_alpaca_error(exc):
                 logger.critical(
                     "Alpaca auth failed during %s (HTTP %s): %s",
@@ -156,14 +168,6 @@ def call_with_retry(
                 )
                 time.sleep(delay)
                 continue
-            if is_skippable_order_error(exc):
-                logger.info(
-                    "Alpaca %s order rejected (HTTP %s): %s",
-                    op_name,
-                    getattr(exc, "status_code", "?"),
-                    exc,
-                )
-                raise AlpacaValidationError(str(exc)) from exc
             logger.error(
                 "Alpaca %s failed (HTTP %s): %s",
                 op_name,

@@ -1,7 +1,8 @@
 """Dynamic NYSE/NASDAQ universe screener (paper-first, standalone).
 
-Pulls active US equities from Alpaca, filters by liquidity, scores by
-momentum / volatility / trend, writes top 75 to data/screener_universe.json.
+Uses market_data.db for OHLCV (fast, no API limits); yfinance only for gaps.
+Scores by momentum / volatility / trend; writes top 15–20 to data/screener_universe.json.
+Skips re-run when cache is fresher than 7 days (use --force to refresh).
 
 Run from stock-bot/:
   python scripts/analysis/universe_screener.py
@@ -10,6 +11,7 @@ Run from stock-bot/:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -27,14 +29,27 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 import config
+from modules.dynamic_universe import (
+    MIN_PRICE,
+    MIN_SHARE_VOLUME,
+    STRICT_MIN_MOMENTUM_RANK,
+    apply_sector_balance,
+    apply_sticky_universe,
+    effective_max_universe_size,
+    effective_min_dollar_volume,
+    effective_min_share_volume,
+    effective_momentum_lookback,
+    sector_for_symbol,
+    strict_mode_active,
+)
 
 OUTPUT_PATH = ROOT / config.SCREENER_UNIVERSE_PATH
 LOOKBACK = 20
 MA_WINDOW = 50
-MIN_PRICE = 5.0
-MIN_AVG_SHARE_VOLUME = 500_000
-TOP_N = 75
-PRINT_TOP = 20
+MIN_AVG_SHARE_VOLUME = MIN_SHARE_VOLUME
+TOP_N = int(os.getenv("SCREENER_TOP_N", str(effective_max_universe_size())))
+PRINT_TOP = int(os.getenv("SCREENER_PRINT_TOP", "15"))
+CACHE_MAX_AGE_DAYS = int(os.getenv("SCREENER_CACHE_DAYS", "7"))
 BATCH_SIZE = 40
 YFINANCE_PERIOD = "120d"
 YFINANCE_BATCH_SLEEP_SEC = 1.5
@@ -53,6 +68,13 @@ def _is_common_equity(symbol: str) -> bool:
 WEIGHT_MOMENTUM = 0.40
 WEIGHT_VOLATILITY = 0.30
 WEIGHT_TREND = 0.30
+
+
+def _suppress_yfinance_noise() -> None:
+    """Quiet yfinance delisted / rate-limit chatter on stderr."""
+    warnings.filterwarnings("ignore", category=FutureWarning)
+    for name in ("yfinance", "yfinance.base", "yfinance.scrapers", "yfinance.scrapers.history"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 
 
 def _load_env() -> None:
@@ -149,12 +171,14 @@ def _normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame | None:
     return out if len(out) >= LOOKBACK + 1 else None
 
 
-def _load_from_db(symbol: str) -> pd.DataFrame | None:
+def _load_from_db(symbol: str, conn: sqlite3.Connection | None = None) -> pd.DataFrame | None:
     """Load daily OHLCV from market_data.db when available."""
-    db_path = ROOT / config.DB_PATH
-    if not db_path.is_file():
-        return None
-    conn = sqlite3.connect(db_path)
+    own_conn = conn is None
+    if own_conn:
+        db_path = ROOT / config.DB_PATH
+        if not db_path.is_file():
+            return None
+        conn = sqlite3.connect(db_path)
     try:
         for table in (f"{symbol}_daily", symbol):
             try:
@@ -183,6 +207,8 @@ def _load_from_db(symbol: str) -> pd.DataFrame | None:
             df = pd.read_sql(f'SELECT {", ".join(select)} FROM "{table}"', conn)
             if df.empty:
                 continue
+            if "Volume" not in df.columns:
+                df["Volume"] = float(MIN_AVG_SHARE_VOLUME)
             frame = _normalize_ohlcv(df)
             if frame is not None and len(frame) >= LOOKBACK + 1:
                 if table == symbol and len(frame) > LOOKBACK * 4:
@@ -199,8 +225,26 @@ def _load_from_db(symbol: str) -> pd.DataFrame | None:
                 if frame is not None:
                     return frame
     finally:
-        conn.close()
+        if own_conn and conn is not None:
+            conn.close()
     return None
+
+
+def _preload_db_frames(symbols: list[str]) -> dict[str, pd.DataFrame]:
+    """Bulk-load bars from market_data.db (one connection per batch)."""
+    db_path = ROOT / config.DB_PATH
+    if not db_path.is_file() or not symbols:
+        return {}
+    out: dict[str, pd.DataFrame] = {}
+    conn = sqlite3.connect(db_path)
+    try:
+        for sym in symbols:
+            frame = _load_from_db(sym, conn)
+            if frame is not None:
+                out[sym] = frame
+    finally:
+        conn.close()
+    return out
 
 
 def _fetch_alpaca_bars_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
@@ -268,27 +312,29 @@ def _fetch_yfinance_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
     if not symbols:
         return {}
     out: dict[str, pd.DataFrame] = {}
-    if len(symbols) == 1:
-        sym = symbols[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        if len(symbols) == 1:
+            sym = symbols[0]
+            try:
+                raw = yf.download(sym, period=YFINANCE_PERIOD, progress=False, auto_adjust=True)
+                frame = _normalize_ohlcv(raw)
+                if frame is not None:
+                    out[sym] = frame
+            except Exception:
+                pass
+            return out
         try:
-            raw = yf.download(sym, period=YFINANCE_PERIOD, progress=False, auto_adjust=True)
-            frame = _normalize_ohlcv(raw)
-            if frame is not None:
-                out[sym] = frame
+            raw = yf.download(
+                symbols,
+                period=YFINANCE_PERIOD,
+                group_by="ticker",
+                progress=False,
+                auto_adjust=True,
+                threads=True,
+            )
         except Exception:
-            pass
-        return out
-    try:
-        raw = yf.download(
-            symbols,
-            period=YFINANCE_PERIOD,
-            group_by="ticker",
-            progress=False,
-            auto_adjust=True,
-            threads=True,
-        )
-    except Exception:
-        return out
+            return out
     if raw is None or raw.empty:
         return out
     if isinstance(raw.columns, pd.MultiIndex):
@@ -306,15 +352,6 @@ def _fetch_yfinance_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
         if frame is not None:
             out[symbols[0]] = frame
     return out
-
-
-def _fetch_bars_batch(symbols: list[str]) -> dict[str, pd.DataFrame]:
-    """Alpaca daily bars first, then yfinance for misses."""
-    frames = _fetch_alpaca_bars_batch(symbols)
-    missing = [s for s in symbols if s not in frames]
-    if missing:
-        frames.update(_fetch_yfinance_batch(missing))
-    return frames
 
 
 def _atr_pct(frame: pd.DataFrame, window: int = LOOKBACK) -> float:
@@ -337,27 +374,61 @@ def _metrics(frame: pd.DataFrame, *, symbol: str, exchange: str) -> dict | None:
     close = frame["Close"]
     volume = frame["Volume"]
     price = float(close.iloc[-1])
-    if price <= MIN_PRICE:
+    min_price = max(MIN_PRICE, 8.0) if strict_mode_active() else MIN_PRICE
+    if price < min_price:
         return None
-    avg_shares = float(volume.tail(LOOKBACK).mean())
-    if avg_shares < MIN_AVG_SHARE_VOLUME:
+    lookback = effective_momentum_lookback()
+    avg_shares = float(volume.tail(lookback).mean())
+    min_shares = effective_min_share_volume()
+    if avg_shares < min_shares:
         return None
-    if len(close) < LOOKBACK + 1:
+    avg_dollar = avg_shares * price
+    min_dollar = effective_min_dollar_volume()
+    if avg_dollar < min_dollar:
         return None
-    momentum = float(close.iloc[-1] / close.iloc[-LOOKBACK - 1] - 1.0)
+    if len(close) < lookback + 1:
+        return None
+    momentum = float(close.iloc[-1] / close.iloc[-lookback - 1] - 1.0)
+    mom_30_lb = 30
+    if strict_mode_active():
+        from modules.dynamic_universe import STRICT_MOMENTUM_LOOKBACK
+
+        mom_30_lb = STRICT_MOMENTUM_LOOKBACK
+    momentum_30d = (
+        float(close.iloc[-1] / close.iloc[-mom_30_lb - 1] - 1.0)
+        if len(close) >= mom_30_lb + 1
+        else momentum
+    )
     ma50 = float(close.rolling(min(MA_WINDOW, len(close))).mean().iloc[-1])
     if ma50 <= 0:
         return None
     trend = float(price / ma50 - 1.0)
     atr_pct = _atr_pct(frame, LOOKBACK)
+    if strict_mode_active() and price < 10 and avg_dollar < 80_000_000:
+        return None
+    pattern_score_val = 0.0
+    if config.effective_pattern_awareness_enabled():
+        from modules.chart_patterns import detect_patterns, pattern_score
+
+        pattern_score_val = pattern_score(
+            detect_patterns(
+                close,
+                symbol=symbol,
+                volume=volume,
+                avg_volume=avg_shares,
+            )
+        )
     return {
         "ticker": symbol,
         "exchange": exchange,
         "price": price,
         "avg_volume": int(avg_shares),
+        "avg_dollar_volume": int(avg_dollar),
         "momentum": momentum,
+        "momentum_30d": momentum_30d,
         "atr_pct": atr_pct,
         "trend": trend,
+        "pattern_score": pattern_score_val,
     }
 
 
@@ -391,26 +462,45 @@ def _discover_db_symbols() -> list[str]:
 
 
 def _build_symbol_list(asset_map: dict[str, dict], *, full_scan: bool) -> list[str]:
-    seed = set(config.equity_universe()) | set(_discover_db_symbols())
+    db_syms = set(_discover_db_symbols())
+    seed = set(config.equity_universe()) | db_syms
     seed = {s for s in seed if s not in EXCLUDED and _is_common_equity(s)}
     if full_scan:
         symbols = sorted(set(asset_map.keys()) | seed)
     else:
-        extra = [s for s in asset_map if s not in seed][: max(0, 2500 - len(seed))]
+        # Prefer DB + static universe; cap Alpaca extras to limit yfinance calls
+        extra_cap = max(0, 800 - len(seed))
+        extra = [s for s in asset_map if s not in seed][:extra_cap]
         symbols = sorted(seed | set(extra))
     return symbols
 
 
-def score_candidates(rows: list[dict]) -> list[dict]:
+def score_candidates(
+    rows: list[dict],
+    *,
+    rotation_summary: dict | None = None,
+) -> list[dict]:
     if not rows:
         return []
     momentum = np.array([r["momentum"] for r in rows], dtype=float)
+    momentum_30d = np.array([r.get("momentum_30d", r["momentum"]) for r in rows], dtype=float)
     atr_pct = np.array([r["atr_pct"] for r in rows], dtype=float)
     trend = np.array([r["trend"] for r in rows], dtype=float)
 
     mom_rank = _percentile_rank(momentum)
+    mom_30_rank = _percentile_rank(momentum_30d)
     vol_rank = 1.0 - _percentile_rank(atr_pct)
     trend_rank = _percentile_rank(trend)
+
+    rotation_state = None
+    if rotation_summary is not None and config.effective_sector_rotation_enabled():
+        from modules.sector_rotation import evaluate_rotation_state
+
+        impact = float(rotation_summary.get("news_impact_score") or 0.0)
+        rotation_state = evaluate_rotation_state(
+            rotation_summary,
+            confidence=0.55 + 0.35 * impact if impact > 0 else 0.60,
+        )
 
     scored = []
     for i, row in enumerate(rows):
@@ -419,51 +509,118 @@ def score_candidates(rows: list[dict]) -> list[dict]:
             + WEIGHT_VOLATILITY * vol_rank[i]
             + WEIGHT_TREND * trend_rank[i]
         )
+        if rotation_state is not None:
+            from modules.sector_rotation import score_multiplier
+
+            composite *= score_multiplier(row["ticker"], rotation_state)
+        if config.effective_pattern_awareness_enabled():
+            from modules.chart_patterns import pattern_composite_multiplier
+
+            composite *= pattern_composite_multiplier(row.get("pattern_score", 0.0))
         scored.append(
             {
                 "ticker": row["ticker"],
                 "score": round(float(composite), 6),
                 "momentum": round(float(row["momentum"]), 6),
+                "momentum_30d": round(float(row.get("momentum_30d", row["momentum"])), 6),
                 "momentum_rank": round(float(mom_rank[i]), 6),
+                "momentum_30d_rank": round(float(mom_30_rank[i]), 6),
                 "atr_pct": round(float(row["atr_pct"]), 6),
                 "volatility_rank": round(float(vol_rank[i]), 6),
                 "trend": round(float(row["trend"]), 6),
                 "trend_rank": round(float(trend_rank[i]), 6),
                 "price": round(float(row["price"]), 4),
                 "avg_volume": int(row["avg_volume"]),
+                "avg_dollar_volume": int(row.get("avg_dollar_volume") or 0),
                 "exchange": row.get("exchange", ""),
+                "sector": sector_for_symbol(row["ticker"]),
             }
         )
     scored.sort(key=lambda r: r["score"], reverse=True)
+    if strict_mode_active():
+        scored = [
+            r
+            for r in scored
+            if float(r.get("momentum_30d_rank") or 0) >= STRICT_MIN_MOMENTUM_RANK
+        ]
+        scored = apply_sector_balance(scored, max_size=TOP_N)
     return scored
 
 
-def run_screener(*, asset_map: dict[str, dict] | None = None, full_scan: bool = False) -> dict:
+def _cache_age_days() -> float | None:
+    if not OUTPUT_PATH.is_file():
+        return None
+    try:
+        payload = json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
+        gen = payload.get("generated_at")
+        if not gen:
+            return None
+        ts = datetime.fromisoformat(str(gen).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts).total_seconds() / 86400.0
+    except Exception:
+        return None
+
+
+def _load_cached_payload() -> dict | None:
+    if not OUTPUT_PATH.is_file():
+        return None
+    try:
+        return json.loads(OUTPUT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def print_top_table(rows: list[dict], *, n: int = PRINT_TOP) -> None:
+    print(f"\nTop {n} by composite score (40% mom / 30% low-vol / 30% trend):")
+    print(
+        f"{'Rank':<5} {'Ticker':<8} {'Score':>7} {'Mom%':>8} {'ATR%':>7} "
+        f"{'Trend%':>8} {'AvgVolK':>8}"
+    )
+    for i, row in enumerate(rows[:n], 1):
+        print(
+            f"{i:<5} {row['ticker']:<8} {row['score']:>7.4f} "
+            f"{row['momentum'] * 100:>7.2f} {row['atr_pct'] * 100:>6.2f} "
+            f"{row['trend'] * 100:>7.2f} {row['avg_volume'] / 1000:>7.0f}k"
+        )
+
+
+def run_screener(
+    *,
+    asset_map: dict[str, dict] | None = None,
+    full_scan: bool = False,
+    previous_tickers: list[str] | None = None,
+) -> dict:
     _load_env()
     asset_map = asset_map or fetch_alpaca_assets()
     symbols = _build_symbol_list(asset_map, full_scan=full_scan)
     mode = "full Alpaca" if full_scan else "paper-first (UNIVERSE + DB + capped Alpaca)"
-    print(f"Screener mode: {mode} | symbols to scan: {len(symbols)}")
+    db_path = ROOT / config.DB_PATH
+    print(
+        f"Screener mode: {mode} | symbols to scan: {len(symbols)} | "
+        f"db={'yes' if db_path.is_file() else 'missing'} | top_n={TOP_N}"
+    )
 
     candidates: list[dict] = []
     db_hits = 0
+    yf_hits = 0
     for start in range(0, len(symbols), BATCH_SIZE):
         batch = symbols[start : start + BATCH_SIZE]
         print(
             f"Batch {start // BATCH_SIZE + 1}/"
             f"{(len(symbols) + BATCH_SIZE - 1) // BATCH_SIZE} ({len(batch)} symbols)..."
         )
-        yf_needed: list[str] = []
-        frames: dict[str, pd.DataFrame] = {}
-        for sym in batch:
-            frame = _load_from_db(sym)
-            if frame is not None:
-                frames[sym] = frame
-                db_hits += 1
-            else:
-                yf_needed.append(sym)
+        frames = _preload_db_frames(batch)
+        db_hits += len(frames)
+        yf_needed = [s for s in batch if s not in frames]
+        if yf_needed:
+            alpaca_frames = _fetch_alpaca_bars_batch(yf_needed)
+            frames.update(alpaca_frames)
+            yf_needed = [s for s in yf_needed if s not in frames]
         if yf_needed:
             frames.update(_fetch_yfinance_batch(yf_needed))
+            yf_hits += len([s for s in yf_needed if s in frames])
             time.sleep(YFINANCE_BATCH_SLEEP_SEC)
         for sym in batch:
             frame = frames.get(sym)
@@ -479,18 +636,42 @@ def run_screener(*, asset_map: dict[str, dict] | None = None, full_scan: bool = 
 
     print(
         f"Passed filters (price>${MIN_PRICE}, {MIN_AVG_SHARE_VOLUME/1e3:.0f}k avg share vol, "
-        f"{LOOKBACK}d): {len(candidates)} | db bars used: {db_hits}"
+        f"{LOOKBACK}d): {len(candidates)} | db bars: {db_hits} | yfinance fills: {yf_hits}"
     )
-    score_table = score_candidates(candidates)
-    top = score_table[:TOP_N]
+    rotation_summary = None
+    if config.effective_sector_rotation_enabled():
+        from modules.sector_rotation import build_screener_rotation_context
+
+        rotation_summary = build_screener_rotation_context()
+        from modules.sector_rotation import evaluate_rotation_state
+
+        rot = evaluate_rotation_state(
+            rotation_summary,
+            confidence=0.55 + 0.35 * float(rotation_summary.get("news_impact_score") or 0.0),
+        )
+        print(f"Sector rotation: {rot.narrative[:120]}")
+    score_table = score_candidates(candidates, rotation_summary=rotation_summary)
+    top = apply_sticky_universe(score_table, previous_tickers, top_n=TOP_N)
+    turnover = 0
+    if previous_tickers:
+        prev_set = {str(t).upper() for t in previous_tickers}
+        cur_set = {r["ticker"] for r in top}
+        turnover = len(cur_set ^ prev_set)
     payload = {
         "tickers": [row["ticker"] for row in top],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "score_table": top,
+        "ipo_count": sum(1 for row in top if row.get("is_ipo")),
+        "turnover_vs_prior": turnover,
         "filters": {
             "min_price": MIN_PRICE,
-            "min_avg_share_volume": MIN_AVG_SHARE_VOLUME,
-            "lookback_days": LOOKBACK,
+            "min_avg_share_volume": effective_min_share_volume(),
+            "min_avg_dollar_volume": effective_min_dollar_volume(),
+            "lookback_days": effective_momentum_lookback(),
+            "strict_mode": strict_mode_active(),
+            "sticky_keep": int(os.getenv("PAPER_UNIVERSE_STICKY_KEEP", "6")),
+            "cache_max_age_days": CACHE_MAX_AGE_DAYS,
+            "data_source": "market_data.db primary, Alpaca bars, yfinance fallback",
             "weights": {
                 "momentum": WEIGHT_MOMENTUM,
                 "volatility": WEIGHT_VOLATILITY,
@@ -503,17 +684,7 @@ def run_screener(*, asset_map: dict[str, dict] | None = None, full_scan: bool = 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"Wrote {len(top)} tickers to {OUTPUT_PATH}")
-    print(f"\nTop {PRINT_TOP} by composite score (40% mom / 30% low-vol / 30% trend):")
-    print(
-        f"{'Rank':<5} {'Ticker':<8} {'Score':>7} {'Mom%':>8} {'ATR%':>7} "
-        f"{'Trend%':>8} {'AvgVolK':>8}"
-    )
-    for i, row in enumerate(top[:PRINT_TOP], 1):
-        print(
-            f"{i:<5} {row['ticker']:<8} {row['score']:>7.4f} "
-            f"{row['momentum'] * 100:>7.2f} {row['atr_pct'] * 100:>6.2f} "
-            f"{row['trend'] * 100:>7.2f} {row['avg_volume'] / 1000:>7.0f}k"
-        )
+    print_top_table(top)
     return payload
 
 
@@ -526,8 +697,26 @@ def main() -> int:
         action="store_true",
         help="Scan all Alpaca common equities (~10k; slow, yfinance rate limits)",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=f"Ignore cache and re-run even if {OUTPUT_PATH.name} is <{CACHE_MAX_AGE_DAYS}d old",
+    )
     args = parser.parse_args()
-    warnings.filterwarnings("ignore", category=FutureWarning)
+    _suppress_yfinance_noise()
+    _load_env()
+
+    age = _cache_age_days()
+    if not args.force and age is not None and age < CACHE_MAX_AGE_DAYS:
+        cached = _load_cached_payload()
+        if cached and cached.get("score_table"):
+            print(
+                f"Using cached universe ({OUTPUT_PATH.name}, age {age:.1f}d < {CACHE_MAX_AGE_DAYS}d). "
+                f"Run with --force to refresh."
+            )
+            print_top_table(cached["score_table"])
+            return 0
+
     try:
         run_screener(full_scan=args.full)
         return 0

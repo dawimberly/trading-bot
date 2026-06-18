@@ -8,17 +8,11 @@ import warnings
 from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 
-_env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
-if _env_override and os.path.isfile(_env_override):
-    load_dotenv(_env_override, override=True)
-else:
-    _local_env = find_dotenv()
-    if _local_env:
-        load_dotenv(_local_env, override=True)
-    # Repo-root .env fills keys missing from stock-bot/.env (e.g. PAPER_INTERNATIONAL_SLEEVE_ENABLED)
-    _repo_root_env = Path(__file__).resolve().parent.parent / ".env"
-    if _repo_root_env.is_file() and str(_repo_root_env) != (_local_env or ""):
-        load_dotenv(_repo_root_env, override=False)
+from modules.env_loader import load_project_dotenv
+
+load_project_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = PROJECT_ROOT.parent
 
 try:
     from modules.ssl_certs import configure_ssl_certificates
@@ -150,6 +144,53 @@ PAPER_IPO_SAFETY_ENABLED = os.getenv(
 PAPER_PROFIT_TARGET_ENABLED = os.getenv(
     "PAPER_PROFIT_TARGET_ENABLED", "false"
 ).lower() in ("1", "true", "yes")
+# Research/backtest only (--compare-scaling-strategy); never on live or paper bots
+PAPER_SCALING_STRATEGY_ENABLED = os.getenv(
+    "PAPER_SCALING_STRATEGY_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+# Chart pattern awareness — research/backtest only (--compare-patterns); default OFF
+PATTERN_AWARENESS_ENABLED = os.getenv(
+    "PATTERN_AWARENESS_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+PAPER_PATTERN_AWARENESS_ENABLED = os.getenv(
+    "PAPER_PATTERN_AWARENESS_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+PATTERN_SCORE_BOOST = float(os.getenv("PATTERN_SCORE_BOOST", "0.06"))
+PATTERN_SCORE_TRIM = float(os.getenv("PATTERN_SCORE_TRIM", "0.05"))
+PATTERN_BEARISH_ONLY = os.getenv("PATTERN_BEARISH_ONLY", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_PATTERN_BEARISH_ONLY = os.getenv("PAPER_PATTERN_BEARISH_ONLY", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PATTERN_MIN_CONFIDENCE = float(os.getenv("PATTERN_MIN_CONFIDENCE", "0.55"))
+PATTERN_CUP_HANDLE_MIN_CONF = float(os.getenv("PATTERN_CUP_HANDLE_MIN_CONF", "0.72"))
+PATTERN_FLAG_MIN_CONF = float(os.getenv("PATTERN_FLAG_MIN_CONF", "0.68"))
+PATTERN_MIN_PRICE = float(os.getenv("PATTERN_MIN_PRICE", "5.0"))
+PATTERN_MIN_AVG_VOLUME = int(os.getenv("PATTERN_MIN_AVG_VOLUME", "500000"))
+# Top 1% vol-based asymmetric position sizing — paper default ON (conservative blend)
+PAPER_VOL_POSITION_SIZING_ENABLED = os.getenv(
+    "PAPER_VOL_POSITION_SIZING_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+PAPER_LOSS_CUTTING_ENABLED = os.getenv(
+    "PAPER_LOSS_CUTTING_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+TOP1_VOL_SIZING_CONSERVATIVE = os.getenv(
+    "TOP1_VOL_SIZING_CONSERVATIVE", "true"
+).lower() in ("1", "true", "yes")
+TOP1_LOSS_CUT_CONSERVATIVE = os.getenv(
+    "TOP1_LOSS_CUT_CONSERVATIVE", "true"
+).lower() in ("1", "true", "yes")
+# Strict point-in-time backtest — default ON (Best Paper v2.2 research standard)
+STRICT_PIT_BACKTEST = os.getenv("STRICT_PIT_BACKTEST", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
 PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
 PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.01"))
@@ -202,12 +243,60 @@ PAPER_STAT_ARB_OPTIMIZED = os.getenv("PAPER_STAT_ARB_OPTIMIZED", "false").lower(
 STAT_ARB_MAX_HOLD_BARS = int(os.getenv("STAT_ARB_MAX_HOLD_BARS", "35"))
 STAT_ARB_PROFIT_Z_DELTA = float(os.getenv("STAT_ARB_PROFIT_Z_DELTA", "1.5"))
 STAT_ARB_CORR_HALF_LIFE = float(os.getenv("STAT_ARB_CORR_HALF_LIFE", "25"))
-# Local LLM thinking engine (Ollama) — paper only; run scripts/setup_ollama.py first
-PAPER_THINKING_ENGINE_ENABLED = os.getenv("PAPER_THINKING_ENGINE_ENABLED", "false").lower() in (
+# Local LLM thinking engine (Ollama) — paper v2.2 default ON; live stays OFF
+PAPER_THINKING_ENGINE_ENABLED = os.getenv("PAPER_THINKING_ENGINE_ENABLED", "true").lower() in (
     "1",
     "true",
     "yes",
 )
+# Inter-sector rotation — paper ON by default, live OFF until validated
+SECTOR_ROTATION_ENABLED = os.getenv("SECTOR_ROTATION_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_SECTOR_ROTATION_ENABLED = os.getenv(
+    "PAPER_SECTOR_ROTATION_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+SECTOR_ROTATION_SCORE_BOOST = float(os.getenv("SECTOR_ROTATION_SCORE_BOOST", "0.12"))
+SECTOR_ROTATION_SCORE_TRIM = float(os.getenv("SECTOR_ROTATION_SCORE_TRIM", "0.10"))
+SECTOR_ROTATION_HYBRID_MODE = os.getenv("SECTOR_ROTATION_HYBRID_MODE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+SECTOR_ROTATION_MAX_SECTOR_DELTA = float(
+    os.getenv("SECTOR_ROTATION_MAX_SECTOR_DELTA", "0.08")
+)
+SECTOR_ROTATION_MAX_ACTIVE_SECTORS = int(
+    os.getenv("SECTOR_ROTATION_MAX_ACTIVE_SECTORS", "2")
+)
+SECTOR_ROTATION_CONSERVATIVE_MODE = os.getenv(
+    "SECTOR_ROTATION_CONSERVATIVE_MODE", "false"
+).lower() in ("1", "true", "yes")
+SECTOR_ROTATION_CONSERVATIVE_BOOST = float(
+    os.getenv("SECTOR_ROTATION_CONSERVATIVE_BOOST", "0.06")
+)
+SECTOR_ROTATION_CONSERVATIVE_TRIM = float(
+    os.getenv("SECTOR_ROTATION_CONSERVATIVE_TRIM", "0.05")
+)
+SECTOR_ROTATION_CONSERVATIVE_MAX_DELTA = float(
+    os.getenv("SECTOR_ROTATION_CONSERVATIVE_MAX_DELTA", "0.04")
+)
+SECTOR_ROTATION_CONSERVATIVE_MAX_SECTORS = int(
+    os.getenv("SECTOR_ROTATION_CONSERVATIVE_MAX_SECTORS", "1")
+)
+# Tech concentration guard — paper ON by default; caps tech tilts when exposure > 45%
+PAPER_TECH_GUARD_ENABLED = os.getenv("PAPER_TECH_GUARD_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+TECH_CONCENTRATION_LIVE_ENABLED = os.getenv(
+    "TECH_CONCENTRATION_LIVE_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+TECH_CONCENTRATION_LIMIT = float(os.getenv("TECH_CONCENTRATION_LIMIT", "0.45"))
+TECH_GUARD_MAX_SPY_TILT = float(os.getenv("TECH_GUARD_MAX_SPY_TILT", "0.04"))
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
 OLLAMA_FALLBACK_MODELS = os.getenv(
     "OLLAMA_FALLBACK_MODELS", "llama3.2:3b,deepseek-r1:1.5b"
@@ -789,6 +878,7 @@ _account_equity: float | None = None
 _small_account_mode = False
 _backtest_small_account_ctx = False
 _backtest_paper_sleeves_ctx = False
+_backtest_strict_pit_ctx = False
 _live_thinking_sim_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
@@ -860,7 +950,7 @@ def reload_from_env(env_file: str | None = None) -> None:
     if env_file and os.path.isfile(env_file):
         load_dotenv(env_file, override=True)
     else:
-        load_dotenv(find_dotenv(), override=True)
+        load_project_dotenv(force=True)
     PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
     ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in (
         "1",
@@ -890,20 +980,101 @@ def get_alpaca_base_url(*, paper: bool | None = None) -> str:
     return ALPACA_LIVE_BASE_URL
 
 
-def get_alpaca_credentials():
-    """Return (api_key, secret_key). Prefers APCA_*; falls back to legacy ALPACA_*."""
-    key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
-    secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
-        os.getenv("ALPACA_SECRET_KEY")
-    )
-    if not key or not secret:
-        raise ValueError(
-            "Alpaca credentials missing. Add to your .env file (never commit .env):\n"
-            "  APCA_API_KEY_ID=your_key_id\n"
-            "  APCA_API_SECRET_KEY=your_secret_key\n"
-            "For paper trading also set PAPER_TRADING=true"
+def ensure_dotenv_loaded(*, force: bool = False) -> list[Path]:
+    """Reload .env from known project paths (safe to call from scripts)."""
+    return load_project_dotenv(force=force)
+
+
+def get_alpaca_credentials(*, paper: bool | None = None):
+    """Return (api_key, secret_key).
+
+    Paper mode prefers PAPER_APCA_* / SOCIAL_APCA_* when APCA_* are missing or placeholders.
+    """
+    ensure_dotenv_loaded()
+    use_paper = PAPER_TRADING if paper is None else bool(paper)
+
+    def _main_creds() -> tuple[str, str]:
+        key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
+        secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+            os.getenv("ALPACA_SECRET_KEY")
         )
-    return key, secret
+        return key, secret
+
+    if use_paper:
+        research = get_research_alpaca_credentials()
+        if research:
+            return research
+        key, secret = _main_creds()
+        if key and secret and not alpaca_credentials_are_placeholders(key, secret):
+            return key, secret
+    else:
+        key, secret = _main_creds()
+        if key and secret and not alpaca_credentials_are_placeholders(key, secret):
+            return key, secret
+        if key and secret:
+            return key, secret
+
+    raise ValueError(
+        "Alpaca credentials missing. Add to your .env file (never commit .env):\n"
+        "  APCA_API_KEY_ID=your_key_id\n"
+        "  APCA_API_SECRET_KEY=your_secret_key\n"
+        "  # paper research book (Profile B):\n"
+        "  PAPER_APCA_API_KEY_ID=...\n"
+        "  PAPER_APCA_API_SECRET_KEY=...\n"
+        "For paper trading also set PAPER_TRADING=true"
+    )
+
+
+_ALPACA_CREDENTIAL_PLACEHOLDERS = frozenset(
+    {
+        "your_paper_key_id",
+        "your_paper_secret_key",
+        "your_key_id",
+        "your_secret_key",
+        "your_live_key_id",
+        "your_live_secret_key",
+    }
+)
+
+
+def alpaca_credentials_are_placeholders(key: str, secret: str) -> bool:
+    """True when .env still has template values from .env.example."""
+    k = _strip_env(key).lower()
+    s = _strip_env(secret).lower()
+    return (
+        k in _ALPACA_CREDENTIAL_PLACEHOLDERS
+        or s in _ALPACA_CREDENTIAL_PLACEHOLDERS
+        or k.startswith("your_")
+        or s.startswith("your_")
+    )
+
+
+def get_research_alpaca_credentials() -> tuple[str, str] | None:
+    """PAPER_APCA_* / SOCIAL_APCA_* research book keys (Profile B)."""
+    key = _strip_env(os.getenv("PAPER_APCA_API_KEY_ID")) or _strip_env(
+        os.getenv("SOCIAL_APCA_API_KEY_ID")
+    )
+    secret = _strip_env(os.getenv("PAPER_APCA_API_SECRET_KEY")) or _strip_env(
+        os.getenv("SOCIAL_APCA_API_SECRET_KEY")
+    )
+    if key and secret and not alpaca_credentials_are_placeholders(key, secret):
+        return key, secret
+    return None
+
+
+def resolve_preflight_alpaca_credentials() -> tuple[tuple[str, str], str]:
+    """Credentials for preflight — fall back to research book when APCA_* are placeholders."""
+    main_key, main_secret = get_alpaca_credentials()
+    if not alpaca_credentials_are_placeholders(main_key, main_secret):
+        return (main_key, main_secret), "APCA_*"
+    research = get_research_alpaca_credentials()
+    if research:
+        return research, "PAPER_APCA_* (research book)"
+    raise ValueError(
+        "Alpaca APCA_* still has .env.example placeholders (your_paper_key_id). "
+        "Copy real paper keys into APCA_API_KEY_ID / APCA_API_SECRET_KEY, "
+        "or set PAPER_APCA_* and start Profile B with: python run_paper_bot.py"
+    )
 
 
 def validate_alpaca_config(*, require_credentials: bool = True) -> None:
@@ -1007,6 +1178,20 @@ def set_backtest_paper_sleeves_context(active: bool) -> None:
 
 def backtest_paper_sleeves_context() -> bool:
     return _backtest_paper_sleeves_ctx
+
+
+def set_backtest_strict_pit_context(active: bool) -> None:
+    """True while run_backtest() enforces point-in-time news/social/thinking cutoffs."""
+    global _backtest_strict_pit_ctx
+    _backtest_strict_pit_ctx = bool(active)
+
+
+def backtest_strict_pit_context() -> bool:
+    return _backtest_strict_pit_ctx
+
+
+def effective_strict_pit_backtest() -> bool:
+    return bool(_backtest_strict_pit_ctx)
 
 
 def set_live_thinking_sim_context(active: bool) -> None:
@@ -1316,7 +1501,7 @@ def _nyse_eligible_symbol(symbol: str) -> bool:
 def nyse_momentum_universe(data_columns) -> list[str]:
     """Equity sleeve candidates: dynamic screener (NYSE+NASDAQ) or static columns."""
     global _screener_fallback_warned
-    from modules.dynamic_universe import equity_sleeve_universe
+    from modules.dynamic_universe import equity_sleeve_universe, screener_coverage_report
 
     use_dynamic = USE_DYNAMIC_UNIVERSE or effective_paper_dynamic_universe()
     if not use_dynamic:
@@ -1325,10 +1510,14 @@ def nyse_momentum_universe(data_columns) -> list[str]:
     dynamic = equity_sleeve_universe(data_columns)
     static = [c for c in data_columns if _nyse_eligible_symbol(c)]
     if dynamic == static and use_dynamic and load_screener_universe_tickers():
-        if not _screener_fallback_warned:
+        cov = screener_coverage_report(data_columns)
+        if cov["missing_count"] > 0 and not _screener_fallback_warned:
+            missing_preview = ", ".join(cov["missing"][:8])
+            more = f" (+{cov['missing_count'] - 8} more)" if cov["missing_count"] > 8 else ""
             warnings.warn(
-                f"Dynamic universe enabled but no screener tickers in price data — "
-                f"fetch daily history for {SCREENER_UNIVERSE_PATH} tickers",
+                f"Dynamic universe enabled but {cov['missing_count']}/{cov['screener_count']} "
+                f"screener tickers missing from price data ({missing_preview}{more}) — "
+                f"run fetch_data or backtest prefetch for {SCREENER_UNIVERSE_PATH}",
                 stacklevel=2,
             )
             _screener_fallback_warned = True
@@ -1606,6 +1795,7 @@ BEST_PAPER_LOCKED_OFF = (
     "profit_target",
     "international_adr",
     "bond_sleeve",
+    "sector_rotation",
 )
 
 
@@ -1615,8 +1805,8 @@ def get_best_paper_validated_defaults_line() -> str:
         return _load_best_paper_config().get_validated_defaults_line()
     except ImportError:
         return (
-            "v2.1 FINAL LOCK: crypto OFF | ADR OFF | bond OFF | "
-            "dyn_univ ON | IPO safety ON | thinking OFF (opt-in)"
+            "v2.2 LOCK: strict PIT | conservative blend | thinking ON | "
+            "dyn_univ ON | crypto/rotation/ADR/bond OFF"
         )
 
 
@@ -1625,7 +1815,7 @@ def get_best_paper_locked_header() -> str:
     try:
         return _load_best_paper_config().get_locked_stack_header()
     except ImportError:
-        return "LOCKED Best Paper Bot v2.1 (crypto OFF)"
+        return "LOCKED Best Paper Bot v2.2 (conservative blend + thinking ON)"
 
 
 def get_best_paper_final_lock_banner() -> str:
@@ -1633,7 +1823,7 @@ def get_best_paper_final_lock_banner() -> str:
     try:
         return _load_best_paper_config().get_final_lock_banner()
     except ImportError:
-        return "FINAL CONFIG: Best Paper Bot v2.1 (crypto OFF) locked"
+        return "FINAL CONFIG: Best Paper Bot v2.2 locked"
 
 
 def get_best_paper_restart_lines() -> list[str]:
@@ -1661,7 +1851,19 @@ def get_best_paper_display_name() -> str:
     try:
         return _load_best_paper_config().BEST_PAPER_DISPLAY_NAME
     except ImportError:
-        return "Best Paper Bot v2.1 (crypto OFF)"
+        return "Best Paper Bot v2.2 (conservative blend + thinking ON)"
+
+
+def get_best_paper_v22_summary_lines() -> list[str]:
+    """Best Paper v2.2 multi-line config summary (status.py)."""
+    try:
+        return _load_best_paper_config().get_v22_config_summary_lines()
+    except ImportError:
+        return [
+            "=== Best Paper v2.2 (locked defaults) ===",
+            "  ON: strict PIT | conservative Top1 | thinking | dyn_univ",
+            "  OFF: crypto | rotation | ADR | bond | scaling | patterns",
+        ]
 
 
 def format_best_paper_status_lines() -> tuple[str, str]:
@@ -1689,6 +1891,7 @@ def format_best_paper_status_lines() -> tuple[str, str]:
             f"cofire={'on' if stack['cofire_budget'] else 'off'}",
             f"dyn_univ={'on' if stack.get('dynamic_universe') else 'off'}",
             f"ipo={'on' if stack.get('ipo_safety') else 'off'}",
+            f"tech_guard={'on' if PAPER_TECH_GUARD_ENABLED else 'off'}",
         ]
         off_parts = [
             "macro",
@@ -1700,8 +1903,11 @@ def format_best_paper_status_lines() -> tuple[str, str]:
             "crypto",
             "crypto_expanded",
             "profit_target",
+            "scaling",
+            "patterns",
             "intl_adr",
             "bond",
+            "sector_rotation",
         ]
         return " | ".join(on_parts), " | ".join(off_parts)
     finally:
@@ -1717,7 +1923,7 @@ def print_paper_research_stack_flags() -> None:
     try:
         alloc = fund_allocation_pct()
         stack = get_best_paper_bot_stack()
-        print("--- Best Paper Bot v2.1 (crypto OFF / paper_aggressive) ---")
+        print("--- Best Paper Bot v2.2 (conservative blend / paper_aggressive) ---")
         if paper_chase_mode_enabled():
             print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
         print(f"  game_plan:              {gp}")
@@ -1872,7 +2078,7 @@ def paper_only_sleeves_active() -> bool:
 
 
 def enforce_best_paper_stack() -> None:
-    """Disable weak/redundant paper sleeves (Profile B locked stack v2.1)."""
+    """Disable weak/redundant paper sleeves (Profile B locked stack v2.2)."""
     global PAPER_RISK_PARITY_ENABLED
     global PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     global PAPER_SOCIAL_SLEEVE_ENABLED
@@ -1884,6 +2090,8 @@ def enforce_best_paper_stack() -> None:
     global PAPER_CRYPTO_ENABLED
     global PAPER_CRYPTO_UNIVERSE_EXPANDED
     global PAPER_PROFIT_TARGET_ENABLED
+    global PAPER_SCALING_STRATEGY_ENABLED
+    global PAPER_PATTERN_AWARENESS_ENABLED
     global CRYPTO_SLEEVE_ENABLED
     PAPER_RISK_PARITY_ENABLED = False
     PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
@@ -1896,6 +2104,8 @@ def enforce_best_paper_stack() -> None:
     PAPER_CRYPTO_ENABLED = False
     PAPER_CRYPTO_UNIVERSE_EXPANDED = False
     PAPER_PROFIT_TARGET_ENABLED = False
+    PAPER_SCALING_STRATEGY_ENABLED = False
+    PAPER_PATTERN_AWARENESS_ENABLED = False
     CRYPTO_SLEEVE_ENABLED = False
 
 
@@ -1922,6 +2132,35 @@ def init_paper_chase_if_enabled() -> list[str]:
         except Exception:
             pass
         extras.insert(0, "best_paper_stack_v2_locked")
+        extras.extend(init_top1_conservative_blend())
+    return extras
+
+
+def init_top1_conservative_blend() -> list[str]:
+    """Enable winning conservative Top1 blend on paper (spec cap + spec -4% stop)."""
+    extras: list[str] = []
+    if not (
+        PAPER_TRADING
+        and paper_chase_mode_enabled()
+        and PAPER_AGGRESSIVE_ENABLED
+    ):
+        return extras
+    try:
+        from modules.loss_cutting import set_loss_cutting_conservative
+        from modules.vol_position_sizing import set_vol_sizing_conservative
+
+        if effective_vol_position_sizing_enabled() and TOP1_VOL_SIZING_CONSERVATIVE:
+            set_vol_sizing_conservative(True)
+            extras.append("top1_vol_conservative")
+        if effective_loss_cutting_enabled() and TOP1_LOSS_CUT_CONSERVATIVE:
+            set_loss_cutting_conservative(True)
+            extras.append("top1_loss_conservative")
+    except ImportError:
+        pass
+    if effective_vol_position_sizing_enabled():
+        extras.append("vol_position_sizing")
+    if effective_loss_cutting_enabled():
+        extras.append("loss_cutting")
     return extras
 
 
@@ -1948,6 +2187,12 @@ def get_paper_feature_flags() -> dict[str, bool]:
         "options": effective_options_sleeve_enabled(),
         "macro_regime": effective_macro_regime_adaptor_enabled(),
         "thinking_engine": effective_thinking_engine_enabled(),
+        "sector_rotation": effective_sector_rotation_enabled(),
+        "pattern_awareness": effective_pattern_awareness_enabled(),
+        "vol_position_sizing": effective_vol_position_sizing_enabled(),
+        "loss_cutting": effective_loss_cutting_enabled(),
+        "top1_vol_conservative": effective_top1_vol_conservative(),
+        "top1_loss_conservative": effective_top1_loss_conservative(),
         "risk_parity": effective_risk_parity_enabled(),
         "stat_arb_optimized": False,
         "social": effective_social_sleeve_enabled(),
@@ -2061,6 +2306,120 @@ def effective_thinking_engine_enabled() -> bool:
     if PAPER_TRADING:
         return True
     return bool(backtest_paper_sleeves_context())
+
+
+def effective_sector_rotation_enabled() -> bool:
+    """Inter-sector rotation — paper default ON, live OFF."""
+    if (
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or PAPER_TRADING
+    ):
+        return bool(PAPER_SECTOR_ROTATION_ENABLED)
+    return bool(SECTOR_ROTATION_ENABLED)
+
+
+def sector_rotation_conservative_mode() -> bool:
+    """Lightweight rotation: validated rules only, mild boosts, no tech trim on defense."""
+    if not effective_sector_rotation_enabled():
+        return False
+    return bool(SECTOR_ROTATION_CONSERVATIVE_MODE)
+
+
+def effective_sector_rotation_hybrid() -> bool:
+    """Hybrid adaptive rotation (rules + thinking bias)."""
+    if sector_rotation_conservative_mode():
+        return False
+    return effective_sector_rotation_enabled() and SECTOR_ROTATION_HYBRID_MODE
+
+
+def effective_pattern_awareness_enabled() -> bool:
+    """Chart pattern boosts/filters — paper/backtest opt-in, live OFF by default."""
+    if (
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or PAPER_TRADING
+    ):
+        return bool(PAPER_PATTERN_AWARENESS_ENABLED)
+    return bool(PATTERN_AWARENESS_ENABLED)
+
+
+def effective_pattern_bearish_only() -> bool:
+    """When True, patterns only trim/defer bearish setups — no bullish boosts."""
+    if not effective_pattern_awareness_enabled():
+        return False
+    if (
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or PAPER_TRADING
+    ):
+        return bool(PAPER_PATTERN_BEARISH_ONLY)
+    return bool(PATTERN_BEARISH_ONLY)
+
+
+def effective_vol_position_sizing_enabled() -> bool:
+    """Top1 vol + asymmetric conviction sizing — paper/backtest opt-in."""
+    if (
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or PAPER_TRADING
+    ):
+        return bool(PAPER_VOL_POSITION_SIZING_ENABLED)
+    return False
+
+
+def effective_loss_cutting_enabled() -> bool:
+    """Top1 asymmetric loss cutting + scaled profit takes — paper/backtest opt-in."""
+    if (
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or PAPER_TRADING
+    ):
+        return bool(PAPER_LOSS_CUTTING_ENABLED)
+    return False
+
+
+def effective_top1_vol_conservative() -> bool:
+    """Conservative vol sizing: speculative 0.5% cap + mild ATR, no heat cap."""
+    if not effective_vol_position_sizing_enabled():
+        return False
+    return bool(TOP1_VOL_SIZING_CONSERVATIVE)
+
+
+def effective_top1_loss_conservative() -> bool:
+    """Conservative loss cutting: speculative -4% hard stop only."""
+    if not effective_loss_cutting_enabled():
+        return False
+    return bool(TOP1_LOSS_CUT_CONSERVATIVE)
+
+
+def get_top1_conservative_blend_line() -> str:
+    """One-line summary for status.py."""
+    if not PAPER_VOL_POSITION_SIZING_ENABLED and not PAPER_LOSS_CUTTING_ENABLED:
+        return "Top1 conservative blend: OFF"
+    parts: list[str] = []
+    if effective_vol_position_sizing_enabled():
+        if effective_top1_vol_conservative():
+            parts.append("vol spec 0.5% + mild ATR (no heat cap)")
+        else:
+            parts.append("vol full Top1")
+    if effective_loss_cutting_enabled():
+        if effective_top1_loss_conservative():
+            parts.append("loss spec -4% only (no trail)")
+        else:
+            parts.append("loss full Top1")
+    return "Top1 conservative blend: " + " | ".join(parts) if parts else "Top1: off"
+
+
+def effective_tech_guard_enabled() -> bool:
+    """Tech concentration guard — paper default ON, live OFF."""
+    if (
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or PAPER_TRADING
+    ):
+        return bool(PAPER_TECH_GUARD_ENABLED)
+    return bool(TECH_CONCENTRATION_LIVE_ENABLED)
 
 
 def effective_thinking_max_sleeve_delta(*, live_sim: bool = False) -> float:

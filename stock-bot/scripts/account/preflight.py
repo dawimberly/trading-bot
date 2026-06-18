@@ -107,9 +107,11 @@ def run():
     else:
         print("[OK] Paper mode enabled")
 
+    creds: tuple[str, str] | None = None
+    cred_source = ""
     try:
-        config.get_alpaca_credentials()
-        print("[OK] Alpaca credentials found")
+        creds, cred_source = config.resolve_preflight_alpaca_credentials()
+        print(f"[OK] Alpaca credentials found ({cred_source})")
     except ValueError as e:
         print(f"[FAIL] {e}")
         ok = False
@@ -117,7 +119,10 @@ def run():
 
     acct = None
     try:
-        ex = AlpacaExecutor()
+        ex = AlpacaExecutor(
+            paper=not live,
+            credentials_fn=lambda c=creds: c,
+        )
         acct = ex.client.get_account()
         mode = "LIVE" if live else "PAPER"
         print(
@@ -138,7 +143,10 @@ def run():
         if live and "401" in str(e):
             hint = " (check live keys + PAPER_TRADING=false)"
         elif not live and "401" in str(e):
-            hint = " (live keys need PAPER_TRADING=false; paper keys need PAPER_TRADING=true)"
+            hint = (
+                " (APCA_* may be placeholders — copy real paper keys or use PAPER_APCA_*; "
+                "Profile B: python run_paper_bot.py)"
+            )
         print(f"[FAIL] Alpaca connection: {e}{hint}")
         ok = False
 
@@ -273,7 +281,15 @@ def run():
             print("\n=== READY (LIVE): python run_all.py ===")
             print("    (10-second abort window on first startup when live)")
         else:
-            print("\n=== READY: python run_all.py ===")
+            if config.get_research_alpaca_credentials():
+                print("\n=== READY (PAPER Profile B): python run_paper_bot.py ===")
+                if cred_source.startswith("PAPER_APCA"):
+                    print(
+                        "    (main APCA_* are placeholders — using PAPER_APCA_*; "
+                        "copy keys to APCA_* for bare run_all.py / launch.bat)"
+                    )
+            else:
+                print("\n=== READY: python run_all.py ===")
     else:
         print("\n=== FIX ISSUES ABOVE BEFORE STARTING ===")
         sys.exit(1)

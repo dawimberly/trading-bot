@@ -17,7 +17,7 @@ DEFAULT_MAX_AGE_DAYS = int(
 
 # --- Screener filters (paper only; lightweight for laptop) ---
 ALLOWED_EXCHANGES = frozenset({"NYSE", "NASDAQ", "ARCA"})
-MIN_PRICE = float(__import__("os").getenv("PAPER_UNIVERSE_MIN_PRICE", "5"))
+MIN_PRICE = float(__import__("os").getenv("PAPER_UNIVERSE_MIN_PRICE", "7"))
 MIN_AVG_DOLLAR_VOLUME = float(
     __import__("os").getenv("PAPER_UNIVERSE_MIN_DOLLAR_VOL", "50000000")
 )
@@ -61,6 +61,9 @@ STRICT_MIN_MOMENTUM_RANK = float(
 )
 STRICT_MAX_IPO_SLOTS = int(__import__("os").getenv("PAPER_UNIVERSE_STRICT_MAX_IPO", "1"))
 MOMENTUM_LOOKBACK = int(__import__("os").getenv("PAPER_UNIVERSE_MOMENTUM_DAYS", "20"))
+STICKY_MIN_KEEP = int(__import__("os").getenv("PAPER_UNIVERSE_STICKY_KEEP", "6"))
+STICKY_RANK_FLOOR = float(__import__("os").getenv("PAPER_UNIVERSE_STICKY_RANK", "0.50"))
+SCREENER_HISTORY_PATH = Path(__file__).resolve().parents[1] / "data" / "screener_universe_history.jsonl"
 
 # GICS-lite tags for sector balance (subset of liquid US names)
 EQUITY_SECTOR_MAP: dict[str, str] = {
@@ -479,6 +482,167 @@ def build_offline_screener_seed() -> dict:
     return payload
 
 
+def apply_sticky_universe(
+    scored: list[dict],
+    previous_tickers: list[str] | None,
+    *,
+    top_n: int | None = None,
+) -> list[dict]:
+    """Retain prior-week names that still pass rank floor to reduce churn."""
+    max_n = top_n if top_n is not None else effective_max_universe_size()
+    if not previous_tickers or not scored:
+        return scored[:max_n]
+    by_ticker = {str(r.get("ticker", "")).upper(): r for r in scored}
+    kept: list[dict] = []
+    seen: set[str] = set()
+    for sym in previous_tickers:
+        sym = str(sym).upper()
+        row = by_ticker.get(sym)
+        if not row:
+            continue
+        rank = row.get("momentum_30d_rank")
+        if rank is None:
+            rank = row.get("momentum_rank", row.get("score", 0))
+        if float(rank or 0) < STICKY_RANK_FLOOR:
+            continue
+        kept.append(row)
+        seen.add(sym)
+        if len(kept) >= STICKY_MIN_KEEP:
+            break
+    for row in scored:
+        sym = str(row.get("ticker", "")).upper()
+        if sym in seen:
+            continue
+        kept.append(row)
+        seen.add(sym)
+        if len(kept) >= max_n:
+            break
+    return kept[:max_n]
+
+
+def _append_screener_history(tickers: list[str]) -> None:
+    try:
+        SCREENER_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(
+            {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "tickers": tickers,
+            }
+        )
+        with open(SCREENER_HISTORY_PATH, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+def _seed_screener_history_from_file() -> None:
+    """Bootstrap churn tracking from existing screener_universe.json."""
+    tickers = config.load_screener_universe_tickers() or []
+    if tickers:
+        _append_screener_history(tickers)
+
+
+def prior_screener_tickers() -> list[str]:
+    if not SCREENER_HISTORY_PATH.is_file():
+        _seed_screener_history_from_file()
+    if not SCREENER_HISTORY_PATH.is_file():
+        return []
+    try:
+        lines = SCREENER_HISTORY_PATH.read_text(encoding="utf-8").strip().splitlines()
+        if not lines:
+            return []
+        payload = json.loads(lines[-1])
+        return [str(t).upper() for t in (payload.get("tickers") or [])]
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def screener_turnover_vs_prior(current: list[str] | None = None) -> dict:
+    """Week-over-week ticker churn from screener history."""
+    cur = [str(t).upper() for t in (current or config.load_screener_universe_tickers() or [])]
+    prev = prior_screener_tickers()
+    if not cur or not prev:
+        return {"prior_count": len(prev), "current_count": len(cur), "changes": 0, "overlap": 0}
+    cur_set, prev_set = set(cur), set(prev)
+    overlap = len(cur_set & prev_set)
+    changes = len(cur_set ^ prev_set)
+    return {
+        "prior_count": len(prev),
+        "current_count": len(cur),
+        "overlap": overlap,
+        "changes": changes,
+        "added": sorted(cur_set - prev_set),
+        "removed": sorted(prev_set - cur_set),
+    }
+
+
+def screener_tickers_missing_from_db(tickers: list[str] | None = None) -> list[str]:
+    import sqlite3
+
+    tickers = [str(t).upper() for t in (tickers or config.load_screener_universe_tickers() or [])]
+    if not tickers:
+        return []
+    db_path = Path(config.DB_PATH)
+    if not db_path.is_file():
+        return tickers
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_daily'"
+        ).fetchall()
+        tables = {str(r[0]) for r in rows}
+    finally:
+        conn.close()
+    missing: list[str] = []
+    for sym in tickers:
+        if f"{sym}_daily" not in tables:
+            missing.append(sym)
+    return missing
+
+
+def screener_coverage_report(data_columns) -> dict:
+    """How many screener names are present in a price matrix."""
+    screener = config.load_screener_universe_tickers() or []
+    cols = {str(c).upper() for c in data_columns}
+    present = [t for t in screener if t in cols]
+    missing = [t for t in screener if t not in cols]
+    return {
+        "screener_count": len(screener),
+        "present_count": len(present),
+        "missing_count": len(missing),
+        "missing": missing,
+        "coverage_pct": (len(present) / len(screener) * 100.0) if screener else 100.0,
+    }
+
+
+def ensure_screener_prices_loaded(
+    *,
+    days: int | None = None,
+    use_max: bool = False,
+) -> dict:
+    """Fetch daily history for screener tickers missing from market_data.db."""
+    tickers = config.load_screener_universe_tickers() or []
+    missing = screener_tickers_missing_from_db(tickers)
+    if missing:
+        from fetch_data import fetch_daily_history_for_tickers
+
+        fetch_daily_history_for_tickers(missing, days=days, use_max=use_max)
+        still = screener_tickers_missing_from_db(tickers)
+    else:
+        still = []
+    try:
+        from modules.data_loader import clear_close_matrix_cache
+
+        clear_close_matrix_cache()
+    except ImportError:
+        pass
+    return {
+        "screener_count": len(tickers),
+        "fetched": len(missing),
+        "still_missing": still,
+    }
+
+
 def maybe_refresh_screener_universe(
     *,
     force: bool = False,
@@ -505,7 +669,11 @@ def maybe_refresh_screener_universe(
         from scripts.analysis.universe_screener import run_screener
 
         load_screener_ticker_meta(force=True)
-        result = run_screener()
+        prior = prior_screener_tickers()
+        result = run_screener(previous_tickers=prior)
+        tickers = result.get("tickers") or []
+        if tickers:
+            _append_screener_history(tickers)
         logger.info(
             "dynamic_universe refreshed: %s tickers (%s IPO)",
             len(result.get("tickers") or []),

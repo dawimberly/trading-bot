@@ -14,7 +14,7 @@ import plotly.express as px
 import streamlit as st
 
 import config
-from modules.alpaca_executor import get_trading_client
+from modules.alpaca_executor import AlpacaExecutor, get_trading_client
 from nerdminer import config as nm_config
 from nerdminer.monitor import assess_health, load_history, load_state
 
@@ -729,6 +729,39 @@ def render_positions(df: pd.DataFrame | None, err: str | None) -> None:
     st.dataframe(_style_pnl_df(df), use_container_width=True, hide_index=True)
     total_upl = df["Unrealized P&L ($)"].sum()
     st.metric("Total unrealized P&L", f"${total_upl:+,.2f}")
+
+    tickers = df["Ticker"].astype(str).tolist()
+    sell_ticker = st.selectbox("Close position", options=tickers, key="pos_sell_ticker")
+    qty = float(df.loc[df["Ticker"] == sell_ticker, "Qty"].iloc[0])
+    qty_label = f"{qty:.4f}".rstrip("0").rstrip(".")
+    confirm_live = True
+    if not config.PAPER_TRADING:
+        confirm_live = st.checkbox(
+            "I understand this is LIVE trading with real money",
+            key="pos_sell_live_confirm",
+        )
+    if st.button("Sell position", type="primary", disabled=not confirm_live):
+        verb = "Cover" if qty < 0 else "Sell"
+        with st.spinner(f"{verb}ing {sell_ticker}…"):
+            try:
+                executor = AlpacaExecutor(paper=config.PAPER_TRADING)
+                order = executor.execute_full_exit(
+                    sell_ticker,
+                    reason="manual_dashboard",
+                    sleeve=_infer_sleeve(sell_ticker),
+                )
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"Failed to close {sell_ticker}: {exc}")
+            else:
+                if order is None:
+                    st.error(
+                        f"Could not submit close for {sell_ticker} "
+                        f"({qty_label} shares) — no position or below minimum notional."
+                    )
+                else:
+                    st.success(f"Close order submitted for {sell_ticker} ({qty_label} shares).")
+                    time.sleep(1)
+                    st.rerun()
 
 
 def render_recent_trades() -> None:

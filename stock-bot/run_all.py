@@ -738,6 +738,11 @@ def main():
         if sleeve_cap_pcts:
             executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
 
+    if config.effective_vol_position_sizing_enabled() or config.effective_loss_cutting_enabled():
+        from modules.vol_position_sizing import set_top1_sizing_context
+
+        set_top1_sizing_context(executor, thinking_result)
+
     if config.effective_risk_parity_enabled():
         from modules.risk_parity_sleeve import (
             apply_risk_parity_cycle,
