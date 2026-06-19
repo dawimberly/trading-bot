@@ -1,6 +1,6 @@
 # trading-bot
 
-**Alpaca stock fund bot** — clone once, run on your own PC. UFC betting files were removed; this repo is **trading bot only** (`stock-bot/`).
+**Alpaca stock fund bot only** — UFC betting files were moved out of this repo. All trading code lives under `stock-bot/`.
 
 **Repo (personal):** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)  
 **Repo (group / infinite-robots):** [github.com/infinite-robots/python-trading](https://github.com/infinite-robots/python-trading)

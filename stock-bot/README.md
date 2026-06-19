@@ -16,11 +16,11 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 - Yield-gate-only game plan (`GAME_PLAN_YIELD_GATE_ONLY=true`)
 - Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off**
 
-**Recommended paper stack — Best Paper Bot v2.1 (crypto OFF)** (`PAPER_CHASE_MODE=1`):
+**Recommended paper stack — Best Paper Bot v2.1 Final (crypto OFF, rotation OFF by default)** (`PAPER_CHASE_MODE=1`):
 
 - Dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**
-- **Dynamic universe ON**, **IPO safety ON**
-- **Crypto OFF**, **ADR OFF**, **bond OFF** (locked defaults — see rationale below)
+- **Dynamic universe ON**, **IPO safety ON**, **tech guard ON**
+- **Crypto OFF**, **sector rotation OFF**, **ADR OFF**, **bond OFF** (locked defaults — see rationale below)
 - Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`); macro/social/risk parity **locked off**
 
 See [Final recommended configuration](#final-recommended-configuration) and [Profile B](#profile-b-best-paper-bot-v21-paper_aggressive).
@@ -37,14 +37,16 @@ This section is the **authoritative summary** of what actually runs on **live an
 
 ## Final recommended configuration
 
-> **Final lock (2026-06-17):** Best Paper Bot v2.1 defaults are enforced in `config/best_paper_config.py` on every paper-chase startup. Crypto is **locked OFF** (`.env` cannot re-enable). ADR and bond sleeves are **opt-in research only**. UFC betting stacks were removed from this repo — **trading bot only** under `stock-bot/`.
+> **Final lock (2026-06-17):** Best Paper Bot **v2.1 Final** defaults are enforced in `config/best_paper_config.py` on every paper-chase startup. **Crypto OFF** and **sector rotation OFF** (`.env` opt-in only). **Tech guard ON** on paper. ADR and bond sleeves are **opt-in research only**. UFC betting stacks were removed — **trading bot only** under `stock-bot/`.
 
 | Target | VTI | Crypto | ADR | Thinking | Key sleeves | Start command |
 |--------|-----|--------|-----|----------|-------------|---------------|
 | **Live Profile A** ($300–$1,000) | **90%** (&lt;$500) | **OFF** | **OFF** | **OFF** | SPY + NYSE yield-gate | `python run_all.py` |
-| **Best Paper Bot v2.1** | Dynamic 40–75% | **OFF** | **OFF** | Opt-in | Stat arb + vol + options + overlap/chunk/co-fire + **dynamic universe** | `python run_paper_bot.py` |
+| **Best Paper Bot v2.1 Final** | Dynamic 40–75% | **OFF** | **OFF** | Opt-in | Stat arb + vol + options + overlap/chunk/co-fire + **dynamic universe** + **tech guard** | `python run_paper_bot.py` |
 
 **Why crypto is disabled:** Across 365d grids (Live Profile A, paper aggressive, expanded universe, v2/v3 filters, vol sleeve), the crypto sleeve and stat-arb crypto pairs **did not improve Sharpe or Max DD** vs the equity-only stack. Crypto adds fee/slippage drag on small notionals and correlated beta without consistent alpha. Crypto code remains for **research** under `scripts/research/` and backtest flags (`--compare-crypto-universe`); `enforce_best_paper_stack()` keeps it **off on all bots** even if `.env` sets `PAPER_CRYPTO_ENABLED=true`.
+
+**Why sector rotation is off by default:** 365d A/B (`--compare-sector-rotation`, paper + thinking + news): rules-only rotation **-7.9pp** return vs baseline; hybrid mode **-21.5pp**. Rotation trimmed tech during a tech-led window without adding alpha. Default **OFF**; enable with `PAPER_SECTOR_ROTATION_ENABLED=true` only for research after rule tuning. **Tech guard stays ON** (`PAPER_TECH_GUARD_ENABLED=true`) — latent safety net with zero drag when exposure stays below 45%.
 
 **Why international ADR is off by default:** Final 365d validation (`--compare-international-sleeve`, 2026-06-16) showed **-0.38pp return** and **-0.05 Sharpe** vs the v2.1 baseline, with deeper drawdown (14 ADR trades). The sleeve is **research opt-in** only (`PAPER_INTERNATIONAL_SLEEVE_ENABLED=true`); it is never enabled on Live Profile A.
 
@@ -65,6 +67,8 @@ PAPER_BOND_SLEEVE_ENABLED=false
 PAPER_THINKING_ENGINE_ENABLED=false
 PAPER_DYNAMIC_UNIVERSE_ENABLED=true
 PAPER_IPO_SAFETY_ENABLED=true
+PAPER_TECH_GUARD_ENABLED=true
+PAPER_SECTOR_ROTATION_ENABLED=false
 ```
 
 ### Restart bots (after `.env` changes)
@@ -79,7 +83,7 @@ python run_all.py
 
 Or use the desktop launcher: `..\launch.bat` from repo root (stop existing bot in dashboard first).
 
-**Paper Profile B** (Best Paper v2.1):
+**Paper Profile B** (Best Paper v2.1 Final):
 
 ```powershell
 cd C:\Users\Owner\PythonTrading\stock-bot
@@ -87,7 +91,7 @@ python status.py
 python run_paper_bot.py
 ```
 
-Verify paper stack: `python status.py` → `LOCKED Best Paper Bot v2.1 (crypto OFF)` and `v2.1 validated defaults: crypto OFF | ADR OFF | ...`
+Verify paper stack: `python status.py` → `Best Paper Bot v2.1 Final (crypto OFF, rotation OFF by default)` and ON line includes `tech_guard=on`, OFF includes `sector_rotation`.
 
 **Both in parallel:** `python launch_bots.py` or `..\launch_both.bat` (live + paper on separate keys).
 
@@ -117,6 +121,8 @@ Verify paper stack: `python status.py` → `LOCKED Best Paper Bot v2.1 (crypto O
 | **Dynamic universe** | Weekly NYSE+NASDAQ screener refresh — **on** (`PAPER_DYNAMIC_UNIVERSE=true`) |
 | **Dynamic universe strict** | Quality screener (8–12 names) — **off** unless `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
 | **IPO safety** | **On** — 2% cap, 0.5× sizing, trim rules (`PAPER_IPO_SAFETY_ENABLED=true`) |
+| **Tech guard** | **On** — caps tech exposure at 45% (`PAPER_TECH_GUARD_ENABLED=true`; zero drag when below limit) |
+| **Sector rotation** | **Off by default** — opt-in research (`PAPER_SECTOR_ROTATION_ENABLED=true`; 365d: -7.9pp rules-only) |
 | **Crypto** | **Off (locked)** — `enforce_best_paper_stack()`; research in `scripts/research/` |
 | **Thinking engine** | **Off** unless `PAPER_THINKING_ENGINE_ENABLED=true` |
 | **International ADR sleeve** | **Off by default** — research opt-in via `PAPER_INTERNATIONAL_SLEEVE_ENABLED=true` (365d final: -0.38pp vs baseline) |
@@ -320,6 +326,26 @@ Restart paper bot after changing thinking env: `python run_paper_bot.py`
 #### Backtest validation (365d, fast compare + realistic costs 2026-06-13)
 
 Default execution model: **5 bps equity slippage**, **10 bps crypto slippage**, Alpaca crypto taker fee when fee-aware. Override with `--no-realistic-costs` or `--equity-slippage-bps N`.
+
+**Strict point-in-time (PIT) mode** — default **ON** with `--paper-aggressive`:
+
+- News/social/thinking inputs use only data available at the simulated decision time (prior close for premarket thinking; macro series sliced to bar date).
+- Live `web_sentiment_live.json` is never injected into historical bars; Wayback monthly sentiment is forward-filled without lookahead.
+- Strict PIT bumps costs to **8 bps equity slippage + 1 bps commission** (12 bps crypto) for small-account realism.
+- Disable with `--no-strict-pit`; compare relaxed vs strict: `python backtester.py --days 365 --paper-aggressive --compare-pit`
+
+**Top1 vol position sizing** (research only, `--compare-position-sizing`):
+
+- Base **1% equity risk**, scaled by ATR (lower vol → larger), conviction up to **2×** (thinking + sector tailwind)
+- Speculative names (price < $8, low volume, IPO/hype like SPCX): **≤0.5% risk**
+- Portfolio heat cap **7%** total allocated risk across open positions
+
+**Top1 loss cutting** (research only, `--compare-loss-cutting`):
+
+- Hard stop **-7%** normal / **-4%** speculative (< $8, low vol, IPO/hype)
+- Tighten to **-5% / -3%** when Thinking turns negative or sector is a laggard
+- Scale out **30/30/40** at **+6% / +12% / +20%** (low conviction)
+- Thinking confidence **>= 0.7**: **10% trailing stop** after **+6%** instead of fixed targets
 
 | Config | Return | Sharpe | Max DD | vs VTI |
 |--------|--------|--------|--------|--------|
