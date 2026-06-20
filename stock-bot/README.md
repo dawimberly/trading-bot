@@ -1,22 +1,28 @@
 # PythonTrading
 
-**Personal systematic fund** on Alpaca. Currently running **live on a small ~$100 account** (adding ~$200 soon → ~$300).
+**Personal systematic fund** on Alpaca. Currently running **live on ~$300** (small-account guardrails while equity &lt; $500).
 
 The bot automatically applies **small-account safety** when equity &lt; $500:
 
 - **90% VTI core** (passive index anchor)
-- **~10% active sleeves** (SPY, NYSE momentum, vol-gated crypto)
+- **~10% active sleeves** (SPY, NYSE momentum — crypto **off** on Profile A live)
 - **1% risk per trade** (~$1–$3 orders)
 - **$10 max per order**
 
-**Recommended live stack** (already default — no extra flags required):
+**Recommended live stack — Profile A (~$300 live, lock 2026-06-19):**
 
-- `WISDOM_MODE=dynamic`
-- Yield-gate-only game plan (`GAME_PLAN_YIELD_GATE_ONLY=true`)
-- **90% VTI core** on small accounts (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`)
-- Overlap filter, adaptive chunk, co-fire, SPY MA exit, social sleeve, macro adaptor — **off by default** (opt-in via `.env`)
+| Setting | Value |
+|---------|-------|
+| **VTI core** | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`) |
+| **Crypto sleeve** | **OFF** (Profile A / Alpaca live default) |
+| **Thinking engine** | **OFF** (paper opt-in only) |
+| **Game plan** | Yield-gate-only (`GAME_PLAN_YIELD_GATE_ONLY=true`) |
+| **WISDOM_MODE** | `dynamic` |
+| Overlap / chunk / co-fire / SPY MA exit / social / macro | **off** (opt-in via `.env`) |
 
-**Paper research** (`paper_aggressive`): **Best Paper Bot v2.1** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-paper_aggressive).
+No extra flags required — preflight and `status.py` confirm the stack.
+
+**Paper research** (`paper_aggressive`): **Best Paper Bot v2.2** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-paper_aggressive) and [Final recommended configuration](#final-recommended-configuration-lock-2026-06-19).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -31,7 +37,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 | Component | Role |
 |-----------|------|
 | **`run_all.py`** | Main orchestrator — Profile A live default, Profile B when `PAPER_CHASE_MODE=1` |
-| **`run_paper_bot.py`** | Isolated paper Sharpe chase (Best Paper v2.1) on separate keys/book |
+| **`run_paper_bot.py`** | Isolated paper Sharpe chase (Best Paper v2.2) on separate keys/book |
 | **`dashboard_app.py`** | CustomTkinter monitor — equity, positions, trades, wisdom; 60s auto-refresh |
 | **`status.py`** | CLI snapshot — live + paper equity, regime, stack flags, heartbeat age |
 | **`modules/thinking_engine.py`** | Opt-in Ollama PM tilts (paper only by default; live requires manual approval) |
@@ -40,7 +46,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 **Two profiles (do not mix on the same book without intent):**
 
 - **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
-- **Profile B — paper v2.1** (`paper_aggressive`): dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking engine opt-in.
+- **Profile B — paper v2.2** (`paper_aggressive`): dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking engine opt-in.
 
 ---
 
@@ -58,6 +64,34 @@ Long-running bots and the dashboard were tuned to avoid loading full journals/lo
 | **Optional memory indicator** | Dashboard status bar | Shows process RSS (e.g. `142 MB`) when `psutil` is installed — omit from `requirements.txt` if not needed |
 
 No trading logic, risk rules, or order sizing changed — I/O and cache bounds only.
+
+---
+
+## June 2026 stability fixes
+
+Operational hardening for 24/7 live + paper on one PC (no strategy changes on Profile A live):
+
+| Fix | Where | What changed |
+|-----|-------|--------------|
+| **RAM / I/O bounds** | `dashboard_app.py`, `backtester_core.py`, `portal_bot.py` | Journal/log tail reads, backtest cache cap, refresh debounce — see [Memory & performance](#memory--performance-phase-32) |
+| **Daily breaker false trips** | `modules/trading_safety.py` | Detects **anchor contamination** (live ~$300 vs paper ~$98k in `trading_safety_state.json`), resets stale anchors, auto-clears trips when loss is below limit; live session re-primes on startup |
+| **Stat-arb reconcile** | `modules/stat_arb_sleeve.py` | Startup reconcile ignores VTI/SPY/NYSE longs and crypto when sleeves disabled; purges stale book rows; resolves orphan pair registries — no spurious orphan warnings on Profile A |
+| **Dashboard restart** | `dashboard_app.py`, `modules/portal_bot.py` | **Restart Bot** stops cleanly, clears orphan processes, restarts live + paper when keys configured (positions not closed) |
+| **Heartbeat reporting** | `run_all.py`, `status.py`, `status_metrics.py` | Heartbeats include `last_cycle_error`; `status.py` shows age, **STARTING** / **WARMING UP** / **STALE**, scan phase; prefers fresh Alpaca equity over stale heartbeat |
+| **Crypto vol gate** | `modules/crypto_vol_gate.py` | Centralized allow/deny with regime pause + vol-only check; optional SpaceX narrative override; status surfaces gate reason |
+| **Anchor contamination guard** | `modules/trading_safety.py` | Live open-equity anchor capped vs current equity; paper anchor rejects live-scale values on paper book |
+
+### Verify / test commands
+
+Run from `stock-bot/` (venv active):
+
+```powershell
+python tests/test_trading_safety_status.py   # daily loss status + false-trip auto-clear
+python tests/test_stat_arb_reconcile.py      # stat-arb orphan filtering / book purge
+python tests/test_kraken_budget.py          # Kraken cycle budget caps (exchange stack only)
+python status.py                            # live + paper equity, breaker, heartbeat age
+python scripts/account/preflight.py         # keys, alerts, small-account sizing
+```
 
 ---
 
@@ -80,29 +114,44 @@ No trading logic, risk rules, or order sizing changed — I/O and cache bounds o
 
 Recommended setup for a Windows PC left running 24/7:
 
-1. **Start via launcher** — `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) so the dashboard supervises one `run_all.py` process. Use **Stop Bot** before restarting to avoid duplicates.
+1. **Start via launcher** — `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) so the dashboard supervises one `run_all.py` process. Use dashboard **Restart Bot** for clean restarts (stops orphans, relaunches live + paper); use **Stop Bot** only when shutting down for the day.
 2. **Task Scheduler (optional)** — schedule `scripts/background_runner.py --mode auto --trigger startup` at logon and `--trigger midnight` daily. Lightweight mode runs `status.py`, checks heartbeats (stale &gt; 30 min), daily loss circuit, and can auto-start `run_paper_bot.py` when paper-only.
 3. **Logging rotation** — `modules/logging_utils.setup_project_logging()` attaches midnight-rotating handlers to `logs/run_all.log` and `logs/events.log` (7 days retained). No manual log cleanup needed for normal operation.
-4. **Heartbeat monitoring** — each cycle writes `bot_heartbeat.json` (live) or `paper_chase_heartbeat.json` (paper chase). If timestamp is stale: restart bot via dashboard **Stop Bot** → relaunch, or `python launch_bots.py --stop` then start again.
+4. **Heartbeat monitoring** — each cycle writes `bot_heartbeat.json` (live) or `paper_chase_heartbeat.json` (paper chase). If timestamp is stale (&gt; 90 min in `status.py`): **Restart Bot** in the dashboard, or `python launch_bots.py --stop` then relaunch. Check `last_cycle_error` in heartbeat / `status.py` output.
 5. **Preflight before live** — `python scripts/account/preflight.py` with live keys; confirms `ALLOW_LIVE_TRADING=yes`, equity, alerts, and recent `market_data.db`.
 6. **Data refresh** — `fetch_data.py` on schedule or when preflight flags stale DB; background runner can trigger refresh when DB age &gt; 24 h.
+
+### Bulletproof monitoring (daily)
+
+| Check | Command / file | Action if bad |
+|-------|----------------|---------------|
+| Live + paper health | `python status.py` | Banner, regime, stack ON/OFF, heartbeat age, daily breaker |
+| Positions / dust | `python status.py --positions` | Stale paper: `python scripts/cleanup_stale_positions.py --help`; live: `python scripts/cleanup_live_stale_positions.py --dry-run` |
+| Heartbeats | `bot_heartbeat.json`, `paper_chase_heartbeat.json` | Timestamp &lt; 30 min when bot running; investigate `last_cycle_error` |
+| Daily loss anchor | `trading_safety_state.json` | Live `open` ≈ current equity (~$300), not paper-scale; `circuit_tripped` false unless real loss |
+| Crypto vol gate (paper) | `crypto_vol_heartbeat.json` | Gate reason when crypto sleeve active |
+| Thinking audit (paper opt-in) | `thinking_engine_last.json`, `logs/thinking_engine.log` | Review before enabling on live |
+| Unit tests (after changes) | `python tests/test_trading_safety_status.py` etc. | Run the three tests under [Verify / test commands](#verify--test-commands) |
+| Config change | dashboard **Restart Bot** or `python run_paper_bot.py` | Restart paper after `.env` edits |
 
 Dual-bot owners: see [Dual fund bots](#dual-fund-bots-live--paper-sharpe-chase) for isolated heartbeat/journal paths per book.
 
 ---
 
-## Remaining cleanups (non-blocking)
+## Remaining known limitations (non-blocking)
 
 These are informational warnings or optional paths — **no action required** for Alpaca live Profile A:
 
 | Item | Symptom | Notes |
 |------|---------|-------|
-| **Stat-arb orphan warnings** | `Stat-arb orphans (not in book)` in logs at startup | Paper Profile B only; reconcile removes stale book entries — orphans are pairs in Alpaca not tracked in stat-arb ledger |
+| ~~**Stat-arb orphan warnings**~~ | ~~`Stat-arb orphans (not in book)` at startup~~ | **Resolved (2026-06)** — reconcile filters VTI/SPY/NYSE/crypto when sleeves off; real orphans still logged on paper Profile B |
+| ~~**Daily breaker false trip**~~ | ~~`circuit_tripped` with tiny loss~~ | **Resolved (2026-06)** — anchor contamination repair + auto-clear in `trading_safety.py`; verify with `python tests/test_trading_safety_status.py` |
 | **Kraken xStocks API off** | Startup banner: SPY/NYSE will not auto-trade on Kraken | Alpaca-only live is fine; set `KRAKEN_AUTOPILOT_ENABLED=false` to silence Kraken paths |
-| **Kraken autopilot vs Alpaca** | Preflight warns when both live | Recommended: Alpaca-only for ~$100 live; Kraken is separate `scripts/exchange/` stack |
+| **Kraken autopilot vs Alpaca** | Preflight warns when both live | Recommended: Alpaca-only for ~$300 live; Kraken is separate `scripts/exchange/` stack |
 | **Thinking engine calibration** | Heuristic fallback common on first cycles | Keep off on live; use `--simulate-live-thinking` before enabling |
 | **Universe screener age** | `status.py` universe line &gt; 7 days | Run `python scripts/analysis/universe_screener.py` on paper book |
 | **Legacy Streamlit dashboard** | `dashboard.py` still works | CustomTkinter `dashboard_app.py` is primary; Streamlit is backup |
+| **Log file lock on Windows** | `PermissionError` rotating `run_all.log` | Duplicate bot process — use **Restart Bot** to dedupe |
 
 ---
 
@@ -129,7 +178,7 @@ The repo supports **three deployment targets**. Live defaults stay conservative;
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Best Paper Bot v2.1 (`paper_aggressive`)
+### Profile B: Best Paper Bot v2.2 (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
@@ -297,7 +346,7 @@ Preflight checks live mode, Alpaca connection, alerts, and prints small-account 
 # or: python dashboard_app.py --launch-bot
 ```
 
-Sign in with your portal user. The dashboard shows equity, regime, VTI core, and active sleeves. **Stop Bot** before restarting to avoid duplicate processes.
+Sign in with your portal user. The dashboard shows equity, regime, VTI core, and active sleeves. Use **Restart Bot** for clean restarts after config changes; **Stop Bot** when shutting down for the day.
 
 5. **Check status anytime:**
 
@@ -402,7 +451,31 @@ Preflight and `bot_heartbeat.json` report `effective_cash_buffer_pct()` alongsid
 
 ## Recommended configuration by profile
 
-Sharpe phase backtests selected **current_dynamic** as the **live** baseline. Paper research uses **paper_aggressive** with optional chase extras. Details: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+Sharpe phase backtests selected **current_dynamic** as the **live** baseline. Paper research uses **paper_aggressive** (Best Paper v2.2) with optional chase extras. Details: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
+
+### Final recommended configuration (lock 2026-06-19)
+
+| Book | Profile | Stack |
+|------|---------|-------|
+| **Live ~$300** | Profile A (`current_dynamic`) | **90% VTI**, crypto **OFF**, thinking **OFF**, yield-gate-only, 1% / $10 caps, overlap/chunk/co-fire off |
+| **Paper ~$98k** | Profile B v2.2 (`paper_aggressive`) | Dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking opt-in; macro/social off |
+
+Confirm anytime: `python status.py` (Profile A vs v2.2 locked lines) · `python scripts/account/preflight.py`
+
+```env
+# Live Profile A (~$300) — defaults; only set if overriding
+PAPER_TRADING=false
+ALLOW_LIVE_TRADING=yes
+VTI_CORE_ENABLED=true
+SMALL_ACCOUNT_VTI_CORE_PCT=0.90
+GAME_PLAN_YIELD_GATE_ONLY=true
+# Crypto + thinking stay off on live Profile A (no env needed)
+
+# Paper Profile B — portal / run_paper_bot.py sets PAPER_CHASE_MODE=1
+PAPER_CHASE_MODE=1
+PAPER_APCA_API_KEY_ID=...
+PAPER_APCA_API_SECRET_KEY=...
+```
 
 ### Profile A — live (`current_dynamic`)
 
@@ -412,7 +485,7 @@ Sharpe phase backtests selected **current_dynamic** as the **live** baseline. Pa
 | **Sleeves (base)** | 45% SPY / 20% crypto / 20% NYSE / 15% cash (scaled by VTI core) |
 | **SPY** | MA200 entry; `SPY_EXIT_ON_MA_BREAK=false` (opt-in) |
 | **NYSE** | Overlap filter off; beta scaling off (opt-in) |
-| **Crypto** | Vol-gated pairs only; min correlation 0.5 |
+| **Crypto** | Vol-gated pairs only; **off on live Profile A** (small account) |
 | **Sizing** | Adaptive chunk + co-fire off (opt-in) |
 | **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
 | **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
@@ -742,7 +815,7 @@ python run_all.py
 
 `preflight.py` verifies: `ALLOW_LIVE_TRADING=yes`, equity &gt; $50, alerts configured, recent `market_data.db` refresh, and prints small-account sizing when applicable. `run_all.py` prints a loud **LIVE TRADING ENABLED** banner with equity and waits 10 seconds before the first cycle.
 
-**Daily use:** double-click **`launch.bat`** (or a desktop shortcut to it). Use the dashboard **Stop Bot** button before restarting to avoid duplicate `run_all.py` processes.
+**Daily use:** double-click **`launch.bat`** (or a desktop shortcut to it). Use dashboard **Restart Bot** after `.env` changes; **Stop Bot** only when shutting down.
 
 **Stop bot from terminal:**
 
@@ -839,9 +912,9 @@ Portal users store keys under `data/portal/users/<username>/.env`. A project-roo
 |-------|-----|
 | Dashboard window missing after sign-in | Check `logs\dashboard_crash.log` or run `python dashboard_app.py --launch-bot` in a terminal |
 | Shortcut does nothing | Use **`launch_monitor.bat`** (not the raw `.exe`); run **`stop_dashboard.bat`** if already running in the tray |
-| Multiple bots running | **Stop Bot** in dashboard, or `_stop_bot_processes()` above, then `launch.bat` / `launch_monitor.bat` once |
-| `No run_all.py process found` | Normal after stop — run `launch.bat` to start again |
-| Stale heartbeat | Bot not running — relaunch with `launch.bat` |
+| Multiple bots running | **Restart Bot** or **Stop Bot** in dashboard, or `_stop_bot_processes()` above, then `launch.bat` / `launch_monitor.bat` once |
+| `No run_all.py process found` | Normal after stop — run `launch.bat` or **Restart Bot** to start again |
+| Stale heartbeat | Bot not running or cycle error — check `last_cycle_error` in heartbeat; **Restart Bot** |
 
 ### Manual launch
 
@@ -851,7 +924,7 @@ python dashboard_app.py
 python dashboard_app.py --launch-bot   # also start run_all.py
 ```
 
-Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Stop Bot** ends `run_all.py` (does not liquidate positions). Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
+Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Restart Bot** for clean stop + relaunch; **Stop Bot** ends `run_all.py` without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
 
 Auto-refresh every **60 seconds**. Data sources: per-user `bot_heartbeat.json` (portal path or `data/fund/<slot>/`), Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
 
@@ -1271,6 +1344,7 @@ stock-bot/
 │   └── fund/               # @root bot slots (e.g. paper/ heartbeat, journal)
 ├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
 ├── status.py               # One-line live + paper equity, regime, flags
+├── tests/                  # Unit tests (trading_safety, stat_arb reconcile, kraken budget)
 ├── run_spy.py              # Optional standalone SPY loop
 ├── fetch_data.py           # yfinance → SQLite (5m live, daily backtest)
 ├── config.py               # Universe, sleeves, game plan, credentials, paths
@@ -1315,14 +1389,15 @@ stock-bot/
     ├── generate_dashboard_icon.py  # Icon for launch shortcut / PyInstaller
     ├── create_monitor_shortcut.ps1 # Desktop shortcut → launch_monitor.bat
     ├── dashboard_running.ps1       # Detect running monitor (venv or .exe)
-    ├── exchange/           # Kraken checks
-    └── tests/              # Unit tests (e.g. test_kraken_budget.py)
+    └── exchange/           # Kraken checks
 ```
 
 ## Utility scripts
 
 ```powershell
 python status.py                             # Live + paper equity, regime, flags
+python tests/test_trading_safety_status.py   # Daily loss / anchor unit test
+python tests/test_stat_arb_reconcile.py      # Stat-arb reconcile unit test
 python scripts/generate_dashboard_icon.py    # assets/dashboard.ico for shortcuts
 powershell -File scripts/create_monitor_shortcut.ps1  # Desktop shortcut for .exe monitor
 python scripts/account/preflight.py          # Pre-flight before paper month
@@ -1357,7 +1432,9 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `trading_history.jsonl` | Position ledger |
 | `risk_events.log` | Drawdown halt and stop events |
 | `paper_journal.csv` | Structured log for paper-month analysis (`game_plan` events when enabled) |
-| `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, game plan state, trades, halted |
+| `bot_heartbeat.json` | Last cycle: regime, sleeve exposure, game plan state, trades, halted, `last_cycle_error` |
+| `trading_safety_state.json` | Daily loss anchor + circuit breaker per book (live / paper) |
+| `crypto_vol_heartbeat.json` | Crypto vol gate state (paper / when crypto active) |
 | `logs/dashboard_launch.log` | stderr from `launch.bat` / `pythonw` if dashboard fails silently |
 | `logs/monitor_*.log` | stderr from `launch_monitor.bat` / `.exe` startup |
 | `logs/run_all.log` | Main bot log (daily rotation, 7 days) |

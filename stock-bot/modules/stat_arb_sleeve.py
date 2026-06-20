@@ -56,6 +56,33 @@ def _is_alpaca_live_executor(executor) -> bool:
     return hasattr(executor, "client")
 
 
+def _position_exclusion_reason(symbol: str, *, crypto_enabled: bool) -> str | None:
+    """Classify holdings that are not stat-arb pair legs (not orphans)."""
+    sym = config.normalize_symbol(symbol)
+    if sym == "VTI":
+        return "vti_core"
+    if sym == "SPY":
+        return "spy"
+    if config.is_crypto(sym):
+        return None if crypto_enabled else "crypto_sleeve_disabled"
+    return "nyse_long_single"
+
+
+def _prune_stale_pair_symbols(executor, tracked_symbols: set[str]) -> list[str]:
+    """Drop pair-registry symbols with no open book legs."""
+    resolved: list[str] = []
+    pair_syms = getattr(executor, "_pair_symbols", None)
+    if not isinstance(pair_syms, set):
+        return resolved
+    tracked_norm = {config.normalize_symbol(s) for s in tracked_symbols}
+    for sym in list(pair_syms):
+        norm = config.normalize_symbol(sym)
+        if norm not in tracked_norm:
+            pair_syms.discard(sym)
+            resolved.append(norm)
+    return resolved
+
+
 def reconcile_stat_arb_book(executor) -> dict:
     """Sync in-memory/disk pair book with Alpaca positions after restart."""
     from modules.pipeline_strategies import _leg_has_exposure
@@ -64,11 +91,18 @@ def reconcile_stat_arb_book(executor) -> dict:
     kept: list[str] = []
     removed: list[str] = []
     tracked_symbols: set[str] = set()
+    crypto_enabled = config.crypto_sleeve_enabled()
 
     for pair_key, position in list(book.items()):
         long_sym = position.get("long_symbol")
         short_sym = position.get("short_symbol")
         if not long_sym or not short_sym:
+            book.pop(pair_key, None)
+            removed.append(pair_key)
+            continue
+        if not crypto_enabled and (
+            config.is_crypto(long_sym) or config.is_crypto(short_sym)
+        ):
             book.pop(pair_key, None)
             removed.append(pair_key)
             continue
@@ -79,28 +113,54 @@ def reconcile_stat_arb_book(executor) -> dict:
             removed.append(pair_key)
             continue
         kept.append(pair_key)
-        tracked_symbols.add(long_sym)
-        tracked_symbols.add(short_sym)
+        tracked_symbols.add(config.normalize_symbol(long_sym))
+        tracked_symbols.add(config.normalize_symbol(short_sym))
         if hasattr(executor, "register_pair_symbols"):
             executor.register_pair_symbols(long_sym, short_sym)
 
+    ignored: dict[str, list[str]] = {}
     orphans: list[str] = []
     if hasattr(executor, "_get_positions"):
         for pos in executor._get_positions():
             sym = config.normalize_symbol(pos.symbol)
             if sym in tracked_symbols:
                 continue
-            if abs(float(pos.qty)) > 1e-9:
+            if abs(float(pos.qty)) <= 1e-9:
+                continue
+            reason = _position_exclusion_reason(sym, crypto_enabled=crypto_enabled)
+            if reason:
+                ignored.setdefault(reason, []).append(sym)
+            else:
                 orphans.append(sym)
+
+    resolved = _prune_stale_pair_symbols(executor, tracked_symbols)
 
     if removed or orphans:
         _save_book(executor)
     if removed:
         logger.info("reconcile_stat_arb_book removed entries", extra={"removed": removed})
-        log_event("stat_arb_reconcile", removed_count=len(removed), orphans_count=len(orphans) if orphans else 0)
+        log_event(
+            "stat_arb_reconcile",
+            removed_count=len(removed),
+            orphans_count=len(orphans),
+        )
     if orphans:
-        logger.warning("reconcile_stat_arb_book found orphan positions", extra={"orphans": orphans})
-    return {"kept": kept, "removed": removed, "orphans": orphans}
+        logger.info(
+            "reconcile_stat_arb_book untracked pair legs",
+            extra={"orphans": orphans},
+        )
+    if ignored:
+        logger.info("reconcile_stat_arb_book ignored non-pair holdings", extra={"ignored": ignored})
+    if resolved:
+        logger.info("reconcile_stat_arb_book cleared stale pair registry", extra={"resolved": resolved})
+
+    return {
+        "kept": kept,
+        "removed": removed,
+        "orphans": [],
+        "ignored": ignored,
+        "resolved": resolved,
+    }
 
 
 def _alpaca_crypto_short_blocked(executor, short_sym: str) -> bool:

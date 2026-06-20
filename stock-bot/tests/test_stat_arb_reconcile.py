@@ -46,17 +46,15 @@ def _assert_no_warning_orphans(result: dict) -> None:
 
 
 def run_tests() -> None:
-    saved_crypto = config.CRYPTO_SLEEVE_ENABLED
     saved_stat = config.PAPER_STAT_ARB_ENABLED
     saved_paper = config.PAPER_AGGRESSIVE_ENABLED
     saved_paper_ctx = config.paper_aggressive_context()
+    saved_crypto_fn = config.crypto_sleeve_enabled
     try:
         config.PAPER_AGGRESSIVE_ENABLED = True
         config.set_paper_aggressive_context(True)
         config.PAPER_STAT_ARB_ENABLED = True
-        config.CRYPTO_SLEEVE_ENABLED = True
-        # Typical paper book: VTI + SPY + NYSE longs should not warn as orphans.
-        config.CRYPTO_SLEEVE_ENABLED = False
+        config.crypto_sleeve_enabled = lambda: False
         ex = _MockExecutor(
             [
                 _Pos("VTI", 1.0),
@@ -122,7 +120,7 @@ def run_tests() -> None:
 
         print("test_stat_arb_reconcile: all passed")
     finally:
-        config.CRYPTO_SLEEVE_ENABLED = saved_crypto
+        config.crypto_sleeve_enabled = saved_crypto_fn
         config.PAPER_STAT_ARB_ENABLED = saved_stat
         config.PAPER_AGGRESSIVE_ENABLED = saved_paper
         config.set_paper_aggressive_context(saved_paper_ctx)
