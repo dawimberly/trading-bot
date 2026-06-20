@@ -17,7 +17,7 @@ from modules.logging_utils import setup_logging, log_event, log_subsystem_warnin
 
 import config
 from modules.safe_io import install_safe_stdout, write_json_atomic
-from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError
+from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError, AlpacaValidationError
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
 from modules.data_refresh import RefreshScheduler
@@ -27,6 +27,8 @@ from modules.pipeline_strategies import (
     run_crypto_strategy,
     run_equity_strategy,
     run_equity_pairs_strategy,
+    run_international_strategy,
+    run_bond_strategy,
     run_spy_exits,
     run_spy_strategy,
     resolve_cycle_deploy,
@@ -195,10 +197,34 @@ def _maybe_reconcile_startup(executor):
         from modules.stat_arb_sleeve import reconcile_stat_arb_book
 
         stat = reconcile_stat_arb_book(executor)
+        log = logging.getLogger(__name__)
         if stat.get("removed"):
-            logging.getLogger(__name__).info("Stat-arb book reconcile", extra={"kept": len(stat.get('kept', [])), "removed": len(stat['removed'])})
-        if stat.get("orphans"):
-            logging.getLogger(__name__).warning("Stat-arb orphans (not in book)", extra={"orphans": stat['orphans'][:8]})
+            log.info(
+                "Stat-arb book reconcile",
+                extra={
+                    "kept": len(stat.get("kept", [])),
+                    "removed": len(stat["removed"]),
+                },
+            )
+        if stat.get("resolved"):
+            log.info(
+                "Stat-arb orphans auto-resolved",
+                extra={"resolved": stat["resolved"][:8]},
+            )
+        ignored = stat.get("ignored") or {}
+        if ignored:
+            log.info(
+                "Stat-arb reconcile: non-pair holdings ignored",
+                extra={
+                    "count": sum(len(v) for v in ignored.values()),
+                    "reasons": {k: len(v) for k, v in ignored.items()},
+                },
+            )
+        if stat.get("informational"):
+            log.info(
+                "Stat-arb untracked legs (informational)",
+                extra={"symbols": stat["informational"][:8]},
+            )
     except Exception as exc:
         _warn_nonfatal("Holdings reconcile error", exc)
 
@@ -435,10 +461,18 @@ def main():
 
     from modules.trading_safety import (
         daily_loss_circuit_tripped,
+        refresh_daily_loss_session,
         set_entry_block_for_cycle,
     )
 
-    dl_tripped, dl_reason, _ = daily_loss_circuit_tripped(equity)
+    paper_book = bool(config.PAPER_TRADING)
+    if _main_cycle_count == 1:
+        refresh_daily_loss_session(equity, paper=paper_book, startup=True)
+
+    dl_tripped, dl_reason, _ = daily_loss_circuit_tripped(
+        equity,
+        paper=paper_book,
+    )
     set_entry_block_for_cycle(dl_reason if dl_tripped else None)
     if dl_tripped:
         logger.warning(
@@ -609,6 +643,10 @@ def main():
         regime=regime,
         macro_stress=macro_stress_flag,
     )
+    if config.effective_paper_profit_protect_enabled():
+        from modules.dynamic_risk import update_profit_protect_context
+
+        update_profit_protect_context(equity=equity)
     if config.paper_aggressive_context() and config.PAPER_DYNAMIC_RISK_ENABLED:
         dyn_risk = config.effective_risk_per_trade(equity)
         print(
@@ -735,6 +773,11 @@ def main():
         )
         if sleeve_cap_pcts:
             executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
+
+    if config.effective_vol_position_sizing_enabled() or config.effective_loss_cutting_enabled():
+        from modules.vol_position_sizing import set_top1_sizing_context
+
+        set_top1_sizing_context(executor, thinking_result)
 
     if config.effective_risk_parity_enabled():
         from modules.risk_parity_sleeve import (
@@ -902,17 +945,20 @@ def main():
         yield_gated=yield_gated,
         market_open=equity_scans,
     )
-    c = run_crypto_strategy(
-        data,
-        executor,
-        regime,
-        now,
-        pair_cooldown,
-        log_fn=_crypto_log,
-        portfolio_manager=portfolio_manager,
-        volatility=vol,
-        spacex_snapshot=spacex_snapshot,
-    )
+    if config.effective_crypto_enabled():
+        c = run_crypto_strategy(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            log_fn=_crypto_log,
+            portfolio_manager=portfolio_manager,
+            volatility=vol,
+            spacex_snapshot=spacex_snapshot,
+        )
+    else:
+        c = 0
     s = 0
     nyse_trades = 0
     gp_result = {"enabled": False, "signals": gp_signals, "actions": []}
@@ -943,6 +989,9 @@ def main():
                 yield_gated=yield_gated,
             )
         else:
+            from modules.pipeline_strategies import run_ipo_safety_trims
+
+            run_ipo_safety_trims(data, executor)
             nyse_trades = run_equity_strategy(
                 data,
                 executor,
@@ -952,7 +1001,44 @@ def main():
                 log_fn=_equity_log,
                 portfolio_manager=portfolio_manager,
                 yield_gated=yield_gated,
+                full_data=data,
             )
+            if config.effective_international_sleeve_enabled():
+                nyse_trades += run_international_strategy(
+                    data,
+                    executor,
+                    regime,
+                    now,
+                    pair_cooldown,
+                    log_fn=_equity_log,
+                    portfolio_manager=portfolio_manager,
+                    yield_gated=yield_gated,
+                    full_data=data,
+                )
+            if config.effective_bond_sleeve_enabled():
+                from modules.macro_signals import evaluate, load_daily_matrix
+                from modules.options_sleeve import current_vix_level
+
+                try:
+                    macro_daily = load_daily_matrix(days=450)
+                    macro_window = macro_daily
+                    macro_eval = evaluate(macro_daily, regime)
+                    macro_stress_flag = bool(macro_eval.get("stress"))
+                except Exception:
+                    macro_window = data
+                    macro_stress_flag = False
+                nyse_trades += run_bond_strategy(
+                    data,
+                    executor,
+                    regime,
+                    now,
+                    pair_cooldown,
+                    log_fn=_equity_log,
+                    volatility=vol,
+                    vix=current_vix_level(),
+                    macro_stress=macro_stress_flag,
+                    macro_window=macro_window,
+                )
         gp_result = run_game_plan_cycle(
             executor,
             regime,
@@ -991,7 +1077,10 @@ def main():
                 signals=gp_signals,
             )
     else:
-        print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
+        if config.effective_crypto_enabled():
+            print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
+        else:
+            print("--- Overnight: equity scans off (crypto sleeve disabled) ---")
         if config.game_plan_active():
             gp_result = run_game_plan_cycle(
                 executor,
@@ -1409,9 +1498,16 @@ if __name__ == "__main__":
             sys.exit(1)
         except AlpacaCriticalError as e:
             log_event("alpaca_critical", error=str(e))
-            logger.critical("Alpaca API failure: %s", e)
-            trade_journal.log_event("error", notes=f"Alpaca critical: {e}")
-            sys.exit(1)
+            _record_cycle_error(str(e))
+            logger.warning(
+                "Alpaca API failure after retries (skipping cycle, bot continues): %s",
+                e,
+            )
+            trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
+        except AlpacaValidationError as e:
+            log_event("alpaca_validation", error=str(e))
+            logger.info("Alpaca order validation skipped (cycle continues): %s", e)
+            trade_journal.log_event("error", notes=f"Alpaca validation skip: {e}")
         except Exception as e:
             tb = traceback.format_exc()
             _record_cycle_error(str(e))

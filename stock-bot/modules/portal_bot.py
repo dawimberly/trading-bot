@@ -9,7 +9,6 @@ import sys
 import time
 from pathlib import Path
 
-from modules.trading_books import BOOKS
 from modules.portal_paths import (
     PROJECT_ROOT,
     book_bot_log_path,
@@ -26,6 +25,7 @@ from modules.portal_paths import (
     user_journal_path,
     user_pid_path,
 )
+from modules.trading_books import BOOKS, book_enabled
 
 WISDOM_SCORECARD = PROJECT_ROOT / "wisdom_scorecard.json"
 WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
@@ -230,6 +230,59 @@ def bot_pid(username: str, book_id: str = "alpaca_paper") -> int | None:
     return None
 
 
+def _write_startup_heartbeat(username: str, book_id: str) -> None:
+    """Fresh timestamp so status/dashboard do not show stale heartbeat after restart."""
+    try:
+        from modules.safe_io import write_json_atomic
+
+        path = book_heartbeat_path(username, book_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        write_json_atomic(
+            path,
+            {
+                "timestamp": now,
+                "status": "starting",
+                "bot_restarted_at": now,
+                "book_id": book_id,
+                "paper": _is_paper_book(username, book_id),
+            },
+        )
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "startup heartbeat write failed for %s: %s", book_id, exc
+        )
+
+
+def _book_has_keys(username: str, book_id: str) -> bool:
+    try:
+        from modules.portal_paths import has_alpaca_config
+
+        return has_alpaca_config(username, book_id)
+    except Exception:
+        return False
+
+
+def restart_all_bots(username: str) -> tuple[bool, str]:
+    """Gracefully restart every configured book that has API keys."""
+    messages: list[str] = []
+    ok_all = True
+    restarted_any = False
+    for book_id in BOOKS:
+        if not book_enabled(book_id) or not _book_has_keys(username, book_id):
+            continue
+        restarted_any = True
+        ok, msg = restart_bot(username, book_id)
+        messages.append(f"--- {book_id} ---\n{msg}")
+        ok_all = ok_all and ok
+    if not restarted_any:
+        return False, "No books with API keys found to restart."
+    prefix = "All bots restarted" if ok_all else "Restart finished with errors"
+    return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
+
+
 def bot_running(username: str, book_id: str = "alpaca_paper") -> bool:
     return bot_pid(username, book_id) is not None
 
@@ -307,6 +360,21 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
         creationflags=flags,
     )
     pid_path.write_text(str(proc.pid), encoding="utf-8")
+    try:
+        from modules.safe_io import write_json_atomic
+
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        write_json_atomic(
+            slot_dir / "bot_heartbeat.json",
+            {
+                "timestamp": now,
+                "status": "starting",
+                "bot_restarted_at": now,
+                "slot": slot,
+            },
+        )
+    except Exception:
+        pass
     time.sleep(2)
     if proc.poll() is not None:
         log_file.flush()
@@ -386,6 +454,7 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
         creationflags=flags,
     )
     book_pid_path(username, book_id).write_text(str(proc.pid), encoding="utf-8")
+    _write_startup_heartbeat(username, book_id)
     time.sleep(2)
     if proc.poll() is not None:
         log_file.flush()
@@ -432,8 +501,8 @@ def restart_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str
             return False, stop_msg
     else:
         stop_msg = "Bot was not running."
-        stop_orphan_project_bots()
-    time.sleep(1.5)
+    stop_orphan_project_bots()
+    time.sleep(2.0)
     ok, start_msg = start_bot(username, book_id)
     if not ok:
         return False, start_msg

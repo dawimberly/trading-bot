@@ -72,7 +72,9 @@ from modules.portal_paths import (  # noqa: E402
     write_user_env,
 )
 from modules.wisdom_evaluator import filter_paper_journal  # noqa: E402
+from modules import status_metrics as sm  # noqa: E402
 from modules.trading_books import (  # noqa: E402
+    BOOKS,
     book_dropdown_entries,
     book_enabled,
     book_id_for_dropdown_label,
@@ -90,12 +92,13 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 import config  # noqa: E402
-from modules.alpaca_executor import get_trading_client  # noqa: E402
+from modules.alpaca_executor import AlpacaExecutor, get_trading_client  # noqa: E402
 from modules.portal_auth import authenticate, init_db, register_user  # noqa: E402
 from modules.portal_bot import (  # noqa: E402
     bot_running,
     bot_status_label,
     read_bot_log_tail,
+    restart_all_bots,
     restart_bot,
     start_bot,
     stop_bot,
@@ -887,6 +890,7 @@ class DataTable(ctk.CTkFrame):
             show="headings",
             height=height,
             style=style_name,
+            selectmode="browse",
         )
         for col in columns:
             self._tree.heading(col, text=col)
@@ -931,6 +935,16 @@ class DataTable(ctk.CTkFrame):
                 except (TypeError, ValueError):
                     tag = ""
             self._tree.insert("", "end", values=values, tags=(tag,) if tag else ())
+
+    def selected_row(self) -> dict | None:
+        sel = self._tree.selection()
+        if not sel:
+            return None
+        values = self._tree.item(sel[0], "values")
+        return {
+            col: values[i] if i < len(values) else ""
+            for i, col in enumerate(self._columns)
+        }
 
 
 class LoginApp(ctk.CTk):
@@ -1367,6 +1381,7 @@ class TradingDashboardApp(ctk.CTk):
         self._shutting_down = False
         self._refresh_busy = False
         self._refresh_pending = False
+        self._last_positions_df: pd.DataFrame | None = None
 
         if ICON_PATH.is_file():
             try:
@@ -1431,6 +1446,13 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["green"],
         )
         self._live_equity_label.pack(anchor="w", pady=(6, 0))
+        self._since_start_label = ctk.CTkLabel(
+            title_block,
+            text="Since Start: —",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["text_dim"],
+        )
+        self._since_start_label.pack(anchor="w", pady=(2, 0))
         self._book_menu = ctk.CTkOptionMenu(
             header_left,
             variable=self._book_var,
@@ -1533,6 +1555,35 @@ class TradingDashboardApp(ctk.CTk):
         self._pill_regime = _pill(status_inner, "Regime: —", COLORS["surface2"], COLORS["text_dim"])
         self._pill_bot = _pill(status_inner, "Bot: —", COLORS["surface2"], COLORS["muted"])
 
+        stats_banner = ctk.CTkFrame(
+            top_stack,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        stats_banner.pack(fill="x", pady=(0, 8))
+        stats_inner = ctk.CTkFrame(stats_banner, fg_color="transparent")
+        stats_inner.pack(fill="x", padx=14, pady=10)
+        self._stats_line1 = ctk.CTkLabel(
+            stats_inner,
+            text="Account Total: —",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["text"],
+            anchor="w",
+            justify="left",
+        )
+        self._stats_line1.pack(fill="x")
+        self._stats_line2 = ctk.CTkLabel(
+            stats_inner,
+            text="Daily Breaker: —   ·   Insight: —",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+            justify="left",
+        )
+        self._stats_line2.pack(fill="x", pady=(4, 0))
+
         self._small_panel = ctk.CTkFrame(top_stack, fg_color="transparent")
         self._small_body = ctk.CTkLabel(
             self._small_panel,
@@ -1547,7 +1598,7 @@ class TradingDashboardApp(ctk.CTk):
         hero_row = ctk.CTkFrame(top_stack, fg_color="transparent")
         hero_row.pack(fill="x", pady=(0, 6))
         self._metric_cards: dict[str, MetricCard] = {}
-        self._metric_cards["equity"] = MetricCard(hero_row, "Equity", hero=True)
+        self._metric_cards["equity"] = MetricCard(hero_row, "Account Total", hero=True)
         self._metric_cards["equity"].pack(side="left", fill="both", expand=True, padx=(0, 6))
         self._metric_cards["cash"] = MetricCard(hero_row, "Cash", hero=True)
         self._metric_cards["cash"].pack(side="left", fill="both", expand=True, padx=(0, 6))
@@ -1613,6 +1664,12 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("heading"),
             text_color=COLORS["text"],
         ).pack(side="left")
+        ctk.CTkLabel(
+            pos_head,
+            text="Select a row, then Sell",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        ).pack(side="left", padx=(12, 0))
         self._pos_total = ctk.CTkLabel(
             pos_head,
             text="",
@@ -1620,6 +1677,31 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
         self._pos_total.pack(side="right")
+        pos_btn_row = ctk.CTkFrame(pos_head, fg_color="transparent")
+        pos_btn_row.pack(side="right", padx=(0, 10))
+        ctk.CTkButton(
+            pos_btn_row,
+            text="Sell all",
+            width=72,
+            height=28,
+            corner_radius=10,
+            fg_color=COLORS["small"],
+            hover_color=COLORS["small_bg"],
+            text_color=COLORS["text"],
+            font=_ctk_font("caption"),
+            command=self._on_sell_all_positions,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            pos_btn_row,
+            text="Sell",
+            width=64,
+            height=28,
+            corner_radius=10,
+            fg_color=COLORS["live_bg"],
+            hover_color=COLORS["live"],
+            font=_ctk_font("caption"),
+            command=self._on_sell_selected_position,
+        ).pack(side="left")
         self._positions_table = DataTable(
             self._tab_positions,
             ["Ticker", "Sleeve", "Qty", "Entry", "Current", "P&L $", "P&L %"],
@@ -2000,6 +2082,32 @@ class TradingDashboardApp(ctk.CTk):
             return
         self._update_live_equity_header(0.0, err)
 
+    def _book_is_paper_chase(self) -> bool:
+        spec = BOOKS.get(self._book_id) or {}
+        return bool(spec.get("paper_chase"))
+
+    def _update_stats_banner(
+        self, equity: float, heartbeat: dict | None, acct_err: str | None
+    ) -> None:
+        if acct_err or equity <= 0:
+            self._stats_line1.configure(text="Account Total: —   ·   Since Start: —   ·   Regime: —")
+            self._stats_line2.configure(text="Daily Breaker: —   ·   Insight: —")
+            self._since_start_label.configure(text="Since Start: —")
+            return
+        paper_chase = self._book_is_paper_chase()
+        live_only = self._book_id == "alpaca_live"
+        extra = [book_journal_path(self._username, self._book_id)]
+        line1, line2, since_detail = sm.dashboard_stats_lines(
+            equity=equity,
+            heartbeat=heartbeat,
+            paper_chase=paper_chase,
+            live_only=live_only,
+            extra_journal_paths=extra,
+        )
+        self._stats_line1.configure(text=line1)
+        self._stats_line2.configure(text=line2)
+        self._since_start_label.configure(text=since_detail)
+
     def _update_live_equity_header(self, equity: float, acct_err: str | None) -> None:
         live = not config.PAPER_TRADING
         prefix = "Live" if live else "Paper"
@@ -2050,6 +2158,7 @@ class TradingDashboardApp(ctk.CTk):
         small_account = equity > 0 and config.is_small_account(equity)
 
         self._update_live_equity_header(equity, acct_err)
+        self._update_stats_banner(equity, heartbeat, acct_err)
         running = bot_running(self._username, self._book_id)
         self._update_small_panel(equity, heartbeat)
 
@@ -2259,16 +2368,19 @@ class TradingDashboardApp(ctk.CTk):
         total_upl: float,
     ) -> None:
         if pos_err:
+            self._last_positions_df = None
             self._positions_table.clear()
             self._pos_total.configure(text=pos_err, text_color=COLORS["red"])
             return
         if positions_df is None or positions_df.empty:
+            self._last_positions_df = None
             self._positions_table.clear()
             self._pos_total.configure(
                 text="No open positions — cash until next rebalance.",
                 text_color=COLORS["muted"],
             )
             return
+        self._last_positions_df = positions_df.copy()
         rows = self._position_rows(positions_df)
         self._positions_table.set_rows(rows, pnl_col="_pnl")
         color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
@@ -2498,6 +2610,155 @@ class TradingDashboardApp(ctk.CTk):
             messagebox.showerror("Start Bot", msg + detail)
         self.refresh_data()
 
+    def _position_qty(self, ticker: str) -> float | None:
+        if self._last_positions_df is None or self._last_positions_df.empty:
+            return None
+        match = self._last_positions_df[self._last_positions_df["Ticker"] == ticker]
+        if match.empty:
+            return None
+        return float(match.iloc[0]["Qty"])
+
+    def _sell_confirm_message(self, *, action: str, detail: str) -> str:
+        msg = f"{action}\n\n{detail}"
+        if self._book_id == "alpaca_live":
+            msg += (
+                "\n\n⚠ LIVE ACCOUNT — REAL MONEY.\n"
+                "This order executes immediately at market price."
+            )
+        return msg
+
+    def _on_sell_selected_position(self) -> None:
+        if not has_alpaca_config(self._username, self._book_id):
+            messagebox.showwarning(
+                "API keys",
+                f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
+            )
+            return
+        row = self._positions_table.selected_row()
+        if not row:
+            messagebox.showwarning("Sell Position", "Select a position row first.")
+            return
+        ticker = str(row.get("Ticker") or row.get("symbol") or "").strip()
+        if not ticker:
+            messagebox.showwarning("Sell Position", "Could not read ticker from selection.")
+            return
+        qty = self._position_qty(ticker)
+        if qty is None:
+            messagebox.showwarning(
+                "Sell Position",
+                f"Could not find quantity for {ticker}. Refresh and try again.",
+            )
+            return
+        qty_label = f"{qty:.4f}".rstrip("0").rstrip(".")
+        verb = "Cover entire short" if qty < 0 else "Sell entire"
+        if not messagebox.askyesno(
+            "Sell Position",
+            self._sell_confirm_message(
+                action=f"{verb} {ticker} position ({qty_label} shares)?",
+                detail="Submits a market order to close the full position.",
+            ),
+            icon="warning",
+        ):
+            return
+        self._pos_total.configure(text=f"Closing {ticker}…", text_color=COLORS["amber"])
+        self.update_idletasks()
+
+        def _worker() -> None:
+            err: str | None = None
+            try:
+                executor = AlpacaExecutor(paper=self._book_id != "alpaca_live")
+                order = executor.execute_full_exit(
+                    ticker,
+                    reason="manual_dashboard",
+                    sleeve=_infer_sleeve(ticker),
+                )
+                if order is None:
+                    err = (
+                        f"Could not submit close for {ticker} "
+                        "(no position, below minimum notional, or trading blocked)."
+                    )
+            except Exception as exc:  # noqa: BLE001
+                err = str(exc)
+
+            def _finish() -> None:
+                if err:
+                    messagebox.showerror("Sell Position", err)
+                else:
+                    messagebox.showinfo(
+                        "Sell Position",
+                        f"Close order submitted for {ticker}.",
+                    )
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_sell_all_positions(self) -> None:
+        if not has_alpaca_config(self._username, self._book_id):
+            messagebox.showwarning(
+                "API keys",
+                f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
+            )
+            return
+        if self._last_positions_df is None or self._last_positions_df.empty:
+            messagebox.showinfo("Sell All", "No open positions.")
+            return
+        tickers = self._last_positions_df["Ticker"].astype(str).tolist()
+        n = len(tickers)
+        if not messagebox.askyesno(
+            "Sell All",
+            self._sell_confirm_message(
+                action=f"Close all {n} open position(s)?",
+                detail="Submits a market close order for each position.",
+            ),
+            icon="warning",
+        ):
+            return
+        self._pos_total.configure(text=f"Closing {n} position(s)…", text_color=COLORS["amber"])
+        self.update_idletasks()
+
+        def _worker() -> None:
+            errors: list[str] = []
+            closed = 0
+            try:
+                executor = AlpacaExecutor(paper=self._book_id != "alpaca_live")
+                for ticker in tickers:
+                    try:
+                        order = executor.execute_full_exit(
+                            ticker,
+                            reason="manual_dashboard",
+                            sleeve=_infer_sleeve(ticker),
+                        )
+                        if order is None:
+                            errors.append(f"{ticker}: order not submitted")
+                        else:
+                            closed += 1
+                    except Exception as exc:  # noqa: BLE001
+                        errors.append(f"{ticker}: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(str(exc))
+
+            def _finish() -> None:
+                if errors:
+                    detail = "\n".join(errors[:8])
+                    if len(errors) > 8:
+                        detail += f"\n… and {len(errors) - 8} more"
+                    messagebox.showwarning(
+                        "Sell All",
+                        f"Submitted {closed} of {n} close order(s).\n\n{detail}",
+                    )
+                else:
+                    messagebox.showinfo(
+                        "Sell All",
+                        f"Submitted close orders for {closed} position(s).",
+                    )
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
     def _on_stop_bot(self) -> None:
         if not bot_running(self._username, self._book_id):
             messagebox.showinfo("Stop Bot", f"No bot running for {book_label(self._book_id)}.")
@@ -2522,12 +2783,10 @@ class TradingDashboardApp(ctk.CTk):
                 f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
             )
             return
-        mode = "paper" if config.PAPER_TRADING else "live"
-        script = "run_paper_bot.py" if mode == "paper" else "run_all.py"
         if not messagebox.askyesno(
             "Restart Bot",
-            f"This will restart the trading bot ({mode} mode, {script}).\n\n"
-            "The bot loop stops cleanly, then starts again.\n"
+            "This will restart live and paper bots (when API keys are configured).\n\n"
+            "Each bot stops cleanly, orphan processes are cleared, then both restart.\n"
             "Open positions are not closed.\n\nContinue?",
             icon="warning",
         ):
@@ -2542,14 +2801,12 @@ class TradingDashboardApp(ctk.CTk):
         self.update_idletasks()
 
         def _worker() -> None:
-            ok, msg = restart_bot(self._username, self._book_id)
+            ok, msg = restart_all_bots(self._username)
 
             def _finish() -> None:
                 if ok:
                     messagebox.showinfo("Restart Bot", msg)
-                    self._status_label.configure(
-                        text=f"{'Paper' if config.PAPER_TRADING else 'Live'} · bot restarted"
-                    )
+                    self._status_label.configure(text="Live + paper bots restarted")
                 else:
                     tail = read_bot_log_tail(self._username, self._book_id)
                     detail = f"\n\n{tail}" if tail else ""
