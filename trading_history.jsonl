@@ -1,3 +1,0 @@
-{"event": "ledger_rebuilt", "at": "2026-06-12T15:36:57", "backup": "trading_history.jsonl.bak.20260612_153657"}
-{"pair": "GLD", "qty": 1.3322e-05, "price": 397.998, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "VTI", "qty": 0.245563002, "price": 366.464, "status": "open", "source": "alpaca_reconcile"}

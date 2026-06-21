@@ -3,14 +3,164 @@
 import json
 import logging
 import os
+import sys
 import warnings
+from pathlib import Path
+
 from dotenv import load_dotenv, find_dotenv
 
-_env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
-if _env_override and os.path.isfile(_env_override):
-    load_dotenv(_env_override, override=True)
-else:
-    load_dotenv(find_dotenv())
+_CONFIG_DIR = Path(__file__).resolve().parent
+
+
+def _parse_env_bool(key: str, *, default: str = "false") -> bool:
+    return os.getenv(key, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _append_loaded_env(loaded: list[str], path: Path) -> None:
+    try:
+        resolved = str(path.resolve())
+    except OSError:
+        return
+    if resolved not in loaded:
+        loaded.append(resolved)
+
+
+def _load_project_dotenv() -> None:
+    """Load .env: stock-bot/.env is authoritative; dist/.env fills missing keys only."""
+    loaded: list[str] = []
+    env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
+    if env_override and os.path.isfile(env_override):
+        load_dotenv(env_override, override=True)
+        loaded.append(str(Path(env_override).resolve()))
+        _normalize_alpaca_env_keys()
+        os.environ["PYTHONTRADING_LOADED_ENV"] = ";".join(loaded)
+        return
+
+    try:
+        from modules.runtime_paths import resolve_data_root, resolve_runtime_root
+
+        root = resolve_runtime_root()
+        data_root = resolve_data_root(root)
+    except ImportError:
+        root = _CONFIG_DIR
+        data_root = _CONFIG_DIR
+
+    stock_env = _CONFIG_DIR / ".env"
+    dist_env = data_root / ".env"
+    repo_env = _CONFIG_DIR.parent / ".env"
+
+    if getattr(sys, "frozen", False):
+        if stock_env.is_file():
+            load_dotenv(stock_env, override=True)
+            _append_loaded_env(loaded, stock_env)
+            if dist_env.is_file() and dist_env.resolve() != stock_env.resolve():
+                load_dotenv(dist_env, override=False)
+                _append_loaded_env(loaded, dist_env)
+        elif dist_env.is_file():
+            load_dotenv(dist_env, override=True)
+            _append_loaded_env(loaded, dist_env)
+    else:
+        if repo_env.is_file() and repo_env.resolve() != stock_env.resolve():
+            load_dotenv(repo_env, override=True)
+            _append_loaded_env(loaded, repo_env)
+        if stock_env.is_file():
+            load_dotenv(stock_env, override=True)
+            _append_loaded_env(loaded, stock_env)
+        if dist_env.is_file():
+            same_as_stock = stock_env.is_file() and dist_env.resolve() == stock_env.resolve()
+            if not same_as_stock:
+                load_dotenv(dist_env, override=not stock_env.is_file())
+                _append_loaded_env(loaded, dist_env)
+
+    found = find_dotenv(usecwd=True)
+    if found:
+        found_path = Path(found)
+        try:
+            found_resolved = found_path.resolve()
+        except OSError:
+            found_resolved = None
+        already = {Path(p).resolve() for p in loaded}
+        if found_resolved and found_resolved not in already and found_path.is_file():
+            load_dotenv(found_path, override=True)
+            _append_loaded_env(loaded, found_path)
+
+    _normalize_alpaca_env_keys()
+    if loaded:
+        os.environ["PYTHONTRADING_LOADED_ENV"] = ";".join(loaded)
+
+
+def _dotenv_file_value(path: Path, key: str) -> str | None:
+    """Read a single KEY=value from a .env file without applying it to os.environ."""
+    if not path.is_file():
+        return None
+    try:
+        for line in path.read_text(encoding="utf-8-sig").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            k, _, v = stripped.partition("=")
+            if k.strip() == key:
+                return _strip_env(v)
+    except OSError:
+        return None
+    return None
+
+
+_ALPACA_ENV_KEYS = (
+    "APCA_API_KEY_ID",
+    "APCA_API_SECRET_KEY",
+    "PAPER_APCA_API_KEY_ID",
+    "PAPER_APCA_API_SECRET_KEY",
+    "ALPACA_API_KEY",
+    "ALPACA_SECRET_KEY",
+    "SPY_APCA_API_KEY_ID",
+    "SPY_APCA_API_SECRET_KEY",
+    "PAPER_TRADING",
+    "ALLOW_LIVE_TRADING",
+)
+
+
+def _strip_env(val: str | None) -> str:
+    """Strip whitespace, optional quotes, and UTF-8 BOM artifacts from env values."""
+    if val is None:
+        return ""
+    s = str(val).strip().lstrip("\ufeff")
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"":
+        s = s[1:-1].strip()
+    return s
+
+
+def _normalize_alpaca_env_keys() -> None:
+    """Normalize known Alpaca keys after dotenv load (quotes, trailing spaces)."""
+    for key in _ALPACA_ENV_KEYS:
+        raw = os.getenv(key)
+        if raw is None:
+            continue
+        cleaned = _strip_env(raw)
+        if cleaned != raw:
+            os.environ[key] = cleaned
+
+
+def _sync_trading_mode_flags() -> None:
+    """Apply PAPER_TRADING / ALLOW_LIVE_TRADING from os.environ after dotenv load."""
+    global PAPER_TRADING, ALLOW_LIVE_TRADING
+    ALLOW_LIVE_TRADING = _parse_env_bool("ALLOW_LIVE_TRADING", default="false")
+    paper_raw = (os.getenv("PAPER_TRADING", "true") or "true").strip().lower()
+    PAPER_TRADING = paper_raw in ("1", "true", "yes", "on")
+    if ALLOW_LIVE_TRADING and paper_raw in ("0", "false", "no", "off"):
+        PAPER_TRADING = False
+    # Root .env live intent wins over stock-bot/.env paper override (dual-file setups).
+    root_env = _CONFIG_DIR.parent / ".env"
+    root_allow = (_dotenv_file_value(root_env, "ALLOW_LIVE_TRADING") or "").lower()
+    root_paper = (_dotenv_file_value(root_env, "PAPER_TRADING") or "").lower()
+    if root_allow in ("1", "true", "yes", "on") and root_paper in ("0", "false", "no", "off"):
+        PAPER_TRADING = False
+        ALLOW_LIVE_TRADING = True
+        os.environ["PAPER_TRADING"] = "false"
+        os.environ["ALLOW_LIVE_TRADING"] = "yes"
+
+
+_load_project_dotenv()
 
 try:
     from modules.ssl_certs import configure_ssl_certificates
@@ -20,9 +170,10 @@ except ImportError:
     pass
 
 # --- Alpaca (canonical: APCA_*; legacy ALPACA_* supported via get_alpaca_credentials) ---
-# Paper-only by default. Set ALLOW_LIVE_TRADING=yes in .env to override PAPER_TRADING=False.
-PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
-ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in ("1", "true", "yes")
+# Paper-only by default. Set ALLOW_LIVE_TRADING=yes with PAPER_TRADING=false for live.
+PAPER_TRADING = True
+ALLOW_LIVE_TRADING = False
+_sync_trading_mode_flags()
 ALPACA_PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 ALPACA_LIVE_BASE_URL = "https://api.alpaca.markets"
 
@@ -57,6 +208,49 @@ TRADE_HISTORY_LOG = "trade_history.log"
 RISK_EVENTS_LOG = "risk_events.log"
 PAPER_JOURNAL_CSV = os.getenv("PAPER_JOURNAL_CSV", "paper_journal.csv")
 HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "bot_heartbeat.json")
+AUTO_LAUNCH_DASHBOARD = _parse_env_bool("AUTO_LAUNCH_DASHBOARD", default="false")
+
+
+def resolve_heartbeat_file(paper: bool | None = None) -> Path:
+    """Absolute heartbeat path under the runtime data root."""
+    from modules.runtime_paths import resolve_data_root
+
+    data_root = resolve_data_root()
+    env_raw = (os.getenv("HEARTBEAT_FILE") or "").strip()
+    if env_raw:
+        env_path = Path(env_raw)
+        if env_path.is_absolute():
+            return env_path.resolve()
+
+    hb_env = (env_raw or HEARTBEAT_FILE or "bot_heartbeat.json").lower()
+    if paper_chase_mode_enabled() or "paper_chase" in hb_env:
+        return (data_root / "paper_chase_heartbeat.json").resolve()
+
+    is_paper = bool(PAPER_TRADING) if paper is None else bool(paper)
+    if is_paper:
+        return (data_root / "bot_heartbeat.json").resolve()
+    return (data_root / "live_bot_heartbeat.json").resolve()
+
+
+def configure_heartbeat_path() -> str:
+    """Pin HEARTBEAT_FILE to an absolute path for this runtime mode."""
+    global HEARTBEAT_FILE
+    path = resolve_heartbeat_file()
+    HEARTBEAT_FILE = str(path)
+    os.environ["HEARTBEAT_FILE"] = HEARTBEAT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return HEARTBEAT_FILE
+
+
+def ensure_heartbeat_path_writable() -> str:
+    """Resolve relative heartbeat paths and ensure parent dir exists."""
+    hb = HEARTBEAT_FILE
+    if not Path(hb).is_absolute():
+        hb = configure_heartbeat_path()
+    else:
+        Path(hb).parent.mkdir(parents=True, exist_ok=True)
+    return hb
+
 
 # --- Strategy ---
 TICKER = "VTI"
@@ -104,6 +298,20 @@ PAPER_CRYPTO_V2_ENABLED = os.getenv("PAPER_CRYPTO_V2_ENABLED", "false").lower() 
     "true",
     "yes",
 )
+# Winners treatment (profit-protect) — paper research opt-in; off on live Profile A
+PAPER_PROFIT_PROTECT_ENABLED = _parse_env_bool(
+    "PAPER_PROFIT_PROTECT_ENABLED", default="false"
+)
+# Top1 vol sizing / loss cutting — paper research opt-in; off on live Profile A
+PAPER_VOL_POSITION_SIZING_ENABLED = _parse_env_bool(
+    "PAPER_VOL_POSITION_SIZING_ENABLED", default="false"
+)
+PAPER_LOSS_CUTTING_ENABLED = _parse_env_bool(
+    "PAPER_LOSS_CUTTING_ENABLED", default="false"
+)
+# Classic crypto pairs sleeve — off by default on live and paper bots
+PAPER_CRYPTO_ENABLED = _parse_env_bool("PAPER_CRYPTO_ENABLED", default="false")
+CRYPTO_SLEEVE_ENABLED = _parse_env_bool("CRYPTO_SLEEVE_ENABLED", default="false")
 PAPER_CRYPTO_V2_SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD", "ADA-USD",
     "DOT-USD", "MATIC-USD", "ATOM-USD", "UNI-USD", "LTC-USD", "BCH-USD",
@@ -818,17 +1026,12 @@ CRYPTO_TICKERS = frozenset(
 
 def reload_from_env(env_file: str | None = None) -> None:
     """Reload credentials flags after portal switches per-user .env."""
-    global PAPER_TRADING, ALLOW_LIVE_TRADING
     if env_file and os.path.isfile(env_file):
         load_dotenv(env_file, override=True)
     else:
-        load_dotenv(find_dotenv(), override=True)
-    PAPER_TRADING = os.getenv("PAPER_TRADING", "true").lower() in ("1", "true", "yes")
-    ALLOW_LIVE_TRADING = os.getenv("ALLOW_LIVE_TRADING", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+        _load_project_dotenv()
+    _normalize_alpaca_env_keys()
+    _sync_trading_mode_flags()
     try:
         from modules.alpaca_client import reset_trading_client_cache
 
@@ -837,12 +1040,90 @@ def reload_from_env(env_file: str | None = None) -> None:
         pass
 
 
-def _strip_env(val: str | None) -> str:
-    return (val or "").strip()
+def get_paper_alpaca_credentials() -> tuple[str, str]:
+    """Paper book keys — prefer PAPER_APCA_*, fallback to APCA_* for single-key setups."""
+    key = _strip_env(os.getenv("PAPER_APCA_API_KEY_ID"))
+    secret = _strip_env(os.getenv("PAPER_APCA_API_SECRET_KEY"))
+    if key and secret:
+        return key, secret
+    key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
+    secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+        os.getenv("ALPACA_SECRET_KEY")
+    )
+    if not key or not secret:
+        raise ValueError(
+            "Paper Alpaca credentials missing. Add to .env (never commit):\n"
+            "  PAPER_APCA_API_KEY_ID=your_paper_key_id\n"
+            "  PAPER_APCA_API_SECRET_KEY=your_paper_secret\n"
+            "  PAPER_TRADING=true"
+        )
+    return key, secret
+
+
+def get_live_alpaca_credentials() -> tuple[str, str]:
+    """Live book keys — APCA_* only (never PAPER_APCA_*)."""
+    key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
+    secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+        os.getenv("ALPACA_SECRET_KEY")
+    )
+    if not key or not secret:
+        raise ValueError(
+            "Live Alpaca credentials missing. Add to .env (never commit):\n"
+            "  APCA_API_KEY_ID=your_live_key_id\n"
+            "  APCA_API_SECRET_KEY=your_live_secret\n"
+            "  PAPER_TRADING=false\n"
+            "  ALLOW_LIVE_TRADING=yes"
+        )
+    return key, secret
+
+
+def alpaca_credentials_status(*, paper: bool | None = None) -> dict[str, str | bool]:
+    """Safe credential diagnostics (suffix only — never full keys)."""
+    use_paper = PAPER_TRADING if paper is None else bool(paper)
+    if use_paper:
+        pk = _strip_env(os.getenv("PAPER_APCA_API_KEY_ID"))
+        ps = _strip_env(os.getenv("PAPER_APCA_API_SECRET_KEY"))
+        if pk and ps:
+            key, secret, source = pk, ps, "PAPER_APCA_*"
+        else:
+            key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(
+                os.getenv("ALPACA_API_KEY")
+            )
+            secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+                os.getenv("ALPACA_SECRET_KEY")
+            )
+            source = "APCA_* (paper fallback)"
+    else:
+        key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(
+            os.getenv("ALPACA_API_KEY")
+        )
+        secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
+            os.getenv("ALPACA_SECRET_KEY")
+        )
+        source = "APCA_* (live)"
+    return {
+        "paper": use_paper,
+        "mode": "PAPER" if use_paper else "LIVE",
+        "base_url": get_alpaca_base_url(paper=use_paper),
+        "key_source": source,
+        "key_suffix": key[-4:] if len(key) >= 4 else "????",
+        "has_key": bool(key),
+        "has_secret": bool(secret),
+        "loaded_env": os.getenv("PYTHONTRADING_LOADED_ENV", "(unknown)"),
+        "env_override": os.getenv("PYTHONTRADING_ENV_FILE", ""),
+    }
+
+
+def get_alpaca_credentials(*, paper: bool | None = None) -> tuple[str, str]:
+    """Return (api_key, secret_key) for paper or live based on PAPER_TRADING."""
+    use_paper = PAPER_TRADING if paper is None else bool(paper)
+    if use_paper:
+        return get_paper_alpaca_credentials()
+    return get_live_alpaca_credentials()
 
 
 def get_alpaca_base_url(*, paper: bool | None = None) -> str:
-    """Return Alpaca REST base URL. Paper mode always uses the paper endpoint."""
+    """Return Alpaca REST base URL for paper or live trading."""
     use_paper = PAPER_TRADING if paper is None else bool(paper)
     if use_paper:
         return ALPACA_PAPER_BASE_URL
@@ -852,37 +1133,72 @@ def get_alpaca_base_url(*, paper: bool | None = None) -> str:
     return ALPACA_LIVE_BASE_URL
 
 
-def get_alpaca_credentials():
-    """Return (api_key, secret_key). Prefers APCA_*; falls back to legacy ALPACA_*."""
-    key = _strip_env(os.getenv("APCA_API_KEY_ID")) or _strip_env(os.getenv("ALPACA_API_KEY"))
-    secret = _strip_env(os.getenv("APCA_API_SECRET_KEY")) or _strip_env(
-        os.getenv("ALPACA_SECRET_KEY")
-    )
-    if not key or not secret:
-        raise ValueError(
-            "Alpaca credentials missing. Add to your .env file (never commit .env):\n"
-            "  APCA_API_KEY_ID=your_key_id\n"
-            "  APCA_API_SECRET_KEY=your_secret_key\n"
-            "For paper trading also set PAPER_TRADING=true"
-        )
-    return key, secret
+def trading_mode_summary() -> dict[str, str | bool]:
+    """Resolved trading mode for startup banners and diagnostics."""
+    paper = bool(PAPER_TRADING)
+    creds = alpaca_credentials_status(paper=paper)
+    return {
+        "paper": paper,
+        "mode": "PAPER" if paper else "LIVE",
+        "base_url": get_alpaca_base_url(),
+        "allow_live": bool(ALLOW_LIVE_TRADING),
+        "paper_env": os.getenv("PAPER_TRADING", "(unset)"),
+        "allow_live_env": os.getenv("ALLOW_LIVE_TRADING", "(unset)"),
+        "key_source": creds["key_source"],
+        "key_suffix": creds["key_suffix"],
+        "loaded_env": creds["loaded_env"],
+    }
+
+
+def print_trading_mode_banner(*, stream=None) -> None:
+    """Loud startup line showing effective Alpaca mode (after dotenv)."""
+    import sys
+
+    from modules.safe_io import ensure_stdio_streams, safe_print
+
+    ensure_stdio_streams()
+    out = stream or sys.stdout
+    info = trading_mode_summary()
+    bar = "=" * 60
+    lines = [
+        bar,
+        f"  ALPACA MODE: {info['mode']}",
+        f"  PAPER_TRADING={info['paper_env']}  ALLOW_LIVE_TRADING={info['allow_live_env']}",
+        f"  API endpoint: {info['base_url']}",
+        f"  Keys: {info['key_source']} (…{info['key_suffix']})",
+    ]
+    if not info["paper"] and not info["allow_live"]:
+        lines.append("  WARNING: live mode blocked — set ALLOW_LIVE_TRADING=yes")
+    lines.append(bar)
+    for line in lines:
+        safe_print(line, file=out)
+    if getattr(sys, "frozen", False):
+        log = logging.getLogger("config")
+        for line in lines:
+            log.info(line)
 
 
 def validate_alpaca_config(*, require_credentials: bool = True) -> None:
     """Validate Alpaca env at startup; raise ValueError with setup instructions."""
-    if require_credentials:
-        get_alpaca_credentials()
+    _sync_trading_mode_flags()
     use_paper = PAPER_TRADING
+    if require_credentials:
+        get_alpaca_credentials(paper=use_paper)
     if not use_paper and not ALLOW_LIVE_TRADING:
         raise ValueError(
             "Live trading blocked. Set PAPER_TRADING=true for paper keys, "
             "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
         )
     base_url = get_alpaca_base_url(paper=use_paper)
+    creds = alpaca_credentials_status(paper=use_paper)
+    print_trading_mode_banner()
     logging.getLogger(__name__).info(
-        "Alpaca config OK: paper=%s base_url=%s",
+        "Alpaca config OK: paper=%s base_url=%s key_source=%s key_suffix=…%s loaded_env=%s",
         use_paper,
         base_url,
+        creds["key_source"],
+        creds["key_suffix"],
+        creds["loaded_env"],
     )
 
 
@@ -1001,12 +1317,23 @@ CRYPTO_SLEEVE_DISABLED_MSG = (
 
 
 def crypto_sleeve_enabled() -> bool:
-    """Alpaca crypto orders — on for paper Profile B; off for Profile A / small live."""
-    if PAPER_TRADING or paper_only_sleeves_active():
-        return True
-    if is_small_account() or trading_profile() == "A":
+    """Alpaca crypto orders — delegates to effective_crypto_enabled()."""
+    return effective_crypto_enabled()
+
+
+def effective_crypto_enabled() -> bool:
+    """Crypto pairs sleeve — off on live Profile A; paper opt-in or crypto v2."""
+    if not PAPER_TRADING:
         return False
-    return True
+    if is_small_account() and not paper_only_sleeves_active():
+        return False
+    if effective_crypto_v2_enabled():
+        return True
+    if paper_only_sleeves_active() or paper_aggressive_context():
+        return PAPER_CRYPTO_ENABLED
+    if paper_chase_mode_enabled():
+        return PAPER_CRYPTO_ENABLED
+    return CRYPTO_SLEEVE_ENABLED
 
 
 def set_dynamic_risk_context(
@@ -1807,6 +2134,49 @@ def paper_crypto_v2_symbols() -> list[str]:
 def effective_stat_arb_optimized() -> bool:
     """Enhanced stat arb (Kalman/decay/dynamic Z) — disabled; see stat_arb_optimized.py."""
     return False
+
+
+def effective_international_sleeve_enabled() -> bool:
+    """ADR sleeve — research opt-in; off on live Profile A."""
+    return False
+
+
+def effective_bond_sleeve_enabled() -> bool:
+    """Bond sleeve — research opt-in; off on live Profile A."""
+    return False
+
+
+def effective_paper_profit_protect_enabled() -> bool:
+    """Profit-protect risk sizing — paper opt-in; always off on live (incl. small account)."""
+    if not PAPER_TRADING:
+        return False
+    if is_small_account() and not paper_only_sleeves_active():
+        return False
+    if not (paper_only_sleeves_active() or paper_aggressive_context()):
+        return False
+    return PAPER_PROFIT_PROTECT_ENABLED
+
+
+def effective_vol_position_sizing_enabled() -> bool:
+    """Top1 vol + conviction position sizing — paper opt-in; off on live Profile A."""
+    if not PAPER_TRADING:
+        return False
+    if is_small_account() and not paper_only_sleeves_active():
+        return False
+    if not (paper_only_sleeves_active() or paper_aggressive_context()):
+        return False
+    return PAPER_VOL_POSITION_SIZING_ENABLED
+
+
+def effective_loss_cutting_enabled() -> bool:
+    """Top1 asymmetric loss cutting — paper opt-in; off on live Profile A."""
+    if not PAPER_TRADING:
+        return False
+    if is_small_account() and not paper_only_sleeves_active():
+        return False
+    if not (paper_only_sleeves_active() or paper_aggressive_context()):
+        return False
+    return PAPER_LOSS_CUTTING_ENABLED
 
 
 def effective_thinking_engine_enabled() -> bool:

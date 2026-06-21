@@ -762,6 +762,32 @@ class AlpacaExecutor:
         )
         return submitted
 
+    def cleanup_dust_positions(
+        self,
+        *,
+        dry_run: bool = True,
+        max_notional: float | None = None,
+        max_qty: float | None = None,
+        symbols: list[str] | None = None,
+    ) -> list[dict]:
+        """Close fractional dust (notional < $1 or qty < 0.001). Idempotent."""
+        from modules.dust_cleanup import (
+            DEFAULT_DUST_MAX_NOTIONAL,
+            DEFAULT_DUST_MAX_QTY,
+            cleanup_dust_positions,
+        )
+
+        results = cleanup_dust_positions(
+            self,
+            dry_run=dry_run,
+            max_notional=max_notional
+            if max_notional is not None
+            else DEFAULT_DUST_MAX_NOTIONAL,
+            max_qty=max_qty if max_qty is not None else DEFAULT_DUST_MAX_QTY,
+            symbols=symbols,
+        )
+        return [r.as_dict() for r in results]
+
 
 def get_trading_client(paper=None, credentials_fn=None):
     """Return a cached TradingClient (utility scripts)."""

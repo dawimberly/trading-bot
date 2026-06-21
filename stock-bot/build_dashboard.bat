@@ -27,5 +27,6 @@ if errorlevel 1 (
 
 echo.
 echo Done: dist\PythonTradingMonitor\PythonTradingMonitor.exe
-echo Run from THIS folder (project root), not only from dist — needs .venv and run_all.py nearby.
+echo Run from stock-bot\ (PYTHONTRADING_ROOT=%CD%)
+if defined BUILD_ALL exit /b 0
 pause

@@ -30,6 +30,66 @@ No extra flags required — preflight and `status.py` confirm the stack.
 
 ---
 
+## Launch & build (consolidated layout)
+
+**Home folder:** `stock-bot/` — all launchers set `PYTHONTRADING_ROOT` to `stock-bot/`. Runtime EXEs and writable data live under **`stock-bot/dist/`**.
+
+**`.env` precedence:** `stock-bot/.env` wins. Frozen EXE loads `stock-bot/.env` first; `dist/.env` only fills keys missing from stock-bot. `build_all.bat` syncs stock-bot → dist as a portable fallback.
+
+| Path | Purpose |
+|------|---------|
+| `stock-bot/` | Source, **`.env` (edit here)**, portal data, `run_all.py` |
+| `stock-bot/dist/` | `Weinstein-Trading-Bot.exe`, `PythonTradingMonitor/`, logs, heartbeats, `market_data.db` |
+| `stock-bot/dist/.env` | Fallback copy — do not treat as primary config |
+| `stock-bot/dist/PythonTradingMonitor/` | Frozen desktop monitor (CustomTkinter) |
+
+### First-time setup
+
+```powershell
+cd C:\Users\Owner\PythonTrading\stock-bot
+copy .env.example .env
+# Edit .env — Alpaca keys, PAPER_TRADING, optional AUTO_LAUNCH_DASHBOARD=true
+python -m venv .venv
+.\.venv\Scripts\pip install -r requirements.txt
+python scripts\account\preflight.py
+```
+
+### Daily launch (pick one)
+
+| Launcher | Starts |
+|----------|--------|
+| **`../start.bat`** (repo root) | Frozen EXE if built, else same as `launch.bat` |
+| **`launch.bat`** | Frozen EXE if built, else venv `python run_all.py` |
+| **`launch_both.bat`** | Same as `launch.bat` |
+| **`launch_monitor.bat`** | `dist\PythonTradingMonitor\PythonTradingMonitor.exe` only |
+| **`dist\Start Weinstein Trading Bot.bat`** | Frozen bot EXE only (console); auto-opens monitor when `AUTO_LAUNCH_DASHBOARD=true` |
+| **`stop_dashboard.bat`** | Stops monitor EXE + `pythonw dashboard_app.py` under `stock-bot/` |
+
+Dashboard auto-launch is controlled by `AUTO_LAUNCH_DASHBOARD=true` in **`stock-bot/.env`** (not started separately by `launch.bat`).
+
+```powershell
+cd C:\Users\Owner\PythonTrading\stock-bot
+.\launch.bat
+```
+
+**Shortcut tip:** point **Start in** to `...\PythonTrading\stock-bot`, not the repo root.
+
+### Build frozen EXEs
+
+```powershell
+cd C:\Users\Owner\PythonTrading\stock-bot
+.\build_all.bat          # monitor + bot (recommended)
+# or separately:
+.\build_dashboard.bat    # → dist\PythonTradingMonitor\PythonTradingMonitor.exe
+python build_exe.py      # → dist\Weinstein-Trading-Bot.exe
+```
+
+Quit **PythonTradingMonitor.exe** before rebuilding (unlocks `dist\PythonTradingMonitor\`).
+
+**Logs:** `dist\logs\run_all.log` · `dist\logs\dashboard_auto_launch.log` · `logs\dashboard_crash.log`
+
+---
+
 ## System overview
 
 One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → VTI core rebalance → sleeve strategies → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`, `launch.bat`) and **`status.py`** read heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
@@ -695,7 +755,7 @@ python scripts/account/preflight.py
 python run_all.py
 ```
 
-**Desktop monitor:** [Desktop monitor](#desktop-monitor-customtkinter) — sign in, then `launch.bat` or `python dashboard_app.py --launch-bot`.
+**Desktop monitor:** sign in via monitor EXE or `python dashboard_app.py` — see [Launch & build](#launch--build-consolidated-layout).
 
 ### Dual fund bots (live + paper Sharpe chase)
 
@@ -750,7 +810,7 @@ python backtester.py --days 365 --paper-aggressive
 python backtester.py --days 365 --compare-paper-aggressive
 ```
 
-Always run commands from the **project root** so relative paths (`market_data.db`, logs) resolve correctly.
+Always run commands from **`stock-bot/`** so relative paths (`market_data.db`, logs, `dist/`) resolve correctly.
 
 ## Paper trading on Alpaca (recommended first month)
 
@@ -869,52 +929,30 @@ Primary monitor for a small live account — dark theme, auto-refresh, calm layo
 
 ### One-click launch (recommended)
 
-**Python source (dev / venv):** double-click **`launch.bat`** in the project root. It activates `.venv`, opens the **sign-in** screen (no console window), then starts the bot for the logged-in portal user:
+See **[Launch & build (consolidated layout)](#launch--build-consolidated-layout)** for current launchers.
 
-```text
-launch.bat  →  pythonw dashboard_app.py --launch-bot
-```
-
-**Frozen `.exe` (built monitor):** double-click **`launch_monitor.bat`** (or a desktop shortcut to it). It sets the project root as **Start in**, passes `--launch-bot`, and logs startup errors to `logs\monitor_*.log`:
-
-```text
-launch_monitor.bat  →  dist\PythonTradingMonitor\PythonTradingMonitor.exe --launch-bot
-```
-
-**If the shortcut says “already running” but no window appears:** run `stop_dashboard.bat`, then `launch_monitor.bat` again. Stale headless monitor processes are cleaned automatically after 45s with no window.
+**Summary:** double-click **`launch.bat`** in `stock-bot/` (monitor + bot), or **`launch_monitor.bat`** (monitor only). Use **`stop_dashboard.bat`** before relaunching if the monitor is stuck.
 
 **Sign in** with the same username/password as the web portal (`portal.py`). Use **Register** on first run, then **Account → Edit Alpaca keys…** to paste API keys (or connect keys in the portal **Settings** tab). **Remember username** is stored in `data/portal/desktop_prefs.json`.
 
 **Desktop shortcut (Windows):**
 
-*Option A — venv launcher:*
+1. Right-click `launch.bat` → **Send to** → **Desktop (create shortcut)**.
+2. **Properties → Start in:** `C:\Users\Owner\PythonTrading\stock-bot`
+3. Optional icon: `assets\dashboard.ico` (`python scripts/generate_dashboard_icon.py`)
 
-1. Right-click `launch.bat` → **Show more options** → **Send to** → **Desktop (create shortcut)**.
-2. Right-click the new shortcut → **Properties**.
-3. **Start in:** set to your project folder, e.g. `C:\Users\Owner\PythonTrading` (must match where `.env` and `run_all.py` live).
-4. **Run:** `Minimized` (optional — hides the brief cmd window if `pythonw` is unavailable).
-5. **Change Icon…** → Browse to `assets\dashboard.ico` (generate first: `python scripts/generate_dashboard_icon.py`).
-6. Rename the shortcut to e.g. **PythonTrading Live**.
+Or run `powershell -ExecutionPolicy Bypass -File scripts\create_monitor_shortcut.ps1` for a shortcut to **`launch_monitor.bat`**.
 
-*Option B — `.exe` launcher (recommended after `build_dashboard.bat`):*
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\create_monitor_shortcut.ps1
-```
-
-Creates a desktop shortcut to **`launch_monitor.bat`** with **Start in** = project root. Do **not** shortcut the raw `.exe` in `dist\` alone — the bot needs the project root for `.venv`, `run_all.py`, and portal paths.
-
-Portal users store keys under `data/portal/users/<username>/.env`. A project-root `.env` is still used for CLI (`run_all.py`, `@root` paper slot). Errors are appended to `logs\dashboard_launch.log` (venv) or `logs\monitor_*.log` (exe).
+Portal users store keys under `data/portal/users/<username>/.env`. A `stock-bot/.env` is used for CLI and `@root` fund slots.
 
 **Troubleshooting:**
 
 | Issue | Fix |
 |-------|-----|
-| Dashboard window missing after sign-in | Check `logs\dashboard_crash.log` or run `python dashboard_app.py --launch-bot` in a terminal |
-| Shortcut does nothing | Use **`launch_monitor.bat`** (not the raw `.exe`); run **`stop_dashboard.bat`** if already running in the tray |
-| Multiple bots running | **Restart Bot** or **Stop Bot** in dashboard, or `_stop_bot_processes()` above, then `launch.bat` / `launch_monitor.bat` once |
-| `No run_all.py process found` | Normal after stop — run `launch.bat` or **Restart Bot** to start again |
-| Stale heartbeat | Bot not running or cycle error — check `last_cycle_error` in heartbeat; **Restart Bot** |
+| Dashboard window missing | Check `logs\dashboard_crash.log` or `dist\logs\dashboard_auto_launch.log` |
+| Shortcut does nothing | **Start in** must be `stock-bot/`; run **`stop_dashboard.bat`**, then `launch.bat` |
+| Multiple bots running | **Stop Bot** in dashboard or `stop_dashboard.bat`, then launch once |
+| Stale heartbeat | **Restart Bot** in dashboard; check `last_cycle_error` in heartbeat / `python status.py` |
 
 ### Manual launch
 
@@ -930,13 +968,14 @@ Auto-refresh every **60 seconds**. Data sources: per-user `bot_heartbeat.json` (
 
 ### Build a Windows .exe (optional)
 
-For a standalone monitor executable (bot still uses `.venv` Python via `--launch-bot`):
+See **[Launch & build](#launch--build-consolidated-layout)** — use **`build_all.bat`** for monitor + bot, or build separately:
 
 ```powershell
-.\build_dashboard.bat
+.\build_dashboard.bat    # dist\PythonTradingMonitor\PythonTradingMonitor.exe
+python build_exe.py        # dist\Weinstein-Trading-Bot.exe
 ```
 
-Or manually:
+Manual PyInstaller (monitor):
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -945,19 +984,7 @@ python scripts/generate_dashboard_icon.py
 python -m PyInstaller dashboard.spec --noconfirm
 ```
 
-Use **`python -m PyInstaller`** (not bare `pyinstaller`) so you don't need PyInstaller on PATH. Install into **`.venv`**, not global Python.
-
-**Before rebuilding:** quit **PythonTradingMonitor.exe** (and the system tray icon if minimized there). If the app is open, PyInstaller cannot delete `dist\PythonTradingMonitor` (locked `users.db`).
-
-Output: `dist\PythonTradingMonitor\PythonTradingMonitor.exe`
-
-**Daily use with the `.exe`:** double-click **`launch_monitor.bat`** (or a shortcut created by `scripts\create_monitor_shortcut.ps1`). **Start in** must be the project root so `--launch-bot` can spawn `run_all.py` via `.venv`.
-
-Manual shortcut target (if not using `create_monitor_shortcut.ps1`):
-
-```text
-C:\Users\Owner\PythonTrading\launch_monitor.bat
-```
+**Before rebuilding:** quit **PythonTradingMonitor.exe** (and tray icon). Output lives under **`stock-bot/dist/`** (gitignored — rebuild locally).
 
 Start in: `C:\Users\Owner\PythonTrading`
 
@@ -1328,13 +1355,15 @@ stock-bot/
 ├── friend_setup.bat        # Friends: clone → install → open portal (Windows)
 ├── friend_setup.sh         # Friends: same on Mac/Linux
 ├── portal.py               # Friends: login + Alpaca keys + bot (browser)
-├── launch.bat              # One-click: sign in + dashboard + bot (pythonw)
-├── launch_monitor.bat      # One-click: sign in + frozen .exe + bot
-├── stop_dashboard.bat      # Stop pythonw / PythonTradingMonitor.exe for this project
-├── launch_both.bat         # Start live + paper bots together
+├── launch.bat              # Monitor EXE + python run_all.py
+├── launch_monitor.bat      # Monitor EXE only
+├── stop_dashboard.bat      # Stop monitor + dashboard_app
+├── launch_both.bat         # Same as launch.bat
 ├── launch_bots.py          # Dual-bot launcher (--status, --stop, --init-pair)
 ├── run_paper_bot.py        # 24/7 paper Sharpe chase (root .env, isolated logs)
-├── build_dashboard.bat     # Rebuild Windows monitor .exe
+├── build_all.bat           # build_dashboard.bat + build_exe.py
+├── build_dashboard.bat     # → dist/PythonTradingMonitor/
+├── build_exe.py            # → dist/Weinstein-Trading-Bot.exe
 ├── dashboard_app.py        # Desktop monitor (CustomTkinter) — owner UI
 ├── dashboard.py            # Streamlit monitor (backup)
 ├── dashboard.spec          # PyInstaller config for Windows .exe

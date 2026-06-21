@@ -8,6 +8,8 @@ from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+from modules.safe_io import ensure_stdio_streams
+
 
 def _add_daily_handler(
     root: logging.Logger,
@@ -50,9 +52,11 @@ def setup_logging(
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    sh = logging.StreamHandler(sys.stdout)
-    sh.setFormatter(fmt)
-    root.addHandler(sh)
+    ensure_stdio_streams()
+    if sys.stdout is not None:
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
 
     if log_dir:
         try:

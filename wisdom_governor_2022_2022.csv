@@ -1,8 +1,0 @@
-mode,total_return_pct,sharpe,max_drawdown_pct,orders,paused_days,benchmark_pct,final_equity
-baseline,-4.14,-1.79,-6.13,55,0,3.92,9585.52
-web_regime,-4.14,-1.79,-6.13,55,0,3.92,9585.52
-arbitrage,-4.14,-1.79,-6.13,55,0,3.92,9585.52
-wisdom_pause,-0.94,-1.56,-1.47,10,42,3.92,9905.54
-governor_vol,-0.94,-1.56,-1.47,10,42,3.92,9905.54
-governor,-0.94,-1.56,-1.47,10,42,3.92,9905.54
-governor_strict,-3.95,-1.87,-7.15,36,19,3.92,9605.0

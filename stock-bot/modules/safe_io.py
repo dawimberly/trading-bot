@@ -7,14 +7,117 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 logger = logging.getLogger(__name__)
 
 
+class _NullStream:
+    """Absorb writes when there is no console (PyInstaller --windowed sets stdout=None)."""
+
+    encoding = "utf-8"
+    errors = "replace"
+
+    def write(self, data) -> int:
+        if not data:
+            return 0
+        if isinstance(data, bytes):
+            return len(data)
+        return len(str(data))
+
+    def flush(self) -> None:
+        return None
+
+    def isatty(self) -> bool:
+        return False
+
+    def fileno(self) -> int:
+        raise OSError("no fileno")
+
+
+class _SafeStream:
+    """Wrap a text stream so write/flush ignore Windows EINVAL (broken pipe)."""
+
+    def __init__(self, stream: TextIO | _NullStream):
+        self._stream = stream
+
+    def write(self, data):
+        if self._stream is None:
+            return len(data) if data else 0
+        try:
+            return self._stream.write(data)
+        except (OSError, AttributeError) as exc:
+            if isinstance(exc, OSError) and getattr(exc, "errno", None) != 22:
+                raise
+            return len(data) if data else 0
+
+    def flush(self):
+        if self._stream is None:
+            return None
+        try:
+            self._stream.flush()
+        except (OSError, AttributeError) as exc:
+            if isinstance(exc, OSError) and getattr(exc, "errno", None) != 22:
+                raise
+
+    def __getattr__(self, name):
+        if self._stream is None:
+            raise AttributeError(name)
+        return getattr(self._stream, name)
+
+
+def ensure_stdio_streams() -> None:
+    """Replace missing stdout/stderr before logging or print (windowed EXE)."""
+    if sys.stdout is None:
+        sys.stdout = _NullStream()  # type: ignore[assignment]
+    if sys.stderr is None:
+        sys.stderr = _NullStream()  # type: ignore[assignment]
+
+
+def install_safe_stdout() -> None:
+    """Call once at process start before the main trading loop."""
+    ensure_stdio_streams()
+    if not isinstance(sys.stdout, _SafeStream):
+        sys.stdout = _SafeStream(sys.stdout)  # type: ignore[assignment]
+    if not isinstance(sys.stderr, _SafeStream):
+        sys.stderr = _SafeStream(sys.stderr)  # type: ignore[assignment]
+
+
+def fatal_startup(message: str, *, exit_code: int = 1) -> None:
+    """Log startup failure, show a dialog when there is no console, and exit."""
+    ensure_stdio_streams()
+    text = str(message).strip()
+    log_dir = Path("logs")
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "startup_fatal.log").write_text(text + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    try:
+        logging.getLogger(__name__).critical(text)
+    except Exception:
+        pass
+    safe_print(f"[FATAL] {text}")
+    if getattr(sys, "frozen", False) and sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
+                0,
+                text[:2000],
+                "Weinstein Trading Bot",
+                0x00000010,
+            )
+        except Exception:
+            pass
+    raise SystemExit(exit_code)
+
+
 def safe_print(*args, sep: str = " ", end: str = "\n", file=None, flush: bool = False) -> None:
-    """Print without crashing when stdout is piped/closed (common on Windows)."""
+    """Print without crashing when stdout is piped/closed/missing (common on Windows)."""
     target = file if file is not None else sys.stdout
+    if target is None:
+        target = _NullStream()
     text = sep.join(str(a) for a in args) + end
     try:
         target.write(text)
@@ -25,42 +128,9 @@ def safe_print(*args, sep: str = " ", end: str = "\n", file=None, flush: bool = 
         target.write(text)
         if flush:
             target.flush()
-    except OSError as exc:
-        if getattr(exc, "errno", None) != 22:
+    except (OSError, AttributeError) as exc:
+        if isinstance(exc, OSError) and getattr(exc, "errno", None) != 22:
             raise
-
-
-class _SafeStream:
-    """Wrap a text stream so write/flush ignore Windows EINVAL (broken pipe)."""
-
-    def __init__(self, stream):
-        self._stream = stream
-
-    def write(self, data):
-        try:
-            return self._stream.write(data)
-        except OSError as exc:
-            if getattr(exc, "errno", None) == 22:
-                return len(data) if data else 0
-            raise
-
-    def flush(self):
-        try:
-            self._stream.flush()
-        except OSError as exc:
-            if getattr(exc, "errno", None) != 22:
-                raise
-
-    def __getattr__(self, name):
-        return getattr(self._stream, name)
-
-
-def install_safe_stdout() -> None:
-    """Call once at process start before the main trading loop."""
-    if not isinstance(sys.stdout, _SafeStream):
-        sys.stdout = _SafeStream(sys.stdout)
-    if not isinstance(sys.stderr, _SafeStream):
-        sys.stderr = _SafeStream(sys.stderr)
 
 
 def read_json_file(path: Path | str) -> dict:

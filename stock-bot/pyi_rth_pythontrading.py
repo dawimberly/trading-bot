@@ -8,18 +8,13 @@ from pathlib import Path
 
 
 def _find_project_root() -> Path:
-    candidate = Path(sys.executable).resolve().parent
-    for _ in range(8):
-        nested = candidate / "stock-bot"
-        if (nested / "run_all.py").is_file():
-            return nested
-        if (candidate / "run_all.py").is_file():
-            return candidate
-        parent = candidate.parent
-        if parent == candidate:
-            break
-        candidate = parent
-    return Path(sys.executable).resolve().parent
+    exe_dir = Path(sys.executable).resolve().parent
+    # stock-bot/dist/Weinstein-Trading-Bot.exe -> stock-bot/
+    if (exe_dir.parent / "run_all.py").is_file():
+        return exe_dir.parent
+    if (exe_dir / "run_all.py").is_file():
+        return exe_dir
+    return exe_dir
 
 
 if getattr(sys, "frozen", False):
@@ -28,24 +23,42 @@ if getattr(sys, "frozen", False):
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
-        val = os.environ.get(var, "").strip()
-        if val and not Path(val).expanduser().is_file():
-            os.environ.pop(var, None)
+    try:
+        from modules.ssl_certs import configure_ssl_certificates
 
-    meipass = getattr(sys, "_MEIPASS", None)
-    if meipass:
-        bundled = Path(meipass) / "certifi" / "cacert.pem"
-        if bundled.is_file():
-            os.environ["SSL_CERT_FILE"] = str(bundled)
-            os.environ["REQUESTS_CA_BUNDLE"] = str(bundled)
-        else:
-            try:
-                import certifi
+        configure_ssl_certificates(force=True)
+    except Exception:
+        for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+            val = os.environ.get(var, "").strip()
+            if val and not Path(val).expanduser().is_file():
+                os.environ.pop(var, None)
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            bundled = Path(meipass) / "certifi" / "cacert.pem"
+            if bundled.is_file():
+                bundle = str(bundled)
+                os.environ["SSL_CERT_FILE"] = bundle
+                os.environ["REQUESTS_CA_BUNDLE"] = bundle
+                os.environ["CURL_CA_BUNDLE"] = bundle
 
-                ca = Path(certifi.where())
-                if ca.is_file():
-                    os.environ["SSL_CERT_FILE"] = str(ca)
-                    os.environ["REQUESTS_CA_BUNDLE"] = str(ca)
-            except ImportError:
-                pass
+    try:
+        os.chdir(str(root))
+    except OSError:
+        pass
+
+    data_root = root / "dist" if (root / "dist" / "Weinstein-Trading-Bot.exe").is_file() else root
+    if getattr(sys, "frozen", False) and (data_root / "Weinstein-Trading-Bot.exe").is_file():
+        try:
+            os.chdir(str(data_root))
+        except OSError:
+            pass
+
+    try:
+        from modules.safe_io import ensure_stdio_streams
+
+        ensure_stdio_streams()
+    except Exception:
+        if sys.stdout is None:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115

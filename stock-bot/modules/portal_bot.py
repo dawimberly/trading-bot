@@ -25,6 +25,14 @@ from modules.portal_paths import (
     user_journal_path,
     user_pid_path,
 )
+from modules.runtime_paths import (
+    BOT_EXE_NAME,
+    find_bot_exe_pids,
+    find_script_pids,
+    live_bot_pids,
+    resolve_bot_executable,
+    resolve_bot_workdir,
+)
 from modules.trading_books import BOOKS, book_enabled
 
 WISDOM_SCORECARD = PROJECT_ROOT / "wisdom_scorecard.json"
@@ -49,9 +57,17 @@ def _python() -> str:
     return sys.executable
 
 
+def _bot_subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Child bot env without inherited TLS paths from the monitor EXE."""
+    env = dict(base or os.environ)
+    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        env.pop(var, None)
+    return env
+
+
 def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]:
     migrate_user_to_books(username)
-    env = os.environ.copy()
+    env = _bot_subprocess_env()
     bd = book_dir(username, book_id)
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
@@ -70,27 +86,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
 
 def _find_script_pids(script_name: str) -> list[int]:
     """PIDs for python processes running script_name."""
-    pids: list[int] = []
-    try:
-        if sys.platform == "win32":
-            cmd = (
-                f"Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-                f"Where-Object {{ $_.CommandLine -like '*{script_name}*' }} | "
-                "Select-Object -ExpandProperty ProcessId"
-            )
-            out = subprocess.check_output(
-                ["powershell", "-NoProfile", "-Command", cmd],
-                text=True,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            pids = [int(x.strip()) for x in out.splitlines() if x.strip().isdigit()]
-        else:
-            out = subprocess.check_output(["pgrep", "-f", script_name], text=True)
-            pids = [int(x) for x in out.split() if x.strip().isdigit()]
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
-        pass
-    return pids
+    return find_script_pids(script_name)
 
 
 def _process_cmdline(pid: int) -> str | None:
@@ -157,6 +153,12 @@ def stop_orphan_project_bots() -> tuple[int, str]:
                 stopped += 1
             else:
                 notes.append(msg)
+    for pid in find_bot_exe_pids():
+        ok, msg = _graceful_stop_pid(pid)
+        if ok:
+            stopped += 1
+        else:
+            notes.append(msg)
     summary = f"Stopped {stopped} orphan bot process(es)." if stopped else "No orphan bot processes."
     if notes:
         summary += " " + "; ".join(notes)
@@ -183,17 +185,32 @@ def _bot_entry_script(username: str, book_id: str) -> Path:
     return PROJECT_ROOT / "run_all.py"
 
 
+def _bot_launch_command(bot_script: Path) -> tuple[list[str], Path]:
+    """Argv + cwd for starting the trading loop (EXE in dist/ or python script)."""
+    if bot_script.name == "run_all.py":
+        workdir = resolve_bot_workdir(PROJECT_ROOT)
+        exe = resolve_bot_executable(PROJECT_ROOT)
+        if exe is not None:
+            return [str(exe)], workdir
+    return [_python(), "-u", str(bot_script)], PROJECT_ROOT
+
+
 def bot_status_label(username: str, book_id: str = "alpaca_paper") -> str:
     """Short status for dashboard header: Running (PID n) · script · mode."""
     pid = bot_pid(username, book_id)
     if pid is None:
-        orphans = _find_script_pids("run_all.py") + _find_script_pids("run_paper_bot.py")
+        orphans = live_bot_pids() + _find_script_pids("run_paper_bot.py")
         if orphans:
             pid = orphans[0]
         else:
             return "Bot: Stopped"
     cmd = _process_cmdline(pid) or ""
-    script = "run_paper_bot" if "run_paper_bot" in cmd else "run_all"
+    if BOT_EXE_NAME.replace(".exe", "") in cmd or BOT_EXE_NAME in cmd:
+        script = BOT_EXE_NAME
+    elif "run_paper_bot" in cmd:
+        script = "run_paper_bot"
+    else:
+        script = "run_all"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
     return f"Bot: Running · PID {pid} · {script} ({mode})"
 
@@ -334,7 +351,7 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
     stop_orphan_project_bots()
     time.sleep(1.0)
 
-    env = os.environ.copy()
+    env = _bot_subprocess_env()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(env_file)
@@ -351,9 +368,10 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
     log_file.write(f"\n--- bot start {slot} {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
     log_file.flush()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    launch_argv, launch_cwd = _bot_launch_command(PROJECT_ROOT / "run_all.py")
     proc = subprocess.Popen(
-        [_python(), "-u", str(PROJECT_ROOT / "run_all.py")],
-        cwd=str(PROJECT_ROOT),
+        launch_argv,
+        cwd=str(launch_cwd),
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
@@ -434,7 +452,13 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     if orphans_stopped:
         time.sleep(1.0)
     bot_script = _bot_entry_script(username, book_id)
-    if not bot_script.is_file():
+    launch_argv, launch_cwd = _bot_launch_command(bot_script)
+    if bot_script.name != "run_all.py" and not bot_script.is_file():
+        return False, f"{bot_script.name} not found in project root."
+    if bot_script.name == "run_all.py" and launch_argv[0].endswith(BOT_EXE_NAME):
+        if not Path(launch_argv[0]).is_file():
+            return False, f"{BOT_EXE_NAME} not found beside dist/ runtime data."
+    elif not bot_script.is_file():
         return False, f"{bot_script.name} not found in project root."
     log_path = book_bot_log_path(username, book_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -446,8 +470,8 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     log_file.flush()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     proc = subprocess.Popen(
-        [_python(), "-u", str(bot_script)],
-        cwd=str(PROJECT_ROOT),
+        launch_argv,
+        cwd=str(launch_cwd),
         env=user_bot_env(username, book_id),
         stdout=log_file,
         stderr=subprocess.STDOUT,

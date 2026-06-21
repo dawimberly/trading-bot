@@ -12,6 +12,13 @@ from alpaca.trading.client import TradingClient
 
 import config
 
+try:
+    from modules.ssl_certs import configure_ssl_certificates
+
+    configure_ssl_certificates()
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -31,6 +38,10 @@ class AlpacaAuthError(RuntimeError):
 
 class AlpacaCriticalError(RuntimeError):
     """Non-recoverable Alpaca API failure after retries."""
+
+
+class AlpacaValidationError(RuntimeError):
+    """Order rejected by Alpaca (422/403 validation) — skip order, keep bot running."""
 
 
 def _client_cache_key(
@@ -101,7 +112,25 @@ def is_transient_alpaca_error(exc: BaseException) -> bool:
 
 
 def is_auth_alpaca_error(exc: BaseException) -> bool:
-    return isinstance(exc, APIError) and getattr(exc, "status_code", None) in AUTH_HTTP_STATUS
+    if not isinstance(exc, APIError):
+        return False
+    status = getattr(exc, "status_code", None)
+    if status == 403 and "insufficient qty" in str(exc).lower():
+        return False
+    return status in AUTH_HTTP_STATUS
+
+
+def is_skippable_order_error(exc: BaseException) -> bool:
+    """422 notional/qty validation or insufficient-qty 403 — do not crash the cycle."""
+    if not isinstance(exc, APIError):
+        return False
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    if status == 422:
+        return True
+    if status == 403 and "insufficient qty" in msg:
+        return True
+    return False
 
 
 def call_with_retry(
@@ -120,12 +149,27 @@ def call_with_retry(
         except APIError as exc:
             last_exc = exc
             if is_auth_alpaca_error(exc):
-                logger.critical(
-                    "Alpaca auth failed during %s (HTTP %s): %s",
-                    op_name,
-                    getattr(exc, "status_code", "?"),
-                    exc,
-                )
+                try:
+                    st = config.alpaca_credentials_status()
+                    logger.critical(
+                        "Alpaca auth failed during %s (HTTP %s): %s | mode=%s "
+                        "endpoint=%s key_source=%s key_suffix=…%s loaded_env=%s",
+                        op_name,
+                        getattr(exc, "status_code", "?"),
+                        exc,
+                        st.get("mode"),
+                        st.get("base_url"),
+                        st.get("key_source"),
+                        st.get("key_suffix"),
+                        st.get("loaded_env"),
+                    )
+                except Exception:
+                    logger.critical(
+                        "Alpaca auth failed during %s (HTTP %s): %s",
+                        op_name,
+                        getattr(exc, "status_code", "?"),
+                        exc,
+                    )
                 raise AlpacaAuthError(str(exc)) from exc
             if is_transient_alpaca_error(exc) and attempt < max_attempts:
                 delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
@@ -139,6 +183,14 @@ def call_with_retry(
                 )
                 time.sleep(delay)
                 continue
+            if is_skippable_order_error(exc):
+                logger.info(
+                    "Alpaca %s order rejected (HTTP %s): %s",
+                    op_name,
+                    getattr(exc, "status_code", "?"),
+                    exc,
+                )
+                raise AlpacaValidationError(str(exc)) from exc
             logger.error(
                 "Alpaca %s failed (HTTP %s): %s",
                 op_name,

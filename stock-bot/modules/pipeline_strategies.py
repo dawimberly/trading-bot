@@ -1137,3 +1137,13 @@ def nyse_mirror_intent(
         "pair_key": pair_key,
         "phase": "nyse_mirror",
     }
+
+
+def run_international_strategy(*_args, **_kwargs) -> int:
+    """ADR sleeve placeholder — disabled on live; full impl in research branch."""
+    return 0
+
+
+def run_bond_strategy(*_args, **_kwargs) -> int:
+    """Bond sleeve placeholder — disabled on live; full impl in research branch."""
+    return 0

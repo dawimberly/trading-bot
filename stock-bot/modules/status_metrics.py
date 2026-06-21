@@ -30,13 +30,31 @@ def _env_float(key: str) -> float | None:
         return None
 
 
-def _read_equity_journal(path: Path) -> list[tuple[datetime, float]]:
+def _read_csv_tail(path: Path, max_rows: int) -> "pd.DataFrame":
+    from modules.csv_utils import read_csv_tail as _safe_read_csv_tail
+
+    return _safe_read_csv_tail(path, max_rows)
+
+
+def _read_equity_journal(path: Path, *, tail_rows: int = 12_000) -> list[tuple[datetime, float]]:
     if not path.is_file():
         return []
     try:
         import pandas as pd
 
-        df = pd.read_csv(path, parse_dates=["timestamp"])
+        # Large paper journals can freeze the dashboard if read fully on the UI thread.
+        if tail_rows > 0 and path.stat().st_size > 256_000:
+            from modules.csv_utils import coerce_trade_journal_df, read_csv_tail
+
+            df = coerce_trade_journal_df(read_csv_tail(path, tail_rows))
+            if "timestamp" in df.columns:
+                df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        else:
+            from modules.csv_utils import coerce_trade_journal_df, read_csv_file
+
+            df = coerce_trade_journal_df(read_csv_file(path))
+            if "timestamp" in df.columns:
+                df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     except Exception:
         return []
     if df.empty or "equity" not in df.columns:

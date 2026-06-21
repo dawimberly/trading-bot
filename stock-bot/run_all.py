@@ -9,14 +9,16 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import re
 import sys
 import time
 import traceback
+import warnings
 
 from modules.logging_utils import setup_logging, log_event, log_subsystem_warning
 
 import config
-from modules.safe_io import install_safe_stdout, write_json_atomic
+from modules.safe_io import install_safe_stdout, write_json_atomic, fatal_startup
 from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError, AlpacaValidationError
 from modules.alpaca_executor import AlpacaExecutor
 from modules.data_loader import load_close_matrix
@@ -53,6 +55,25 @@ from modules.scan_schedule import (
     equity_scan_state,
     format_scan_schedule_line,
 )
+
+# yfinance logs "$BTC-USD: possibly delisted; ..." for crypto pairs (false positives).
+_YF_CRYPTO_DELISTED = re.compile(r"possibly delisted", re.IGNORECASE)
+_YF_CRYPTO_TICKER = re.compile(r"(-USD|/USD)")
+
+
+class _YfinanceCryptoDelistedFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if _YF_CRYPTO_DELISTED.search(msg) and _YF_CRYPTO_TICKER.search(msg):
+            return False
+        return True
+
+
+_yf_logger = logging.getLogger("yfinance")
+if not any(isinstance(f, _YfinanceCryptoDelistedFilter) for f in _yf_logger.filters):
+    _yf_logger.addFilter(_YfinanceCryptoDelistedFilter())
+
+warnings.filterwarnings("ignore", message=r".*possibly delisted.*")
 
 pair_cooldown = {}
 
@@ -283,7 +304,7 @@ def _record_cycle_error(error: str) -> None:
     """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
     from modules.safe_io import read_json_file, write_json_atomic
 
-    path = config.HEARTBEAT_FILE
+    path = config.ensure_heartbeat_path_writable()
     payload = read_json_file(path) or {}
     payload["last_cycle_error"] = str(error)[:500]
     payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
@@ -435,7 +456,7 @@ def _write_heartbeat(
                 else {}
             ),
         }
-    write_json_atomic(config.HEARTBEAT_FILE, payload)
+    write_json_atomic(config.ensure_heartbeat_path_writable(), payload)
 
 
 def main():
@@ -1270,8 +1291,13 @@ def _print_kraken_banner():
 
 def _print_startup_banner():
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    endpoint = (
+        "paper-api.alpaca.markets"
+        if config.PAPER_TRADING
+        else "api.alpaca.markets (LIVE)"
+    )
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
-    print(f"--- Alpaca mode: {mode} (signals / paper execution) ---")
+    print(f"--- Alpaca mode: {mode} ({endpoint}) ---")
     if config.paper_aggressive_context():
         print(
             "--- Paper SHARPE CHASE: dynamic VTI 40-75% (calm/stress) | "
@@ -1462,13 +1488,25 @@ if __name__ == "__main__":
     install_safe_stdout()
     from pathlib import Path
 
+    if getattr(sys, "frozen", False):
+        from modules.runtime_paths import resolve_data_root
+
+        try:
+            os.chdir(resolve_data_root())
+        except OSError:
+            pass
+
+    config.configure_heartbeat_path()
     setup_logging(log_dir=Path("logs"))
     config.ensure_sentiment_dirs()
     try:
         config.validate_alpaca_config()
     except ValueError as exc:
-        logger.critical("[FATAL] %s", exc)
-        sys.exit(1)
+        fatal_startup(
+            f"{exc}\n\nCopy .env.example to dist\\.env and add your Alpaca keys, "
+            "or run from stock-bot with .env in the project root."
+        )
+    config.apply_best_paper_config_if_enabled()
     chase_extras = config.init_paper_chase_if_enabled()
     if chase_extras:
         print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
@@ -1482,8 +1520,23 @@ if __name__ == "__main__":
     _print_startup_banner()
     if startup_equity is not None:
         _confirm_live_trading_startup(startup_equity)
+    from modules.dashboard_launcher import maybe_launch_dashboard
+
+    maybe_launch_dashboard()
     trade_journal.log_event("startup", notes="run_all.py started")
     cycle_count = 0
+
+    import signal
+
+    def _handle_shutdown(signum, _frame):
+        logger.info("Shutdown signal %s — exiting", signum)
+        trade_journal.log_event("shutdown", notes=f"signal {signum}")
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _handle_shutdown)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _handle_shutdown)
+
     while True:
         try:
             main()
@@ -1508,6 +1561,10 @@ if __name__ == "__main__":
             log_event("alpaca_validation", error=str(e))
             logger.info("Alpaca order validation skipped (cycle continues): %s", e)
             trade_journal.log_event("error", notes=f"Alpaca validation skip: {e}")
+        except KeyboardInterrupt:
+            logger.info("KeyboardInterrupt — shutting down")
+            trade_journal.log_event("shutdown", notes="keyboard interrupt")
+            break
         except Exception as e:
             tb = traceback.format_exc()
             _record_cycle_error(str(e))
