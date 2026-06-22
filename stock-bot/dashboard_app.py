@@ -45,7 +45,6 @@ from modules.runtime_paths import (  # noqa: E402
     resolve_bot_executable,
     resolve_bot_workdir,
     resolve_data_root,
-    resolve_heartbeat_path,
     resolve_runtime_root,
     runtime_layout_label,
     runtime_log_dir,
@@ -56,6 +55,7 @@ from modules.portal_paths import (  # noqa: E402
     book_journal_path,
     book_scorecard_path,
     ensure_book_journal,
+    ensure_book_env,
     env_flags_for_book,
     get_last_book_id,
     get_last_username,
@@ -93,19 +93,20 @@ from matplotlib.figure import Figure  # noqa: E402
 
 import config  # noqa: E402
 from modules.csv_utils import coerce_trade_journal_df, read_csv_file  # noqa: E402
-from modules.alpaca_executor import AlpacaExecutor, get_trading_client  # noqa: E402
+from modules.alpaca_client import build_trading_client, reset_trading_client_cache  # noqa: E402
+from modules.alpaca_executor import AlpacaExecutor  # noqa: E402
 from modules.portal_auth import authenticate, init_db, register_user  # noqa: E402
 from modules.portal_bot import (  # noqa: E402
     bot_running,
     bot_status_label,
     read_bot_log_tail,
-    restart_all_bots,
     restart_bot,
     start_bot,
     stop_bot,
 )
 
 REFRESH_SECONDS = 60
+_BOOK_ENV_LOCK = threading.Lock()
 CRYPTO_VOL_HEARTBEAT_FILE = "crypto_vol_heartbeat.json"
 TRADES_LIMIT = 50
 TRADE_EVENTS = frozenset({"signal", "exit", "fill"})
@@ -185,27 +186,83 @@ def _resolve_path(relative: str) -> Path:
     return PROJECT_ROOT / relative
 
 
-def _active_heartbeat_path(username: str, book_id: str) -> Path:
-    """Heartbeat file for the active book (portal slot, env, or dist/ bot_heartbeat.json)."""
-    book_hb = book_heartbeat_path(username, book_id)
-    if book_hb.is_file():
-        return book_hb
-    env_raw = (os.getenv("HEARTBEAT_FILE") or config.HEARTBEAT_FILE or "").strip()
-    if env_raw:
-        path = Path(env_raw)
-        resolved = path if path.is_absolute() else PROJECT_ROOT / path
-        if resolved.is_file():
-            return resolved
-    if book_id == "alpaca_live" or not config.PAPER_TRADING:
-        return resolve_heartbeat_path(PROJECT_ROOT, paper=False)
-    from modules.health_check import resolve_paper_heartbeat_path
+def _book_is_paper(book_id: str) -> bool:
+    from modules.trading_books import default_env_prefs
 
-    return resolve_paper_heartbeat_path(PROJECT_ROOT)
+    return bool(default_env_prefs(book_id).get("paper", True))
+
+
+def _other_book_id(book_id: str) -> str:
+    return "alpaca_paper" if book_id == "alpaca_live" else "alpaca_live"
+
+
+def _heartbeat_matches_book(hb: dict | None, book_id: str) -> bool:
+    if not hb:
+        return False
+    if hb.get("book_id"):
+        return str(hb["book_id"]) == book_id
+    if "paper" in hb:
+        return bool(hb["paper"]) == _book_is_paper(book_id)
+    return True
+
+
+def _book_running_status(username: str, book_id: str) -> bool:
+    """PID file when present; else infer from a fresh per-book heartbeat."""
+    if bot_running(username, book_id):
+        return True
+    hb, _ = _load_active_heartbeat(username, book_id)
+    if not hb or not _heartbeat_matches_book(hb, book_id):
+        return False
+    age = _heartbeat_age_minutes(hb)
+    if age is None:
+        return False
+    return age < 120
+
+
+def _format_book_status_block(username: str, book_id: str) -> list[str]:
+    """Compact status lines for one Alpaca book (live or paper)."""
+    lbl = book_label(book_id)
+    mode = "paper" if _book_is_paper(book_id) else "live"
+    running = _book_running_status(username, book_id)
+    hb, hb_path = _load_active_heartbeat(username, book_id)
+    run_txt = "running" if running else "stopped"
+    age = _heartbeat_age_minutes(hb)
+    age_txt = f"{age:.0f} min ago" if age is not None else "no timestamp"
+    stale = _heartbeat_is_stale(hb, running=running)
+    regime = (hb or {}).get("regime") or "—"
+    phase = _scan_phase_label(hb)
+    eq = float((hb or {}).get("equity") or 0)
+    eq_s = f"${eq:,.2f}" if eq > 0 else "n/a"
+    try:
+        hb_rel = os.path.relpath(str(hb_path), resolve_data_root(PROJECT_ROOT))
+    except ValueError:
+        hb_rel = str(hb_path)
+    line1 = f"{lbl} ({mode}) · bot {run_txt} · equity {eq_s}"
+    line2 = f"  regime={regime}"
+    if phase:
+        line2 += f" · {phase}"
+    line2 += f" · hb {age_txt}"
+    if stale:
+        line2 += " · STALE"
+    line2 += f" · {hb_rel}"
+    return [line1, line2]
+
+
+def _active_heartbeat_path(username: str, book_id: str) -> Path:
+    """Per-book heartbeat only — never fall back to dist/ global files."""
+    return book_heartbeat_path(username, book_id)
 
 
 def _load_active_heartbeat(username: str, book_id: str) -> tuple[dict | None, Path]:
     path = _active_heartbeat_path(username, book_id)
-    return _load_json(path), path
+    if not path.is_file():
+        return None, path
+    hb = _load_json(path)
+    if not hb:
+        return None, path
+    if not _heartbeat_matches_book(hb, book_id):
+        return None, path
+    return hb, path
 
 
 def _load_json(path: Path) -> dict | None:
@@ -241,6 +298,34 @@ def _heartbeat_age_minutes(heartbeat: dict | None) -> float | None:
         return None
 
 
+def _heartbeat_is_stale(
+    heartbeat: dict | None,
+    *,
+    running: bool,
+    max_age_min: float = 90,
+) -> bool:
+    """Match status.py grace periods for starting / warming up."""
+    age = _heartbeat_age_minutes(heartbeat)
+    if age is None:
+        return False
+    if heartbeat and heartbeat.get("status") == "starting" and age < 10:
+        return False
+    if running and age < 5:
+        return False
+    return age > max_age_min
+
+
+def _heartbeat_on_disk_mismatch(username: str, book_id: str) -> bool:
+    """True when on-disk heartbeat exists but tags a different book."""
+    path = _active_heartbeat_path(username, book_id)
+    if not path.is_file():
+        return False
+    hb = _load_json(path)
+    if not hb:
+        return False
+    return not _heartbeat_matches_book(hb, book_id)
+
+
 def _scan_phase_label(heartbeat: dict | None) -> str:
     scan = (heartbeat or {}).get("scan_schedule") or {}
     return str(scan.get("phase") or scan.get("label") or "").strip()
@@ -269,20 +354,73 @@ def _path_for_resolve(path: Path) -> str:
 def _apply_user_paths(username: str, book_id: str) -> None:
     """Load book API keys and point dashboard at isolated bot files."""
     migrate_user_to_books(username)
-    from modules.portal_paths import ensure_book_env
-
     env_file = ensure_book_env(username, book_id)
-    config.reload_from_env(str(env_file))
+    paper = _book_is_paper(book_id)
+    config.reload_from_env(str(env_file), book_scoped=True)
+    # Per-book flags must win over any stale global state.
+    os.environ["PYTHONTRADING_ENV_FILE"] = str(env_file.resolve())
+    os.environ["PAPER_TRADING"] = "true" if paper else "false"
+    os.environ["ALLOW_LIVE_TRADING"] = "yes" if not paper else "no"
+    config.PAPER_TRADING = paper
+    config.ALLOW_LIVE_TRADING = not paper
     bd = env_file.parent
     hb = book_heartbeat_path(username, book_id)
     journal = ensure_book_journal(username, book_id)
-    config.HEARTBEAT_FILE = _path_for_resolve(hb)
+    config.HEARTBEAT_FILE = str(hb.resolve())
     config.PAPER_JOURNAL_CSV = _path_for_resolve(journal)
     config.WISDOM_SCORECARD_FILE = _path_for_resolve(bd / "wisdom_scorecard.json")
     config.WISDOM_JOURNAL_FILE = _path_for_resolve(bd / "wisdom_journal.csv")
-    os.environ["PYTHONTRADING_ENV_FILE"] = str(env_file)
-    os.environ["HEARTBEAT_FILE"] = str(hb)
-    os.environ["PAPER_JOURNAL_CSV"] = str(journal)
+    os.environ["HEARTBEAT_FILE"] = str(hb.resolve())
+    os.environ["PAPER_JOURNAL_CSV"] = str(journal.resolve())
+    reset_trading_client_cache()
+
+
+def _env_val(values: dict, *names: str) -> str:
+    for name in names:
+        raw = values.get(name)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    return ""
+
+
+def _read_book_credentials(username: str, book_id: str) -> tuple[bool, str, str]:
+    """Read Alpaca keys from the book .env file (immune to root .env overrides)."""
+    from dotenv import dotenv_values
+
+    env_file = ensure_book_env(username, book_id)
+    vals = dotenv_values(env_file)
+    paper = _book_is_paper(book_id)
+    if paper:
+        key = _env_val(vals, "PAPER_APCA_API_KEY_ID", "APCA_API_KEY_ID", "ALPACA_API_KEY")
+        secret = _env_val(
+            vals, "PAPER_APCA_API_SECRET_KEY", "APCA_API_SECRET_KEY", "ALPACA_SECRET_KEY"
+        )
+    else:
+        key = _env_val(vals, "APCA_API_KEY_ID", "ALPACA_API_KEY")
+        secret = _env_val(vals, "APCA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
+    if not key or not secret:
+        book = book_label(book_id)
+        raise ValueError(f"Alpaca credentials missing for {book} ({env_file.name})")
+    return paper, key, secret
+
+
+def _book_trading_client(username: str, book_id: str):
+    """Alpaca client for book_id — explicit paper flag and book .env keys only."""
+    paper, api_key, secret_key = _read_book_credentials(username, book_id)
+    base_url = config.get_alpaca_base_url(paper=paper)
+    return build_trading_client(api_key, secret_key, paper=paper, base_url=base_url)
+
+
+def _make_book_executor(username: str, book_id: str) -> AlpacaExecutor:
+    """Executor scoped to one book's .env keys and paper/live endpoint."""
+    with _BOOK_ENV_LOCK:
+        _apply_user_paths(username, book_id)
+        paper, api_key, secret_key = _read_book_credentials(username, book_id)
+    return AlpacaExecutor(
+        paper=paper,
+        credentials_fn=lambda: (api_key, secret_key),
+        allow_live=not paper,
+    )
 
 
 def _needs_setup(username: str, book_id: str) -> bool:
@@ -290,9 +428,8 @@ def _needs_setup(username: str, book_id: str) -> bool:
         return False
     if not has_alpaca_config(username, book_id):
         return True
-    _apply_user_paths(username, book_id)
     try:
-        config.get_alpaca_credentials()
+        _read_book_credentials(username, book_id)
     except ValueError:
         return True
     return False
@@ -307,12 +444,14 @@ def _reset_equity_cache() -> None:
         config._small_account_mode = False  # type: ignore[attr-defined]
 
 
-def _fetch_account_summary(*, retries: int = 2) -> tuple[float | None, float | None, str | None]:
-    """Fresh Alpaca account read; retries briefly on transient failures."""
+def _fetch_account_summary(
+    *, username: str, book_id: str, retries: int = 2
+) -> tuple[float | None, float | None, str | None]:
+    """Fresh Alpaca account read for the selected book."""
     last_err: str | None = None
     for attempt in range(max(1, retries)):
         try:
-            client = get_trading_client()
+            client = _book_trading_client(username, book_id)
             acct = client.get_account()
             equity = float(acct.equity)
             cash = float(acct.cash)
@@ -333,6 +472,9 @@ def _resolve_equity_cash(
     acct_cash: float | None,
     acct_err: str | None,
     heartbeat: dict | None,
+    *,
+    username: str,
+    book_id: str,
 ) -> tuple[float, float, str | None]:
     """Prefer live Alpaca equity; ignore stale heartbeat when API keys are configured."""
     hb_eq = float((heartbeat or {}).get("equity") or 0)
@@ -342,8 +484,9 @@ def _resolve_equity_cash(
         cash = acct_cash if acct_cash is not None else hb_cash
         return acct_eq, cash, acct_err
 
+    paper = _book_is_paper(book_id)
     try:
-        config.get_alpaca_credentials()
+        _read_book_credentials(username, book_id)
         has_keys = True
     except ValueError:
         has_keys = False
@@ -358,9 +501,27 @@ def _resolve_equity_cash(
     return 0.0, hb_cash, acct_err
 
 
-def _fetch_positions() -> tuple[pd.DataFrame | None, str | None]:
+def _fetch_book_equity(username: str, book_id: str, *, retries: int = 2) -> tuple[float, float, str | None]:
+    """Synchronous Alpaca equity/cash for the selected book (caller may hold _BOOK_ENV_LOCK)."""
+    with _BOOK_ENV_LOCK:
+        _apply_user_paths(username, book_id)
+        _reset_equity_cache()
+        acct_eq, acct_cash, acct_err = _fetch_account_summary(
+            username=username, book_id=book_id, retries=retries
+        )
+        return _resolve_equity_cash(
+            acct_eq,
+            acct_cash,
+            acct_err,
+            None,
+            username=username,
+            book_id=book_id,
+        )
+
+
+def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, str | None]:
     try:
-        client = get_trading_client()
+        client = _book_trading_client(username, book_id)
         positions = client.get_all_positions()
     except ValueError as exc:
         return None, str(exc)
@@ -394,18 +555,39 @@ def _fetch_positions() -> tuple[pd.DataFrame | None, str | None]:
 
 def _collect_refresh_snapshot(username: str, book_id: str) -> dict:
     """Network / disk work for dashboard refresh (safe off UI thread)."""
-    _reset_equity_cache()
-    heartbeat, heartbeat_path = _load_active_heartbeat(username, book_id)
-    scorecard, scorecard_src = _load_scorecard(username, book_id)
-    acct_eq, acct_cash, acct_err = _fetch_account_summary(retries=2)
-    positions_df, pos_err = _fetch_positions()
-    journal_df = _load_trade_history(username, book_id)
-    recent_orders_df = _fetch_alpaca_fills(limit=12)
-    running = bot_running(username, book_id) or bool(live_bot_pids())
-    equity, cash, acct_err = _resolve_equity_cash(acct_eq, acct_cash, acct_err, heartbeat)
+    with _BOOK_ENV_LOCK:
+        _apply_user_paths(username, book_id)
+        _reset_equity_cache()
+        heartbeat, heartbeat_path = _load_active_heartbeat(username, book_id)
+        scorecard, scorecard_src = _load_scorecard(username, book_id)
+        acct_eq, acct_cash, acct_err = _fetch_account_summary(
+            username=username, book_id=book_id, retries=2
+        )
+        positions_df, pos_err = _fetch_positions(username, book_id)
+        journal_df = _load_trade_history(username, book_id)
+        recent_orders_df = _fetch_alpaca_fills(username, book_id, limit=12)
+        running = _book_running_status(username, book_id)
+        other_book = _other_book_id(book_id)
+        other_book_running = _book_running_status(username, other_book)
+        heartbeat_stale = _heartbeat_is_stale(heartbeat, running=running)
+        heartbeat_mismatch = _heartbeat_on_disk_mismatch(username, book_id)
+        equity, cash, acct_err = _resolve_equity_cash(
+            acct_eq,
+            acct_cash,
+            acct_err,
+            heartbeat,
+            username=username,
+            book_id=book_id,
+        )
     return {
         "book_id": book_id,
+        "book_label": book_label(book_id),
+        "book_paper": _book_is_paper(book_id),
+        "other_book": other_book,
+        "other_book_running": other_book_running,
         "heartbeat": heartbeat,
+        "heartbeat_stale": heartbeat_stale,
+        "heartbeat_mismatch": heartbeat_mismatch,
         "heartbeat_path": str(heartbeat_path),
         "scorecard": scorecard,
         "scorecard_src": scorecard_src,
@@ -464,13 +646,8 @@ def _load_scorecard(username: str, book_id: str) -> tuple[dict | None, str]:
 
 
 def _resolve_db_path() -> Path:
-    """market_data.db beside dist/ EXE or stock-bot source tree."""
-    data_root = resolve_data_root(PROJECT_ROOT)
-    for base in (data_root, PROJECT_ROOT):
-        candidate = (base / config.DB_PATH).resolve()
-        if candidate.is_file():
-            return candidate
-    return (PROJECT_ROOT / config.DB_PATH).resolve()
+    """market_data.db — always via config.resolve_db_path (never empty dist stub)."""
+    return config.resolve_db_path()
 
 
 def _read_csv_tail(path: Path, max_rows: int) -> pd.DataFrame:
@@ -504,12 +681,12 @@ def _filter_journal_for_book(path: Path, df: pd.DataFrame, book_id: str) -> pd.D
     return df.loc[df["event"].astype(str).isin(TRADE_EVENTS)].copy()
 
 
-def _fetch_alpaca_fills(limit: int = TRADES_LIMIT) -> pd.DataFrame:
+def _fetch_alpaca_fills(username: str, book_id: str, limit: int = TRADES_LIMIT) -> pd.DataFrame:
     try:
         from alpaca.trading.enums import QueryOrderStatus
         from alpaca.trading.requests import GetOrdersRequest
 
-        client = get_trading_client()
+        client = _book_trading_client(username, book_id)
         req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=limit, nested=True)
         orders = list(client.get_orders(filter=req))
         rows = []
@@ -565,7 +742,7 @@ def _load_trade_history(
     else:
         journal_df = pd.DataFrame()
 
-    fills_df = _fetch_alpaca_fills(limit=limit)
+    fills_df = _fetch_alpaca_fills(username, book_id, limit=limit)
     if not fills_df.empty and not journal_df.empty and "timestamp" in journal_df.columns:
         # Prefer journal signals; add fills not already represented.
         journal_df = pd.concat([journal_df, fills_df], ignore_index=True)
@@ -705,6 +882,37 @@ def _regime_color(regime: str) -> str:
     if "BULL" in r or "RISK_ON" in r:
         return COLORS["green"]
     return COLORS["amber"]
+
+
+def _format_last_trade(snap: dict | None) -> str:
+    if not snap:
+        return "none yet"
+    orders_df = snap.get("recent_orders_df")
+    if isinstance(orders_df, pd.DataFrame) and not orders_df.empty:
+        row = orders_df.iloc[0]
+        ts = str(row.get("timestamp", "?"))[:19]
+        side = str(row.get("side", "?")).upper()
+        sym = row.get("symbol", "?")
+        notional = float(row.get("notional") or 0)
+        if notional > 0:
+            return f"{ts}  {side} {sym}  ${notional:,.0f}"
+        return f"{ts}  {side} {sym}"
+    journal_df = snap.get("journal_df")
+    if isinstance(journal_df, pd.DataFrame) and not journal_df.empty:
+        trade_events = {"fill", "buy", "sell", "game_plan", "signal"}
+        if "event" in journal_df.columns:
+            fills = journal_df[journal_df["event"].astype(str).isin(trade_events)]
+            if not fills.empty:
+                row = fills.iloc[0]
+            else:
+                row = journal_df.iloc[0]
+        else:
+            row = journal_df.iloc[0]
+        ts = str(row.get("timestamp", "?"))[:19]
+        sym = row.get("symbol") or "?"
+        side = str(row.get("side") or row.get("event") or "?")
+        return f"{ts}  {side} {sym}"
+    return "none yet"
 
 
 def _expected_actions(heartbeat: dict | None) -> list[str]:
@@ -1004,6 +1212,52 @@ class DataTable(ctk.CTkFrame):
             col: values[i] if i < len(values) else ""
             for i, col in enumerate(self._columns)
         }
+
+
+class ScrollTextPanel(ctk.CTkFrame):
+    """Read-only scrollable text block for status logs and errors."""
+
+    def __init__(
+        self,
+        master,
+        *,
+        height: int = 200,
+        font_key: str = "body_sm",
+        text_color: str | None = None,
+    ):
+        super().__init__(
+            master,
+            fg_color=COLORS["surface2"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._default_color = text_color or COLORS["text"]
+        self._text = ctk.CTkTextbox(
+            self,
+            height=height,
+            font=_ctk_font(font_key),
+            fg_color=COLORS["surface2"],
+            text_color=self._default_color,
+            border_width=0,
+            wrap="word",
+            activate_scrollbars=True,
+        )
+        self._text.pack(fill="both", expand=True, padx=8, pady=8)
+        self._text.configure(state="disabled")
+
+    def set_text(self, text: str, *, text_color: str | None = None) -> None:
+        color = text_color or self._default_color
+        self._text.configure(state="normal", text_color=color)
+        self._text.delete("1.0", "end")
+        self._text.insert("1.0", text or "")
+        self._text.configure(state="disabled")
+        self._text.update_idletasks()
+        self._text.see("end")
+
+
+OVERVIEW_STATUS_HEIGHT = 280
+OVERVIEW_ACTIONS_HEIGHT = 220
 
 
 class LoginApp(ctk.CTk):
@@ -1620,8 +1874,8 @@ class TradingDashboardApp(ctk.CTk):
         ).grid(row=0, column=3, padx=3, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
-            text="Restart",
-            width=78,
+            text="Restart Bot",
+            width=96,
             fg_color=COLORS["small_bg"],
             hover_color=COLORS["small"],
             text_color=COLORS["amber"],
@@ -1929,7 +2183,8 @@ class TradingDashboardApp(ctk.CTk):
                 self.after(800, lambda: self._maybe_auto_start_bot(quiet=True))
 
     def _apply_user_paths(self, username: str, book_id: str | None = None) -> None:
-        _apply_user_paths(username, book_id or self._book_id)
+        with _BOOK_ENV_LOCK:
+            _apply_user_paths(username, book_id or self._book_id)
 
     def _open_book_menu(self) -> None:
         BookMenu(
@@ -1951,6 +2206,64 @@ class TradingDashboardApp(ctk.CTk):
             return
         self._switch_book(book_id)
 
+    def _clear_book_panels_for_switch(self, book_id: str) -> None:
+        """Reset overview panels so stale book data is not shown during switch."""
+        mode = "Paper" if _book_is_paper(book_id) else "Live"
+        self._live_status_panel.set_text(
+            f"Switching to {book_label(book_id)} ({mode})…",
+            text_color=COLORS["muted"],
+        )
+        self._clear_frame(self._actions_scroll)
+        self._wisdom_line.configure(text="—")
+        if hasattr(self, "_overview_last_trade"):
+            self._overview_last_trade.configure(text="Last trade: —", text_color=COLORS["muted"])
+            self._overview_next_action.configure(text="Next expected: —", text_color=COLORS["muted"])
+        self._live_equity_label.configure(
+            text=f"Switching to {mode}…",
+            text_color=COLORS["muted"],
+        )
+        self._equity_error_label.configure(text="")
+        self._stats_line1.configure(text="Account Total: —")
+        self._stats_line2.configure(text="Loading…")
+        self._since_start_label.configure(text="Since Start: —")
+
+    def _start_book_async(self, book_id: str) -> None:
+        self._status_label.configure(text=f"Starting {book_label(book_id)} bot…")
+        self._bot_badge.configure(text="Bot: starting…", text_color=COLORS["amber"])
+
+        def _worker() -> None:
+            ok, msg = start_bot(self._username, book_id)
+
+            def _finish() -> None:
+                if not ok:
+                    messagebox.showwarning("Start Bot", msg)
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True, name="dashboard-book-start").start()
+
+    def _restart_book_async(self, book_id: str) -> None:
+        self._status_label.configure(text=f"Restarting {book_label(book_id)} bot…")
+        self._bot_badge.configure(text="Bot: restarting…", text_color=COLORS["amber"])
+        self._pill_bot.configure(
+            text="Bot: restarting…",
+            fg_color=COLORS["small_bg"],
+            text_color=COLORS["amber"],
+        )
+
+        def _worker() -> None:
+            ok, msg = restart_bot(self._username, book_id)
+
+            def _finish() -> None:
+                if not ok:
+                    messagebox.showwarning("Restart Bot", msg)
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True, name="dashboard-book-restart").start()
+
     def _switch_book(self, book_id: str) -> None:
         if book_id == self._book_id:
             return
@@ -1962,20 +2275,20 @@ class TradingDashboardApp(ctk.CTk):
         save_last_book_id(book_id)
         self._book_var.set(dropdown_label_for_book(book_id))
         self.title(f"PythonTrading — {book_label(book_id)}")
-        self._apply_user_paths(self._username, book_id)
-        prefix = "Paper" if config.PAPER_TRADING else "Live"
-        self._live_equity_label.configure(
-            text=f"Switching to {prefix}…",
-            text_color=COLORS["muted"],
-        )
+        self._refresh_seq += 1
+        self._clear_book_panels_for_switch(book_id)
+        paper = _book_is_paper(book_id)
+        equity, cash, err = _fetch_book_equity(self._username, book_id, retries=2)
+        self._apply_equity_cash_ui(equity, cash, err, paper=paper)
         self._status_label.configure(text="Loading account data…")
         self._bot_badge.configure(text="Bot: …", text_color=COLORS["muted"])
         self.update_idletasks()
+
         if _needs_setup(self._username, book_id):
             self._show_setup_wizard()
-        else:
-            _reset_equity_cache()
-            self.refresh_data()
+            return
+
+        self.refresh_data()
 
     def _on_logout_click(self) -> None:
         if self._on_logout is None:
@@ -1987,83 +2300,118 @@ class TradingDashboardApp(ctk.CTk):
         self._on_logout()
 
     def _build_overview_tab(self) -> None:
+        self._overview_body = ctk.CTkFrame(self._tab_overview, fg_color="transparent")
+        self._overview_body.pack(fill="both", expand=True)
+
+        activity_panel = ctk.CTkFrame(
+            self._overview_body,
+            fg_color=COLORS["surface2"],
+            corner_radius=12,
+            border_width=2,
+            border_color=COLORS["accent"],
+        )
+        activity_panel.pack(fill="x", padx=12, pady=(10, 8))
+        ctk.CTkLabel(
+            activity_panel,
+            text="Activity",
+            font=_ctk_font("heading"),
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 2))
+        self._overview_last_trade = ctk.CTkLabel(
+            activity_panel,
+            text="Last trade: —",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color=COLORS["text"],
+            anchor="w",
+            wraplength=820,
+            justify="left",
+        )
+        self._overview_last_trade.pack(fill="x", padx=12, pady=(0, 4))
+        self._overview_next_action = ctk.CTkLabel(
+            activity_panel,
+            text="Next expected: —",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["amber"],
+            anchor="w",
+            wraplength=820,
+            justify="left",
+        )
+        self._overview_next_action.pack(fill="x", padx=12, pady=(0, 10))
+
         live_panel = ctk.CTkFrame(
-            self._tab_overview,
+            self._overview_body,
             fg_color=COLORS["card"],
             corner_radius=12,
             border_width=1,
             border_color=COLORS["border"],
         )
-        live_panel.pack(fill="x", padx=12, pady=(10, 8))
-        ctk.CTkLabel(
+        live_panel.pack(fill="x", padx=12, pady=(0, 8))
+        self._overview_status_title = ctk.CTkLabel(
             live_panel,
-            text="Live bot status",
+            text="Bot status (both books)",
             font=_ctk_font("heading"),
             anchor="w",
-        ).pack(fill="x", padx=12, pady=(10, 4))
-        self._live_status_line1 = ctk.CTkLabel(
+        )
+        self._overview_status_title.pack(fill="x", padx=12, pady=(10, 4))
+        self._live_status_panel = ScrollTextPanel(
             live_panel,
-            text="Heartbeat: —",
-            justify="left",
-            anchor="w",
-            font=_ctk_font("body_sm"),
+            height=OVERVIEW_STATUS_HEIGHT,
+            font_key="body_sm",
             text_color=COLORS["text"],
-            wraplength=820,
         )
-        self._live_status_line1.pack(fill="x", padx=12)
-        self._live_status_line2 = ctk.CTkLabel(
-            live_panel,
-            text="Recent orders: —",
-            justify="left",
-            anchor="w",
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-            wraplength=820,
-        )
-        self._live_status_line2.pack(fill="x", padx=12, pady=(2, 10))
+        self._live_status_panel.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self._live_status_panel.set_text("Waiting for refresh…", text_color=COLORS["muted"])
 
         ctk.CTkLabel(
-            self._tab_overview,
+            self._overview_body,
             text="Next actions",
             font=_ctk_font("heading"),
             anchor="w",
         ).pack(fill="x", padx=14, pady=(4, 4))
-        self._actions_frame = ctk.CTkFrame(self._tab_overview, fg_color="transparent")
-        self._actions_frame.pack(fill="x", padx=14)
-        self._regime_label = ctk.CTkLabel(self._tab_overview, text="")  # sync target for errors
-        self._status_label_tab = ctk.CTkLabel(self._tab_overview, text="")
-        self._cycle_label = ctk.CTkLabel(self._tab_overview, text="")
+        self._actions_scroll = ctk.CTkScrollableFrame(
+            self._overview_body,
+            height=OVERVIEW_ACTIONS_HEIGHT,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+            scrollbar_fg_color=COLORS["surface2"],
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["accent"],
+        )
+        self._actions_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
         ctk.CTkLabel(
-            self._tab_overview,
+            self._overview_body,
             text="Wisdom",
             font=_ctk_font("heading"),
             anchor="w",
-        ).pack(fill="x", padx=14, pady=(12, 4))
+        ).pack(fill="x", padx=14, pady=(8, 4))
         self._wisdom_line = ctk.CTkLabel(
-            self._tab_overview,
+            self._overview_body,
             text="—",
             justify="left",
             anchor="w",
             font=_ctk_font("body_sm"),
             text_color=COLORS["muted"],
+            wraplength=820,
         )
         self._wisdom_line.pack(fill="x", padx=14)
 
         ctk.CTkLabel(
-            self._tab_overview,
+            self._overview_body,
             text="Crypto vol sleeve",
             font=_ctk_font("heading"),
             anchor="w",
         ).pack(fill="x", padx=14, pady=(12, 4))
         self._crypto_vol_panel = ctk.CTkFrame(
-            self._tab_overview,
+            self._overview_body,
             fg_color=COLORS["card"],
             corner_radius=12,
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._crypto_vol_panel.pack(fill="x", padx=12, pady=(0, 4))
+        self._crypto_vol_panel.pack(fill="x", padx=12, pady=(0, 10))
         self._crypto_vol_body = ctk.CTkLabel(
             self._crypto_vol_panel,
             text="—",
@@ -2156,6 +2504,12 @@ class TradingDashboardApp(ctk.CTk):
         for child in frame.winfo_children():
             child.destroy()
 
+    def _scroll_frame_to_bottom(self, frame: ctk.CTkScrollableFrame) -> None:
+        try:
+            frame._parent_canvas.yview_moveto(1.0)  # noqa: SLF001
+        except Exception:
+            pass
+
     def _update_live_status_panel(
         self,
         snap: dict,
@@ -2163,6 +2517,15 @@ class TradingDashboardApp(ctk.CTk):
         *,
         running: bool,
     ) -> None:
+        book_id = snap.get("book_id") or self._book_id
+        other_book = snap.get("other_book") or _other_book_id(book_id)
+        lines: list[str] = []
+        lines.append("This book")
+        lines.extend(_format_book_status_block(self._username, book_id))
+        lines.append("")
+        lines.append("Other book")
+        lines.extend(_format_book_status_block(self._username, other_book))
+
         hb_path = snap.get("heartbeat_path") or ""
         try:
             hb_rel = os.path.relpath(hb_path, resolve_data_root(PROJECT_ROOT)) if hb_path else "—"
@@ -2184,33 +2547,42 @@ class TradingDashboardApp(ctk.CTk):
             except ValueError:
                 exe_hint = f" · bot: {Path(bot_exe).name}"
         run_txt = "running" if running else "stopped"
-        stale = hb_age is not None and hb_age > 90 and running
-        line1 = (
-            f"{runtime} · bot {run_txt} · heartbeat {hb_rel} · {age_txt} · "
-            f"status={hb_status} · regime={regime}"
-        )
-        if phase:
-            line1 += f" · {phase}"
-        if stale:
-            line1 += " · STALE"
-        self._live_status_line1.configure(
-            text=line1,
-            text_color=COLORS["red"] if stale else COLORS["text"],
-        )
-
+        stale = bool(snap.get("heartbeat_stale"))
+        if snap.get("heartbeat_mismatch"):
+            lines.extend(["", "Note: this book heartbeat file has wrong book tag — ignored"])
         orders_df = snap.get("recent_orders_df")
         if isinstance(orders_df, pd.DataFrame) and not orders_df.empty:
             bits = []
-            for _, row in orders_df.head(5).iterrows():
+            for _, row in orders_df.head(8).iterrows():
                 bits.append(
                     f"{row.get('timestamp', '?')} {row.get('side', '?')} "
                     f"{row.get('symbol', '?')} ${float(row.get('notional') or 0):,.0f}"
                 )
-            orders_txt = " · ".join(bits)
+            orders_txt = "\n  ".join(bits)
         else:
             orders_txt = "none (journal/Alpaca fills empty)"
-        self._live_status_line2.configure(
-            text=f"Recent orders: {orders_txt} · logs: {log_hint}{exe_hint}"
+        lines.extend(
+            [
+                "",
+                f"Detail ({book_label(book_id)}): {runtime} · bot {run_txt} · "
+                f"heartbeat {hb_rel} · {age_txt} · status={hb_status} · regime={regime}"
+                + (f" · {phase}" if phase else "")
+                + (" · STALE" if stale else ""),
+                "",
+                "Recent orders:",
+                f"  {orders_txt}",
+                "",
+                f"Logs: {log_hint}{exe_hint}",
+            ]
+        )
+        cycle_err = (heartbeat or {}).get("last_cycle_error")
+        if cycle_err:
+            err_at = (heartbeat or {}).get("last_cycle_error_at") or ""
+            lines.extend(["", f"Last cycle error ({err_at}):"])
+            lines.append(str(cycle_err))
+        self._live_status_panel.set_text(
+            "\n".join(lines),
+            text_color=COLORS["red"] if stale else COLORS["text"],
         )
         if hasattr(self, "_pill_runtime"):
             self._pill_runtime.configure(text=runtime)
@@ -2223,20 +2595,25 @@ class TradingDashboardApp(ctk.CTk):
         regime: str = "—",
         halted: bool = False,
         bot_running_flag: bool = False,
+        book_paper: bool | None = None,
     ) -> None:
-        live = not config.PAPER_TRADING
+        live = not (book_paper if book_paper is not None else _book_is_paper(self._book_id))
         if live:
             self._pill_mode.configure(
                 text="● LIVE TRADING",
                 fg_color=COLORS["live_bg"],
                 text_color="#fecaca",
             )
+            if hasattr(self, "_overview_status_title"):
+                self._overview_status_title.configure(text="Bot status (both books)")
         else:
             self._pill_mode.configure(
-                text="● PAPER",
+                text="● PAPER TRADING",
                 fg_color=COLORS["paper_ok_bg"],
                 text_color=COLORS["green"],
             )
+            if hasattr(self, "_overview_status_title"):
+                self._overview_status_title.configure(text="Bot status (both books)")
 
         if small_account:
             self._pill_small.pack(side="left", padx=(0, 8), before=self._pill_regime)
@@ -2309,17 +2686,29 @@ class TradingDashboardApp(ctk.CTk):
                 return total / equity * 100
         return max(0.0, (equity - cash) / equity * 100)
 
+    def _apply_equity_cash_ui(
+        self,
+        equity: float,
+        cash: float,
+        acct_err: str | None,
+        *,
+        paper: bool | None = None,
+    ) -> None:
+        """Update header + metric cards from a fresh Alpaca read."""
+        self._last_equity = equity
+        if equity > 0:
+            config.configure_account_profile(equity)
+        self._update_live_equity_header(equity, acct_err, paper=paper)
+        cash_pct = (cash / equity * 100) if equity > 0 else 0.0
+        self._metric_cards["equity"].set(f"${equity:,.2f}" if equity > 0 else "—")
+        self._metric_cards["cash"].set(
+            f"${cash:,.0f} ({cash_pct:.0f}%)" if equity > 0 else "—"
+        )
+
     def _bootstrap_live_equity(self) -> None:
         """Force a fresh Alpaca read on startup / book switch before heartbeat fallback."""
-        _reset_equity_cache()
-        self._last_equity = 0.0
-        eq, cash, err = _fetch_account_summary(retries=3)
-        if eq is not None and eq > 0:
-            self._last_equity = eq
-            config.configure_account_profile(eq)
-            self._update_live_equity_header(eq, err)
-            return
-        self._update_live_equity_header(0.0, err)
+        equity, cash, err = _fetch_book_equity(self._username, self._book_id, retries=3)
+        self._apply_equity_cash_ui(equity, cash, err, paper=_book_is_paper(self._book_id))
 
     def _book_is_paper_chase(self) -> bool:
         spec = BOOKS.get(self._book_id) or {}
@@ -2354,8 +2743,10 @@ class TradingDashboardApp(ctk.CTk):
         self._stats_line2.configure(text=line2)
         self._since_start_label.configure(text=since_detail)
 
-    def _update_live_equity_header(self, equity: float, acct_err: str | None) -> None:
-        live = not config.PAPER_TRADING
+    def _update_live_equity_header(
+        self, equity: float, acct_err: str | None, *, paper: bool | None = None
+    ) -> None:
+        live = not (paper if paper is not None else config.PAPER_TRADING)
         prefix = "Live" if live else "Paper"
         if equity > 0:
             color = COLORS["green"] if live else COLORS["blue"]
@@ -2458,7 +2849,7 @@ class TradingDashboardApp(ctk.CTk):
         if equity > 0:
             config.configure_account_profile(equity)
 
-        self._update_live_equity_header(equity, acct_err)
+        self._update_live_equity_header(equity, acct_err, paper=snap.get("book_paper"))
         self._update_stats_banner(equity, heartbeat, acct_err)
         self._update_small_panel(equity, heartbeat)
 
@@ -2479,12 +2870,21 @@ class TradingDashboardApp(ctk.CTk):
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
 
         self._bot_badge.configure(
-            text=bot_status_label(self._username, self._book_id),
+            text=(
+                bot_status_label(self._username, self._book_id)
+                if bot_running(self._username, self._book_id)
+                else (
+                    f"Bot: Running · {snap.get('book_label', book_label(self._book_id))} "
+                    f"({'paper' if snap.get('book_paper') else 'live'})"
+                    if running
+                    else "Bot: Stopped"
+                )
+            ),
             text_color=COLORS["green"] if running else COLORS["amber"],
         )
 
         self._update_live_status_panel(snap, heartbeat, running=running)
-        self._fill_overview(heartbeat, equity, acct_err)
+        self._fill_overview(heartbeat, equity, acct_err, snap=snap)
         self._fill_crypto_vol_panel()
         self._fill_positions(positions_df, pos_err, upl)
         self._fill_trades(journal_df)
@@ -2496,14 +2896,15 @@ class TradingDashboardApp(ctk.CTk):
             self._draw_charts()
             self._charts_dirty = False
 
-        mode = "LIVE" if not config.PAPER_TRADING else "Paper"
+        mode = "LIVE" if not snap.get("book_paper", _book_is_paper(self._book_id)) else "Paper"
         ts = datetime.now().strftime("%H:%M:%S")
         mem = _process_rss_mb()
         hb_age = _heartbeat_age_minutes(heartbeat)
+        heartbeat_stale = bool(snap.get("heartbeat_stale"))
         parts = [mode, ts, f"every {REFRESH_SECONDS}s"]
         if mem:
             parts.append(mem)
-        if running and hb_age is not None and hb_age > 90:
+        if running and heartbeat_stale and hb_age is not None:
             parts.append(f"hb stale {hb_age:.0f}m")
         self._status_label.configure(text=" · ".join(parts))
 
@@ -2540,34 +2941,62 @@ class TradingDashboardApp(ctk.CTk):
         )
 
     def _fill_overview(
-        self, heartbeat: dict | None, equity: float, acct_err: str | None
+        self,
+        heartbeat: dict | None,
+        equity: float,
+        acct_err: str | None,
+        *,
+        snap: dict | None = None,
     ) -> None:
+        last_trade = _format_last_trade(snap)
         if acct_err:
+            self._overview_last_trade.configure(
+                text=f"Last trade: {last_trade}",
+                text_color=COLORS["muted"],
+            )
+            self._overview_next_action.configure(
+                text="Next expected: fix Alpaca connection, then Start Bot",
+                text_color=COLORS["red"],
+            )
             self._update_status_row(
                 equity,
                 equity > 0 and config.is_small_account(equity),
                 regime="Alpaca error",
                 halted=True,
-                bot_running_flag=bot_running(self._username, self._book_id),
+                bot_running_flag=_book_running_status(self._username, self._book_id),
+                book_paper=_book_is_paper(self._book_id),
             )
             self._pill_regime.configure(
                 text=f"Alpaca: {acct_err[:40]}",
                 text_color=COLORS["red"],
             )
-            self._clear_frame(self._actions_frame)
+            self._clear_frame(self._actions_scroll)
+            self._live_status_panel.set_text(
+                f"Alpaca error:\n{acct_err}",
+                text_color=COLORS["red"],
+            )
             self._wisdom_line.configure(text="—")
             return
         if heartbeat is None:
-            running = bot_running(self._username, self._book_id)
+            self._overview_last_trade.configure(
+                text=f"Last trade: {last_trade}",
+                text_color=COLORS["muted"],
+            )
+            self._overview_next_action.configure(
+                text="Next expected: Start Bot (first heartbeat ~60s)",
+                text_color=COLORS["amber"],
+            )
+            running = _book_running_status(self._username, self._book_id)
             self._update_status_row(
                 equity,
                 equity > 0 and config.is_small_account(equity),
                 regime="Waiting…" if running else "No heartbeat",
                 bot_running_flag=running,
+                book_paper=_book_is_paper(self._book_id),
             )
-            self._clear_frame(self._actions_frame)
-            btn_row = ctk.CTkFrame(self._actions_frame, fg_color="transparent")
-            btn_row.pack(fill="x", pady=4)
+            self._clear_frame(self._actions_scroll)
+            btn_row = ctk.CTkFrame(self._actions_scroll, fg_color="transparent")
+            btn_row.pack(fill="x", pady=4, padx=8)
             ctk.CTkButton(
                 btn_row,
                 text="Start Bot",
@@ -2583,19 +3012,29 @@ class TradingDashboardApp(ctk.CTk):
                 command=self.refresh_data,
             ).pack(side="left")
             if running:
-                tail = read_bot_log_tail(self._username, self._book_id, max_chars=400)
+                tail = read_bot_log_tail(self._username, self._book_id, max_chars=4000)
                 if tail:
-                    last = tail.splitlines()[-1][:120]
-                    ctk.CTkLabel(
-                        self._actions_frame,
-                        text=f"Log: {last}",
-                        anchor="w",
+                    log_panel = ScrollTextPanel(
+                        self._actions_scroll,
+                        height=140,
+                        font_key="caption",
                         text_color=COLORS["muted"],
-                        font=ctk.CTkFont(size=11),
-                        wraplength=780,
-                    ).pack(fill="x", pady=(6, 0))
+                    )
+                    log_panel.pack(fill="x", padx=8, pady=(8, 8))
+                    log_panel.set_text(f"Bot log tail:\n\n{tail}")
+            self.after(50, lambda: self._scroll_frame_to_bottom(self._actions_scroll))
             self._wisdom_line.configure(text="—")
             return
+
+        actions = _expected_actions(heartbeat)
+        self._overview_last_trade.configure(
+            text=f"Last trade: {last_trade}",
+            text_color=COLORS["text"],
+        )
+        self._overview_next_action.configure(
+            text=f"Next expected: {actions[0] if actions else 'Monitoring — no immediate actions.'}",
+            text_color=COLORS["amber"],
+        )
 
         regime = heartbeat.get("regime", "—")
         halted = bool(heartbeat.get("halted"))
@@ -2607,28 +3046,33 @@ class TradingDashboardApp(ctk.CTk):
             equity > 0 and config.is_small_account(equity),
             regime=str(regime),
             halted=halted,
-            bot_running_flag=bot_running(self._username, self._book_id),
+            bot_running_flag=_book_running_status(self._username, self._book_id),
+            book_paper=_book_is_paper(self._book_id),
         )
 
-        self._clear_frame(self._actions_frame)
+        self._clear_frame(self._actions_scroll)
         cycle_err = heartbeat.get("last_cycle_error")
         if cycle_err:
-            ctk.CTkLabel(
-                self._actions_frame,
-                text=f"Last cycle error: {str(cycle_err)[:200]}",
-                anchor="w",
+            err_panel = ScrollTextPanel(
+                self._actions_scroll,
+                height=120,
+                font_key="body_sm",
                 text_color=COLORS["red"],
-                font=ctk.CTkFont(size=12),
-                wraplength=780,
-            ).pack(fill="x", pady=(0, 6))
-        for action in _expected_actions(heartbeat):
+            )
+            err_panel.pack(fill="x", padx=8, pady=(8, 4))
+            err_at = heartbeat.get("last_cycle_error_at") or ""
+            err_panel.set_text(f"Last cycle error ({err_at}):\n\n{cycle_err}")
+        for action in actions[1:]:
             ctk.CTkLabel(
-                self._actions_frame,
+                self._actions_scroll,
                 text=f"• {action}",
                 anchor="w",
+                justify="left",
                 text_color=COLORS["text"],
-                font=ctk.CTkFont(size=12),
-            ).pack(fill="x", pady=1)
+                font=_ctk_font("body_sm"),
+                wraplength=760,
+            ).pack(fill="x", padx=10, pady=2)
+        self.after(50, lambda: self._scroll_frame_to_bottom(self._actions_scroll))
 
         wisdom = heartbeat.get("wisdom") or {}
         if wisdom:
@@ -2978,7 +3422,7 @@ class TradingDashboardApp(ctk.CTk):
         def _worker() -> None:
             err: str | None = None
             try:
-                executor = AlpacaExecutor(paper=self._book_id != "alpaca_live")
+                executor = _make_book_executor(self._username, self._book_id)
                 order = executor.execute_full_exit(
                     ticker,
                     reason="manual_dashboard",
@@ -3034,7 +3478,7 @@ class TradingDashboardApp(ctk.CTk):
             errors: list[str] = []
             closed = 0
             try:
-                executor = AlpacaExecutor(paper=self._book_id != "alpaca_live")
+                executor = _make_book_executor(self._username, self._book_id)
                 for ticker in tickers:
                     try:
                         order = executor.execute_full_exit(
@@ -3097,37 +3541,14 @@ class TradingDashboardApp(ctk.CTk):
             return
         if not messagebox.askyesno(
             "Restart Bot",
-            "This will restart live and paper bots (when API keys are configured).\n\n"
-            "Each bot stops cleanly, orphan processes are cleared, then both restart.\n"
+            f"Restart the bot for {book_label(self._book_id)}?\n\n"
+            "The current book stops cleanly, then relaunches in the correct "
+            "paper/live mode for this dropdown selection.\n"
             "Open positions are not closed.\n\nContinue?",
             icon="warning",
         ):
             return
-        self._bot_badge.configure(text="Bot: restarting…", text_color=COLORS["amber"])
-        self._pill_bot.configure(
-            text="Bot: restarting…",
-            fg_color=COLORS["small_bg"],
-            text_color=COLORS["amber"],
-        )
-        self._status_label.configure(text="Bot restarting…")
-        self.update_idletasks()
-
-        def _worker() -> None:
-            ok, msg = restart_all_bots(self._username)
-
-            def _finish() -> None:
-                if ok:
-                    messagebox.showinfo("Restart Bot", msg)
-                    self._status_label.configure(text="Live + paper bots restarted")
-                else:
-                    tail = read_bot_log_tail(self._username, self._book_id)
-                    detail = f"\n\n{tail}" if tail else ""
-                    messagebox.showerror("Restart Bot", msg + detail)
-                self.refresh_data()
-
-            self.after(0, _finish)
-
-        threading.Thread(target=_worker, daemon=True).start()
+        self._restart_book_async(self._book_id)
 
     def _schedule_refresh(self) -> None:
         if self._refresh_job:

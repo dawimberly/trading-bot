@@ -1,8 +1,10 @@
 """Central configuration: credentials, universe, paths, and strategy constants."""
 
+import importlib.util
 import json
 import logging
 import os
+import shutil
 import sys
 import warnings
 from pathlib import Path
@@ -10,6 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 
 _CONFIG_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = _CONFIG_DIR
 
 
 def _parse_env_bool(key: str, *, default: str = "false") -> bool:
@@ -141,7 +144,7 @@ def _normalize_alpaca_env_keys() -> None:
             os.environ[key] = cleaned
 
 
-def _sync_trading_mode_flags() -> None:
+def _sync_trading_mode_flags(*, skip_root_override: bool = False) -> None:
     """Apply PAPER_TRADING / ALLOW_LIVE_TRADING from os.environ after dotenv load."""
     global PAPER_TRADING, ALLOW_LIVE_TRADING
     ALLOW_LIVE_TRADING = _parse_env_bool("ALLOW_LIVE_TRADING", default="false")
@@ -149,6 +152,8 @@ def _sync_trading_mode_flags() -> None:
     PAPER_TRADING = paper_raw in ("1", "true", "yes", "on")
     if ALLOW_LIVE_TRADING and paper_raw in ("0", "false", "no", "off"):
         PAPER_TRADING = False
+    if skip_root_override:
+        return
     # Root .env live intent wins over stock-bot/.env paper override (dual-file setups).
     root_env = _CONFIG_DIR.parent / ".env"
     root_allow = (_dotenv_file_value(root_env, "ALLOW_LIVE_TRADING") or "").lower()
@@ -209,6 +214,68 @@ RISK_EVENTS_LOG = "risk_events.log"
 PAPER_JOURNAL_CSV = os.getenv("PAPER_JOURNAL_CSV", "paper_journal.csv")
 HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "bot_heartbeat.json")
 AUTO_LAUNCH_DASHBOARD = _parse_env_bool("AUTO_LAUNCH_DASHBOARD", default="false")
+
+
+def resolve_db_path() -> Path:
+    """Return the best market_data.db path with these priorities:
+    1. Project root (stock-bot/market_data.db)
+    2. Largest non-empty .db file in cwd or dist/
+    3. Copy from project root to dist/ if running from packaged dir
+    """
+    env_raw = (os.getenv("MARKET_DATA_DB") or "").strip()
+    if env_raw:
+        p = Path(env_raw)
+        return p.resolve() if p.is_absolute() else (PROJECT_ROOT / p).resolve()
+
+    from modules.runtime_paths import resolve_data_root, resolve_runtime_root
+
+    project_root = resolve_runtime_root()
+    data_root = resolve_data_root(project_root)
+    name = DB_PATH
+    min_size = 1_000_000  # < ~1MB = empty stub
+
+    candidates = [
+        project_root / name,
+        Path.cwd() / name,
+        data_root / name,
+        project_root / "dist" / name,
+    ]
+    best: Path | None = None
+    best_size = 0
+    seen: set[Path] = set()
+    for p in candidates:
+        try:
+            rp = p.resolve()
+        except OSError:
+            continue
+        if rp in seen:
+            continue
+        seen.add(rp)
+        if not rp.is_file():
+            continue
+        size = rp.stat().st_size
+        if size > best_size:
+            best = rp
+            best_size = size
+
+    real_db = (project_root / name).resolve()
+    if best is None or best_size < min_size:
+        if real_db.is_file() and real_db.stat().st_size >= min_size:
+            if data_root != project_root:
+                target = (data_root / name).resolve()
+            else:
+                target = (Path.cwd() / name).resolve()
+            if target != real_db:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(real_db, target)
+                return target
+            return real_db
+    return best or real_db
+
+
+def ensure_market_db() -> Path:
+    """Ensure a usable market_data.db exists (delegates to resolve_db_path)."""
+    return resolve_db_path()
 
 
 def resolve_heartbeat_file(paper: bool | None = None) -> Path:
@@ -309,6 +376,25 @@ PAPER_VOL_POSITION_SIZING_ENABLED = _parse_env_bool(
 PAPER_LOSS_CUTTING_ENABLED = _parse_env_bool(
     "PAPER_LOSS_CUTTING_ENABLED", default="false"
 )
+# Research opt-in sleeves (status.py / paper aggressive only)
+PAPER_INTERNATIONAL_SLEEVE_ENABLED = _parse_env_bool(
+    "PAPER_INTERNATIONAL_SLEEVE_ENABLED", default="false"
+)
+PAPER_BOND_SLEEVE_ENABLED = _parse_env_bool("PAPER_BOND_SLEEVE_ENABLED", default="false")
+PAPER_SECTOR_ROTATION_ENABLED = _parse_env_bool(
+    "PAPER_SECTOR_ROTATION_ENABLED", default="false"
+)
+PAPER_TECH_GUARD_ENABLED = _parse_env_bool("PAPER_TECH_GUARD_ENABLED", default="true")
+PAPER_SCALING_STRATEGY_ENABLED = _parse_env_bool(
+    "PAPER_SCALING_STRATEGY_ENABLED", default="false"
+)
+PAPER_PATTERN_AWARENESS_ENABLED = _parse_env_bool(
+    "PAPER_PATTERN_AWARENESS_ENABLED", default="false"
+)
+INTERNATIONAL_SLEEVE_CAP_PCT = float(os.getenv("INTERNATIONAL_SLEEVE_CAP_PCT", "0.10"))
+BOND_SLEEVE_CAP_PCT = float(os.getenv("BOND_SLEEVE_CAP_PCT", "0.15"))
+BOND_SLEEVE_SYMBOL = os.getenv("BOND_SLEEVE_SYMBOL", "TLT").strip().upper() or "TLT"
+STRICT_PIT_BACKTEST = _parse_env_bool("STRICT_PIT_BACKTEST", default="false")
 # Classic crypto pairs sleeve — off by default on live and paper bots
 PAPER_CRYPTO_ENABLED = _parse_env_bool("PAPER_CRYPTO_ENABLED", default="false")
 CRYPTO_SLEEVE_ENABLED = _parse_env_bool("CRYPTO_SLEEVE_ENABLED", default="false")
@@ -510,6 +596,21 @@ NYSE_ANTI_OVERLAP_ENABLED = NYSE_OVERLAP_FILTER_ENABLED
 NYSE_SPY_CORR_MAX = float(os.getenv("NYSE_SPY_CORR_MAX", "0.80"))
 NYSE_SPY_BETA_MAX = float(os.getenv("NYSE_SPY_BETA_MAX", "1.6"))
 NYSE_SPY_CORR_LOOKBACK = int(os.getenv("NYSE_SPY_CORR_LOOKBACK", "60"))
+# Paper aggressive: stricter NYSE filter when SPY sleeve is full or bullish (live: always off)
+NYSE_CONDITIONAL_ON_SPY = os.getenv("NYSE_CONDITIONAL_ON_SPY", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+NYSE_CONDITIONAL_SPY_CORR_MAX = float(os.getenv("NYSE_CONDITIONAL_SPY_CORR_MAX", "0.78"))
+NYSE_CONDITIONAL_SPY_CAP_FILL_PCT = float(
+    os.getenv("NYSE_CONDITIONAL_SPY_CAP_FILL_PCT", "0.50")
+)
+PAPER_NYSE_CONDITIONAL_ON_SPY = os.getenv("PAPER_NYSE_CONDITIONAL_ON_SPY", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
 NYSE_BETA_SCALING_ENABLED = os.getenv("NYSE_BETA_SCALING_ENABLED", "false").lower() in (
     "1",
     "true",
@@ -959,6 +1060,7 @@ _account_equity: float | None = None
 _small_account_mode = False
 _backtest_small_account_ctx = False
 _backtest_paper_sleeves_ctx = False
+_backtest_strict_pit_ctx = False
 _live_thinking_sim_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
@@ -1024,14 +1126,14 @@ CRYPTO_TICKERS = frozenset(
 )
 
 
-def reload_from_env(env_file: str | None = None) -> None:
+def reload_from_env(env_file: str | None = None, *, book_scoped: bool = False) -> None:
     """Reload credentials flags after portal switches per-user .env."""
     if env_file and os.path.isfile(env_file):
         load_dotenv(env_file, override=True)
     else:
         _load_project_dotenv()
     _normalize_alpaca_env_keys()
-    _sync_trading_mode_flags()
+    _sync_trading_mode_flags(skip_root_override=book_scoped)
     try:
         from modules.alpaca_client import reset_trading_client_cache
 
@@ -1285,6 +1387,15 @@ def set_backtest_paper_sleeves_context(active: bool) -> None:
 
 def backtest_paper_sleeves_context() -> bool:
     return _backtest_paper_sleeves_ctx
+
+
+def set_backtest_strict_pit_context(active: bool) -> None:
+    global _backtest_strict_pit_ctx
+    _backtest_strict_pit_ctx = bool(active)
+
+
+def backtest_strict_pit_context() -> bool:
+    return _backtest_strict_pit_ctx
 
 
 def set_live_thinking_sim_context(active: bool) -> None:
@@ -1737,6 +1848,7 @@ def get_best_paper_bot_stack() -> dict[str, bool]:
         stack["dynamic_vti"] = PAPER_DYNAMIC_VTI_ENABLED
         stack["dynamic_risk"] = PAPER_DYNAMIC_RISK_ENABLED
         stack["nyse_overlap"] = PAPER_NYSE_OVERLAP_FILTER_ENABLED
+        stack["nyse_conditional"] = PAPER_NYSE_CONDITIONAL_ON_SPY
         stack["adaptive_chunk"] = PAPER_ADAPTIVE_CHUNK_ENABLED
         stack["cofire_budget"] = PAPER_COFIRE_BUDGET_ENABLED
         stack["dynamic_universe"] = PAPER_DYNAMIC_UNIVERSE_ENABLED
@@ -1750,6 +1862,7 @@ def get_best_paper_bot_stack() -> dict[str, bool]:
             "options_income": PAPER_OPTIONS_SLEEVE_ENABLED,
             "thinking_engine": PAPER_THINKING_ENGINE_ENABLED,
             "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+            "nyse_conditional": PAPER_NYSE_CONDITIONAL_ON_SPY,
             "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
             "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
             "dynamic_universe": PAPER_DYNAMIC_UNIVERSE_ENABLED,
@@ -1807,6 +1920,106 @@ def format_best_paper_status_lines() -> tuple[str, str]:
     finally:
         set_paper_aggressive_context(was_ctx)
         set_backtest_paper_sleeves_context(was_bt)
+
+
+_best_paper_config_mod = None
+
+
+def refresh_paper_new_markets_flags_from_env() -> None:
+    """Re-read opt-in ADR/bond sleeve flags after dotenv or .env edits."""
+    global PAPER_INTERNATIONAL_SLEEVE_ENABLED, PAPER_BOND_SLEEVE_ENABLED
+    PAPER_INTERNATIONAL_SLEEVE_ENABLED = _parse_env_bool(
+        "PAPER_INTERNATIONAL_SLEEVE_ENABLED", default="false"
+    )
+    PAPER_BOND_SLEEVE_ENABLED = _parse_env_bool("PAPER_BOND_SLEEVE_ENABLED", default="false")
+
+
+def _load_best_paper_config():
+    """Load config/best_paper_config.py (config.py shadows the config/ package name)."""
+    global _best_paper_config_mod
+    if _best_paper_config_mod is not None:
+        return _best_paper_config_mod
+    path = Path(__file__).resolve().parent / "config" / "best_paper_config.py"
+    if not path.is_file():
+        raise ImportError(f"best_paper_config not found at {path}")
+    spec = importlib.util.spec_from_file_location("_best_paper_config", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load best_paper_config from {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _best_paper_config_mod = mod
+    return mod
+
+
+def get_best_paper_validated_defaults_line() -> str:
+    try:
+        return _load_best_paper_config().get_validated_defaults_line()
+    except (ImportError, AttributeError):
+        return (
+            "v2.2 LOCK: strict PIT | conservative blend | thinking ON | "
+            "dyn_univ ON | crypto/rotation/ADR/bond OFF"
+        )
+
+
+def get_best_paper_display_name() -> str:
+    try:
+        return _load_best_paper_config().BEST_PAPER_DISPLAY_NAME
+    except (ImportError, AttributeError):
+        return "Best Paper Bot v2.2 (conservative blend + thinking ON)"
+
+
+def get_best_paper_final_lock_banner() -> str:
+    try:
+        return _load_best_paper_config().get_final_lock_banner()
+    except (ImportError, AttributeError):
+        return "FINAL CONFIG: Best Paper Bot v2.2 locked"
+
+
+def get_best_paper_v22_summary_lines() -> list[str]:
+    try:
+        return _load_best_paper_config().get_v22_config_summary_lines()
+    except (ImportError, AttributeError):
+        return [
+            "=== Best Paper v2.2 (locked defaults) ===",
+            "  ON: strict PIT | conservative Top1 | thinking | dyn_univ",
+            "  OFF: crypto | rotation | ADR | bond | scaling | patterns",
+        ]
+
+
+def get_best_paper_locked_header() -> str:
+    try:
+        return _load_best_paper_config().get_locked_stack_header()
+    except (ImportError, AttributeError):
+        return "LOCKED Best Paper Bot v2.2 (conservative blend + thinking ON)"
+
+
+def get_best_paper_restart_lines() -> list[str]:
+    try:
+        return _load_best_paper_config().get_restart_commands_block()
+    except (ImportError, AttributeError):
+        return [
+            "=== Restart bots ===",
+            "Live: python run_all.py",
+            "Paper: python run_paper_bot.py",
+        ]
+
+
+def get_live_profile_defaults_line() -> str:
+    try:
+        return _load_best_paper_config().get_live_profile_summary()
+    except (ImportError, AttributeError):
+        return "Live Profile A: 90% VTI | crypto OFF | thinking OFF | static universe"
+
+
+def get_top1_conservative_blend_line() -> str:
+    if not PAPER_VOL_POSITION_SIZING_ENABLED and not PAPER_LOSS_CUTTING_ENABLED:
+        return "Top1 conservative blend: OFF"
+    parts: list[str] = []
+    if effective_vol_position_sizing_enabled():
+        parts.append("vol sizing on")
+    if effective_loss_cutting_enabled():
+        parts.append("loss cutting on")
+    return "Top1 conservative blend: " + (", ".join(parts) if parts else "OFF")
 
 
 def print_paper_research_stack_flags() -> None:
@@ -2046,6 +2259,7 @@ def get_paper_feature_flags() -> dict[str, bool]:
         "stat_arb_optimized": False,
         "social": effective_social_sleeve_enabled(),
         "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+        "nyse_conditional": PAPER_NYSE_CONDITIONAL_ON_SPY,
         "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
         "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
         "spy_exit_on_ma_break": PAPER_SPY_EXIT_ON_MA_BREAK,
@@ -2058,6 +2272,7 @@ def snapshot_paper_sleeve_flags() -> dict[str, bool]:
     """Save PAPER_* sleeve env flags for backtest restore."""
     return {
         "nyse_overlap": PAPER_NYSE_OVERLAP_FILTER_ENABLED,
+        "nyse_conditional": PAPER_NYSE_CONDITIONAL_ON_SPY,
         "adaptive_chunk": PAPER_ADAPTIVE_CHUNK_ENABLED,
         "cofire_budget": PAPER_COFIRE_BUDGET_ENABLED,
         "spy_exit_on_ma_break": PAPER_SPY_EXIT_ON_MA_BREAK,
@@ -2067,11 +2282,14 @@ def snapshot_paper_sleeve_flags() -> dict[str, bool]:
 def apply_paper_sleeve_flags(flags: dict[str, bool]) -> None:
     """Set PAPER_* sleeve flags (used by backtester A/B)."""
     global PAPER_NYSE_OVERLAP_FILTER_ENABLED
+    global PAPER_NYSE_CONDITIONAL_ON_SPY
     global PAPER_ADAPTIVE_CHUNK_ENABLED
     global PAPER_COFIRE_BUDGET_ENABLED
     global PAPER_SPY_EXIT_ON_MA_BREAK
     if "nyse_overlap" in flags:
         PAPER_NYSE_OVERLAP_FILTER_ENABLED = bool(flags["nyse_overlap"])
+    if "nyse_conditional" in flags:
+        PAPER_NYSE_CONDITIONAL_ON_SPY = bool(flags["nyse_conditional"])
     if "adaptive_chunk" in flags:
         PAPER_ADAPTIVE_CHUNK_ENABLED = bool(flags["adaptive_chunk"])
     if "cofire_budget" in flags:
@@ -2085,6 +2303,15 @@ def effective_nyse_overlap_filter_enabled() -> bool:
     if flags:
         return flags["nyse_overlap"]
     return NYSE_OVERLAP_FILTER_ENABLED
+
+
+def effective_nyse_conditional_on_spy() -> bool:
+    """Stricter NYSE vs SPY filter — paper aggressive / chase only."""
+    if not (paper_only_sleeves_active() or paper_aggressive_context()):
+        return False
+    if not NYSE_CONDITIONAL_ON_SPY or not PAPER_NYSE_CONDITIONAL_ON_SPY:
+        return False
+    return True
 
 
 def effective_adaptive_chunk_enabled() -> bool:
@@ -2138,12 +2365,20 @@ def effective_stat_arb_optimized() -> bool:
 
 def effective_international_sleeve_enabled() -> bool:
     """ADR sleeve — research opt-in; off on live Profile A."""
-    return False
+    if not paper_only_sleeves_active() and not backtest_paper_sleeves_context():
+        return False
+    if not (paper_aggressive_context() or backtest_paper_sleeves_context()):
+        return False
+    return PAPER_INTERNATIONAL_SLEEVE_ENABLED
 
 
 def effective_bond_sleeve_enabled() -> bool:
     """Bond sleeve — research opt-in; off on live Profile A."""
-    return False
+    if not paper_only_sleeves_active() and not backtest_paper_sleeves_context():
+        return False
+    if not (paper_aggressive_context() or backtest_paper_sleeves_context()):
+        return False
+    return PAPER_BOND_SLEEVE_ENABLED
 
 
 def effective_paper_profit_protect_enabled() -> bool:

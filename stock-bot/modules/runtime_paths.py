@@ -82,9 +82,9 @@ def resolve_runtime_root(start: Path | None = None) -> Path:
 
     if is_frozen():
         exe_dir = Path(sys.executable).resolve().parent
-        found = _stock_bot_from_path(exe_dir)
+        found = _find_runtime_root(exe_dir) or _stock_bot_from_path(exe_dir)
         if found is not None:
-            return found
+            return found.resolve()
         return exe_dir.resolve()
 
     return Path(__file__).resolve().parents[1]

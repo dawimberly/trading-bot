@@ -91,12 +91,17 @@ def build_trading_client(
 def get_trading_client(
     paper: bool | None = None,
     credentials_fn: Callable[[], tuple[str, str]] | None = None,
+    *,
+    allow_live: bool | None = None,
 ) -> TradingClient:
     """Return a cached TradingClient using config credentials."""
-    cred_fn = credentials_fn or config.get_alpaca_credentials
-    api_key, secret_key = cred_fn()
     use_paper = config.PAPER_TRADING if paper is None else bool(paper)
-    if not use_paper and not config.ALLOW_LIVE_TRADING:
+    if credentials_fn is not None:
+        api_key, secret_key = credentials_fn()
+    else:
+        api_key, secret_key = config.get_alpaca_credentials(paper=use_paper)
+    use_allow_live = config.ALLOW_LIVE_TRADING if allow_live is None else bool(allow_live)
+    if not use_paper and not use_allow_live:
         raise RuntimeError(
             "Live trading is disabled. Use Alpaca paper keys with PAPER_TRADING=true, "
             "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."

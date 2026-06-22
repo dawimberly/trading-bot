@@ -21,12 +21,17 @@ from fetch_data import fetch_and_store
 DB_PATH = Path(__file__).resolve().parents[2] / "market_data.db"
 
 
+def _is_weekend() -> bool:
+    return datetime.now().weekday() >= 5
+
+
 def _data_refresh_ok(data) -> tuple[bool, str]:
     if data.empty:
         return False, "market_data.db has no price rows — run fetch_data.py"
     if not DB_PATH.exists():
         return False, "market_data.db missing — run fetch_data.py"
     mtime_h = (time.time() - DB_PATH.stat().st_mtime) / 3600
+    bar_max_h = 72 if _is_weekend() else 48
     if mtime_h > 24:
         return False, f"DB file {mtime_h:.1f}h old — run fetch_data.py"
     last = data.index[-1]
@@ -36,9 +41,11 @@ def _data_refresh_ok(data) -> tuple[bool, str]:
             if last_dt.tzinfo is None:
                 last_dt = last_dt.replace(tzinfo=timezone.utc)
             age_h = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
-            if age_h > 48:
-                return False, f"last bar ~{age_h:.0f}h old — run fetch_data.py"
-            return True, f"price data through {last} ({mtime_h:.1f}h since refresh)"
+            if age_h > bar_max_h:
+                hint = " (weekend: bars may lag until Monday)" if _is_weekend() else ""
+                return False, f"last bar ~{age_h:.0f}h old — run fetch_data.py{hint}"
+            weekend_note = f", bar age limit {bar_max_h}h (weekend)" if _is_weekend() else ""
+            return True, f"price data through {last} ({mtime_h:.1f}h since refresh{weekend_note})"
     except Exception:
         pass
     return True, f"DB refreshed {mtime_h:.1f}h ago ({len(data)} rows)"

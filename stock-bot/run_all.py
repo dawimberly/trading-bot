@@ -558,8 +558,15 @@ def main():
     print(f"--- {format_scan_schedule_line(schedule)} ---")
     data = load_close_matrix()
     if data.empty or len(data) < 20:
+        db = config.resolve_db_path()
+        db_size = db.stat().st_size if db.is_file() else 0
         log_event("cycle_skip", reason="insufficient_data", equity=equity)
-        logger.warning("Insufficient market data. Skipping cycle.")
+        logger.warning(
+            "Insufficient market data. Skipping cycle. (db=%s size=%s rows=%s)",
+            db,
+            db_size,
+            len(data),
+        )
         trade_journal.log_event("skip", equity=equity, notes="empty or short data")
         return
 
@@ -1264,7 +1271,6 @@ def main():
 
 def _print_kraken_banner():
     if not config.KRAKEN_AUTOPILOT_ENABLED:
-        print("--- Kraken autopilot: off ---")
         return
     from modules.kraken_capabilities import probe_kraken_capabilities
     from modules.kraken_spot import autopilot_enabled, trading_allowed
@@ -1289,6 +1295,35 @@ def _print_kraken_banner():
         )
 
 
+def _alpaca_startup_hint(exc: Exception | None = None) -> str:
+    if config.PAPER_TRADING:
+        return (
+            "Use paper Alpaca keys with PAPER_TRADING=true "
+            "(endpoint paper-api.alpaca.markets). "
+            "Live keys need PAPER_TRADING=false."
+        )
+    return (
+        "Use live Alpaca keys with PAPER_TRADING=false and ALLOW_LIVE_TRADING=yes "
+        "(endpoint api.alpaca.markets). Paper keys return 401 on the live endpoint."
+    )
+
+
+def _print_account_startup_summary(equity: float) -> None:
+    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    config.configure_account_profile(equity)
+    vti = config.vti_core_allocation_pct(equity=equity)
+    print(
+        f"--- Account summary: ${equity:,.2f} equity | {mode} | "
+        f"VTI target {vti:.0%} | risk {config.effective_risk_per_trade():.0%}/trade ---"
+    )
+    if config.is_small_account(equity):
+        print(
+            f"--- Small account profile (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
+            f"max order ${config.effective_max_notional_per_order(equity):,.2f} | "
+            f"VTI {vti:.0%} ---"
+        )
+
+
 def _print_startup_banner():
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     endpoint = (
@@ -1296,8 +1331,16 @@ def _print_startup_banner():
         if config.PAPER_TRADING
         else "api.alpaca.markets (LIVE)"
     )
+    if config.PAPER_TRADING:
+        print("=" * 60)
+        print("=== BOT STARTING IN PAPER MODE (simulated money) ===")
+        print("=" * 60)
+    else:
+        print("=" * 60)
+        print("=== BOT STARTING IN LIVE MODE (REAL MONEY) ===")
+        print("=" * 60)
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
-    print(f"--- Alpaca mode: {mode} ({endpoint}) ---")
+    print(f"--- Alpaca: {mode} ({endpoint}) ---")
     if config.paper_aggressive_context():
         print(
             "--- Paper SHARPE CHASE: dynamic VTI 40-75% (calm/stress) | "
@@ -1497,6 +1540,7 @@ if __name__ == "__main__":
             pass
 
     config.configure_heartbeat_path()
+    db_path = config.ensure_market_db()
     setup_logging(log_dir=Path("logs"))
     config.ensure_sentiment_dirs()
     try:
@@ -1515,9 +1559,16 @@ if __name__ == "__main__":
         _startup_executor = _make_executor()
         startup_equity = float(_startup_executor._get_account().equity)
         config.configure_account_profile(startup_equity)
+    except AlpacaAuthError as exc:
+        fatal_startup(
+            f"Alpaca authentication failed at startup: {exc}\n\n{_alpaca_startup_hint(exc)}"
+        )
     except Exception as exc:
-        print(f"[WARN] Could not load account for sizing profile: {exc}")
+        print(f"[WARN] Could not load Alpaca account at startup: {exc}")
+        print(f"       {_alpaca_startup_hint(exc)}")
     _print_startup_banner()
+    if startup_equity is not None:
+        _print_account_startup_summary(startup_equity)
     if startup_equity is not None:
         _confirm_live_trading_startup(startup_equity)
     from modules.dashboard_launcher import maybe_launch_dashboard

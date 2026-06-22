@@ -12,7 +12,7 @@ $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-O
 })
 
 if (-not $procs) {
-    Write-Host "No dashboard monitor running under $root"
+    Write-Host "No dashboard monitor running (OK if this is a fresh start)."
     exit 0
 }
 

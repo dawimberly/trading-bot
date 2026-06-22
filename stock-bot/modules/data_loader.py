@@ -68,7 +68,7 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
     days: if set, keep only the last N rows after load
     force_refresh: bypass TTL cache
     """
-    path = db_path or config.DB_PATH
+    path = str(db_path or config.resolve_db_path())
     cache_key = (str(path), interval, days)
     mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
     ttl = _cache_ttl_sec()

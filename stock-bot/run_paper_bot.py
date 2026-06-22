@@ -2,7 +2,7 @@
 
 Uses run_all.py with PAPER_CHASE_MODE and enforce_best_paper_stack():
   - Dynamic VTI (40-75%), dynamic risk (1-3%), original stat arb, vol overlay, options
-  - Overlap filter, adaptive chunk, co-fire budget
+  - Overlap filter, NYSE conditional-on-SPY, adaptive chunk, co-fire budget
   - Thinking engine opt-in (PAPER_THINKING_ENGINE_ENABLED=true + Ollama)
   - Locked OFF: macro regime, risk parity, stat arb optimized, social, equity pairs, SPY MA exit
 

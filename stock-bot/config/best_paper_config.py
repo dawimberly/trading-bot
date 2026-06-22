@@ -29,6 +29,7 @@ BEST_PAPER_CORE_ON: dict[str, bool] = {
     "options_income": True,
     "thinking_engine": False,  # opt-in via PAPER_THINKING_ENGINE_ENABLED / BEST_PAPER_THINKING_ENGINE
     "nyse_overlap": True,
+    "nyse_conditional": True,
     "adaptive_chunk": True,
     "cofire_budget": True,
     "dynamic_universe": True,
@@ -53,6 +54,7 @@ BEST_PAPER_ENV_MAP: dict[str, str] = {
     "options_income": "BEST_PAPER_OPTIONS",
     "thinking_engine": "BEST_PAPER_THINKING_ENGINE",
     "nyse_overlap": "BEST_PAPER_NYSE_OVERLAP",
+    "nyse_conditional": "BEST_PAPER_NYSE_CONDITIONAL",
     "adaptive_chunk": "BEST_PAPER_ADAPTIVE_CHUNK",
     "cofire_budget": "BEST_PAPER_COFIRE_BUDGET",
     "dynamic_universe": "BEST_PAPER_DYNAMIC_UNIVERSE",
@@ -133,6 +135,7 @@ def apply_best_paper_config() -> None:
     else:
         config.PAPER_THINKING_ENGINE_ENABLED = flags["thinking_engine"]
     config.PAPER_NYSE_OVERLAP_FILTER_ENABLED = flags["nyse_overlap"]
+    config.PAPER_NYSE_CONDITIONAL_ON_SPY = flags["nyse_conditional"]
     config.PAPER_ADAPTIVE_CHUNK_ENABLED = flags["adaptive_chunk"]
     config.PAPER_COFIRE_BUDGET_ENABLED = flags["cofire_budget"]
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = flags["dynamic_universe"]

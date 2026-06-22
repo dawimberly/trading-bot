@@ -100,6 +100,52 @@ def _legacy_bot_running(script_name: str) -> bool:
         return False
 
 
+def _active_sleeves(hb: dict | None) -> list[str]:
+    exposure = (hb or {}).get("sleeve_exposure") or {}
+    active: list[str] = []
+    for label, key in (
+        ("VTI", "vti_core_value"),
+        ("SPY", "spy_value"),
+        ("Crypto", "crypto_value"),
+        ("NYSE", "nyse_value"),
+        ("Metal", "metal_value"),
+    ):
+        if float(exposure.get(key) or 0) > 0:
+            active.append(label)
+    return active
+
+
+def _ops_summary_line(
+    *,
+    live_active: bool,
+    live_eq: float | None,
+    live_hb: dict | None,
+    live_hb_age: float | None,
+    live_bot_running: bool,
+) -> str:
+    mode = "LIVE" if live_active else "PAPER ONLY (.env)"
+    eq_s = _fmt_equity(live_eq) if live_active else "n/a"
+    if live_hb_age is not None:
+        stale = _heartbeat_stale_label(live_hb_age, live_hb, bot_running=live_bot_running)
+        hb_s = f"{live_hb_age:.0f} min{stale}"
+    else:
+        hb_s = "n/a"
+    vti = sm.vti_allocation_pct(live_hb if live_active else None)
+    if vti is None and live_eq is not None and live_active:
+        try:
+            config.configure_account_profile(live_eq)
+            vti = config.vti_core_allocation_pct(equity=live_eq) * 100.0
+        except Exception:
+            vti = None
+    vti_s = f"{vti:.0f}%" if vti is not None else "n/a"
+    sleeves = ", ".join(_active_sleeves(live_hb)) if live_active else "n/a"
+    bot_s = "running" if live_bot_running else "stopped"
+    return (
+        f"Ops: {mode} | equity {eq_s} | heartbeat {hb_s} | "
+        f"VTI {vti_s} | sleeves {sleeves or 'none'} | bot {bot_s}"
+    )
+
+
 def _heartbeat_scan_phase(hb: dict | None) -> str:
     scan = (hb or {}).get("scan_schedule") or {}
     return str(scan.get("phase") or scan.get("label") or "").strip()
@@ -599,6 +645,15 @@ def main() -> None:
 
     _emit(f"PythonTrading status - {now} ({mode})")
     _emit("=" * 72)
+    _emit(
+        _ops_summary_line(
+            live_active=_is_live_book_active(),
+            live_eq=live_eq,
+            live_hb=live_hb,
+            live_hb_age=live_hb_age,
+            live_bot_running=live_bot_running,
+        )
+    )
     for line in sm.top_banner_lines(
         live_eq=live_eq,
         paper_eq=paper_eq,

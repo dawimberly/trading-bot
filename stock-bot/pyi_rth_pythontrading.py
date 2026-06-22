@@ -9,11 +9,14 @@ from pathlib import Path
 
 def _find_project_root() -> Path:
     exe_dir = Path(sys.executable).resolve().parent
-    # stock-bot/dist/Weinstein-Trading-Bot.exe -> stock-bot/
-    if (exe_dir.parent / "run_all.py").is_file():
-        return exe_dir.parent
-    if (exe_dir / "run_all.py").is_file():
-        return exe_dir
+    candidate = exe_dir
+    for _ in range(8):
+        if (candidate / "run_all.py").is_file():
+            return candidate
+        parent = candidate.parent
+        if parent == candidate:
+            break
+        candidate = parent
     return exe_dir
 
 

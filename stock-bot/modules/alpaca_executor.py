@@ -22,17 +22,20 @@ T = TypeVar("T")
 class AlpacaExecutor:
     """Submit market orders via alpaca-py with shared credential loading."""
 
-    def __init__(self, paper=None, credentials_fn=None):
+    def __init__(self, paper=None, credentials_fn=None, *, allow_live=None):
         cred_fn = credentials_fn or config.get_alpaca_credentials
         self._credentials_fn = cred_fn
         use_paper = config.PAPER_TRADING if paper is None else paper
-        if not use_paper and not config.ALLOW_LIVE_TRADING:
+        use_allow_live = config.ALLOW_LIVE_TRADING if allow_live is None else allow_live
+        if not use_paper and not use_allow_live:
             raise RuntimeError(
                 "Live trading is disabled. Use Alpaca paper keys with PAPER_TRADING=true, "
                 "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
             )
         self.paper = use_paper
-        self.client = get_trading_client(paper=use_paper, credentials_fn=cred_fn)
+        self.client = get_trading_client(
+            paper=use_paper, credentials_fn=cred_fn, allow_live=use_allow_live
+        )
         self._equity_session_open = None  # None => check Alpaca clock per order
         self._account = None
         self._positions = None
@@ -789,8 +792,8 @@ class AlpacaExecutor:
         return [r.as_dict() for r in results]
 
 
-def get_trading_client(paper=None, credentials_fn=None):
+def get_trading_client(paper=None, credentials_fn=None, *, allow_live=None):
     """Return a cached TradingClient (utility scripts)."""
     from modules.alpaca_client import get_trading_client as _get_client
 
-    return _get_client(paper=paper, credentials_fn=credentials_fn)
+    return _get_client(paper=paper, credentials_fn=credentials_fn, allow_live=allow_live)
