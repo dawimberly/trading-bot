@@ -1,4 +1,6 @@
-"""Email and Telegram alerts for halts and daily paper-trading summaries."""
+"""Email and Telegram alerts — high-signal events only (policy in config.py)."""
+
+from __future__ import annotations
 
 import json
 import os
@@ -8,13 +10,28 @@ import urllib.parse
 import urllib.request
 from datetime import date, datetime
 from email.mime.text import MIMEText
+from zoneinfo import ZoneInfo
 
 import config
 
 STATE_FILE = "alert_state.json"
+_ET = ZoneInfo("America/New_York")
+
+# Internal categories -> config flags
+_CATEGORY_FLAGS: dict[str, str] = {
+    "halt": "TELEGRAM_ALERT_HALT",
+    "resume": "TELEGRAM_ALERT_HALT",
+    "drawdown_major": "TELEGRAM_ALERT_DRAWDOWN_MAJOR",
+    "yield_gate": "TELEGRAM_ALERT_YIELD_GATE",
+    "daily_summary": "TELEGRAM_ALERT_DAILY_SUMMARY",
+    "live_fill": "TELEGRAM_ALERT_LIVE_FILLS",
+    "spacex": "TELEGRAM_ALERT_SPACEX",
+    "btc": "TELEGRAM_ALERT_BTC",
+    "social": "TELEGRAM_ALERT_SOCIAL",
+}
 
 
-def _load_state():
+def _load_state() -> dict:
     if not os.path.exists(STATE_FILE):
         return {}
     try:
@@ -24,18 +41,30 @@ def _load_state():
         return {}
 
 
-def _save_state(state):
+def _save_state(state: dict) -> None:
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
 
 
-def alerts_configured():
+def _category_enabled(category: str) -> bool:
+    flag = _CATEGORY_FLAGS.get(category)
+    if not flag:
+        return False
+    return bool(getattr(config, flag, False))
+
+
+def _mode_label() -> str:
+    return "PAPER" if config.PAPER_TRADING else "LIVE"
+
+
+def alerts_configured() -> bool:
     tg = config.get_telegram_config()
     smtp = config.get_smtp_config()
     return bool(tg) or bool(smtp.get("host") and smtp.get("to"))
 
 
-def send_telegram(text):
+def send_telegram(text: str) -> bool:
+    """Low-level send (bypasses policy) — use for manual tests only."""
     tg = config.get_telegram_config()
     if not tg:
         return False
@@ -55,7 +84,7 @@ def send_telegram(text):
         return False
 
 
-def send_email(subject, body):
+def send_email(subject: str, body: str) -> bool:
     smtp = config.get_smtp_config()
     host = smtp.get("host")
     to_addr = smtp.get("to")
@@ -86,9 +115,11 @@ def send_email(subject, body):
         return False
 
 
-def broadcast(subject, body):
-    """Send to every configured channel; never raises."""
+def broadcast(subject: str, body: str, *, category: str = "general") -> bool:
+    """Send to configured channels when the alert category is enabled."""
     if not alerts_configured():
+        return False
+    if not _category_enabled(category):
         return False
     ok = False
     try:
@@ -104,13 +135,35 @@ def broadcast(subject, body):
     return ok
 
 
-def notify_halt(equity, peak_equity, drawdown_pct):
-    """Alert once when drawdown halt first triggers; reset when trading resumes."""
+def _parse_summary_time_et() -> tuple[int, int]:
+    raw = (config.TELEGRAM_DAILY_SUMMARY_TIME or "16:30").strip()
+    try:
+        hour_s, minute_s = raw.split(":", 1)
+        return int(hour_s), int(minute_s)
+    except (ValueError, TypeError):
+        return 16, 30
+
+
+def _daily_summary_due() -> bool:
+    """True once per ET calendar day after TELEGRAM_DAILY_SUMMARY_TIME."""
+    if not config.TELEGRAM_ALERT_DAILY_SUMMARY:
+        return False
+    now_et = datetime.now(_ET)
+    target_h, target_m = _parse_summary_time_et()
+    if (now_et.hour, now_et.minute) < (target_h, target_m):
+        return False
+    today = now_et.date().isoformat()
+    state = _load_state()
+    return state.get("last_daily_summary") != today
+
+
+def notify_halt(equity: float, peak_equity: float, drawdown_pct: float) -> None:
+    """Alert once when drawdown halt first triggers."""
     state = _load_state()
     if state.get("halt_notified"):
         return
 
-    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    mode = _mode_label()
     subject = f"[PythonTrading {mode}] RISK HALT"
     body = (
         f"Trading paused: max drawdown reached.\n\n"
@@ -118,26 +171,100 @@ def notify_halt(equity, peak_equity, drawdown_pct):
         f"Peak:       ${peak_equity:,.2f}\n"
         f"Drawdown:   {drawdown_pct:.2%}\n"
         f"Limit:      {config.MAX_DRAWDOWN_PCT:.0%}\n"
-        f"Time:       {datetime.now():%Y-%m-%d %H:%M:%S}\n\n"
+        f"Time:       {datetime.now(_ET):%Y-%m-%d %H:%M:%S} ET\n\n"
         f"Review risk_events.log and Alpaca dashboard."
     )
-    broadcast(subject, body)
-    state["halt_notified"] = True
-    state["halt_notified_at"] = datetime.now().isoformat()
-    _save_state(state)
+    if broadcast(subject, body, category="halt"):
+        state["halt_notified"] = True
+        state["halt_notified_at"] = datetime.now().isoformat()
+        _save_state(state)
 
 
-def clear_halt_flag():
+def notify_resume(equity: float, drawdown_pct: float) -> None:
+    """Alert when trading resumes after a risk halt."""
+    mode = _mode_label()
+    subject = f"[PythonTrading {mode}] RISK RESUME"
+    body = (
+        f"Trading resumed after drawdown recovered.\n\n"
+        f"Equity:     ${equity:,.2f}\n"
+        f"Drawdown:   {drawdown_pct:.2%}\n"
+        f"Resume below: {config.HALT_RESUME_DRAWDOWN_PCT:.0%}\n"
+        f"Time:       {datetime.now(_ET):%Y-%m-%d %H:%M:%S} ET"
+    )
+    if broadcast(subject, body, category="resume"):
+        state = _load_state()
+        state["halt_notified"] = False
+        _save_state(state)
+
+
+def clear_halt_flag() -> None:
+    """Reset halt notification latch when trading is healthy."""
     state = _load_state()
     if state.get("halt_notified"):
         state["halt_notified"] = False
         _save_state(state)
 
 
+def maybe_major_drawdown_alert(
+    equity: float, peak_equity: float, drawdown_pct: float
+) -> None:
+    """Warn once when drawdown crosses TELEGRAM_MAJOR_DRAWDOWN_PCT (below halt limit)."""
+    threshold = float(config.TELEGRAM_MAJOR_DRAWDOWN_PCT)
+    state = _load_state()
+    if drawdown_pct < threshold * 0.85:
+        if state.pop("major_dd_notified", None) is not None:
+            _save_state(state)
+        return
+    if drawdown_pct < threshold or state.get("major_dd_notified"):
+        return
+
+    mode = _mode_label()
+    subject = f"[PythonTrading {mode}] Drawdown warning (>{threshold:.0%})"
+    body = (
+        f"Account drawdown crossed {threshold:.0%} (halt at {config.MAX_DRAWDOWN_PCT:.0%}).\n\n"
+        f"Equity:     ${equity:,.2f}\n"
+        f"Peak:       ${peak_equity:,.2f}\n"
+        f"Drawdown:   {drawdown_pct:.2%}\n"
+        f"Time:       {datetime.now(_ET):%Y-%m-%d %H:%M:%S} ET"
+    )
+    if broadcast(subject, body, category="drawdown_major"):
+        state["major_dd_notified"] = True
+        state["major_dd_notified_at"] = datetime.now().isoformat()
+        _save_state(state)
+
+
+def maybe_yield_gate_alert(active: bool) -> None:
+    """Alert on yield-gate state transitions (on/off)."""
+    state = _load_state()
+    prev = state.get("yield_gate_active")
+    if prev is None:
+        state["yield_gate_active"] = bool(active)
+        _save_state(state)
+        return
+    if bool(prev) == bool(active):
+        return
+
+    state["yield_gate_active"] = bool(active)
+    _save_state(state)
+
+    mode = _mode_label()
+    label = "ACTIVATED" if active else "DEACTIVATED"
+    subject = f"[PythonTrading {mode}] Yield gate {label}"
+    body = (
+        f"Yield gate is now {'ON' if active else 'OFF'}.\n"
+        f"New SPY/equity entries are {'blocked' if active else 'allowed'}.\n\n"
+        f"Time: {datetime.now(_ET):%Y-%m-%d %H:%M:%S} ET"
+    )
+    broadcast(subject, body, category="yield_gate")
+
+
 def maybe_monthly_wisdom_summary(rollup: dict) -> None:
-    """One alert per rolled-up calendar month (recommendation only; no auto-switch)."""
+    """Disabled unless TELEGRAM_ALERT_SOCIAL=true (noisy / research-only)."""
     if not rollup or not alerts_configured():
         return
+    if not config.TELEGRAM_ALERT_SOCIAL:
+        return
+
     month_key = rollup.get("month", "")
     state = _load_state()
     if state.get("last_monthly_wisdom_alert") == month_key:
@@ -150,7 +277,7 @@ def maybe_monthly_wisdom_summary(rollup: dict) -> None:
     live_ret = live.get("return_pct")
     ret_s = f"{live_ret:+.2f}%" if live_ret is not None else "n/a (no journal data)"
 
-    mode_label = "PAPER" if config.PAPER_TRADING else "LIVE"
+    mode_label = _mode_label()
     subject = f"[PythonTrading {mode_label}] Wisdom month {month_key}"
     body = (
         f"Month:          {month_key}\n"
@@ -162,20 +289,20 @@ def maybe_monthly_wisdom_summary(rollup: dict) -> None:
         f"File: wisdom_monthly_{month_key}.json\n"
         f"Change WISDOM_MODE in .env manually if you agree."
     )
-    if broadcast(subject, body):
+    if broadcast(subject, body, category="social"):
         state = _load_state()
         state["last_monthly_wisdom_alert"] = month_key
         _save_state(state)
 
 
-def maybe_daily_summary(equity, cash, regime, halted):
-    """One summary per calendar day (UTC-local date on machine)."""
-    state = _load_state()
-    today = date.today().isoformat()
-    if state.get("last_daily_summary") == today:
+def maybe_daily_summary(equity: float, cash: float, regime: str, halted: bool) -> None:
+    """One summary per ET day after market close (TELEGRAM_DAILY_SUMMARY_TIME)."""
+    if not _daily_summary_due():
         return
 
-    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    now_et = datetime.now(_ET)
+    today = now_et.date().isoformat()
+    mode = _mode_label()
     status = "HALTED" if halted else "RUNNING"
     subject = f"[PythonTrading {mode}] Daily summary"
     body = (
@@ -183,20 +310,25 @@ def maybe_daily_summary(equity, cash, regime, halted):
         f"Regime:     {regime}\n"
         f"Equity:     ${equity:,.2f}\n"
         f"Cash:       ${cash:,.2f}\n"
-        f"Date:       {today}\n\n"
+        f"Date:       {today} (ET)\n"
+        f"Sent:       {now_et:%H:%M} ET\n\n"
         f"Logs: {config.PAPER_JOURNAL_CSV}, {config.HEARTBEAT_FILE}"
     )
-    if broadcast(subject, body):
+    if broadcast(subject, body, category="daily_summary"):
+        state = _load_state()
         state["last_daily_summary"] = today
         _save_state(state)
     else:
-        print("Daily summary alert failed (will retry next cycle).")
+        print("Daily summary alert failed or disabled (will retry next cycle).")
 
 
 def maybe_spacex_ipo_alert(snapshot: dict) -> None:
-    """Alert once per cache refresh when BTC-linked SpaceX IPO headlines spike."""
+    """SpaceX/BTC narrative headlines — off unless TELEGRAM_ALERT_BTC=true."""
     if not snapshot or not snapshot.get("alert") or not alerts_configured():
         return
+    if not config.TELEGRAM_ALERT_BTC:
+        return
+
     fetched_at = snapshot.get("fetched_at", "")
     state = _load_state()
     if state.get("last_spacex_ipo_alert") == fetched_at:
@@ -204,7 +336,7 @@ def maybe_spacex_ipo_alert(snapshot: dict) -> None:
 
     s = snapshot.get("summary") or {}
     top = (s.get("top_headlines") or [{}])[0].get("title", "n/a")
-    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    mode = _mode_label()
     subject = f"[PythonTrading {mode}] SpaceX IPO ↔ BTC narrative active"
     body = (
         f"Narrative:      {s.get('narrative', 'n/a')}\n"
@@ -212,25 +344,22 @@ def maybe_spacex_ipo_alert(snapshot: dict) -> None:
         f"BTC-linked:     {s.get('btc_linked_count', 0)}\n"
         f"Avg sentiment:  {s.get('avg_sentiment', 0):+.2f}\n"
         f"Top headline:   {top}\n\n"
-        f"S-1 context: SpaceX disclosed ~18,712 BTC treasury.\n"
-        f"SPCX perp: synthetic pre-IPO contract on Hyperliquid (not Alpaca).\n"
-        f"Override: SPACEX_IPO_CRYPTO_OVERRIDE opens BTC pairs when narrative hot.\n"
         f"Monitor file: {config.SPACEX_IPO_CACHE_FILE}"
     )
-    if broadcast(subject, body):
+    if broadcast(subject, body, category="btc"):
         state = _load_state()
         state["last_spacex_ipo_alert"] = fetched_at
         _save_state(state)
 
 
 def maybe_spacex_listing_alert(listing: dict) -> None:
-    """Alert on SEC stage changes and when SPCX becomes tradable on Alpaca or Kraken."""
-    if not listing or not alerts_configured():
+    """IPO listing milestones — off unless TELEGRAM_ALERT_SPACEX=true."""
+    if not listing or not alerts_configured() or not config.TELEGRAM_ALERT_SPACEX:
         return
 
     stage = listing.get("stage", "")
     state = _load_state()
-    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    mode = _mode_label()
     ticker = listing.get("ticker", config.SPACEX_IPO_TICKER)
     kraken = listing.get("kraken") or {}
     alpaca = listing.get("alpaca") or {}
@@ -243,13 +372,9 @@ def maybe_spacex_listing_alert(listing: dict) -> None:
                 f"Kraken pair:  {kraken.get('wsname') or kraken.get('pair')}\n"
                 f"Kind:         {kraken.get('kind')}\n"
                 f"Stage:        {stage}\n\n"
-                f"Auto-buy:     {'on' if config.KRAKEN_SPCX_BUY_ENABLED else 'off'} "
-                f"(${config.KRAKEN_SPCX_BUY_USD:,.0f})\n"
-                f"Requires:     ALLOW_KRAKEN_TRADING=yes + API keys in .env\n\n"
-                f"US equities on Kraken Pro may also appear in-app before API xStock pairs.\n"
                 f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
             )
-            if broadcast(subject, body):
+            if broadcast(subject, body, category="spacex"):
                 state = _load_state()
                 state["last_spacex_kraken_alert_key"] = key
                 _save_state(state)
@@ -266,12 +391,9 @@ def maybe_spacex_listing_alert(listing: dict) -> None:
             f"Status:     {alpaca.get('status', 'n/a')}\n"
             f"Expected:   {listing.get('expected_listing_date')} "
             f"({listing.get('days_until_expected')} days)\n\n"
-            f"Alpaca auto-buy: ${config.SPACEX_IPO_BUY_NOTIONAL:,.0f} "
-            f"({'on' if config.SPACEX_IPO_AUTO_BUY and (config.PAPER_TRADING or config.ALLOW_LIVE_TRADING) else 'off'})\n\n"
-            f"Kraken:     {'tradable' if kraken.get('tradable') else 'scanning for SPCXx/USD'}\n"
             f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
         )
-        if broadcast(subject, body):
+        if broadcast(subject, body, category="spacex"):
             state = _load_state()
             state["last_spacex_listing_alert_key"] = key
             _save_state(state)
@@ -302,18 +424,17 @@ def maybe_spacex_listing_alert(listing: dict) -> None:
         f"Kraken tradable:  {kraken.get('tradable', False)} "
         f"({kraken.get('wsname') or 'not listed'})\n"
         f"Latest SEC:       {latest.get('form', 'n/a')} ({latest.get('date', 'n/a')})\n\n"
-        f"Tracked: SEC → Alpaca paper → Kraken Pro (SPCX / SPCXx API scan)\n"
         f"File: {config.SPACEX_IPO_LISTING_CACHE_FILE}"
     )
-    if broadcast(subject, body):
+    if broadcast(subject, body, category="spacex"):
         state = _load_state()
         state["last_spacex_listing_alert_key"] = stage_key
         _save_state(state)
 
 
 def maybe_spacex_ipo_countdown_alert(listing: dict) -> None:
-    """One alert per day when within 14 days of expected listing."""
-    if not listing or not alerts_configured():
+    """IPO countdown — off unless TELEGRAM_ALERT_SPACEX=true."""
+    if not listing or not alerts_configured() or not config.TELEGRAM_ALERT_SPACEX:
         return
     days = listing.get("days_until_expected")
     if days is None or days < 0 or days > 14:
@@ -324,17 +445,15 @@ def maybe_spacex_ipo_countdown_alert(listing: dict) -> None:
     if state.get("last_spacex_countdown_day") == today:
         return
 
-    mode = "PAPER" if config.PAPER_TRADING else "LIVE"
+    mode = _mode_label()
     subject = f"[PythonTrading {mode}] SpaceX IPO in {days} day(s) — watch {listing.get('ticker')}"
     body = (
         f"Expected:  {listing.get('expected_listing_date')}\n"
         f"Stage:     {listing.get('stage')}\n"
         f"Alpaca:    {(listing.get('alpaca') or {}).get('tradable', False)}\n"
-        f"Kraken:    {(listing.get('kraken') or {}).get('tradable', False)}\n\n"
-        f"Bot scans Alpaca + Kraken Pro API every cycle for {listing.get('ticker')}.\n"
-        f"Paper Alpaca auto-buy: on by default. Kraken: set KRAKEN_SPCX_BUY_ENABLED=true."
+        f"Kraken:    {(listing.get('kraken') or {}).get('tradable', False)}"
     )
-    if broadcast(subject, body):
+    if broadcast(subject, body, category="spacex"):
         state = _load_state()
         state["last_spacex_countdown_day"] = today
         _save_state(state)

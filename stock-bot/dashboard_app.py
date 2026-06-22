@@ -1232,6 +1232,9 @@ class ScrollTextPanel(ctk.CTkFrame):
             border_width=1,
             border_color=COLORS["border"],
         )
+        self.pack_propagate(False)
+        pad = 16
+        self.configure(height=height + pad)
         self._default_color = text_color or COLORS["text"]
         self._text = ctk.CTkTextbox(
             self,
@@ -1256,8 +1259,8 @@ class ScrollTextPanel(ctk.CTkFrame):
         self._text.see("end")
 
 
-OVERVIEW_STATUS_HEIGHT = 280
-OVERVIEW_ACTIONS_HEIGHT = 220
+OVERVIEW_STATUS_HEIGHT = 360
+OVERVIEW_ACTIONS_HEIGHT = 180
 
 
 class LoginApp(ctk.CTk):
@@ -2300,7 +2303,13 @@ class TradingDashboardApp(ctk.CTk):
         self._on_logout()
 
     def _build_overview_tab(self) -> None:
-        self._overview_body = ctk.CTkFrame(self._tab_overview, fg_color="transparent")
+        self._overview_body = ctk.CTkScrollableFrame(
+            self._tab_overview,
+            fg_color="transparent",
+            scrollbar_fg_color=COLORS["surface2"],
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["accent"],
+        )
         self._overview_body.pack(fill="both", expand=True)
 
         activity_panel = ctk.CTkFrame(
@@ -2344,8 +2353,10 @@ class TradingDashboardApp(ctk.CTk):
             corner_radius=12,
             border_width=1,
             border_color=COLORS["border"],
+            height=OVERVIEW_STATUS_HEIGHT + 52,
         )
         live_panel.pack(fill="x", padx=12, pady=(0, 8))
+        live_panel.pack_propagate(False)
         self._overview_status_title = ctk.CTkLabel(
             live_panel,
             text="Bot status (both books)",
@@ -2356,10 +2367,10 @@ class TradingDashboardApp(ctk.CTk):
         self._live_status_panel = ScrollTextPanel(
             live_panel,
             height=OVERVIEW_STATUS_HEIGHT,
-            font_key="body_sm",
+            font_key="body",
             text_color=COLORS["text"],
         )
-        self._live_status_panel.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self._live_status_panel.pack(fill="x", padx=12, pady=(0, 10))
         self._live_status_panel.set_text("Waiting for refresh…", text_color=COLORS["muted"])
 
         ctk.CTkLabel(
@@ -2379,7 +2390,7 @@ class TradingDashboardApp(ctk.CTk):
             scrollbar_button_color=COLORS["border"],
             scrollbar_button_hover_color=COLORS["accent"],
         )
-        self._actions_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self._actions_scroll.pack(fill="x", padx=12, pady=(0, 8))
 
         ctk.CTkLabel(
             self._overview_body,

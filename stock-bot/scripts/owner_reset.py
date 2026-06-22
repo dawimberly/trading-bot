@@ -25,7 +25,8 @@ def _log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def _pythonw() -> str:    for candidate in (
+def _pythonw() -> str:
+    for candidate in (
         ROOT / ".venv" / "Scripts" / "pythonw.exe",
         ROOT.parent / ".venv" / "Scripts" / "pythonw.exe",
         Path(sys.executable).with_name("pythonw.exe"),
@@ -94,7 +95,7 @@ def main() -> int:
     bind_project_root(ROOT)
     _clean_stale_pids(username)
 
-    _log("Scanning for stray bot processes (may take up to 30 seconds)...")
+    _log("Scanning for stray bot processes (please wait, can take 30-60 seconds)...")
     stopped, orphan_msg = stop_orphan_project_bots()
     _log(orphan_msg if stopped else f"{orphan_msg} Continuing.")
     if stopped:

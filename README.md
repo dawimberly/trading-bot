@@ -9,24 +9,19 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 
 ## Quick start
 
-From repo root:
+**Daily routine (owner, Live + Paper):** double-click **`Start_Bot_and_Dashboard.bat`** at the repo root. See [stock-bot/README.md — Daily usage](stock-bot/README.md#daily-usage-recommended).
 
-```bat
-start.bat
-```
-
-`start.bat` prefers `stock-bot\dist\Weinstein-Trading-Bot.exe` when built; otherwise runs `stock-bot\launch.bat` (source Python).
-
-Or directly:
+First-time / manual launch:
 
 ```bat
 cd stock-bot
-launch.bat
+copy .env.example .env
+python scripts\account\preflight.py
 ```
 
-**Config:** edit `stock-bot\.env` only — it is authoritative. `dist\.env` is a fallback copy synced on `build_all.bat`.
+**Do not use for daily ops:** `start.bat`, `launch.bat`, `launch_both.bat`, or `Weinstein-Trading-Bot.exe` — they start a single bot with the wrong heartbeat paths for the portal dashboard.
 
-Build frozen EXEs: `stock-bot\build_all.bat`
+Build frozen EXEs (optional): `stock-bot\build_all.bat`
 
 Friend setup: [FRIENDS.md](FRIENDS.md) · Full bot docs: [stock-bot/README.md](stock-bot/README.md)
 

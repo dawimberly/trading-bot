@@ -1348,6 +1348,36 @@ def get_telegram_config():
     return None
 
 
+# --- Alert policy (high-signal Telegram/email; noisy topics off by default) ---
+TELEGRAM_ALERT_HALT = _parse_env_bool("TELEGRAM_ALERT_HALT", default="true")
+TELEGRAM_ALERT_DRAWDOWN_MAJOR = _parse_env_bool("TELEGRAM_ALERT_DRAWDOWN_MAJOR", default="true")
+TELEGRAM_MAJOR_DRAWDOWN_PCT = float(os.getenv("TELEGRAM_MAJOR_DRAWDOWN_PCT", "0.05"))
+TELEGRAM_ALERT_DAILY_SUMMARY = _parse_env_bool("TELEGRAM_ALERT_DAILY_SUMMARY", default="true")
+TELEGRAM_DAILY_SUMMARY_TIME = os.getenv("TELEGRAM_DAILY_SUMMARY_TIME", "16:30").strip()
+TELEGRAM_ALERT_YIELD_GATE = _parse_env_bool("TELEGRAM_ALERT_YIELD_GATE", default="true")
+TELEGRAM_ALERT_LIVE_FILLS = _parse_env_bool("TELEGRAM_ALERT_LIVE_FILLS", default="true")
+TELEGRAM_LIVE_FILL_MIN_USD = float(os.getenv("TELEGRAM_LIVE_FILL_MIN_USD", "5"))
+TELEGRAM_ALERT_SPACEX = _parse_env_bool("TELEGRAM_ALERT_SPACEX", default="false")
+TELEGRAM_ALERT_BTC = _parse_env_bool("TELEGRAM_ALERT_BTC", default="false")
+TELEGRAM_ALERT_SOCIAL = _parse_env_bool("TELEGRAM_ALERT_SOCIAL", default="false")
+
+
+def telegram_alert_policy_summary() -> str:
+    """One-line summary for startup / preflight logs."""
+    bits = []
+    if TELEGRAM_ALERT_HALT:
+        bits.append("halt/resume")
+    if TELEGRAM_ALERT_DRAWDOWN_MAJOR:
+        bits.append(f"drawdown>{TELEGRAM_MAJOR_DRAWDOWN_PCT:.0%}")
+    if TELEGRAM_ALERT_YIELD_GATE:
+        bits.append("yield gate")
+    if TELEGRAM_ALERT_DAILY_SUMMARY:
+        bits.append(f"daily@{TELEGRAM_DAILY_SUMMARY_TIME} ET")
+    if TELEGRAM_ALERT_LIVE_FILLS and not PAPER_TRADING:
+        bits.append(f"live fills>${TELEGRAM_LIVE_FILL_MIN_USD:.0f}")
+    return ", ".join(bits) if bits else "all high-signal alerts off"
+
+
 def get_smtp_config():
     """SMTP settings for email alerts."""
     return {

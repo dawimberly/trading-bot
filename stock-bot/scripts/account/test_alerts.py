@@ -19,6 +19,7 @@ def main():
 
     if tg:
         print("[OK] Telegram configured")
+        print(f"     Policy: {config.telegram_alert_policy_summary()}")
     else:
         print("[--] Telegram not set (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)")
 

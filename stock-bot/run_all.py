@@ -544,7 +544,17 @@ def main():
             dd_resume * 100,
             config.HALT_RESUME_DRAWDOWN_PCT * 100,
         )
+        try:
+            alerts.notify_resume(equity, dd_resume)
+        except Exception as exc:
+            _warn_nonfatal("Resume alert error", exc)
     alerts.clear_halt_flag()
+    peak = risk_manager.peak_equity or equity
+    dd = risk_manager.current_drawdown(equity)
+    try:
+        alerts.maybe_major_drawdown_alert(equity, peak, dd)
+    except Exception as exc:
+        _warn_nonfatal("Drawdown alert error", exc)
     _maybe_reconcile_startup(executor)
 
     if not market_open:
@@ -660,6 +670,10 @@ def main():
     yield_gated = bool(gp_signals.get("yield_gate"))
     if macro_regime_result:
         yield_gated = apply_yield_gate_boost(yield_gated, macro_regime_result)
+    try:
+        alerts.maybe_yield_gate_alert(yield_gated)
+    except Exception as exc:
+        _warn_nonfatal("Yield gate alert error", exc)
 
     macro_stress_flag = bool(
         wisdom.get("dynamic_stress")
@@ -1481,7 +1495,7 @@ def _print_startup_banner():
             )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     if alerts.alerts_configured():
-        print("--- Alerts: enabled (Telegram and/or email) ---")
+        print(f"--- Alerts: on — {config.telegram_alert_policy_summary()} ---")
     else:
         print("--- Alerts: off (set TELEGRAM_* or SMTP_* in .env) ---")
     if not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING:
@@ -1492,6 +1506,13 @@ def _confirm_live_trading_startup(equity: float) -> None:
     """One-time loud warning and 10s abort window before the live main loop."""
     global _live_startup_confirmed
     if config.PAPER_TRADING or _live_startup_confirmed or not config.ALLOW_LIVE_TRADING:
+        return
+    if os.getenv("PORTAL_MANAGED_BOT", "").strip().lower() in ("1", "true", "yes"):
+        _live_startup_confirmed = True
+        print(
+            f"--- Live loop starting (portal-managed, ~${equity:,.2f} account) ---\n",
+            flush=True,
+        )
         return
     profile = config.configure_account_profile(equity)
     print("")

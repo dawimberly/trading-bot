@@ -71,6 +71,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
+    env["PORTAL_MANAGED_BOT"] = "1"
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
     env["WISDOM_SCORECARD_FILE"] = str(bd / "wisdom_scorecard.json")
@@ -162,9 +163,13 @@ def stop_orphan_project_bots(preserve_pids: set[int] | None = None) -> tuple[int
     stopped = 0
     notes: list[str] = []
     for script in ("run_paper_bot.py", "run_all.py"):
-        for pid in _find_script_pids(script):
+        pids = _find_script_pids(script)
+        if pids:
+            print(f"Found {len(pids)} orphan {script} process(es)...", flush=True)
+        for pid in pids:
             if pid in preserve:
                 continue
+            print(f"Stopping orphan {script} PID {pid}...", flush=True)
             ok, msg = _graceful_stop_pid(pid)
             if ok:
                 stopped += 1
@@ -299,15 +304,31 @@ def restart_all_bots(username: str) -> tuple[bool, str]:
     messages: list[str] = []
     ok_all = True
     restarted_any = False
+
+    # Stop every book first, then one orphan sweep — avoids killing live run_all
+    # while starting paper (both use run_all.py on disk).
+    for book_id in BOOKS:
+        if not book_enabled(book_id) or not _book_has_keys(username, book_id):
+            continue
+        if bot_running(username, book_id):
+            stop_bot(username, book_id)
+    stopped, orphan_msg = stop_orphan_project_bots()
+    if stopped:
+        time.sleep(1.0)
+
     for book_id in BOOKS:
         if not book_enabled(book_id) or not _book_has_keys(username, book_id):
             continue
         restarted_any = True
-        ok, msg = restart_bot(username, book_id)
-        messages.append(f"--- {book_id} ---\n{msg}")
+        ok, msg = start_bot(username, book_id, skip_orphan_stop=True)
+        prefix = "Bot restarted successfully" if ok else "Bot failed to start"
+        mode = "paper" if _is_paper_book(username, book_id) else "live"
+        messages.append(f"--- {book_id} ---\n{prefix} ({mode} mode).\n{msg}")
         ok_all = ok_all and ok
     if not restarted_any:
         return False, "No books with API keys found to restart."
+    if stopped:
+        messages.insert(0, f"(Pre-start cleanup: {orphan_msg})")
     prefix = "All bots restarted" if ok_all else "Restart finished with errors"
     return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
 
@@ -457,13 +478,15 @@ def bot_env_running(slot: str) -> bool:
     return False
 
 
-def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
+def start_bot(username: str, book_id: str = "alpaca_paper", *, skip_orphan_stop: bool = False) -> tuple[bool, str]:
     if bot_running(username, book_id):
         return False, f"Bot is already running for {book_id}."
-    preserve = _tracked_book_pids(username)
-    orphans_stopped, orphan_msg = stop_orphan_project_bots(preserve_pids=preserve)
-    if orphans_stopped:
-        time.sleep(1.0)
+    orphan_msg = ""
+    if not skip_orphan_stop:
+        preserve = _tracked_book_pids(username)
+        orphans_stopped, orphan_msg = stop_orphan_project_bots(preserve_pids=preserve)
+        if orphans_stopped:
+            time.sleep(1.0)
     bot_script = _bot_entry_script(username, book_id)
     launch_argv, launch_cwd = _bot_launch_command(bot_script)
     if bot_script.name != "run_all.py" and not bot_script.is_file():
@@ -505,10 +528,10 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
                 "\n\nAlpaca returned 401 — check API keys in the portal menu "
                 "(paper vs live keys must match PAPER_TRADING in your book .env)."
             )
-        orphan_note = f"\n{orphan_msg}" if orphans_stopped else ""
+        orphan_note = f"\n{orphan_msg}" if orphan_msg else ""
         return False, f"Bot exited immediately (code {proc.returncode}).{hint}{orphan_note}{detail}"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
-    orphan_note = f" ({orphan_msg})" if orphans_stopped else ""
+    orphan_note = f" ({orphan_msg})" if orphan_msg else ""
     return True, (
         f"{mode} bot started via {bot_script.name} (PID {proc.pid}){orphan_note}. "
         "First heartbeat may take up to 60s."

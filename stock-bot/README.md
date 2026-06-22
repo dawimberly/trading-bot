@@ -54,25 +54,66 @@ python -m venv .venv
 python scripts\account\preflight.py
 ```
 
-### Daily launch (pick one)
+### Daily usage (recommended)
 
-| Launcher | Starts |
-|----------|--------|
-| **`../start.bat`** (repo root) | Frozen EXE if built, else same as `launch.bat` |
-| **`launch.bat`** | Frozen EXE if built, else venv `python run_all.py` |
-| **`launch_both.bat`** | Same as `launch.bat` |
-| **`launch_monitor.bat`** | `dist\PythonTradingMonitor\PythonTradingMonitor.exe` only |
-| **`dist\Start Weinstein Trading Bot.bat`** | Frozen bot EXE only (console); auto-opens monitor when `AUTO_LAUNCH_DASHBOARD=true` |
-| **`stop_dashboard.bat`** | Stops monitor EXE + `pythonw dashboard_app.py` under `stock-bot/` |
+**Double-click once each morning** (before market open):
 
-Dashboard auto-launch is controlled by `AUTO_LAUNCH_DASHBOARD=true` in **`stock-bot/.env`** (not started separately by `launch.bat`).
+```
+C:\Users\Owner\PythonTrading\Start_Bot_and_Dashboard.bat
+```
+
+Same logic is available as `Start Trading.bat` (repo root) or `stock-bot\fix_setup.bat` (troubleshooting).
+
+#### What it does
+
+1. Stops stray bot and dashboard processes from earlier runs
+2. Restarts **both portal books** for your user (`alpaca_live` + `alpaca_paper`):
+   - **Live** (~$300) — Profile A conservative via `run_all.py`
+   - **Paper** (~$98k) — Best Paper aggressive via `run_paper_bot.py`
+3. Opens the **desktop monitor** (`dashboard_app.py` via `pythonw` — no extra console window)
+4. Shows a small **startup console** with progress, then minimizes on success
+
+Wait **~60 seconds**, then sign in on the dashboard and open **Overview → Bot status (both books)**. Both books should show fresh heartbeats (not **STALE**).
+
+**Run the launcher only once** per session. Double-clicking again creates duplicate processes.
+
+#### Desktop shortcut
+
+1. In File Explorer, go to `C:\Users\Owner\PythonTrading`
+2. Right-click **`Start_Bot_and_Dashboard.bat`** → **Send to** → **Desktop (create shortcut)**
+3. Rename the shortcut to something like **PythonTrading Daily**
+
+The shortcut works from the Desktop — the batch file resolves paths from its own location.
+
+#### Do **not** use for daily ops
+
+| Launcher | Why not |
+|----------|---------|
+| `Weinstein-Trading-Bot.exe` | Single bot, wrong heartbeat path → dashboard shows **STALE** |
+| `launch.bat` / `launch_both.bat` | Same — one bot only, not dual-book portal |
+| `start.bat` (repo root) | Forwards to EXE / `launch.bat` |
+| `dist\Start Weinstein Trading Bot.bat` | Standalone EXE wrapper |
+
+Those are legacy or for quick standalone tests. Portal-managed dual-book ops use **`Start_Bot_and_Dashboard.bat`**.
+
+#### Other launchers (special cases)
+
+| Launcher | When to use |
+|----------|-------------|
+| **`launch_monitor.bat`** | Monitor only (bots already running) |
+| **`stop_dashboard.bat`** | Close stuck dashboard windows |
+| **`launch.bat`** | Legacy single-bot (warns you to use daily launcher) |
+| **`build_all.bat`** | Rebuild frozen EXEs after code changes |
+
+Portal heartbeats and PID files live under `data/portal/users/<username>/books/alpaca_live/` and `.../alpaca_paper/` — not `dist/bot_heartbeat.json`.
 
 ```powershell
 cd C:\Users\Owner\PythonTrading\stock-bot
-.\launch.bat
+# Manual reset (same as daily launcher):
+python scripts\owner_reset.py
 ```
 
-**Shortcut tip:** point **Start in** to `...\PythonTrading\stock-bot`, not the repo root.
+**Config:** edit **`stock-bot/.env`** and per-book portal `.env` files under `data/portal/users/`. `dist/.env` is only a fallback copy.
 
 ### Build frozen EXEs
 
@@ -92,7 +133,9 @@ Quit **PythonTradingMonitor.exe** before rebuilding (unlocks `dist\PythonTrading
 
 ## System overview
 
-One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → VTI core rebalance → sleeve strategies → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`, `launch.bat`) and **`status.py`** read heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
+One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → VTI core rebalance → sleeve strategies → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`) and **`status.py`** read portal book heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
+
+**Dual-book owner setup:** one portal user (e.g. `dawimberly`) with two books — `alpaca_live` (Profile A) and `alpaca_paper` (Profile B). Start both daily with **`Start_Bot_and_Dashboard.bat`**.
 
 | Component | Role |
 |-----------|------|
@@ -159,12 +202,12 @@ python scripts/account/preflight.py         # keys, alerts, small-account sizing
 
 | Goal | Profile | How to run | Key env |
 |------|---------|------------|---------|
-| **Real money ~$100–$300** | Profile A | `launch.bat` or `python run_all.py` after preflight | `PAPER_TRADING=false`, `ALLOW_LIVE_TRADING=yes` |
+| **Real money ~$100–$300** | Profile A | Portal book `alpaca_live` — started by **`Start_Bot_and_Dashboard.bat`** | `PAPER_TRADING=false`, `ALLOW_LIVE_TRADING=yes` |
 | **Paper evaluation / first month** | Profile A on paper keys | Same loop with paper keys | `PAPER_TRADING=true` (default) |
-| **Sharpe research ~$98k book** | Profile B | `python run_paper_bot.py` or portal paper user | `PAPER_CHASE_MODE=1`, `PAPER_APCA_*` |
-| **Both in parallel** | A + B | `launch_both.bat` / `launch_bots.py` | `data/portal/fund_pair.json` |
+| **Sharpe research ~$98k book** | Profile B | Portal book `alpaca_paper` — same daily launcher | `PAPER_CHASE_MODE=1`, paper Alpaca keys in portal |
+| **Both in parallel** | A + B | **`Start_Bot_and_Dashboard.bat`** (recommended) | `data/portal/users/<user>/books/alpaca_{live,paper}/` |
 
-**Monitoring:** `python status.py` prints live + paper equity, regime, stack ON/OFF lines, heartbeat timestamps, and **STALE** when heartbeat age &gt; 90 min. Dashboard status bar shows the same heartbeat age and optional RSS. Paper chase heartbeat: `paper_chase_heartbeat.json`; live: `bot_heartbeat.json`.
+**Monitoring:** `python status.py` prints live + paper equity, regime, stack ON/OFF lines, heartbeat timestamps, and **STALE** when heartbeat age &gt; 90 min. Dashboard **Overview** shows **Bot status (both books)**. Heartbeats: `data/portal/users/<user>/books/alpaca_live/bot_heartbeat.json` and `.../alpaca_paper/bot_heartbeat.json`.
 
 **Before first live cycle:** always run `python scripts/account/preflight.py` (checks keys, alerts, data freshness, small-account sizing). See [Before going live](#before-going-live-real-money).
 
@@ -174,10 +217,10 @@ python scripts/account/preflight.py         # keys, alerts, small-account sizing
 
 Recommended setup for a Windows PC left running 24/7:
 
-1. **Start via launcher** — `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) so the dashboard supervises one `run_all.py` process. Use dashboard **Restart Bot** for clean restarts (stops orphans, relaunches live + paper); use **Stop Bot** only when shutting down for the day.
+1. **Start via daily launcher** — **`Start_Bot_and_Dashboard.bat`** once per session. Use dashboard **Restart Bot** for mid-day recovery; use **Stop Bot** only when shutting down for the day.
 2. **Task Scheduler (optional)** — schedule `scripts/background_runner.py --mode auto --trigger startup` at logon and `--trigger midnight` daily. Lightweight mode runs `status.py`, checks heartbeats (stale &gt; 30 min), daily loss circuit, and can auto-start `run_paper_bot.py` when paper-only.
 3. **Logging rotation** — `modules/logging_utils.setup_project_logging()` attaches midnight-rotating handlers to `logs/run_all.log` and `logs/events.log` (7 days retained). No manual log cleanup needed for normal operation.
-4. **Heartbeat monitoring** — each cycle writes `bot_heartbeat.json` (live) or `paper_chase_heartbeat.json` (paper chase). If timestamp is stale (&gt; 90 min in `status.py`): **Restart Bot** in the dashboard, or `python launch_bots.py --stop` then relaunch. Check `last_cycle_error` in heartbeat / `status.py` output.
+4. **Heartbeat monitoring** — each book writes `bot_heartbeat.json` under its portal book folder. If timestamp is stale (&gt; 90 min in `status.py`): run **`Start_Bot_and_Dashboard.bat`** again (once), or **Restart Bot** in the dashboard. Check `last_cycle_error` in heartbeat / `status.py` output.
 5. **Preflight before live** — `python scripts/account/preflight.py` with live keys; confirms `ALLOW_LIVE_TRADING=yes`, equity, alerts, and recent `market_data.db`.
 6. **Data refresh** — `fetch_data.py` on schedule or when preflight flags stale DB; background runner can trigger refresh when DB age &gt; 24 h.
 
@@ -866,16 +909,16 @@ python fetch_data.py
 # 3. Confirm Telegram/email alerts fire
 python scripts/account/test_alerts.py
 
-# 4. Start monitor + bot (recommended)
-.\launch.bat
+# 4. Start monitor + both bots (recommended)
+..\Start_Bot_and_Dashboard.bat
 
-# Or terminal only (10-second abort window on first startup)
+# Or terminal only (portal-managed live skips the 10s abort window)
 python run_all.py
 ```
 
-`preflight.py` verifies: `ALLOW_LIVE_TRADING=yes`, equity &gt; $50, alerts configured, recent `market_data.db` refresh, and prints small-account sizing when applicable. `run_all.py` prints a loud **LIVE TRADING ENABLED** banner with equity and waits 10 seconds before the first cycle.
+`preflight.py` verifies: `ALLOW_LIVE_TRADING=yes`, equity &gt; $50, alerts configured, recent `market_data.db` refresh, and prints small-account sizing when applicable. Portal-started live bots skip the manual 10-second countdown; CLI `python run_all.py` still shows it.
 
-**Daily use:** double-click **`launch.bat`** (or a desktop shortcut to it). Use dashboard **Restart Bot** after `.env` changes; **Stop Bot** only when shutting down.
+**Daily use:** double-click **`Start_Bot_and_Dashboard.bat`** at the repo root (or your desktop shortcut). Use dashboard **Restart Bot** after `.env` changes; **Stop Bot** only when shutting down.
 
 **Stop bot from terminal:**
 
@@ -925,34 +968,33 @@ Crypto has an additional gate: when `CRYPTO_VOL_ONLY=true`, pairs are skipped un
 
 ## Desktop monitor (CustomTkinter)
 
-Primary monitor for a small live account — dark theme, auto-refresh, calm layout.
+Primary monitor for dual-book ops — dark theme, auto-refresh, **Overview shows both Live and Paper**.
 
 ### One-click launch (recommended)
 
-See **[Launch & build (consolidated layout)](#launch--build-consolidated-layout)** for current launchers.
+Use **`Start_Bot_and_Dashboard.bat`** at the repo root — it starts both portal books and opens the monitor. See **[Daily usage](#daily-usage-recommended)**.
 
-**Summary:** double-click **`launch.bat`** in `stock-bot/` (monitor + bot), or **`launch_monitor.bat`** (monitor only). Use **`stop_dashboard.bat`** before relaunching if the monitor is stuck.
+**Monitor only** (bots already running): `launch_monitor.bat` or `pythonw dashboard_app.py`.
 
-**Sign in** with the same username/password as the web portal (`portal.py`). Use **Register** on first run, then **Account → Edit Alpaca keys…** to paste API keys (or connect keys in the portal **Settings** tab). **Remember username** is stored in `data/portal/desktop_prefs.json`.
+**Sign in** with your portal username (e.g. `dawimberly`). Password is required each time the dashboard opens fresh. **Remember username** is stored in `data/portal/desktop_prefs.json`.
 
 **Desktop shortcut (Windows):**
 
-1. Right-click `launch.bat` → **Send to** → **Desktop (create shortcut)**.
-2. **Properties → Start in:** `C:\Users\Owner\PythonTrading\stock-bot`
-3. Optional icon: `assets\dashboard.ico` (`python scripts/generate_dashboard_icon.py`)
+1. Right-click **`Start_Bot_and_Dashboard.bat`** (repo root) → **Send to** → **Desktop (create shortcut)**.
+2. Rename to **PythonTrading Daily**.
 
-Or run `powershell -ExecutionPolicy Bypass -File scripts\create_monitor_shortcut.ps1` for a shortcut to **`launch_monitor.bat`**.
+Or run `powershell -ExecutionPolicy Bypass -File scripts\create_monitor_shortcut.ps1` and point it at the daily launcher if you customize that script.
 
-Portal users store keys under `data/portal/users/<username>/.env`. A `stock-bot/.env` is used for CLI and `@root` fund slots.
+Portal users store keys under `data/portal/users/<username>/books/<book_id>/.env`. A `stock-bot/.env` is used for CLI and legacy fund slots.
 
 **Troubleshooting:**
 
 | Issue | Fix |
 |-------|-----|
 | Dashboard window missing | Check `logs\dashboard_crash.log` or `dist\logs\dashboard_auto_launch.log` |
-| Shortcut does nothing | **Start in** must be `stock-bot/`; run **`stop_dashboard.bat`**, then `launch.bat` |
-| Multiple bots running | **Stop Bot** in dashboard or `stop_dashboard.bat`, then launch once |
-| Stale heartbeat | **Restart Bot** in dashboard; check `last_cycle_error` in heartbeat / `python status.py` |
+| Shortcut does nothing | Re-create shortcut to **`Start_Bot_and_Dashboard.bat`**; run **`stop_dashboard.bat`**, then launch once |
+| Multiple bots running | Run **`Start_Bot_and_Dashboard.bat`** once only — it cleans orphans first |
+| Stale heartbeat | Run daily launcher once, or **Restart Bot** in dashboard; check `last_cycle_error` in heartbeat / `python status.py` |
 
 ### Manual launch
 
@@ -1271,10 +1313,16 @@ Configure **Telegram** and/or **email** in `.env`, then test:
 python scripts/account/test_alerts.py
 ```
 
-| Event | When |
-|-------|------|
-| **Risk halt** | Once when drawdown hits the limit (not every minute) |
-| **Daily summary** | Once per day: equity, cash, regime, running/halted status |
+| Event | When | Default |
+|-------|------|---------|
+| **Risk halt / resume** | Drawdown halt triggers; trading resumes | On |
+| **Drawdown warning** | Drawdown crosses 5% (before 10% halt) | On |
+| **Yield gate** | Yield gate turns on or off | On |
+| **Daily summary** | Once per day after **4:30 PM ET** | On |
+| **Live fills** | Live account only, notional ≥ $5 | On |
+| SpaceX / BTC / Felix | IPO, narrative, creator spam | **Off** |
+
+Policy flags in `.env` (see `.env.example`): `TELEGRAM_ALERT_HALT`, `TELEGRAM_ALERT_DRAWDOWN_MAJOR`, `TELEGRAM_ALERT_YIELD_GATE`, `TELEGRAM_ALERT_DAILY_SUMMARY`, `TELEGRAM_DAILY_SUMMARY_TIME`, `TELEGRAM_ALERT_LIVE_FILLS`, `TELEGRAM_LIVE_FILL_MIN_USD`, `TELEGRAM_ALERT_SPACEX`, `TELEGRAM_ALERT_BTC`, `TELEGRAM_ALERT_SOCIAL`.
 
 **Telegram setup:**
 
@@ -1340,9 +1388,10 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `SPY_APCA_API_SECRET_KEY` | No | Same |
 | `KRAKEN_API_KEY` | No | `scripts/exchange/` only (not used by `run_all.py`) |
 | `KRAKEN_SECRET_KEY` or `KRAKEN_API_SECRET` | No | `scripts/exchange/` |
-| `TELEGRAM_BOT_TOKEN` | No | Halt + daily alerts |
-| `TELEGRAM_CHAT_ID` | No | Halt + daily alerts |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO` | No | Email alerts |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | No | Your Telegram chat id |
+| `TELEGRAM_ALERT_*` | No | Alert policy flags — see [Alerts](#alerts-optional) and `.env.example` |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO` | No | Email alerts (same policy categories) |
 
 Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 
