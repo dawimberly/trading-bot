@@ -22,7 +22,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 No extra flags required — preflight and `status.py` confirm the stack.
 
-**Paper research** (`paper_aggressive`): **Best Paper Bot v2.2** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-paper_aggressive) and [Final recommended configuration](#final-recommended-configuration-lock-2026-06-19).
+**Paper research** (`paper_aggressive`): **Best Paper Bot v2.2** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-v22-paper_aggressive), [Final recommended configuration](#final-recommended-configuration-lock-2026-06-19), and **[Research velocity profile](PAPER_RESEARCH_PROFILE.md)** (high order flow + stat arb/crypto attribution).
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -149,7 +149,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 **Two profiles (do not mix on the same book without intent):**
 
 - **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
-- **Profile B — paper v2.2** (`paper_aggressive`): dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking engine opt-in.
+- **Profile B — paper v1.3** (`paper_aggressive` / Realistic Research): dynamic core 30–50%, **NYSE momentum + stat arb** (10–14 pairs, RR 1.6), protective shorts, tail risk; vol overlay + options; overlap/chunk/co-fire **on**; thinking opt-in. See [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
 
 ---
 
@@ -294,8 +294,11 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | Layer | Default | Env flag |
 |-------|---------|----------|
 | **VTI core** | Dynamic **40–75%** | `PAPER_DYNAMIC_VTI=true` |
-| **Risk per trade** | Dynamic **1–3%** | `PAPER_DYNAMIC_RISK_ENABLED=true` |
-| **Stat arb** | Original cointegration pairs | `PAPER_STAT_ARB_ENABLED=true` |
+| **Risk per trade** | Dynamic **1.1–2.2%** (calm cap 2.2%) | `PAPER_DYNAMIC_RISK_ENABLED=true` |
+| **SPY / NYSE MAs** | **MA150 / MA70** (tuned 365d grid) | `PAPER_SPY_MA_WINDOW`, `PAPER_NYSE_MA_WINDOW` |
+| **RHYME_E sizing** | **1.60×** | `PAPER_REGIME_E_SIZING_MULT` |
+| **NYSE max hold** | **60 bars** | `PAPER_POSITION_MAX_HOLD_BARS` |
+| **Stat arb** | v1.3: corr≥0.72, coint p&lt;0.12, **10–14 pairs**, Z 2.0–2.6, RR **1.6:1** + trail, $25M liquidity; runs **with** NYSE momentum (not pairs-only) | `PAPER_STAT_ARB_*` in `.env.example` |
 | **Vol overlay** | VIX regime hedge/income | `PAPER_VOL_TRADING_ENABLED=true` |
 | **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
 | **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
@@ -325,6 +328,22 @@ python scripts/account/preflight.py   # paper chase context
 5. `trading_safety_state.json` — daily loss breaker status
 
 Restart paper bot after changing thinking env: `python run_paper_bot.py`
+
+#### Research velocity profile
+
+For **research velocity** (order flow, stat arb funnels, attribution), use **[`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md)** — **Realistic Research v1.3** locked default for `alpaca_paper`: dynamic core 30–50%, stat arb 10–14 pairs, protective shorts (15%), weekly Telegram summary. Startup prints `>>> REALISTIC RESEARCH v1.3` and `>>> STAT ARB v1.3: ...`.
+
+**Stat arb validation (365d):**
+
+```powershell
+python backtester.py --paper-aggressive --compare-stat-arb-v13-push --days 365 --no-thinking
+```
+
+**Weekly Telegram summary (Fridays 16:30 ET after close):**
+
+```powershell
+python scripts/weekly_telegram_summary.py --test
+```
 
 #### Backtest validation (365d, fast compare + realistic costs 2026-06-13)
 
@@ -572,6 +591,7 @@ ALLOW_LIVE_TRADING=yes
 VTI_CORE_ENABLED=true
 SMALL_ACCOUNT_VTI_CORE_PCT=0.90
 GAME_PLAN_YIELD_GATE_ONLY=true
+# Live uses SPY MA200 / NYSE MA50 (config defaults); paper-aggressive uses PAPER_* tuned MAs
 # Crypto + thinking stay off on live Profile A (no env needed)
 
 # Paper Profile B — portal / run_paper_bot.py sets PAPER_CHASE_MODE=1
@@ -624,7 +644,9 @@ Same locked stack as [Profile B above](#profile-b-best-paper-bot-paper_aggressiv
 --- Best Paper Bot (paper_aggressive / Profile B) ---
   paper_chase_mode:       ON (PAPER_CHASE_MODE)
   dynamic_vti:            on (40%-75% by vol/stress)
-  dynamic_risk:           on (3% / 2.2% / 1%)
+  dynamic_risk:           on (2.2% / 1.65% / 1.1% calm-mod-stress)
+  spy_nyse_ma:            SPY MA150 | NYSE MA70 (365d tune)
+  regime_e_sizing:        x1.60 | max hold 60 bars
   stat_arb:               on
   vol_overlay:            on
   options_sleeve:         on
@@ -1319,6 +1341,7 @@ python scripts/account/test_alerts.py
 | **Drawdown warning** | Drawdown crosses 5% (before 10% halt) | On |
 | **Yield gate** | Yield gate turns on or off | On |
 | **Daily summary** | Once per day after **4:30 PM ET** | On |
+| **Weekly summary** | Once per week after **4:30 PM ET Friday** (market closed) | On (paper) |
 | **Live fills** | Live account only, notional ≥ $5 | On |
 | SpaceX / BTC / Felix | IPO, narrative, creator spam | **Off** |
 
@@ -1337,7 +1360,9 @@ python scripts/account/test_alerts.py
 
 Alerts are non-fatal: if Telegram is slow, trading continues.
 
-**Gmail setup:** Use an [app password](https://myaccount.google.com/apppasswords) with `SMTP_HOST=smtp.gmail.com`, port `587`.
+**Gmail setup:** Use an [app password](https://myaccount.google.com/apppasswords) with `SMTP_HOST=smtp.gmail.com`, port `587` (optional — weekly summary uses Telegram only).
+
+**Friday weekly summary:** With Telegram configured, the bot sends a weekly message after **4:30 PM ET on Fridays** once the market is closed. Manual test: `python scripts/weekly_telegram_summary.py --test`. Live book: `TELEGRAM_WEEKLY_LIVE_ENABLED=true`. Disable: `TELEGRAM_WEEKLY_SUMMARY_ENABLED=false`.
 
 ## Environment variables
 
@@ -1391,7 +1416,14 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | No | Your Telegram chat id |
 | `TELEGRAM_ALERT_*` | No | Alert policy flags — see [Alerts](#alerts-optional) and `.env.example` |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO` | No | Email alerts (same policy categories) |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `ALERT_EMAIL_TO` | No | Optional email alerts |
+| `TELEGRAM_WEEKLY_SUMMARY_ENABLED` | No | Friday weekly Telegram (default on for paper) |
+| `TELEGRAM_WEEKLY_SUMMARY_TIME` | No | Friday send time ET (default `16:30`) |
+| `PAPER_STAT_ARB_ENABLED` | No | Stat arb pairs (paper aggressive; default on) |
+| `PAPER_STAT_ARB_MAX_PAIRS` | No | Base pair cap (default `10`; expands to 12–14) |
+| `PAPER_STAT_ARB_RISK_REWARD` | No | Z-space profit:stop ratio (default `1.6`) |
+| `PAPER_STAT_ARB_Z_ENTRY_MAX` | No | High-vol Z entry ceiling (default `2.6`) |
+| `TELEGRAM_WEEKLY_LIVE_ENABLED` | No | Weekly summary on live book (default `false`) |
 
 Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 

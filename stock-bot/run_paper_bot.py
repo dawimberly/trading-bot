@@ -1,18 +1,17 @@
-"""24/7 paper Sharpe-chase bot — Best Paper Bot stack, isolated from live ~$100.
+"""24/7 paper bot — Realistic Research v1.3 (locked default for alpaca_paper).
 
-Uses run_all.py with PAPER_CHASE_MODE and enforce_best_paper_stack():
-  - Dynamic VTI (40-75%), dynamic risk (1-3%), original stat arb, vol overlay, options
-  - Overlap filter, NYSE conditional-on-SPY, adaptive chunk, co-fire budget
-  - Thinking engine opt-in (PAPER_THINKING_ENGINE_ENABLED=true + Ollama)
-  - Locked OFF: macro regime, risk parity, stat arb optimized, social, equity pairs, SPY MA exit
-
+Uses run_all.py with PAPER_CHASE_MODE and enforce_realistic_research_profile():
+  - Locked SPY @ 40% core, deep-history indicators only, 1.8% risk
+  - Stat Arb v1.3: 10–14 pairs, 1.6:1 RR, trailing stop, $25M liquidity filter
+  - Runs alongside NYSE momentum (not pairs-only mode)
+  - Dedicated 7% stat-arb sleeve with portfolio-vol scaling
+  - Tail Risk Controls ON (vol ceiling, DD scaling, RHYME_B buffers, sector screener)
+  - Friday weekly Telegram summary (after 4:30 PM ET)
 Run:
     python run_paper_bot.py
 
 Requires Alpaca **paper** keys (APCA_* + PAPER_TRADING=true) or research book
 (PAPER_APCA_* + PAPER_CHASE_USE_RESEARCH_KEYS=yes).
-
-Backtests peak ~1.0–1.8 Sharpe by window — 3.0 is the chase target, not proven.
 """
 
 from __future__ import annotations
@@ -82,16 +81,35 @@ def _run_crypto_vol_cycle() -> None:
     run_crypto_vol_sleeve_cycle(dry_run=False, paper_chase_context=True)
 
 
+def _apply_paper_research_env(env: dict[str, str]) -> dict[str, str]:
+    from config import apply_realistic_research_env
+
+    env["PAPER_TRADING"] = "true"
+    env["PAPER_CHASE_MODE"] = "1"
+    env.setdefault("PAPER_AGGRESSIVE", "true")
+    return apply_realistic_research_env(env)
+
+
 def main() -> None:
     from modules.logging_utils import setup_project_logging
 
     setup_project_logging()
     load_dotenv(find_dotenv())
-    os.environ["PAPER_TRADING"] = "true"
-    os.environ["PAPER_CHASE_MODE"] = "1"
 
     env = os.environ.copy()
-    env.setdefault("PAPER_AGGRESSIVE", "true")
+    env = _apply_paper_research_env(env)
+
+    import config
+
+    os.environ.update(
+        {k: env[k] for k in env if k in config.REALISTIC_RESEARCH_ENV or k in (
+            "PAPER_TRADING",
+            "PAPER_CHASE_MODE",
+            "HEARTBEAT_FILE",
+            "PAPER_JOURNAL_CSV",
+        )}
+    )
+
     env.setdefault("HEARTBEAT_FILE", "paper_chase_heartbeat.json")
     env.setdefault("PAPER_JOURNAL_CSV", "paper_chase_journal.csv")
 
@@ -103,8 +121,22 @@ def main() -> None:
     if venv_py.is_file():
         python = str(venv_py)
 
-    print("--- Paper Sharpe chase (run_all.py + PAPER_CHASE_MODE) ---")
-    print(f"--- Heartbeat: {env['HEARTBEAT_FILE']} | Journal: {env['PAPER_JOURNAL_CSV']} ---")
+    config.init_paper_chase_if_enabled()
+
+    width = 72
+    print("=" * width)
+    print(config.format_paper_live_profile_line())
+    print("=" * width)
+    for line in config.format_realistic_research_startup_lines():
+        print(line)
+    print("-" * width)
+    print(
+        f"Paper bot engine: run_all.py | "
+        f"Realistic Research v{config.REALISTIC_RESEARCH_VERSION} | "
+        f"deep-history indicators-only"
+    )
+    print(f"Heartbeat: {env['HEARTBEAT_FILE']} | Journal: {env['PAPER_JOURNAL_CSV']}")    for line in config.paper_frequency_mode_lines():
+        print(line)
     if crypto_enabled:
         if _paper_only_ok(env):
             print(

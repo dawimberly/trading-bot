@@ -331,9 +331,12 @@ def _win_pids_for_filter(filter_expr: str) -> list[int]:
 def find_script_pids(script_name: str) -> list[int]:
     try:
         if sys.platform == "win32":
+            root = str(resolve_runtime_root()).replace("'", "''")
             cmd = (
                 f"Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-                f"Where-Object {{ $_.CommandLine -like '*{script_name}*' }} | "
+                f"Where-Object {{ $_.CommandLine -like '*{root}*' -and "
+                f"$_.CommandLine -like '*{script_name}*' -and "
+                f"$_.CommandLine -notlike '* -c *' }} | "
                 "Select-Object -ExpandProperty ProcessId"
             )
             out = subprocess.check_output(

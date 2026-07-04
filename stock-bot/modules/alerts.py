@@ -8,7 +8,9 @@ import smtplib
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from datetime import date, datetime
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from zoneinfo import ZoneInfo
 
@@ -16,6 +18,7 @@ import config
 
 STATE_FILE = "alert_state.json"
 _ET = ZoneInfo("America/New_York")
+_GMAIL_APP_PASSWORD_URL = "https://myaccount.google.com/apppasswords"
 
 # Internal categories -> config flags
 _CATEGORY_FLAGS: dict[str, str] = {
@@ -29,6 +32,141 @@ _CATEGORY_FLAGS: dict[str, str] = {
     "btc": "TELEGRAM_ALERT_BTC",
     "social": "TELEGRAM_ALERT_SOCIAL",
 }
+
+
+@dataclass
+class EmailResult:
+    ok: bool
+    error_code: str = ""
+    message: str = ""
+    hints: list[str] = field(default_factory=list)
+
+
+def _is_gmail_smtp(host: str | None) -> bool:
+    h = (host or "").strip().lower()
+    return "gmail.com" in h or h == "smtp.googlemail.com"
+
+
+def _smtp_error_hints(exc: BaseException) -> tuple[str, list[str]]:
+    """Map SMTP failures to a short code and user-facing hints (Gmail-focused)."""
+    msg = str(exc).strip()
+    lower = msg.lower()
+    code = type(exc).__name__
+    hints: list[str] = []
+
+    auth_failed = (
+        isinstance(exc, smtplib.SMTPAuthenticationError)
+        or "535" in msg
+        or "badcredentials" in lower
+        or "username and password not accepted" in lower
+        or "authentication failed" in lower
+    )
+    if auth_failed:
+        code = "BadCredentials"
+        hints.extend(
+            [
+                "This is usually caused by using your normal Gmail password.",
+                f"Use a 16-character App Password (no spaces) from {_GMAIL_APP_PASSWORD_URL}",
+                "Turn on 2-Step Verification on your Google account, then create the App Password.",
+                "Set SMTP_USER to your full @gmail.com address; SMTP_PASSWORD is only the App Password.",
+            ]
+        )
+    elif isinstance(exc, smtplib.SMTPConnectError) or "connect" in lower:
+        code = "ConnectError"
+        hints.append("Check SMTP_HOST and SMTP_PORT (Gmail: smtp.gmail.com, port 587 with STARTTLS).")
+    elif isinstance(exc, TimeoutError) or "timed out" in lower:
+        code = "Timeout"
+        hints.append("SMTP server did not respond — check firewall, VPN, or host/port.")
+    elif "starttls" in lower:
+        code = "StartTLS"
+        hints.append("TLS handshake failed — for Gmail use port 587 (not 465 unless you change the client).")
+
+    return code, hints
+
+
+def print_email_failure(result: EmailResult) -> None:
+    """Print a concise failure line plus troubleshooting bullets."""
+    label = result.error_code or "Error"
+    detail = f": {result.message}" if result.message and result.error_code != result.message else ""
+    print(f"Email alert failed: {label}{detail}")
+    for hint in result.hints:
+        print(f"  → {hint}")
+
+
+def check_email_config(*, test_login: bool = False, verbose: bool = True) -> bool:
+    """Validate SMTP settings and print Gmail-friendly troubleshooting steps."""
+    smtp = config.get_smtp_config()
+    host = (smtp.get("host") or "").strip()
+    to_addr = (smtp.get("to") or "").strip()
+    user = (smtp.get("user") or "").strip()
+    password = smtp.get("password") or ""
+    port = int(smtp.get("port") or 587)
+    issues: list[str] = []
+    notes: list[str] = []
+
+    if not host:
+        issues.append("SMTP_HOST is not set.")
+    if not to_addr:
+        issues.append("ALERT_EMAIL_TO is not set (delivery address).")
+    if not user:
+        issues.append("SMTP_USER is not set (login address — for Gmail, your full @gmail.com).")
+    if not password:
+        issues.append("SMTP_PASSWORD is empty.")
+
+    if _is_gmail_smtp(host):
+        notes.append(
+            "Gmail detected — use an App Password (16 characters, no spaces), not your login password."
+        )
+        notes.append(f"Create one at: {_GMAIL_APP_PASSWORD_URL}")
+        pwd_compact = password.replace(" ", "")
+        if password and " " in password.strip():
+            issues.append("SMTP_PASSWORD contains spaces — paste the App Password without spaces.")
+        if password and len(pwd_compact) != 16 and not issues:
+            notes.append(
+                f"SMTP_PASSWORD length is {len(pwd_compact)} chars (App Passwords are usually 16)."
+            )
+
+    if verbose:
+        if host and to_addr:
+            print(f"SMTP: {host}:{port} | login: {user or '(none)'} | to: {to_addr}")
+        for note in notes:
+            print(f"  Note: {note}")
+        for issue in issues:
+            print(f"  [!!] {issue}")
+
+    if issues:
+        if verbose:
+            print("\nEmail troubleshooting:")
+            print("  1. Copy SMTP_* and ALERT_EMAIL_TO from .env.example into your book .env")
+            print("  2. Gmail: enable 2-Step Verification, then create an App Password")
+            print(f"  3. Set SMTP_PASSWORD to the 16-character App Password (no spaces)")
+            print("  4. Re-run: python scripts/account/test_alerts.py")
+        return False
+
+    if not test_login:
+        return True
+
+    result = _smtp_login_probe(host, port, user, password)
+    if not result.ok and verbose:
+        print(f"\n[!!] SMTP login test failed: {result.error_code or result.message}")
+        for hint in result.hints:
+            print(f"  → {hint}")
+    return result.ok
+
+
+def _smtp_login_probe(host: str, port: int, user: str, password: str) -> EmailResult:
+    try:
+        with smtplib.SMTP(host, port, timeout=20) as server:
+            server.ehlo()
+            if port == 587:
+                server.starttls()
+                server.ehlo()
+            if user and password:
+                server.login(user, password)
+        return EmailResult(ok=True)
+    except (smtplib.SMTPException, OSError) as exc:
+        code, hints = _smtp_error_hints(exc)
+        return EmailResult(ok=False, error_code=code, message=str(exc), hints=hints)
 
 
 def _load_state() -> dict:
@@ -85,17 +223,44 @@ def send_telegram(text: str) -> bool:
 
 
 def send_email(subject: str, body: str) -> bool:
+    return send_email_alert(subject, body, html_body=None).ok
+
+
+def send_email_html(subject: str, text_body: str, html_body: str | None = None) -> bool:
+    result = send_email_alert(subject, text_body, html_body=html_body)
+    if not result.ok:
+        print_email_failure(result)
+    return result.ok
+
+
+def send_email_alert(
+    subject: str, text_body: str, html_body: str | None = None
+) -> EmailResult:
+    """Send email via SMTP; returns structured result for tests and diagnostics."""
     smtp = config.get_smtp_config()
     host = smtp.get("host")
     to_addr = smtp.get("to")
     if not host or not to_addr:
-        return False
+        return EmailResult(
+            ok=False,
+            error_code="NotConfigured",
+            message="SMTP_HOST and ALERT_EMAIL_TO are required",
+            hints=[
+                "Add SMTP_HOST, SMTP_USER, SMTP_PASSWORD, and ALERT_EMAIL_TO to .env",
+                f"Gmail users: App Password from {_GMAIL_APP_PASSWORD_URL}",
+            ],
+        )
     from_addr = smtp.get("from") or smtp.get("user") or to_addr
-    port = smtp.get("port", 587)
+    port = int(smtp.get("port") or 587)
     user = smtp.get("user")
     password = smtp.get("password")
 
-    msg = MIMEText(body)
+    if html_body:
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(text_body, "plain", "utf-8"))
+        msg.attach(MIMEText(html_body, "html", "utf-8"))
+    else:
+        msg = MIMEText(text_body)
     msg["Subject"] = subject
     msg["From"] = from_addr
     msg["To"] = to_addr
@@ -109,10 +274,14 @@ def send_email(subject: str, body: str) -> bool:
             if user and password:
                 server.login(user, password)
             server.sendmail(from_addr, [to_addr], msg.as_string())
-        return True
-    except (smtplib.SMTPException, OSError) as e:
-        print(f"Email alert failed: {e}")
-        return False
+        return EmailResult(ok=True)
+    except (smtplib.SMTPException, OSError) as exc:
+        code, hints = _smtp_error_hints(exc)
+        if _is_gmail_smtp(host) and code == "BadCredentials":
+            pass  # hints already Gmail-specific
+        elif _is_gmail_smtp(host) and not hints:
+            hints.append(f"Gmail: try an App Password from {_GMAIL_APP_PASSWORD_URL}")
+        return EmailResult(ok=False, error_code=code, message=str(exc), hints=hints)
 
 
 def broadcast(subject: str, body: str, *, category: str = "general") -> bool:
@@ -128,8 +297,11 @@ def broadcast(subject: str, body: str, *, category: str = "general") -> bool:
     except Exception as e:
         print(f"Telegram alert error: {e}")
     try:
-        if send_email(subject, body):
+        result = send_email_alert(subject, body)
+        if result.ok:
             ok = True
+        elif result.error_code:
+            print_email_failure(result)
     except Exception as e:
         print(f"Email alert error: {e}")
     return ok
@@ -311,9 +483,17 @@ def maybe_daily_summary(equity: float, cash: float, regime: str, halted: bool) -
         f"Equity:     ${equity:,.2f}\n"
         f"Cash:       ${cash:,.2f}\n"
         f"Date:       {today} (ET)\n"
-        f"Sent:       {now_et:%H:%M} ET\n\n"
-        f"Logs: {config.PAPER_JOURNAL_CSV}, {config.HEARTBEAT_FILE}"
+        f"Sent:       {now_et:%H:%M} ET\n"
     )
+    try:
+        from modules.entry_skip_tracker import format_daily_summary
+
+        skip_line = format_daily_summary()
+        if "cycles=0" not in skip_line:
+            body += f"\n{skip_line}\n"
+    except ImportError:
+        pass
+    body += f"\nLogs: {config.PAPER_JOURNAL_CSV}, {config.HEARTBEAT_FILE}"
     if broadcast(subject, body, category="daily_summary"):
         state = _load_state()
         state["last_daily_summary"] = today

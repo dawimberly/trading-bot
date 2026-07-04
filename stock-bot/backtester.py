@@ -13,6 +13,8 @@ Run:  python backtester.py
        python backtester.py --days 180
        python backtester.py --days 365 --paper-aggressive --compare-final
        python backtester.py --days 365 --paper-aggressive --fast-mode
+       python backtester.py --days 365 --deep-history --max-years 20
+       python backtester.py --days 365 --deep-history --deep-history-indicators-only
        python backtester.py --days 365 --vti-core 0.80 --no-thinking
        python fetch_data.py --daily --days 365
 
@@ -31,7 +33,13 @@ import pandas as pd
 import config
 from fetch_data import fetch_daily_history, fetch_daily_history_for_tickers
 from modules import deployment_sizing
-from modules.data_loader import load_close_matrix
+from modules.data_loader import (
+    clear_deep_history_cache,
+    deep_history_symbol_set,
+    fetch_deep_history,
+    load_close_matrix,
+    load_deep_history_matrix,
+)
 from modules.market_context import (
     cross_asset_vol_score,
     get_market_regime,
@@ -47,6 +55,7 @@ from modules.pipeline_strategies import (
     run_equity_pairs_strategy,
     run_spy_exits,
     run_spy_strategy,
+    summarize_entry_skip_reason,
 )
 from modules.pipeline_strategies import regime_entries_paused
 from modules.console_output import print_table
@@ -64,7 +73,11 @@ from modules.backtester_core import (
     apply_run_options_to_config,
     apply_default_execution_costs,
     compute_performance_metrics,
+    compute_regime_breakdown,
     effective_execution,
+    format_regime_breakdown_table,
+    regime_matches,
+    resolve_regime_name,
     ensure_daily_data_cached,
     export_results_csv,
     export_results_json,
@@ -87,6 +100,53 @@ from modules.risk_management import RiskManager, trim_long_sleeves_to_cash_targe
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 MIN_HISTORY = max(50, config.SPY_MA_WINDOW)
+
+
+def simulation_warmup_bars(n_bars: int) -> int:
+    """Warmup bars for run_backtest (respects effective SPY MA for paper/live)."""
+    ma = config.effective_spy_ma_window()
+    return min(max(50, ma), max(0, n_bars - 5))
+
+
+def _backtest_indicator_window(trade_data, bar_i: int, indicator_context=None):
+    """Price history through bar_i; uses deep indicator context when provided."""
+    if indicator_context is None or getattr(indicator_context, "empty", True):
+        return trade_data.iloc[: bar_i + 1]
+    ts = pd.Timestamp(trade_data.index[bar_i])
+    ctx_index = indicator_context.index
+    if getattr(ctx_index, "tz", None) is not None and ts.tzinfo is None:
+        ts = ts.tz_localize(ctx_index.tz)
+    elif getattr(ctx_index, "tz", None) is None and ts.tzinfo is not None:
+        ts = ts.tz_localize(None)
+    return indicator_context.loc[:ts]
+
+
+def _print_indicator_context_summary(indicator_context, trade_data) -> None:
+    ctx = indicator_context.dropna(how="all") if indicator_context is not None else None
+    trade = trade_data.dropna(how="all")
+    if ctx is None or ctx.empty:
+        print("Indicator context: (empty) | Trading window: unavailable")
+        return
+    print(
+        f"Indicator context: {ctx.index[0].date()} -> {ctx.index[-1].date()} "
+        f"({len(ctx):,} bars) | "
+        f"Trading window: {trade.index[0].date()} -> {trade.index[-1].date()} "
+        f"({len(trade):,} bars)"
+    )
+
+
+def _build_indicator_context(
+    trade_data,
+    *,
+    max_years: int = 20,
+    refresh: bool = False,
+):
+    symbols = deep_history_symbol_set(trade_data.columns)
+    print(
+        f"Loading deep indicator history for {len(symbols)} symbols "
+        f"(max {max_years}y, cached as *_deep.pkl)..."
+    )
+    return load_deep_history_matrix(symbols, max_years=max_years, refresh=refresh)
 WARMUP_CALENDAR_BUFFER = 45  # calendar days before period_start for indicator warmup
 TX_COST = 0.001  # legacy fallback when ALPACA_CRYPTO_FEE_AWARE=false
 BENCHMARK = "VTI"
@@ -127,10 +187,19 @@ class BacktestExecutor:
         )
         self._regime_spy_scale = 1.0
         self._regime_nyse_scale = 1.0
+        self._current_regime = ""
+        book = getattr(portfolio, "_stat_arb_open", None)
+        if book is None:
+            book = {}
+            portfolio._stat_arb_open = book
+        self._stat_arb_open = book
 
     def set_regime_sleeve_scales(self, *, spy_scale: float = 1.0, nyse_scale: float = 1.0) -> None:
         self._regime_spy_scale = float(spy_scale)
         self._regime_nyse_scale = float(nyse_scale)
+
+    def set_current_regime(self, regime: str) -> None:
+        self._current_regime = str(regime or "")
 
     def set_thinking_sleeve_scales(
         self,
@@ -200,6 +269,9 @@ class BacktestExecutor:
         if notional is None:
             return None
         mult = getattr(self, "_wisdom_sizing_multiplier", 1.0)
+        hedge = getattr(self, "_short_long_hedge_mult", 1.0)
+        if hedge < 0.999:
+            mult *= hedge
         if mult >= 0.999:
             return notional
         scaled = round(notional * mult, 2)
@@ -255,6 +327,30 @@ class BacktestExecutor:
             return False
         return True
 
+    def stat_arb_sleeve_value(self):
+        from modules.stat_arb_sleeve import stat_arb_sleeve_gross_value
+
+        return stat_arb_sleeve_gross_value(self, self.prices)
+
+    def nyse_momentum_sleeve_value(self):
+        """NYSE long exposure excluding stat-arb pair legs when dedicated cap is on."""
+        total = self.nyse_sleeve_value()
+        if not config.effective_stat_arb_sleeve_cap_enabled():
+            return total
+        from modules.stat_arb_sleeve import stat_arb_pair_symbols
+
+        pair_syms = stat_arb_pair_symbols(self)
+        if not pair_syms:
+            return total
+        excluded = 0.0
+        for symbol, qty in self.portfolio.positions.items():
+            sym = config.normalize_symbol(symbol)
+            if sym not in pair_syms or float(qty) <= 0:
+                continue
+            price = self.prices.get(symbol)
+            excluded += self._position_market_value(qty, price)
+        return max(0.0, total - excluded)
+
     def crypto_sleeve_value(self):
         return self._sleeve_exposure(self._is_crypto_position)
 
@@ -265,6 +361,12 @@ class BacktestExecutor:
         return self._sleeve_exposure(self._is_spy_position)
 
     def _scaled_cap_pct(self, sleeve_cap_pct: float, *, sleeve: str | None = None) -> float:
+        if config.live_conservative_profile_active() and sleeve in (
+            "spy",
+            "nyse",
+            "crypto",
+        ):
+            return config.effective_sleeve_cap(sleeve_cap_pct, sleeve=sleeve)
         scale = self._cap_scale
         if sleeve == "spy":
             scale *= getattr(self, "_regime_spy_scale", 1.0)
@@ -272,6 +374,9 @@ class BacktestExecutor:
         elif sleeve == "nyse":
             scale *= getattr(self, "_regime_nyse_scale", 1.0)
             scale *= getattr(self, "_thinking_nyse_scale", 1.0)
+        elif sleeve == "stat_arb":
+            scale *= getattr(self, "_regime_nyse_scale", 1.0)
+            scale *= self.pod_risk_scale("stat_arb")
         elif sleeve == "crypto":
             scale *= getattr(self, "_thinking_crypto_scale", 1.0)
             scale *= self.pod_risk_scale("crypto")
@@ -287,10 +392,16 @@ class BacktestExecutor:
         return deployment_sizing.resolve_sleeve_notional(
             equity,
             cash,
-            self._scaled_cap_pct(sleeve_cap_pct),
+            self._scaled_cap_pct(
+                sleeve_cap_pct,
+                sleeve=sleeve_key
+                if sleeve_key in ("spy", "nyse", "crypto", "stat_arb")
+                else None,
+            ),
             sleeve_value,
             sleeve_key or "",
             self._cofire_notionals,
+            regime=getattr(self, "_current_regime", None) or None,
         )
 
     def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
@@ -329,16 +440,40 @@ class BacktestExecutor:
     def compute_nyse_notional(self):
         equity = self.portfolio.equity(self.prices)
         cash = self.portfolio.cash
+        sleeve_val = (
+            self.nyse_momentum_sleeve_value()
+            if config.effective_stat_arb_sleeve_cap_enabled()
+            else self.nyse_sleeve_value()
+        )
         return self._apply_wisdom_multiplier(
             deployment_sizing.resolve_sleeve_notional(
                 equity,
                 cash,
                 self._scaled_cap_pct(config.NYSE_SLEEVE_CAP_PCT, sleeve="nyse"),
-                self.nyse_sleeve_value(),
+                sleeve_val,
                 "nyse",
                 self._cofire_notionals,
+                regime=getattr(self, "_current_regime", None) or None,
             )
         )
+
+    def compute_stat_arb_notional(self):
+        """Dedicated stat-arb sleeve cap (independent of NYSE momentum when enabled)."""
+        equity = self.portfolio.equity(self.prices)
+        min_n = config.effective_min_notional(equity)
+        if config.effective_stat_arb_sleeve_cap_enabled():
+            raw = self._compute_capped_notional(
+                config.STAT_ARB_SLEEVE_CAP_PCT,
+                self.stat_arb_sleeve_value(),
+                "stat_arb",
+            )
+        else:
+            raw = self.compute_nyse_notional()
+        if raw is None:
+            return None
+        if float(raw) < min_n * 2:
+            return None
+        return raw
 
     def compute_spy_notional(self):
         equity = self.portfolio.equity(self.prices)
@@ -351,6 +486,7 @@ class BacktestExecutor:
                 self.spy_sleeve_value(),
                 "spy",
                 self._cofire_notionals,
+                regime=getattr(self, "_current_regime", None) or None,
             )
         )
         return deployment_sizing.apply_spy_ladder(
@@ -375,14 +511,25 @@ class BacktestExecutor:
 
     def execute_full_exit(self, symbol, **kwargs):
         pos = self._find_position(symbol)
-        if pos is None or pos.qty <= 0:
+        if pos is None:
             return None
         price = self.prices.get(pos.symbol)
         if price is None or not np.isfinite(price) or price <= 0:
             return None
-        return self.execute_order(
-            pos.symbol, "sell", notional=round(pos.qty * price, 2), **kwargs
-        )
+        qty = float(pos.qty)
+        if qty > 0:
+            return self.execute_order(
+                pos.symbol, "sell", notional=round(qty * price, 2), **kwargs
+            )
+        if qty < 0:
+            return self.execute_order(
+                pos.symbol,
+                "buy",
+                notional=round(abs(qty) * price, 2),
+                pair_cover=True,
+                **kwargs,
+            )
+        return None
 
     def execute_order(self, symbol, side, notional=None, reduce_only=False, **kwargs):
         price = self.prices.get(symbol)
@@ -394,15 +541,58 @@ class BacktestExecutor:
             )
             if notional is None:
                 return None
+        if side.lower() == "buy" and notional is not None:
+            from modules.paper_risk_controls import cap_per_name_buy_notional
+
+            equity = self.portfolio.equity(self.prices)
+            notional = cap_per_name_buy_notional(
+                symbol=symbol,
+                side=side,
+                notional=notional,
+                equity=equity,
+                prices=self.prices,
+                positions=self.portfolio.positions,
+            )
+            if notional is None:
+                return None
         order = self.portfolio.trade(
             symbol,
             side.lower(),
             price,
             tx_cost=_tx_cost_for_symbol(symbol),
             notional=notional,
+            allow_naked_short=bool(
+                kwargs.get("naked_short")
+                or kwargs.get("strategy") == "opportunistic_short"
+            ),
         )
         if order:
+            for k in (
+                "reason",
+                "sleeve",
+                "strategy",
+                "pair_key",
+                "naked_short",
+                "naked_cover",
+                "pair_cover",
+            ):
+                if k in kwargs:
+                    order[k] = kwargs[k]
             self.orders.append(order)
+            if config.paper_aggressive_context():
+                from modules.paper_risk_controls import update_position_meta_on_fill
+
+                update_position_meta_on_fill(
+                    self.portfolio,
+                    symbol,
+                    side.lower(),
+                    float(price),
+                    bar_index=getattr(self, "_bar_index", None),
+                    order=order,
+                )
+            att = getattr(self, "_attribution", None)
+            if att:
+                att.on_fill(order, self.prices, self.portfolio, **kwargs)
         return order
 
 
@@ -411,6 +601,8 @@ class BacktestPortfolio:
         self.cash = initial_capital
         self.initial_capital = initial_capital
         self.positions = {}
+        self.position_meta = {}
+        self.short_position_meta = {}
         self.execution_cost_usd = 0.0
 
     def equity(self, prices):
@@ -429,7 +621,7 @@ class BacktestPortfolio:
         fee = notional * max(0.0, tx_cost)
         self.execution_cost_usd += slip + fee
 
-    def trade(self, symbol, side, price, tx_cost=TX_COST, notional=None):
+    def trade(self, symbol, side, price, tx_cost=TX_COST, notional=None, *, allow_naked_short=False):
         raw_price = float(price)
         price, tx_cost, slip_pct = effective_execution(raw_price, side, symbol, tx_cost)
         if notional is None:
@@ -475,7 +667,8 @@ class BacktestPortfolio:
                     "side": "buy",
                     "qty": cover_qty,
                     "notional": round(cover_qty * price, 2),
-                    "pair_cover": True,
+                    "pair_cover": not allow_naked_short,
+                    "naked_cover": allow_naked_short,
                 }
             if notional < 1 or self.cash < notional:
                 return None
@@ -494,6 +687,7 @@ class BacktestPortfolio:
                     (
                         config.effective_equity_pairs_enabled()
                         or config.effective_stat_arb_enabled()
+                        or allow_naked_short
                     )
                     and not config.is_crypto(symbol)
                 ):
@@ -509,7 +703,8 @@ class BacktestPortfolio:
                         "side": "sell",
                         "qty": short_qty,
                         "notional": notional,
-                        "pair_short": True,
+                        "pair_short": not allow_naked_short,
+                        "naked_short": allow_naked_short,
                     }
                 if config.effective_stat_arb_enabled() and config.is_crypto(symbol):
                     if notional is None or notional < 1:
@@ -578,13 +773,46 @@ def _parallel_backtest_worker(payload: tuple) -> dict:
         config.SOCIAL_SLEEVE_ENABLED = saved_social
 
 
-def _benchmark_return(data, start_idx):
+def _benchmark_return(data, start_idx=None):
     if BENCHMARK not in data.columns:
         return None
+    if start_idx is None or start_idx >= len(data) or start_idx < 0:
+        n = len(data)
+        start_idx = min(MIN_HISTORY, max(0, n - 5))
     col = data[BENCHMARK].iloc[start_idx:].dropna()
     if len(col) < 2 or col.iloc[0] <= 0:
         return None
     return (col.iloc[-1] / col.iloc[0] - 1) * 100
+
+
+def _trim_baseline_backtest_data(data, *, target_sim_bars: int):
+    """Warmup prefix + simulation tail (baseline backtest shape)."""
+    n_bars = len(data)
+    warmup = min(MIN_HISTORY, max(0, n_bars - 5))
+    desired_total = warmup + target_sim_bars
+    if len(data) > desired_total:
+        return data.iloc[-desired_total:].copy()
+    return data.copy()
+
+
+def _print_deep_history_mode_banner(
+    *,
+    deep_history: bool,
+    deep_history_indicators_only: bool,
+    max_years: int,
+) -> None:
+    if not deep_history:
+        return
+    if deep_history_indicators_only:
+        print(
+            f"Deep History: Indicators only ({max_years}y context) | "
+            "Allocator on sim window"
+        )
+    else:
+        print(
+            f"Deep History: Full ({max_years}y context) | "
+            "Allocator on trade window"
+        )
 
 
 def _calendar_days_to_fetch(sim_days: int) -> int:
@@ -610,62 +838,20 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
 
 
 def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
-    """Ensure screener tickers exist in SQLite for dynamic-universe backtests."""
+    """Ensure screener + sector expansion tickers exist in SQLite for backtests."""
     from modules.dynamic_universe import maybe_refresh_screener_universe
 
     maybe_refresh_screener_universe(force=refresh)
     screener = config.load_screener_universe_tickers() or []
-    extra = [t for t in screener if t not in config.UNIVERSE]
-    if extra:
-        fetch_days = _calendar_days_to_fetch(days or config.BACKTEST_DAYS)
-        fetch_daily_history_for_tickers(
-            extra,
-            days=fetch_days if not use_max else None,
-            use_max=use_max,
-        )
-    return screener
+    prefetch: set[str] = set(screener)
+    if config.effective_dynamic_sector_screener() or config.DYNAMIC_SECTOR_SCREENER_ENABLED:
+        try:
+            from modules.sector_screener import sector_expansion_prefetch_tickers
 
-
-def _static_equity_universe(data_columns) -> list[str]:
-    return [c for c in data_columns if config._nyse_eligible_symbol(c)]
-
-
-def _dynamic_equity_universe(data_columns) -> list[str]:
-    return config.nyse_momentum_universe(data_columns)
-
-
-def _universe_sample_lines(data, screener: list[str]) -> list[str]:
-    """Highlight NASDAQ / IPO names present in the dynamic pool."""
-    from modules.dynamic_universe import load_screener_ticker_meta
-
-    meta = load_screener_ticker_meta()
-    watch = {"NVDA", "TSLA", "AMD", "AAPL", "SPCX", "META", "GOOGL", "AMZN", "MSFT"}
-    lines: list[str] = []
-    dyn = set(_dynamic_equity_universe(data.columns))
-    for sym in sorted(watch & dyn):
-        row = meta.get(sym, {})
-        ipo = " IPO" if row.get("is_ipo") else ""
-        exch = row.get("exchange") or "?"
-        lines.append(f"  {sym} ({exch}{ipo})")
-    ipo_in_pool = [
-        row["ticker"]
-        for row in meta.values()
-        if row.get("is_ipo") and row.get("ticker") in dyn
-    ]
-    if ipo_in_pool:
-        lines.append(f"  IPO slots in pool: {', '.join(sorted(ipo_in_pool)[:8])}")
-    if "SPCX" in watch and "SPCX" not in dyn and "SPCX" in screener:
-        lines.append("  SPCX in screener file but no price column in backtest window")
-    return lines
-
-
-def _prefetch_screener_for_backtest(days, *, refresh=False, use_max=False) -> list[str]:
-    """Ensure screener tickers exist in SQLite for dynamic-universe backtests."""
-    from modules.dynamic_universe import maybe_refresh_screener_universe
-
-    maybe_refresh_screener_universe(force=refresh)
-    screener = config.load_screener_universe_tickers() or []
-    extra = [t for t in screener if t not in config.UNIVERSE]
+            prefetch.update(sector_expansion_prefetch_tickers())
+        except ImportError:
+            pass
+    extra = [t for t in sorted(prefetch) if t not in config.UNIVERSE]
     if extra:
         fetch_days = _calendar_days_to_fetch(days or config.BACKTEST_DAYS)
         fetch_daily_history_for_tickers(
@@ -718,6 +904,8 @@ def _paper_cap_scale_for_vti(vti_core_pct: float) -> float:
         + config.CRYPTO_SLEEVE_CAP_PCT
         + config.NYSE_SLEEVE_CAP_PCT
     )
+    if config.effective_stat_arb_sleeve_cap_enabled():
+        long_sum += config.STAT_ARB_SLEEVE_CAP_PCT
     if long_sum <= 0:
         return 0.0
     base_scale = round(lf * active_fraction, 6)
@@ -744,6 +932,17 @@ def _resolve_backtest_vti_pct(
     paper_aggressive: bool,
     fixed_vti_core_pct: float,
 ) -> float:
+    if config.effective_dynamic_core_enabled() or config.effective_core_allocator_locked():
+        from modules.core_allocator import effective_vti_core_pct
+
+        pct = effective_vti_core_pct(
+            equity,
+            vol_score=vol_score,
+            macro_stress=macro_stress_flag,
+            volatility=volatility,
+        )
+        if pct is not None:
+            return pct
     if not paper_aggressive:
         return fixed_vti_core_pct
     if not config.PAPER_DYNAMIC_VTI_ENABLED:
@@ -781,6 +980,7 @@ def run_backtest(
     paper_stat_arb: bool | None = None,
     paper_stat_arb_optimized: bool | None = None,
     paper_thinking: bool | None = None,
+    paper_crypto_enabled: bool | None = None,
     paper_crypto_v2: bool | None = None,
     paper_crypto_universe_expanded: bool | None = None,
     paper_risk_parity: bool | None = None,
@@ -788,19 +988,42 @@ def run_backtest(
     paper_vol_live_parity: bool = False,
     paper_dynamic_universe: bool | None = None,
     paper_dynamic_universe_strict: bool | None = None,
+    nyse_conditional_on_spy: bool | None = None,
     track_active_exposure: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
     with_news: bool = False,
+    stat_arb_report: bool | None = None,
+    regime_filter: str | None = None,
+    indicator_context=None,
+    max_years: int = 20,
+    allocator_data=None,
+    deep_history_indicators_only: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
+    if stat_arb_report is None:
+        stat_arb_report = bool(paper_aggressive)
+    saved_deep_history = config.DEEP_HISTORY_ENABLED
+    saved_deep_indicators_only = config.DEEP_HISTORY_INDICATORS_ONLY
+    config.DEEP_HISTORY_ENABLED = indicator_context is not None
+    config.DEEP_HISTORY_INDICATORS_ONLY = bool(deep_history_indicators_only)
     apply_run_options_to_config()
     apply_default_execution_costs()
     if RUN_OPTIONS.fast_mode:
         data = apply_fast_mode_data(data)
-    prepare_indicator_cache(data, spy_ma_window=config.SPY_MA_WINDOW)
+    indicator_frame = indicator_context
+    if indicator_frame is not None and not getattr(indicator_frame, "empty", True):
+        if RUN_OPTIONS.fast_mode:
+            indicator_frame = apply_fast_mode_data(indicator_frame)
+        prepare_indicator_cache(
+            indicator_frame, spy_ma_window=config.effective_spy_ma_window()
+        )
+    else:
+        indicator_frame = None
+        prepare_indicator_cache(data, spy_ma_window=config.effective_spy_ma_window())
     saved_paper_ctx = config.paper_aggressive_context()
     saved_small_ctx = config.backtest_small_account_context()
+    saved_live_conservative_ctx = config.backtest_live_conservative_context()
     saved_social = config.SOCIAL_SLEEVE_ENABLED
     saved_dynamic_vti = config.PAPER_DYNAMIC_VTI_ENABLED
     saved_paper_sleeve_flags = config.snapshot_paper_sleeve_flags()
@@ -813,6 +1036,7 @@ def run_backtest(
     saved_paper_stat_arb = config.PAPER_STAT_ARB_ENABLED
     saved_paper_stat_arb_opt = config.PAPER_STAT_ARB_OPTIMIZED
     saved_paper_thinking = config.PAPER_THINKING_ENGINE_ENABLED
+    saved_paper_crypto = config.PAPER_CRYPTO_ENABLED
     saved_paper_crypto_v2 = config.PAPER_CRYPTO_V2_ENABLED
     saved_paper_crypto_expanded = config.PAPER_CRYPTO_UNIVERSE_EXPANDED
     saved_paper_risk_parity = config.PAPER_RISK_PARITY_ENABLED
@@ -820,10 +1044,22 @@ def run_backtest(
     saved_paper_dynamic_univ = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
     saved_paper_dynamic_univ_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
+    saved_backtest_vti_ceiling = config.backtest_vti_ceiling()
     saved_live_thinking_ctx = config.live_thinking_sim_context()
     config.set_paper_aggressive_context(paper_aggressive)
     config.set_backtest_paper_sleeves_context(paper_aggressive)
     config.set_backtest_small_account_context(small_account)
+    if small_account and not paper_aggressive:
+        conservative = vti_core_pct <= 0 or abs(
+            vti_core_pct - config.LIVE_VTI_CORE_PCT
+        ) < 0.005
+        if vti_core_pct > 0 and abs(vti_core_pct - 0.90) < 0.005:
+            conservative = False
+        config.set_backtest_live_conservative_context(conservative)
+        if conservative:
+            config.enforce_live_small_account_profile()
+    else:
+        config.set_backtest_live_conservative_context(False)
     if simulate_live_thinking and small_account:
         config.set_live_thinking_sim_context(True)
         if paper_thinking is not False:
@@ -858,6 +1094,10 @@ def run_backtest(
         config.PAPER_THINKING_ENGINE_ENABLED = bool(paper_thinking)
     elif RUN_OPTIONS.no_thinking or RUN_OPTIONS.fast_mode:
         config.PAPER_THINKING_ENGINE_ENABLED = False
+    if paper_crypto_enabled is not None:
+        config.PAPER_CRYPTO_ENABLED = bool(paper_crypto_enabled)
+        if not paper_crypto_enabled:
+            config.PAPER_CRYPTO_V2_ENABLED = False
     if paper_crypto_v2 is not None:
         config.PAPER_CRYPTO_V2_ENABLED = bool(paper_crypto_v2)
     if paper_crypto_universe_expanded is not None:
@@ -870,6 +1110,8 @@ def run_backtest(
         config.PAPER_DYNAMIC_UNIVERSE_ENABLED = bool(paper_dynamic_universe)
     if paper_dynamic_universe_strict is not None:
         config.PAPER_DYNAMIC_UNIVERSE_STRICT = bool(paper_dynamic_universe_strict)
+    if nyse_conditional_on_spy is not None:
+        config.PAPER_NYSE_CONDITIONAL_ON_SPY = bool(nyse_conditional_on_spy)
     if RUN_OPTIONS.fast_mode:
         apply_run_options_to_config()
     if paper_aggressive and not any(
@@ -890,12 +1132,35 @@ def run_backtest(
         ensure_vix_daily()
 
     fixed_vti_core_pct = vti_core_pct
-    if paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED:
+    if paper_aggressive and config.effective_core_allocator_locked() and vti_core_pct <= 0:
+        from modules.core_allocator import effective_vti_core_pct, lock_core_allocator
+
+        lock_core_allocator()
+        fixed_vti_core_pct = float(effective_vti_core_pct() or config.PAPER_VTI_CORE_PCT)
+    elif paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED:
         fixed_vti_core_pct = (
             vti_core_pct if vti_core_pct > 0 else config.PAPER_VTI_CORE_PCT
         )
+    config.set_backtest_vti_ceiling(
+        fixed_vti_core_pct
+        if paper_aggressive
+        and not config.PAPER_DYNAMIC_VTI_ENABLED
+        and not config.effective_dynamic_core_enabled()
+        and not config.effective_core_allocator_locked()
+        else None
+    )
 
-    start_date = data.index[MIN_HISTORY]
+    if paper_aggressive and config.effective_dynamic_core_enabled():
+        from modules.core_allocator import reset_core_allocator_state
+
+        reset_core_allocator_state()
+
+    n_bars = len(data)
+    if indicator_frame is not None:
+        warmup = 0
+    else:
+        warmup = simulation_warmup_bars(n_bars)
+    start_date = data.index[warmup]
     end_date = data.index[-1]
     cooldown_bars = DAILY_COOLDOWN_BARS
     sharpe_scale = np.sqrt(252)
@@ -908,10 +1173,28 @@ def run_backtest(
         else (_small_account_start_equity() if small_account else 10000.0)
     )
     portfolio = BacktestPortfolio(initial_capital=initial_capital)
+    portfolio._stat_arb_open = {}
     pair_cooldown = {}
-    risk_manager = RiskManager(max_drawdown_pct=config.MAX_DRAWDOWN_PCT)
+    from modules.market_context import reset_regime_hysteresis
+
+    reset_regime_hysteresis()
+    if paper_aggressive and config.effective_dynamic_core_enabled():
+        from modules.core_allocator import maybe_refresh_core_allocation
+
+        maybe_refresh_core_allocation(
+            data,
+            bar_index=warmup,
+            force=True,
+            allocator_data=allocator_data,
+        )
+    risk_manager = RiskManager(
+        max_drawdown_pct=config.MAX_DRAWDOWN_PCT,
+        halt_min_bars=config.HALT_MIN_BARS,
+    )
     equity_curve = []
     regime_counts = {}
+    regime_series: list[str] = []
+    regime_filter_skips = 0
     total_crypto = 0
     total_equity = 0
     total_spy = 0
@@ -927,6 +1210,8 @@ def run_backtest(
     nyse_exposure_samples = []
     crypto_exposure_samples = []
     cofire_days = 0
+    spy_nyse_cofire_days = 0
+    nyse_pick_counts: dict[str, int] = {}
     prev_crypto_value = 0.0
     crypto_pnl_contribution = 0.0
     trade_days = 0
@@ -944,6 +1229,10 @@ def run_backtest(
     risk_samples: list[float] = []
     high_risk_days = 0
     pairs_traded = 0
+    skip_acc: dict = {}
+    from modules.backtest_attribution import BacktestAttribution
+
+    attribution_tracker = BacktestAttribution() if stat_arb_report else None
     pair_daily_pnl: list[float] = []
     prev_pair_sleeve_value = 0.0
     options_state: dict = {
@@ -992,7 +1281,17 @@ def run_backtest(
     )
     if need_macro_daily:
         try:
-            macro_daily = load_daily_matrix(days=max(450, len(data) + 50))
+            if indicator_frame is not None and not indicator_frame.empty:
+                macro_daily = indicator_frame.copy()
+                for col in ("TLT", "TNX"):
+                    if col not in macro_daily.columns or macro_daily[col].dropna().empty:
+                        extra = fetch_deep_history(
+                            col, max_years=max_years, refresh=False
+                        )
+                        if not extra.empty:
+                            macro_daily[col] = extra.reindex(macro_daily.index).ffill()
+            else:
+                macro_daily = load_daily_matrix(days=max(450, len(data) + 50))
         except Exception:
             macro_daily = None
 
@@ -1018,14 +1317,53 @@ def run_backtest(
 
     crypto_v2_book = CryptoV2State()
     last_executor = None
+    strategic_rebalancer = None
+    prev_bar_date = None
+    if config.REBALANCE_ENABLED:
+        from modules.rebalancer import StrategicRebalancer
 
-    for i in range(MIN_HISTORY, len(data)):
-        window = data.iloc[: i + 1]
-        prices = window.iloc[-1]
+        strategic_rebalancer = StrategicRebalancer()
+
+    for i in range(warmup, len(data)):
+        window = _backtest_indicator_window(data, i, indicator_frame)
+        prices = data.iloc[i]
         eq = portfolio.equity(prices)
         if small_account:
             config.configure_account_profile(eq)
         equity_curve.append(eq)
+
+        from modules.market_context import set_regime_bar_index
+
+        set_regime_bar_index(i)
+        risk_manager.set_current_bar(i)
+
+        if wisdom_mode:
+            from modules.wisdom_sentiment import resolve_backtest_regime
+
+            regime, vol, wisdom_paused, sizing_mult, classified_regime = resolve_backtest_regime(
+                window,
+                data.index[i],
+                monthly_web,
+                wisdom_mode=wisdom_mode,
+            )
+            sentiment = get_price_sentiment(window)
+            if wisdom_paused:
+                pause_days += 1
+            regime_label = classified_regime
+            regime_counts[classified_regime] = regime_counts.get(classified_regime, 0) + 1
+        else:
+            wisdom_paused = False
+            sentiment = get_price_sentiment(window)
+            vol = get_volatility(window)
+            regime = get_market_regime(sentiment, vol, apply_hysteresis=True)
+            from modules.regime_sizing import effective_regime_sizing_multiplier
+
+            sizing_mult = effective_regime_sizing_multiplier(regime)
+            if regime_entries_paused(regime, window, sentiment):
+                pause_days += 1
+            regime_label = regime
+            regime_counts[regime] = regime_counts.get(regime, 0) + 1
+        regime_series.append(regime_label)
 
         prev_halted = risk_manager.halted
         can_trade = risk_manager.check_drawdown(eq)
@@ -1040,6 +1378,11 @@ def run_backtest(
                         frozenset({VTI_CORE_SYMBOL}) if vti_core_pct > 0 else None
                     ),
                 )
+            if config.effective_stat_arb_enabled() and last_executor is not None:
+                from modules.stat_arb_sleeve import process_exits
+
+                last_executor.prices = prices
+                process_exits(window, last_executor, regime="", now=i)
             if verbose and not prev_halted and risk_manager.halted:
                 print(
                     f"!!! RISK HALT at {data.index[i].date()} "
@@ -1052,26 +1395,9 @@ def run_backtest(
                 f"(equity ${round(eq, 2)}, DD {risk_manager.current_drawdown(eq):.1%}) ---"
             )
 
-        if wisdom_mode:
-            from modules.wisdom_sentiment import resolve_backtest_regime
-
-            regime, vol, wisdom_paused, sizing_mult = resolve_backtest_regime(
-                window,
-                data.index[i],
-                monthly_web,
-                wisdom_mode=wisdom_mode,
-            )
-            sentiment = get_price_sentiment(window)
-            if wisdom_paused:
-                pause_days += 1
-        else:
-            sentiment = get_price_sentiment(window)
-            vol = get_volatility(window)
-            regime = get_market_regime(sentiment, vol)
-            sizing_mult = 1.0
-            if regime_entries_paused(regime, window, sentiment):
-                pause_days += 1
-        regime_counts[regime] = regime_counts.get(regime, 0) + 1
+        if regime_filter and not regime_matches(regime_label, regime_filter):
+            regime_filter_skips += 1
+            continue
 
         yield_gated = False
         macro_stress_flag = False
@@ -1084,31 +1410,85 @@ def run_backtest(
 
         vol_score = cross_asset_vol_score(window)
         if paper_aggressive:
+            dd_now = risk_manager.current_drawdown(eq)
             if config.PAPER_DYNAMIC_RISK_ENABLED:
+                hist = equity_curve[-max(60, int(config.PORTFOLIO_VOL_WINDOW) + 5) :]
                 config.set_dynamic_risk_context(
                     vol_score=vol_score,
                     regime=regime,
                     macro_stress=macro_stress_flag,
+                    drawdown=dd_now,
+                    recovery_mode=risk_manager.recovery_mode,
+                    equity_history=hist,
                 )
                 day_risk = config.effective_risk_per_trade(
                     eq,
                     vol_score=vol_score,
                     regime=regime,
                     macro_stress=macro_stress_flag,
+                    drawdown=dd_now,
+                    recovery_mode=risk_manager.recovery_mode,
                 )
             else:
-                day_risk = config.RISK_PER_TRADE
+                hist = equity_curve[-max(60, int(config.PORTFOLIO_VOL_WINDOW) + 5) :]
+                config.set_dynamic_risk_context(
+                    drawdown=dd_now,
+                    recovery_mode=risk_manager.recovery_mode,
+                    equity_history=hist if config.effective_tail_risk_controls() else None,
+                )
+                day_risk = config.effective_risk_per_trade(
+                    eq,
+                    regime=regime,
+                    drawdown=dd_now,
+                    recovery_mode=risk_manager.recovery_mode,
+                )
             risk_samples.append(day_risk)
             if day_risk >= config.PAPER_RISK_CALM_BULL_PCT - 1e-9:
                 high_risk_days += 1
-        vti_core_pct = _resolve_backtest_vti_pct(
-            eq,
-            vol_score=vol_score,
-            volatility=vol,
-            macro_stress_flag=macro_stress_flag,
-            paper_aggressive=paper_aggressive,
-            fixed_vti_core_pct=fixed_vti_core_pct,
-        )
+        if paper_aggressive and config.effective_dynamic_core_enabled():
+            from modules.core_allocator import maybe_refresh_core_allocation
+
+            maybe_refresh_core_allocation(
+                data,
+                bar_index=i,
+                allocator_data=allocator_data,
+            )
+        if config.REBALANCE_ENABLED:
+            from modules.operating_layer import run_operating_cycle_backtest
+
+            op_result = run_operating_cycle_backtest(
+                portfolio,
+                prices,
+                regime=regime,
+                vol=vol,
+                macro_stress=macro_stress_flag,
+                vol_score=vol_score,
+                bar_date=data.index[i],
+                equity_curve=equity_curve,
+                rebalancer=strategic_rebalancer,
+                prev_bar_date=prev_bar_date,
+            )
+            prev_bar_date = data.index[i]
+            vti_core_pct = config.clamp_paper_vti_core(
+                float((op_result or {}).get("core_target", config.REBALANCE_CORE_TARGET))
+            )
+            if op_result and not op_result.get("skipped") and verbose:
+                wisdom_rec = op_result.get("wisdom") or {}
+                print(
+                    f"--- Operating Layer {data.index[i].date()}: core "
+                    f"{vti_core_pct:.0%} | wisdom {wisdom_rec.get('action', 'hold')} "
+                    f"conv {wisdom_rec.get('conviction', 0):.2f} ---"
+                )
+        else:
+            vti_core_pct = _resolve_backtest_vti_pct(
+                eq,
+                vol_score=vol_score,
+                volatility=vol,
+                macro_stress_flag=macro_stress_flag,
+                paper_aggressive=paper_aggressive,
+                fixed_vti_core_pct=fixed_vti_core_pct,
+            )
+            vti_core_pct = config.clamp_paper_vti_core(vti_core_pct)
         thinking_scales = dict(thinking_cache["scales"])
         live_thinking = simulate_live_thinking and small_account
         thinking_on = config.effective_thinking_engine_enabled() and (
@@ -1163,7 +1543,9 @@ def run_backtest(
                     allow_small_account=live_thinking,
                 )
                 thinking_cache["regime"] = regime
-                thinking_cache["vti_pct"] = merged["vti_core"]
+                thinking_cache["vti_pct"] = config.clamp_paper_vti_core(
+                    float(merged["vti_core"])
+                )
                 thinking_cache["scales"] = {
                     "spy_scale": executor_scales_from_caps(base_caps, merged).get(
                         "spy", 1.0
@@ -1199,7 +1581,9 @@ def run_backtest(
                         event["news_theme_summary"] = summary.get("news_theme_summary")
                     thinking_cache["events"].append(event)
             if thinking_cache["vti_pct"] is not None:
-                vti_core_pct = float(thinking_cache["vti_pct"])
+                vti_core_pct = config.clamp_paper_vti_core(
+                    float(thinking_cache["vti_pct"])
+                )
             thinking_scales = dict(thinking_cache["scales"])
         cap_scale = _backtest_cap_scale(vti_core_pct, paper_aggressive=paper_aggressive)
         macro_regime = None
@@ -1223,21 +1607,20 @@ def run_backtest(
             vti_core_samples.append(vti_core_pct)
             active_exposure_samples.append(max(0.0, 1.0 - vti_core_pct))
 
-        if vti_core_pct > 0:
+        if not config.REBALANCE_ENABLED and vti_core_pct > 0:
             _rebalance_vti_core(portfolio, prices, vti_core_pct)
         active_fraction = max(0.0, 1.0 - vti_core_pct)
-        if paper_aggressive:
-            sizing_mult = max(
-                float(sizing_mult), config.PAPER_WISDOM_SIZING_FLOOR
-            )
         executor = BacktestExecutor(
             portfolio,
             prices,
             active_fraction=active_fraction,
             cap_scale=cap_scale,
         )
+        executor._last_regime = regime
         if config.effective_crypto_v2_enabled():
             executor._crypto_v2_book = crypto_v2_book
+        if attribution_tracker is not None:
+            executor._attribution = attribution_tracker
         last_executor = executor
         if macro_regime is not None and macro_regime.get("active"):
             executor.set_regime_sleeve_scales(
@@ -1272,9 +1655,10 @@ def run_backtest(
                 sample_rp_meta = rp_meta
             pod_risk_state.update({"peaks": pod_risk_state.get("peaks", {})})
             new_vti = float(merged_caps.get("vti_core", vti_core_pct))
+            new_vti = config.clamp_paper_vti_core(new_vti)
             if abs(new_vti - vti_core_pct) > 0.004:
                 vti_core_pct = new_vti
-                if vti_core_pct > 0:
+                if not config.REBALANCE_ENABLED and vti_core_pct > 0:
                     _rebalance_vti_core(portfolio, prices, vti_core_pct)
             cap_scales = executor_scales_from_caps(base_caps, merged_caps)
             thinking_scales = {
@@ -1285,7 +1669,19 @@ def run_backtest(
             executor.set_thinking_sleeve_scales(**thinking_scales)
             executor.set_pod_risk_scales(pod_scales)
         executor.set_sizing_context(window)
+        executor.set_current_regime(regime)
         executor.set_wisdom_sizing_multiplier(sizing_mult)
+        executor._bar_index = i
+        if paper_aggressive:
+            from modules.paper_risk_controls import (
+                run_paper_position_exits,
+                trim_per_name_overexposure,
+                trim_sleeve_overexposure,
+            )
+
+            run_paper_position_exits(portfolio, prices, i, executor)
+            trim_sleeve_overexposure(executor, prices)
+            trim_per_name_overexposure(executor, prices)
         resolve_cycle_deploy(
             window,
             executor,
@@ -1299,15 +1695,17 @@ def run_backtest(
         )
         if getattr(executor, "_cofire_notionals", None) and len(executor._cofire_notionals) >= 2:
             cofire_days += 1
-        crypto_n = run_crypto_strategy(
-            window,
-            executor,
-            regime,
-            i,
-            pair_cooldown,
-            cooldown_bars=cooldown_bars,
-            volatility=vol,
-        )
+        crypto_n = 0
+        if config.effective_crypto_enabled():
+            crypto_n = run_crypto_strategy(
+                window,
+                executor,
+                regime,
+                i,
+                pair_cooldown,
+                cooldown_bars=cooldown_bars,
+                volatility=vol,
+            )
         total_crypto += crypto_n
         if (
             config.effective_stat_arb_enabled()
@@ -1328,6 +1726,7 @@ def run_backtest(
         total_spy_exits += spy_exit_n
         total_spy_entries += spy_entry_n
         total_spy += spy_exit_n + spy_entry_n
+        equity_n = 0
         if config.effective_equity_pairs_enabled():
             eq_pairs = run_equity_pairs_strategy(
                 window,
@@ -1339,9 +1738,13 @@ def run_backtest(
                 yield_gated=yield_gated,
             )
             total_equity += eq_pairs
+            equity_n = eq_pairs
             pairs_traded += eq_pairs
         else:
-            total_equity += run_equity_strategy(
+            nyse_picks: list[str] = []
+            from modules.pipeline_strategies import run_nyse_momentum_and_stat_arb
+
+            equity_n = run_nyse_momentum_and_stat_arb(
                 window,
                 executor,
                 regime,
@@ -1349,6 +1752,46 @@ def run_backtest(
                 pair_cooldown,
                 cooldown_bars=cooldown_bars,
                 yield_gated=yield_gated,
+                pick_log=nyse_picks,
+                volatility=vol,
+            )
+            total_equity += equity_n
+            for sym in nyse_picks:
+                nyse_pick_counts[sym] = nyse_pick_counts.get(sym, 0) + 1
+        if config.effective_opportunistic_short_enabled():
+            from modules.opportunistic_short_sleeve import run_opportunistic_short_strategy
+
+            run_opportunistic_short_strategy(
+                window,
+                executor,
+                regime,
+                i,
+                pair_cooldown,
+                cooldown_bars=cooldown_bars,
+                volatility=vol,
+            )
+        if spy_entry_n > 0 and equity_n > 0:
+            spy_nyse_cofire_days += 1
+        day_new_entries = int(crypto_n) + int(spy_entry_n) + int(equity_n)
+        from modules.entry_skip_tracker import accumulate_backtest
+
+        if day_new_entries > 0:
+            accumulate_backtest("traded", skip_acc)
+        else:
+            accumulate_backtest(
+                summarize_entry_skip_reason(
+                    window,
+                    executor,
+                    regime,
+                    i,
+                    pair_cooldown,
+                    cooldown_bars=cooldown_bars,
+                    yield_gated=yield_gated,
+                    market_open=True,
+                    volatility=vol,
+                    wisdom_paused=bool(wisdom_paused),
+                ),
+                skip_acc,
             )
         pair_val = executor.pair_sleeve_value()
         pair_daily_pnl.append(pair_val - prev_pair_sleeve_value)
@@ -1419,6 +1862,8 @@ def run_backtest(
                 vol_state["premium_days"] = int(vol_state.get("premium_days", 0)) + 1
         total_orders += len(executor.orders)
         trade_days += 1
+        if attribution_tracker is not None:
+            attribution_tracker.snapshot_mtm(executor, prices)
 
         if track_metrics:
             invested = eq - portfolio.cash
@@ -1441,7 +1886,7 @@ def run_backtest(
                 window, regime, i, pair_cooldown, cooldown_bars=cooldown_bars
             )
             if spy_fill["first_signal_cycle"] is None and wants_spy:
-                spy_fill["first_signal_cycle"] = i - MIN_HISTORY
+                spy_fill["first_signal_cycle"] = i - warmup
             for order in executor.orders:
                 if (
                     order.get("side") == "buy"
@@ -1452,19 +1897,19 @@ def run_backtest(
             if not spy_fill["reached_90pct"] and spy_val >= target_90 - config.MIN_NOTIONAL:
                 spy_fill["reached_90pct"] = True
                 base = spy_fill["first_signal_cycle"] or 0
-                spy_fill["cycles_to_90pct"] = i - MIN_HISTORY - base
+                spy_fill["cycles_to_90pct"] = i - warmup - base
                 spy_fill["trades_to_90pct"] = spy_fill["spy_buys"]
                 spy_fill["hours_to_90pct"] = round(
                     spy_fill["cycles_to_90pct"] * (COOLDOWN_SECONDS / 3600), 1
                 )
 
-    bench = _benchmark_return(data, MIN_HISTORY)
+    bench = _benchmark_return(data, warmup)
     perf = compute_performance_metrics(
         equity_curve,
         initial_capital=portfolio.initial_capital,
         benchmark_return_pct=bench,
         total_orders=total_orders,
-        equity_index=[data.index[i].isoformat() for i in range(MIN_HISTORY, len(data))],
+        equity_index=[data.index[i].isoformat() for i in range(warmup, len(data))],
     )
     total_ret = perf["total_return_pct"]
     sharpe = perf["sharpe"]
@@ -1510,6 +1955,12 @@ def run_backtest(
             100.0 * portfolio.execution_cost_usd / max(portfolio.initial_capital, 1.0), 3
         ),
         "regime_counts": regime_counts,
+        "regime_series": regime_series,
+        "regime_filter": regime_filter,
+        "regime_filter_skips": regime_filter_skips,
+        "regime_breakdown": compute_regime_breakdown(
+            equity_curve, regime_series, initial_capital=initial_capital
+        ),
         "spy_fill": spy_fill,
         "halt_events": risk_manager.halt_events,
         "resume_events": risk_manager.resume_events,
@@ -1528,13 +1979,34 @@ def run_backtest(
         "paper_sleeve_features": config.get_paper_feature_flags() if paper_aggressive else {},
         "cofire_pct": round(100 * cofire_days / trade_days, 1) if trade_days else 0.0,
         "cofire_days": cofire_days,
+        "spy_nyse_cofire_pct": round(100 * spy_nyse_cofire_days / trade_days, 1)
+        if trade_days
+        else 0.0,
+        "spy_nyse_cofire_days": spy_nyse_cofire_days,
+        "nyse_pick_counts": dict(sorted(nyse_pick_counts.items(), key=lambda x: -x[1])),
+        "nyse_conditional_on_spy": config.effective_nyse_conditional_on_spy(),
         "small_account": small_account,
         "cap_scale": cap_scale,
-        "equity_index": [data.index[i].isoformat() for i in range(MIN_HISTORY, len(data))],
+        "equity_index": [data.index[i].isoformat() for i in range(warmup, len(data))],
         "equity_values": [round(v, 2) for v in equity_curve],
         "pairs_traded": pairs_traded,
         "pair_pnl_correlation": pair_pnl_corr,
     }
+    from modules.entry_skip_tracker import finalize_backtest_accumulator
+
+    result["entry_skip_breakdown"] = finalize_backtest_accumulator(skip_acc)
+    if last_executor is not None and config.effective_stat_arb_enabled():
+        from modules.stat_arb_sleeve import force_close_all_pairs
+
+        last_executor.prices = data.iloc[-1]
+        force_close_all_pairs(
+            last_executor, data.iloc[:], regime="", now=len(data) - 1
+        )
+    if attribution_tracker is not None and last_executor is not None:
+        att = attribution_tracker.finalize(last_executor.prices)
+        att["stat_arb_enabled"] = config.effective_stat_arb_enabled()
+        att["crypto_enabled"] = config.crypto_sleeve_enabled()
+        result["attribution"] = att
     if macro_portfolio is not None and macro_curve:
         macro_init = macro_portfolio.initial_capital
         macro_final = round(macro_curve[-1], 2)
@@ -1688,8 +2160,10 @@ def run_backtest(
         result["crypto_v2"] = summarize_crypto_v2_trades_from_executor(last_executor)
     config.set_paper_aggressive_context(saved_paper_ctx)
     config.set_backtest_paper_sleeves_context(saved_backtest_paper_sleeves)
+    config.set_backtest_vti_ceiling(saved_backtest_vti_ceiling)
     config.set_live_thinking_sim_context(saved_live_thinking_ctx)
     config.set_backtest_small_account_context(saved_small_ctx)
+    config.set_backtest_live_conservative_context(saved_live_conservative_ctx)
     config.SOCIAL_SLEEVE_ENABLED = saved_social
     config.PAPER_DYNAMIC_VTI_ENABLED = saved_dynamic_vti
     config.apply_paper_sleeve_flags(saved_paper_sleeve_flags)
@@ -1702,12 +2176,19 @@ def run_backtest(
     config.PAPER_STAT_ARB_ENABLED = saved_paper_stat_arb
     config.PAPER_STAT_ARB_OPTIMIZED = saved_paper_stat_arb_opt
     config.PAPER_THINKING_ENGINE_ENABLED = saved_paper_thinking
+    config.PAPER_CRYPTO_ENABLED = saved_paper_crypto
     config.PAPER_CRYPTO_V2_ENABLED = saved_paper_crypto_v2
     config.PAPER_CRYPTO_UNIVERSE_EXPANDED = saved_paper_crypto_expanded
     config.PAPER_RISK_PARITY_ENABLED = saved_paper_risk_parity
     config.PAPER_VOL_TRADING_ENABLED = saved_paper_vol_trading
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_paper_dynamic_univ
     config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_paper_dynamic_univ_strict
+    if paper_aggressive:
+        from modules.core_allocator import core_allocator_snapshot
+
+        result["core_allocator"] = core_allocator_snapshot()
+    config.DEEP_HISTORY_ENABLED = saved_deep_history
+    config.DEEP_HISTORY_INDICATORS_ONLY = saved_deep_indicators_only
     store_last_result(result)
     return result
 
@@ -1722,8 +2203,8 @@ def run_options_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -1785,8 +2266,8 @@ def run_dynamic_risk_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -1851,8 +2332,8 @@ def run_vol_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -1907,6 +2388,654 @@ def run_vol_compare(days=None, refresh=False, use_max=False) -> None:
         )
 
 
+def run_opportunistic_short_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare Realistic Research v1.3 with vs without protective shorts."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    lo = config.effective_protective_short_min_pct()
+    hi = config.effective_protective_short_max_pct()
+    configs = [
+        ("RR v1.3 (shorts OFF)", {**base_kwargs, "opportunistic_short": False}),
+        (f"RR v1.3 (shorts {lo:.0%}–{hi:.0%})", {**base_kwargs, "opportunistic_short": True}),
+    ]
+    print(f"--- PROTECTIVE SHORTS A/B (Realistic Research v1.3, {lo:.0%}–{hi:.0%}) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'Short PnL':>10} {'Trips':>6} {'Fires':>6} {'Win%':>5}"
+    )
+    print("-" * 96)
+
+    saved_short = config.PROTECTIVE_SHORT_ENABLED
+    saved_opp = config.SHORT_OPPORTUNISTIC_ENABLED
+    original_enforce = config.enforce_realistic_research_profile
+    results: list[tuple[str, dict]] = []
+
+    def _skip_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_enforce
+        for label, kwargs in configs:
+            on = kwargs.pop("opportunistic_short", True)
+            config.PROTECTIVE_SHORT_ENABLED = on
+            config.SHORT_OPPORTUNISTIC_ENABLED = on
+            result = run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                **kwargs,
+            )
+            att = result.get("attribution") or {}
+            sleeve = (att.get("sleeves") or {}).get("opportunistic_short") or {}
+            os_att = att.get("opportunistic_short") or {}
+            metrics = {
+                "return_pct": float(result.get("total_return_pct", 0) or 0),
+                "sharpe": float(result.get("sharpe", 0) or 0),
+                "max_dd": float(result.get("max_drawdown_pct", 0) or 0),
+                "short_pnl": float(sleeve.get("total_pnl_usd", 0) or 0),
+                "short_trips": int(sleeve.get("round_trips", 0) or 0),
+                "short_wr": float(os_att.get("win_rate_pct", 0) or 0),
+                "trigger_fires": int(os_att.get("trigger_fires", 0) or 0),
+                "trigger_scans": int(os_att.get("trigger_scans", 0) or 0),
+                "entry_fills": int(os_att.get("entry_fills", 0) or 0),
+                "os_att": os_att,
+            }
+            results.append((label, metrics))
+            print(
+                f"{label:<32} "
+                f"{metrics['return_pct']:>+7.2f}% "
+                f"{metrics['sharpe']:>7.2f} "
+                f"{metrics['max_dd']:>7.2f}% "
+                f"{metrics['short_pnl']:>+10.2f} "
+                f"{metrics['short_trips']:>6} "
+                f"{metrics['trigger_fires']:>6} "
+                f"{metrics['short_wr']:>4.0f}%"
+            )
+            if att:
+                from modules.backtest_attribution import (
+                    format_opportunistic_short_banner,
+                    format_short_trigger_summary,
+                )
+
+                line = format_opportunistic_short_banner(att)
+                if line:
+                    print(f"  {line}")
+                os_att = att.get("opportunistic_short") or {}
+                trig_line = format_short_trigger_summary(os_att)
+                if trig_line and on:
+                    print(f"  {trig_line}")
+    finally:
+        config.enforce_realistic_research_profile = original_enforce
+        config.PROTECTIVE_SHORT_ENABLED = saved_short
+        config.SHORT_OPPORTUNISTIC_ENABLED = saved_opp
+        original_enforce()
+
+    print("-" * 96)
+    if len(results) == 2:
+        _, m0 = results[0]
+        _, m1 = results[1]
+        print(
+            f"Delta (shorts ON - OFF): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+            f"short PnL ${m1['short_pnl']:+.2f} | "
+            f"trips {m1['short_trips']:+d} | "
+            f"trigger fires {m1['trigger_fires']} / scans {m1['trigger_scans']}"
+        )
+        from modules.backtest_attribution import format_short_trigger_summary
+
+        trig_summary = format_short_trigger_summary(m1.get("os_att") or {})
+        if trig_summary:
+            print(trig_summary)
+
+
+_LEGACY_UNIVERSE_CONFIG = {
+    "BASE_UNIVERSE_SIZE": 75,
+    "SECTOR_EXPANSION_SIZE": 35,
+    "SECTOR_MAX_TOTAL_TICKERS": 160,
+    "MAX_ACTIVE_SECTORS": 3,
+    "MAX_ACTIVE_SECTORS_STRONG": 3,
+    "SECTOR_FALLBACK_MOMENTUM_COUNT": 12,
+}
+
+
+def _universe_config_snapshot() -> dict[str, int]:
+    return {
+        "BASE_UNIVERSE_SIZE": int(config.BASE_UNIVERSE_SIZE),
+        "SECTOR_EXPANSION_SIZE": int(config.SECTOR_EXPANSION_SIZE),
+        "SECTOR_MAX_TOTAL_TICKERS": int(config.SECTOR_MAX_TOTAL_TICKERS),
+        "MAX_ACTIVE_SECTORS": int(config.MAX_ACTIVE_SECTORS),
+        "MAX_ACTIVE_SECTORS_STRONG": int(getattr(config, "MAX_ACTIVE_SECTORS_STRONG", 4)),
+        "SECTOR_FALLBACK_MOMENTUM_COUNT": int(config.SECTOR_FALLBACK_MOMENTUM_COUNT),
+    }
+
+
+def _apply_universe_config(values: dict[str, int]) -> None:
+    for key, val in values.items():
+        setattr(config, key, val)
+
+
+def _universe_compare_metrics(result: dict, *, data=None) -> dict[str, float | int]:
+    att = result.get("attribution") or {}
+    pick_counts = result.get("nyse_pick_counts") or {}
+    traded = set(pick_counts.keys()) if pick_counts else set()
+    if not traded:
+        for trip in att.get("round_trips") or []:
+            sym = str(trip.get("symbol") or "")
+            if sym and not config.is_crypto(sym):
+                traded.add(sym)
+    stat = att.get("stat_arb") or {}
+    skip = result.get("entry_skip_breakdown") or {}
+    by_cat = skip.get("by_category") or {}
+    stat_rejects = att.get("stat_arb_rejects") or {}
+    pool_size = 0
+    if data is not None and len(data) > 0:
+        try:
+            from modules.sector_screener import get_expanded_universe
+
+            pool_size = len(get_expanded_universe(data.columns, data))
+        except Exception:
+            pool_size = int(result.get("equity_universe_size", 0) or 0)
+    return {
+        "pool_size": pool_size,
+        "unique_tickers": len(traded),
+        "nyse_signals": int(result.get("nyse_signals", 0) or 0),
+        "stat_arb_pairs": int(stat.get("pair_entries", 0) or 0),
+        "stat_arb_intents": int(stat.get("intents", 0) or 0),
+        "stat_arb_no_room": int(stat_rejects.get("no_room", 0) or 0),
+        "skip_no_room": int(by_cat.get("no_room", 0) or 0),
+        "sharpe": float(result.get("sharpe", 0) or 0),
+        "return_pct": float(result.get("total_return_pct", 0) or 0),
+    }
+
+
+def run_universe_size_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare legacy (75/35/160) vs expanded (110/45/180) universe sizing."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Legacy (75/35/160)", _LEGACY_UNIVERSE_CONFIG),
+        ("Expanded (110/45/180)", _universe_config_snapshot()),
+    ]
+    print("--- UNIVERSE SIZE A/B (Realistic Research v1.1c) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<24} {'Return':>8} {'Sharpe':>7} {'Pool':>6} {'Unique':>7} "
+        f"{'NYSE':>6} {'SA pairs':>9} {'SA no_rm':>9} {'Skip nr':>8}"
+    )
+    print("-" * 88)
+
+    saved = _universe_config_snapshot()
+    results: list[tuple[str, dict, dict]] = []
+    try:
+        for label, universe_cfg in configs:
+            _apply_universe_config(universe_cfg)
+            import modules.sector_screener as sector_mod
+
+            sector_mod._sector_pools_cache = None
+            result = run_backtest(data, track_metrics=True, **base_kwargs)
+            metrics = _universe_compare_metrics(result, data=data)
+            results.append((label, result, metrics))
+            print(
+                f"{label:<24} "
+                f"{metrics['return_pct']:>+7.2f}% "
+                f"{metrics['sharpe']:>7.2f} "
+                f"{metrics['pool_size']:>6} "
+                f"{metrics['unique_tickers']:>7} "
+                f"{metrics['nyse_signals']:>6} "
+                f"{metrics['stat_arb_pairs']:>9} "
+                f"{metrics['stat_arb_no_room']:>9} "
+                f"{metrics['skip_no_room']:>8}"
+            )
+    finally:
+        _apply_universe_config(saved)
+        import modules.sector_screener as sector_mod
+
+        sector_mod._sector_pools_cache = None
+
+    print("-" * 88)
+    if len(results) == 2:
+        _legacy, _new, m0 = results[0]
+        _legacy2, _new2, m1 = results[1]
+        print(
+            f"Delta (expanded - legacy): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"pool {m1['pool_size'] - m0['pool_size']:+d} | "
+            f"unique tickers {m1['unique_tickers'] - m0['unique_tickers']:+d} | "
+            f"NYSE signals {m1['nyse_signals'] - m0['nyse_signals']:+d} | "
+            f"stat-arb pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
+            f"SA no_room {m1['stat_arb_no_room'] - m0['stat_arb_no_room']:+d} | "
+            f"skip no_room {m1['skip_no_room'] - m0['skip_no_room']:+d}"
+        )
+
+
+_LEGACY_V12_REALISTIC_RESEARCH = {
+    "PAPER_STAT_ARB_MIN_CORR": 0.75,
+    "PAPER_STAT_ARB_MAX_PAIRS": 8,
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 9,
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 10,
+    "PAPER_STAT_ARB_COINT_PVALUE": 0.10,
+    "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF": False,
+    "DYNAMIC_CORE_ENABLED": False,
+    "CORE_ALLOCATOR_LOCKED": True,
+    "PROTECTIVE_SHORT_MAX_PCT": 0.12,
+    "SHORT_RHYME_E_ENABLED": False,
+}
+
+
+def _realistic_research_config_snapshot() -> dict[str, float | int | bool]:
+    return {
+        "PAPER_STAT_ARB_MIN_CORR": float(config.PAPER_STAT_ARB_MIN_CORR),
+        "PAPER_STAT_ARB_MAX_PAIRS": int(config.PAPER_STAT_ARB_MAX_PAIRS),
+        "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": int(config.PAPER_STAT_ARB_MAX_PAIRS_EXPANDED),
+        "PAPER_STAT_ARB_MAX_PAIRS_CEILING": int(config.PAPER_STAT_ARB_MAX_PAIRS_CEILING),
+        "PAPER_STAT_ARB_COINT_PVALUE": float(config.PAPER_STAT_ARB_COINT_PVALUE),
+        "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF": bool(config.PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF),
+        "DYNAMIC_CORE_ENABLED": bool(config.DYNAMIC_CORE_ENABLED),
+        "CORE_ALLOCATOR_LOCKED": bool(config.CORE_ALLOCATOR_LOCKED),
+        "PROTECTIVE_SHORT_MAX_PCT": float(config.PROTECTIVE_SHORT_MAX_PCT),
+        "SHORT_RHYME_E_ENABLED": bool(config.SHORT_RHYME_E_ENABLED),
+    }
+
+
+def _apply_realistic_research_config(values: dict[str, float | int | bool]) -> None:
+    for key, val in values.items():
+        setattr(config, key, val)
+
+
+def _v13_validation_metrics(result: dict) -> dict[str, float | int]:
+    base = _stat_arb_validation_metrics(result)
+    att = result.get("attribution") or {}
+    sleeves = att.get("sleeves") or {}
+    short_pnl = float((sleeves.get("opportunistic_short") or {}).get("total_pnl_usd", 0.0))
+    os_data = att.get("opportunistic_short") or {}
+    base["short_pnl"] = short_pnl
+    base["short_entries"] = int(os_data.get("entry_fills", 0) or 0)
+    try:
+        from modules.core_allocator import core_allocator_snapshot
+
+        snap = core_allocator_snapshot()
+        base["core_vti_pct"] = float(snap.get("vti_pct", 0.40))
+        base["core_choice"] = str(snap.get("choice", "spy"))
+    except Exception:
+        base["core_vti_pct"] = 0.40
+        base["core_choice"] = "spy"
+    return base
+
+
+def run_realistic_research_v13_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare Realistic Research v1.2 vs v1.3 (full upgrade package)."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Realistic Research v1.2", _LEGACY_V12_REALISTIC_RESEARCH),
+        ("Realistic Research v1.3", _realistic_research_config_snapshot()),
+    ]
+    print("--- REALISTIC RESEARCH v1.3 VALIDATION (v1.2 vs v1.3) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'SA PnL':>9} {'Pairs':>6} {'Short$':>8} {'Core%':>6} {'SA nr':>6}"
+    )
+    print("-" * 100)
+
+    saved = _realistic_research_config_snapshot()
+    original_enforce = config.enforce_realistic_research_profile
+    results: list[tuple[str, dict]] = []
+
+    def _skip_profile_enforce() -> None:
+        """Compare arms set config explicitly; do not re-lock to v1.3 defaults."""
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_profile_enforce
+        for label, cfg in configs:
+            _apply_realistic_research_config(cfg)
+            if cfg.get("CORE_ALLOCATOR_LOCKED"):
+                try:
+                    from modules.core_allocator import lock_core_allocator
+
+                    lock_core_allocator("spy")
+                except ImportError:
+                    pass
+            else:
+                try:
+                    from modules.core_allocator import reset_core_allocator_state
+
+                    reset_core_allocator_state()
+                except ImportError:
+                    pass
+            result = run_backtest(data, track_metrics=True, **base_kwargs)
+            m = _v13_validation_metrics(result)
+            results.append((label, m))
+            print(
+                f"{label:<28} "
+                f"{m['return_pct']:>+7.2f}% "
+                f"{m['sharpe']:>7.2f} "
+                f"{m['max_dd']:>7.2f}% "
+                f"{m['stat_arb_pnl']:>+9.2f} "
+                f"{m['stat_arb_pairs']:>6} "
+                f"{m['short_pnl']:>+8.2f} "
+                f"{m['core_vti_pct']*100:>5.0f}% "
+                f"{m['sa_no_room']:>6}"
+            )
+    finally:
+        config.enforce_realistic_research_profile = original_enforce
+        _apply_realistic_research_config(saved)
+        original_enforce()
+
+    print("-" * 100)
+    if len(results) == 2:
+        _, m0 = results[0]
+        _, m1 = results[1]
+        print(
+            f"Delta (v1.3 - v1.2): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+            f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+            f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
+            f"short PnL ${m1['short_pnl'] - m0['short_pnl']:+.2f} | "
+            f"core VTI {m1['core_vti_pct']*100 - m0['core_vti_pct']*100:+.0f}pp | "
+            f"SA no_room {m1['sa_no_room'] - m0['sa_no_room']:+d}"
+        )
+
+
+_LEGACY_V13_STAT_ARB_PRE = {
+    "PAPER_STAT_ARB_MIN_CORR": 0.72,
+    "PAPER_STAT_ARB_COINT_PVALUE": 0.12,
+    "PAPER_STAT_ARB_MAX_PAIRS": 10,
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 11,
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 12,
+    "PAPER_STAT_ARB_Z_ENTRY_BASE": 2.0,
+    "PAPER_STAT_ARB_Z_ENTRY_MAX": 2.5,
+    "PAPER_STAT_ARB_RISK_REWARD": 1.5,
+    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": 25_000_000,
+}
+
+
+def _stat_arb_v13_config_snapshot() -> dict[str, float | int]:
+    return {
+        "PAPER_STAT_ARB_MIN_CORR": float(config.PAPER_STAT_ARB_MIN_CORR),
+        "PAPER_STAT_ARB_COINT_PVALUE": float(config.PAPER_STAT_ARB_COINT_PVALUE),
+        "PAPER_STAT_ARB_MAX_PAIRS": int(config.PAPER_STAT_ARB_MAX_PAIRS),
+        "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": int(config.PAPER_STAT_ARB_MAX_PAIRS_EXPANDED),
+        "PAPER_STAT_ARB_MAX_PAIRS_CEILING": int(config.PAPER_STAT_ARB_MAX_PAIRS_CEILING),
+        "PAPER_STAT_ARB_Z_ENTRY_BASE": float(config.PAPER_STAT_ARB_Z_ENTRY_BASE),
+        "PAPER_STAT_ARB_Z_ENTRY_MAX": float(config.PAPER_STAT_ARB_Z_ENTRY_MAX),
+        "PAPER_STAT_ARB_RISK_REWARD": float(config.PAPER_STAT_ARB_RISK_REWARD),
+        "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": float(config.PAPER_STAT_ARB_MIN_DOLLAR_VOLUME),
+    }
+
+
+def run_stat_arb_v13_push_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare Stat Arb v1.3 pre-push vs pushed capacity (10-14p, RR 1.6, Z 2.0-2.6)."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("v1.3 before (10-12p RR1.5)", _LEGACY_V13_STAT_ARB_PRE),
+        ("v1.3 pushed (10-14p RR1.6)", _stat_arb_v13_config_snapshot()),
+    ]
+    print("--- STAT ARB v1.3 PUSH (before vs after) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'SA PnL':>9} {'Fill%':>6} {'Pairs':>6} {'SA nr':>6}"
+    )
+    print("-" * 88)
+
+    saved = _stat_arb_v13_config_snapshot()
+    original_enforce = config.enforce_realistic_research_profile
+    results: list[tuple[str, dict]] = []
+
+    def _skip_profile_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_profile_enforce
+        for label, cfg in configs:
+            _apply_stat_arb_config(cfg)
+            result = run_backtest(data, track_metrics=True, **base_kwargs)
+            m = _stat_arb_validation_metrics(result)
+            sa = (result.get("attribution") or {}).get("stat_arb") or {}
+            m["fill_rate"] = float(sa.get("fill_rate_pct", 0) or 0)
+            results.append((label, m))
+            print(
+                f"{label:<28} "
+                f"{m['return_pct']:>+7.2f}% "
+                f"{m['sharpe']:>7.2f} "
+                f"{m['max_dd']:>7.2f}% "
+                f"{m['stat_arb_pnl']:>+9.2f} "
+                f"{m['fill_rate']:>5.1f}% "
+                f"{m['stat_arb_pairs']:>6} "
+                f"{m['sa_no_room']:>6}"
+            )
+    finally:
+        config.enforce_realistic_research_profile = original_enforce
+        _apply_stat_arb_config(saved)
+
+    print("-" * 88)
+    if len(results) == 2:
+        _, m0 = results[0]
+        _, m1 = results[1]
+        print(
+            f"Delta (pushed - before): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+            f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+            f"fill {m1['fill_rate'] - m0['fill_rate']:+.1f}pp | "
+            f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
+            f"no_room {m1['sa_no_room'] - m0['sa_no_room']:+d}"
+        )
+
+
+_LEGACY_STAT_ARB_CONFIG = {
+    "PAPER_STAT_ARB_MAX_PAIRS": 4,
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 6,
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 8,
+    "PAPER_STAT_ARB_RISK_REWARD": 1.2,
+    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": 0,
+    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": 2.0,
+    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": 0.35,
+}
+
+
+def _stat_arb_config_snapshot() -> dict[str, float | int]:
+    return {
+        "PAPER_STAT_ARB_MAX_PAIRS": int(config.PAPER_STAT_ARB_MAX_PAIRS),
+        "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": int(config.PAPER_STAT_ARB_MAX_PAIRS_EXPANDED),
+        "PAPER_STAT_ARB_MAX_PAIRS_CEILING": int(config.PAPER_STAT_ARB_MAX_PAIRS_CEILING),
+        "PAPER_STAT_ARB_RISK_REWARD": float(config.PAPER_STAT_ARB_RISK_REWARD),
+        "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": float(config.PAPER_STAT_ARB_MIN_DOLLAR_VOLUME),
+        "PAPER_STAT_ARB_TRAILING_ARM_FRAC": float(config.PAPER_STAT_ARB_TRAILING_ARM_FRAC),
+        "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": float(
+            config.PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC
+        ),
+    }
+
+
+def _apply_stat_arb_config(values: dict[str, float | int]) -> None:
+    for key, val in values.items():
+        setattr(config, key, val)
+
+
+def _stat_arb_validation_metrics(result: dict) -> dict[str, float | int]:
+    att = result.get("attribution") or {}
+    sa = att.get("stat_arb") or {}
+    sleeves = att.get("sleeves") or {}
+    stat_pnl = float((sleeves.get("stat_arb") or {}).get("total_pnl_usd", 0.0))
+    skip = result.get("entry_skip_breakdown") or {}
+    by_cat = skip.get("by_category") or {}
+    rejects = att.get("stat_arb_rejects") or {}
+    return {
+        "return_pct": float(result.get("total_return_pct", 0) or 0),
+        "sharpe": float(result.get("sharpe", 0) or 0),
+        "max_dd": float(result.get("max_drawdown_pct", 0) or 0),
+        "stat_arb_pnl": stat_pnl,
+        "stat_arb_pairs": int(sa.get("pair_entries", 0) or 0),
+        "stat_arb_win": float((sleeves.get("stat_arb") or {}).get("win_rate_pct", 0) or 0),
+        "avg_z": float(sa.get("avg_entry_z", 0) or 0),
+        "avg_hold": float(sa.get("avg_hold_bars", 0) or 0),
+        "sa_no_room": int(rejects.get("no_room", 0) or 0),
+        "skip_no_room": int(by_cat.get("no_room", 0) or 0),
+    }
+
+
+def run_stat_arb_v12_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare stat arb v1.1 (4-8 pairs, 1.2 RR) vs v1.2 (8-10, 1.5 RR + trail)."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Stat Arb v1.1 (4-8p, RR 1.2)", _LEGACY_STAT_ARB_CONFIG),
+        ("Stat Arb v1.2 (8-10p, RR 1.5)", _stat_arb_config_snapshot()),
+    ]
+    print("--- STAT ARB v1.2 VALIDATION (Realistic Research v1.1c) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'SA PnL':>9} {'Pairs':>6} {'Win%':>5} {'AvgZ':>5} "
+        f"{'SA nr':>6} {'Skip':>5}"
+    )
+    print("-" * 98)
+
+    saved = _stat_arb_config_snapshot()
+    results: list[tuple[str, dict]] = []
+    try:
+        for label, cfg in configs:
+            _apply_stat_arb_config(cfg)
+            result = run_backtest(data, track_metrics=True, **base_kwargs)
+            m = _stat_arb_validation_metrics(result)
+            results.append((label, m))
+            print(
+                f"{label:<28} "
+                f"{m['return_pct']:>+7.2f}% "
+                f"{m['sharpe']:>7.2f} "
+                f"{m['max_dd']:>7.2f}% "
+                f"{m['stat_arb_pnl']:>+9.2f} "
+                f"{m['stat_arb_pairs']:>6} "
+                f"{m['stat_arb_win']:>4.0f}% "
+                f"{m['avg_z']:>5.2f} "
+                f"{m['sa_no_room']:>6} "
+                f"{m['skip_no_room']:>5}"
+            )
+    finally:
+        _apply_stat_arb_config(saved)
+
+    print("-" * 98)
+    if len(results) == 2:
+        _, m0 = results[0]
+        _, m1 = results[1]
+        print(
+            f"Delta (v1.2 - v1.1): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+            f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+            f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
+            f"SA no_room {m1['sa_no_room'] - m0['sa_no_room']:+d} | "
+            f"skip no_room {m1['skip_no_room'] - m0['skip_no_room']:+d}"
+        )
+
+
 def run_stat_arb_compare(days=None, refresh=False, use_max=False) -> None:
     """Compare paper aggressive with vs without statistical arbitrage sleeve."""
     if use_max:
@@ -1914,8 +3043,8 @@ def run_stat_arb_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -1990,8 +3119,8 @@ def run_stat_arb_optimized_compare(days=None, refresh=False, use_max=False) -> N
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
         label = f"{days}d"
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -2079,8 +3208,8 @@ def run_thinking_compare(days=None, refresh=False, use_max=False) -> None:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
         label = f"{days}d"
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -2240,8 +3369,8 @@ def run_compare_crypto_v2(days=None, refresh=False, use_max=False) -> None:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
         label = f"{days}d"
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     from modules.crypto_dual_sleeve import crypto_v2_universe
@@ -2353,8 +3482,8 @@ def run_compare_crypto_universe(days=None, refresh=False, use_max=False) -> None
         config.PAPER_CRYPTO_UNIVERSE_EXPANDED = saved_exp
         config.set_backtest_crypto_expanded_prefetch(saved_prefetch)
 
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     if use_max:
@@ -2591,8 +3720,8 @@ def run_compare_vti_levels(days=None, refresh=False, use_max=False) -> None:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
         label = f"{days}d"
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -2678,8 +3807,8 @@ def run_simulate_live_thinking_compare(
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
         label = f"{days}d"
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     eq_start = start_equity or (
@@ -2938,8 +4067,8 @@ def run_risk_parity_compare(days=None, refresh=False, use_max=False) -> None:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
         label = f"{days}d"
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3275,8 +4404,8 @@ def run_final_compare(
             data = _ensure_daily_data(0, refresh=False, use_max=True)
         else:
             data = _ensure_daily_data(d, refresh=False, use_max=False)
-        if len(data) < MIN_HISTORY:
-            print(f"{label}: need {MIN_HISTORY} bars; got {len(data)}.")
+        if len(data) < 20:
+            print(f"{label}: need 20 bars; got {len(data)}.")
             continue
         w = _run_final_window(data, window_label=label)
         results.append(w)
@@ -3324,8 +4453,8 @@ def run_pairs_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3396,8 +4525,8 @@ def run_regime_shift_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3458,8 +4587,8 @@ def run_felix_social_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3520,8 +4649,8 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3569,6 +4698,72 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
     print("-" * 76)
 
 
+def run_nyse_conditional_compare(days=None, refresh=False, use_max=False) -> None:
+    """Paper aggressive: NYSE conditional-on-SPY filter on vs off."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    configs = [
+        (
+            "Paper (no NYSE conditional)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+                "nyse_conditional_on_spy": False,
+            },
+        ),
+        (
+            "Paper (+NYSE conditional on SPY)",
+            {
+                "paper_aggressive": True,
+                "paper_sleeve_features": True,
+                "paper_dynamic_vti": True,
+                "nyse_conditional_on_spy": True,
+            },
+        ),
+    ]
+    print("--- NYSE CONDITIONAL ON SPY A/B (paper aggressive) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'SPY+NYSE':>8} {'NYSE':>5}"
+    )
+    print("-" * 82)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
+        results.append((label, result))
+        print(
+            f"{label:<34} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{result.get('spy_nyse_cofire_pct', 0):>7.1f}% "
+            f"{result.get('nyse_signals', 0):>5}"
+        )
+    print("-" * 82)
+    for label, result in results:
+        picks = result.get("nyse_pick_counts") or {}
+        top = list(picks.items())[:6]
+        pick_txt = ", ".join(f"{s}({n})" for s, n in top) if top else "—"
+        print(f"{label}: top NYSE picks -> {pick_txt}")
+    print("-" * 82)
+
+
 def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> None:
     """Compare static UNIVERSE vs strict dynamic screener (paper aggressive)."""
     saved_dyn = config.PAPER_DYNAMIC_UNIVERSE_ENABLED
@@ -3595,8 +4790,8 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
     config.PAPER_DYNAMIC_UNIVERSE_ENABLED = saved_dyn
     config.PAPER_DYNAMIC_UNIVERSE_STRICT = saved_strict
 
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     static_size = len(_static_equity_universe(data.columns))
@@ -3697,8 +4892,8 @@ def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3750,8 +4945,8 @@ def run_paper_aggressive_compare(days=None, refresh=False, use_max=False) -> Non
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3809,8 +5004,8 @@ def run_vti_core_compare(
     else:
         days = days or config.BACKTEST_DAYS
         data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < MIN_HISTORY:
-        print(f"Need at least {MIN_HISTORY} daily bars; got {len(data)}.")
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
@@ -3873,32 +5068,90 @@ def run_performance_test(
     vti_core_pct: float = 0.0,
     paper_aggressive: bool = False,
     small_account: bool = False,
+    stat_arb_report: bool | None = None,
+    paper_crypto_enabled: bool | None = None,
+    regime_filter: str | None = None,
+    regime_breakdown: bool = False,
+    deep_history: bool = False,
+    deep_history_indicators_only: bool = False,
+    max_years: int = 20,
 ):
+    if paper_aggressive and not deep_history and config.DEEP_HISTORY_ENABLED:
+        deep_history = True
+    if deep_history and not deep_history_indicators_only and config.DEEP_HISTORY_INDICATORS_ONLY:
+        deep_history_indicators_only = True
     if use_max:
         print("--- STARTING FUND BACKTEST (max available daily history) ---")
     else:
         days = days or config.BACKTEST_DAYS
         print(f"--- STARTING FUND BACKTEST ({days} days) ---")
+    if small_account and not paper_aggressive:
+        conservative = vti_core_pct <= 0 or abs(
+            vti_core_pct - config.LIVE_VTI_CORE_PCT
+        ) < 0.005
+        if vti_core_pct > 0 and abs(vti_core_pct - 0.90) < 0.005:
+            conservative = False
+        config.set_backtest_small_account_context(True)
+        config.set_backtest_live_conservative_context(conservative)
+        if conservative:
+            config.enforce_live_small_account_profile()
     if small_account:
-        print(
-            f"--- SMALL-ACCOUNT MODE: ${config.SMALL_ACCOUNT_BACKTEST_EQUITY:,.0f} start | "
-            f"{config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
-            f"risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
-            f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:,.0f}/order ---"
-        )
+        if config.live_conservative_profile_active():
+            print(
+                f"--- LIVE CONSERVATIVE: ${config.SMALL_ACCOUNT_BACKTEST_EQUITY:,.0f} start | "
+                f"{config.format_live_conservative_banner()} ---"
+            )
+        else:
+            display_vti = (
+                vti_core_pct if vti_core_pct > 0 else config.SMALL_ACCOUNT_VTI_CORE_PCT
+            )
+            print(
+                f"--- SMALL-ACCOUNT MODE (legacy): ${config.SMALL_ACCOUNT_BACKTEST_EQUITY:,.0f} start | "
+                f"{display_vti:.0%} {VTI_CORE_SYMBOL} | "
+                f"risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
+                f"max ${config.SMALL_ACCOUNT_MAX_NOTIONAL:,.0f}/order ---"
+            )
         if vti_core_pct <= 0:
-            vti_core_pct = config.SMALL_ACCOUNT_VTI_CORE_PCT
+            vti_core_pct = (
+                config.LIVE_VTI_CORE_PCT
+                if config.live_conservative_profile_active()
+                else config.SMALL_ACCOUNT_VTI_CORE_PCT
+            )
     elif paper_aggressive:
-        if config.PAPER_DYNAMIC_VTI_ENABLED:
+        if config.effective_core_allocator_locked() and vti_core_pct <= 0:
+            from modules.core_allocator import (
+                current_core_choice,
+                effective_vti_core_pct,
+                lock_core_allocator,
+            )
+
+            lock_core_allocator()
+            vti_core_pct = float(effective_vti_core_pct() or config.PAPER_VTI_CORE_PCT)
+            print(
+                f"--- PAPER AGGRESSIVE: locked {current_core_choice().upper()} @ "
+                f"{vti_core_pct:.0%} passive core | "
+                f"{1 - vti_core_pct:.0%} active (boost "
+                f"{config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x) ---"
+            )
+        elif not config.PAPER_DYNAMIC_VTI_ENABLED and vti_core_pct <= 0:
+            vti_core_pct = config.PAPER_VTI_CORE_PCT
+            print(
+                f"--- PAPER AGGRESSIVE: {vti_core_pct:.0%} {VTI_CORE_SYMBOL} core | "
+                f"{1 - vti_core_pct:.0%} active (boost "
+                f"{config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x) ---"
+            )
+        elif config.PAPER_DYNAMIC_VTI_ENABLED:
             print(
                 f"--- PAPER AGGRESSIVE: dynamic {VTI_CORE_SYMBOL} "
                 f"({config.DYNAMIC_VTI_PAPER_FLOOR:.0%}-75% by vol/stress) | "
                 f"boost {config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x ---"
             )
         else:
+            if vti_core_pct <= 0:
+                vti_core_pct = config.PAPER_VTI_CORE_PCT
             print(
-                f"--- PAPER AGGRESSIVE: {config.PAPER_VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} | "
-                f"{1 - config.PAPER_VTI_CORE_PCT:.0%} active (boost "
+                f"--- PAPER AGGRESSIVE: {vti_core_pct:.0%} {VTI_CORE_SYMBOL} core | "
+                f"{1 - vti_core_pct:.0%} active (boost "
                 f"{config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x) ---"
             )
     elif vti_core_pct > 0:
@@ -3907,15 +5160,39 @@ def run_performance_test(
             f"{1 - vti_core_pct:.0%} active sleeves ---"
         )
     try:
-        data = _ensure_daily_data(days or 0, refresh=refresh, use_max=use_max)
+        from modules.operating_layer import format_operating_layer_banner
+
+        op_banner = format_operating_layer_banner()
+        if op_banner:
+            print(f"--- {op_banner} ---")
+    except Exception:
+        pass
+    if regime_filter:
+        resolved = resolve_regime_name(regime_filter) or regime_filter
+        print(f"--- REGIME FILTER: trade only on {resolved} ---")
+    if deep_history:
+        print(
+            f"--- DEEP INDICATOR HISTORY: up to {max(1, int(max_years))}y "
+            f"(Alpaca + yfinance, cached as *_deep.pkl) ---"
+        )
+        _print_deep_history_mode_banner(
+            deep_history=deep_history,
+            deep_history_indicators_only=deep_history_indicators_only,
+            max_years=max_years,
+        )
+        if refresh:
+            clear_deep_history_cache()
+    config.DEEP_HISTORY_ENABLED = bool(deep_history)
+    config.DEEP_HISTORY_INDICATORS_ONLY = bool(deep_history_indicators_only)
+    try:
+        full_data = _ensure_daily_data(days or 0, refresh=refresh, use_max=use_max)
     except Exception as e:
         print("Database error: " + str(e))
         return
-    if len(data) < MIN_HISTORY:
+    if len(full_data) < 20:
         sim_target = days or config.BACKTEST_DAYS
         print(
-            f"Need at least {MIN_HISTORY} daily bars for SPY MA{config.SPY_MA_WINDOW} "
-            f"warmup; got {len(data)}."
+            f"Need at least 20 daily bars to run; got {len(full_data)}."
         )
         print(
             "Run: python fetch_data.py --daily --days "
@@ -3924,25 +5201,121 @@ def run_performance_test(
         print("Or:  python fetch_data.py --daily --max")
         return
 
-    start_date = data.index[MIN_HISTORY]
-    end_date = data.index[-1]
+    sim_target_days = days or config.BACKTEST_DAYS
+    target_sim_bars = max(5, int(sim_target_days * 0.80))
+    indicator_context = None
+    allocator_data = None
+    data = full_data
+    if deep_history:
+        if deep_history_indicators_only:
+            allocator_data = _trim_baseline_backtest_data(
+                full_data, target_sim_bars=target_sim_bars
+            )
+            if len(full_data) > target_sim_bars:
+                data = full_data.iloc[-target_sim_bars:].copy()
+            n_bars = len(data)
+            warmup = 0
+            start_date = data.index[0]
+            end_date = data.index[-1]
+            indicator_context = _build_indicator_context(
+                data, max_years=max_years, refresh=refresh
+            )
+            if indicator_context is None or indicator_context.empty:
+                print(
+                    "WARNING: deep indicator history unavailable; "
+                    "falling back to in-window warmup."
+                )
+                indicator_context = None
+                allocator_data = None
+                data = allocator_data or _trim_baseline_backtest_data(
+                    full_data, target_sim_bars=target_sim_bars
+                )
+                n_bars = len(data)
+                warmup = min(MIN_HISTORY, max(0, n_bars - 5))
+                start_date = data.index[warmup]
+            else:
+                _print_indicator_context_summary(indicator_context, data)
+        else:
+            if len(full_data) > target_sim_bars:
+                data = full_data.iloc[-target_sim_bars:].copy()
+            n_bars = len(data)
+            warmup = 0
+            start_date = data.index[0]
+            end_date = data.index[-1]
+            indicator_context = _build_indicator_context(
+                data, max_years=max_years, refresh=refresh
+            )
+            if indicator_context is None or indicator_context.empty:
+                print(
+                    "WARNING: deep indicator history unavailable; "
+                    "falling back to in-window warmup."
+                )
+                indicator_context = None
+                n_bars = len(data)
+                warmup = min(MIN_HISTORY, max(0, n_bars - 5))
+                start_date = data.index[warmup]
+            else:
+                _print_indicator_context_summary(indicator_context, data)
+    else:
+        data = _trim_baseline_backtest_data(full_data, target_sim_bars=target_sim_bars)
+        n_bars = len(data)
+        warmup = min(MIN_HISTORY, max(0, n_bars - 5))
+        start_date = data.index[warmup]
+        end_date = data.index[-1]
     cooldown_bars = DAILY_COOLDOWN_BARS
     bar_label = "daily bars"
-    sim_bars = len(data) - MIN_HISTORY
+    sim_bars = len(data) - warmup
     sim_days = (end_date - start_date).days
 
     print(f"Loaded {len(data.columns)} tickers over {len(data)} {bar_label}.")
-    print(
-        f"Warmup: {MIN_HISTORY} bars (SPY MA{config.SPY_MA_WINDOW}) | "
-        f"Simulation: {sim_bars} bars"
-    )
+    if deep_history:
+        print(
+            f"Warmup: 0 bars (deep indicator context) | "
+            f"Simulation: {sim_bars} bars"
+        )
+        if deep_history_indicators_only and allocator_data is not None:
+            print(
+                f"Allocator window: {len(allocator_data)} bars "
+                f"(baseline sim + warmup, pinned)"
+            )
+    else:
+        print(
+            f"Warmup: {warmup} bars (SPY MA{config.SPY_MA_WINDOW}) | "
+            f"Simulation: {sim_bars} bars"
+        )
     print(f"Simulation window: {start_date.date()} to {end_date.date()} ({sim_days} calendar days)")
     print(f"Cooldown: {cooldown_bars} bar(s) (~{COOLDOWN_SECONDS // 60} min live logic)")
 
     saved_paper_ctx = config.paper_aggressive_context()
     saved_small_ctx = config.backtest_small_account_context()
+    saved_live_conservative_ctx = config.backtest_live_conservative_context()
+    saved_bt_sleeves = config.backtest_paper_sleeves_context()
+    saved_vti_ceil = config.backtest_vti_ceiling()
+    saved_paper_crypto = config.PAPER_CRYPTO_ENABLED
+    saved_paper_crypto_v2 = config.PAPER_CRYPTO_V2_ENABLED
     config.set_paper_aggressive_context(paper_aggressive)
     config.set_backtest_small_account_context(small_account)
+    if small_account and not paper_aggressive:
+        conservative = vti_core_pct <= 0 or abs(
+            vti_core_pct - config.LIVE_VTI_CORE_PCT
+        ) < 0.005
+        if vti_core_pct > 0 and abs(vti_core_pct - 0.90) < 0.005:
+            conservative = False
+        config.set_backtest_live_conservative_context(conservative)
+        if conservative:
+            config.enforce_live_small_account_profile()
+    else:
+        config.set_backtest_live_conservative_context(False)
+    config.set_backtest_paper_sleeves_context(paper_aggressive)
+    if paper_crypto_enabled is not None:
+        config.PAPER_CRYPTO_ENABLED = bool(paper_crypto_enabled)
+        if not paper_crypto_enabled:
+            config.PAPER_CRYPTO_V2_ENABLED = False
+    if paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED:
+        effective_vti = (
+            vti_core_pct if vti_core_pct > 0 else config.PAPER_VTI_CORE_PCT
+        )
+        config.set_backtest_vti_ceiling(effective_vti)
     try:
         stack_profile = "paper" if paper_aggressive else "live"
         config.print_recommended_stack_flags(profile=stack_profile)
@@ -3950,6 +5323,11 @@ def run_performance_test(
     finally:
         config.set_paper_aggressive_context(saved_paper_ctx)
         config.set_backtest_small_account_context(saved_small_ctx)
+        config.set_backtest_live_conservative_context(saved_live_conservative_ctx)
+        config.set_backtest_paper_sleeves_context(saved_bt_sleeves)
+        config.set_backtest_vti_ceiling(saved_vti_ceil)
+        config.PAPER_CRYPTO_ENABLED = saved_paper_crypto
+        config.PAPER_CRYPTO_V2_ENABLED = saved_paper_crypto_v2
 
     result = run_backtest(
         data,
@@ -3958,7 +5336,25 @@ def run_performance_test(
         vti_core_pct=vti_core_pct,
         paper_aggressive=paper_aggressive,
         small_account=small_account,
+        stat_arb_report=stat_arb_report,
+        paper_crypto_enabled=paper_crypto_enabled,
+        regime_filter=regime_filter,
+        indicator_context=indicator_context,
+        max_years=max_years,
+        allocator_data=allocator_data,
+        deep_history_indicators_only=deep_history_indicators_only,
     )
+    core = (result or {}).get("core_allocator") or {}
+    if core:
+        choice = str(core.get("choice", "?")).upper()
+        pct = float(core.get("vti_pct", 0.0))
+        metrics = core.get("metrics") or {}
+        vti_sh = float((metrics.get("vti") or {}).get("sharpe", 0.0))
+        spy_sh = float((metrics.get("spy") or {}).get("sharpe", 0.0))
+        print(
+            f"Final core allocator: {choice} @ {pct:.0%} "
+            f"(Sharpe VTI {vti_sh:.2f} vs SPY {spy_sh:.2f})"
+        )
     curve_end = result["final_equity"]
     total_ret = result["total_return_pct"]
     sharpe = result["sharpe"]
@@ -3971,6 +5367,22 @@ def run_performance_test(
     regime_counts = result["regime_counts"]
 
     print("--- FUND BACKTEST REPORT (SPY + vol-gated crypto + NYSE) ---")
+    if result.get("attribution"):
+        from modules.backtest_attribution import (
+            format_crypto_banner,
+            format_opportunistic_short_banner,
+            format_stat_arb_banner,
+        )
+
+        stat_arb_banner = format_stat_arb_banner(result["attribution"])
+        if stat_arb_banner:
+            print(stat_arb_banner)
+        short_banner = format_opportunistic_short_banner(result["attribution"])
+        if short_banner:
+            print(short_banner)
+        crypto_banner = format_crypto_banner(result["attribution"])
+        if crypto_banner:
+            print(crypto_banner)
     print(
         f"Simulation:       {start_date.date()} to {end_date.date()} "
         f"(~{sim_days} days, {len(data)} {bar_label})"
@@ -3983,7 +5395,16 @@ def run_performance_test(
         f"metal {alloc['metal']:.1%} | "
         f"cash {alloc['cash_buffer']:.1%}"
     )
-    if alloc.get("vti_core"):
+    if result.get("vti_core_pct") is not None:
+        core_avg = float(result["vti_core_pct"]) * 100
+        if config.effective_core_allocator_locked():
+            from modules.core_allocator import current_core_choice
+
+            label = current_core_choice().upper()
+            print(f"Core {label} (avg): {core_avg:.1f}% (locked)")
+        else:
+            print(f"VTI core (avg):   {core_avg:.1f}%")
+    elif alloc.get("vti_core"):
         print(f"VTI core:         {alloc['vti_core']:.1%}")
     print(f"Crypto vol-only:  {config.effective_crypto_vol_only()}")
     print(f"Final Equity:     ${curve_end}")
@@ -3999,6 +5420,30 @@ def run_performance_test(
     print(f"Crypto signals:   {total_crypto}")
     print(f"NYSE signals:     {total_equity}")
     print(f"Total orders:     {total_orders}")
+    skip_bd = result.get("entry_skip_breakdown") or {}
+    if skip_bd:
+        print(
+            f"Skip breakdown:   cycles={skip_bd.get('cycles', 0)} "
+            f"traded={skip_bd.get('traded_cycles', 0)} "
+            f"skipped={skip_bd.get('skipped_cycles', 0)}"
+        )
+        by_cat = skip_bd.get("by_category") or {}
+        by_token = skip_bd.get("by_token") or {}
+        from modules.entry_skip_tracker import _top_blockers
+
+        blocker_lines = _top_blockers(by_cat, by_token, n=2)
+        if blocker_lines:
+            for line in blocker_lines:
+                print(f"  {line}")
+        elif by_cat:
+            cat_line = ", ".join(
+                f"{k}={v}" for k, v in sorted(by_cat.items(), key=lambda x: -x[1])
+            )
+            print(f"  by category:    {cat_line}")
+        top_tok = sorted(by_token.items(), key=lambda x: -x[1])[:8]
+        if top_tok and not blocker_lines:
+            tok_line = ", ".join(f"{k}={v}" for k, v in top_tok)
+            print(f"  top tokens:     {tok_line}")
     social = result.get("social_sleeve")
     if social:
         print(
@@ -4012,8 +5457,17 @@ def run_performance_test(
     print("Regime distribution:")
     for name, count in sorted(regime_counts.items(), key=lambda x: -x[1]):
         print(f"  {name}: {count}")
+    if regime_breakdown:
+        print(format_regime_breakdown_table(result.get("regime_breakdown") or []))
+    if result.get("regime_filter"):
+        skips = result.get("regime_filter_skips", 0)
+        print(f"Regime filter skips: {skips} bars (no new trading)")
     print(f"Profit factor:    {round(result.get('profit_factor', 0), 2)}")
     print(f"Avg trade return: {round(result.get('avg_trade_return_pct', 0), 3)}%")
+    if result.get("attribution"):
+        from modules.backtest_attribution import print_attribution_report
+
+        print_attribution_report(result["attribution"])
     if result.get("rolling_sharpe_mean") is not None:
         print(f"Rolling Sharpe:   {round(result['rolling_sharpe_mean'], 2)} (mean {ROLLING_METRIC_WINDOW}d)")
 
@@ -4100,11 +5554,34 @@ if __name__ == "__main__":
         help="Use maximum available daily history (full universe, yfinance max)",
     )
     parser.add_argument(
+        "--deep-history",
+        action="store_true",
+        help=(
+            "Warm indicators from deepest available daily history (Alpaca + yfinance) "
+            "while trading only over the requested simulation window"
+        ),
+    )
+    parser.add_argument(
+        "--deep-history-indicators-only",
+        action="store_true",
+        help=(
+            "With --deep-history: use deep context for indicators/regime only; "
+            "pin core allocator Sharpe to baseline sim window"
+        ),
+    )
+    parser.add_argument(
+        "--max-years",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Cap yfinance/Alpaca lookback when --deep-history is set (default: 20)",
+    )
+    parser.add_argument(
         "--vti-core",
         type=float,
         default=0.0,
         metavar="PCT",
-        help="Passive VTI core fraction (e.g. 0.7 = 70%% VTI, 30%% active bot)",
+        help="Passive core fraction (e.g. 0.4 = 40%% passive). Overrides locked allocator when set.",
     )
     parser.add_argument(
         "--compare-vti-core",
@@ -4117,12 +5594,43 @@ if __name__ == "__main__":
         help="Paper research profile: 20%% VTI, boosted sleeves, social 20%%, crypto all vol",
     )
     parser.add_argument(
+        "--dynamic-core",
+        action="store_true",
+        help="Enable dynamic core allocator (VTI/SPY/blend/cash); overrides --vti-core",
+    )
+    parser.add_argument(
+        "--paper-crypto",
+        action="store_true",
+        help="Enable PAPER_CRYPTO_ENABLED (vol-gated crypto / stat-arb crypto sleeve)",
+    )
+    parser.add_argument(
+        "--regime-breakdown",
+        action="store_true",
+        help="Print performance split by RHYME regime (A–E)",
+    )
+    parser.add_argument(
+        "--regime",
+        default=None,
+        metavar="NAME",
+        help="Trade only on matching RHYME regime (e.g. RHYME_D or D)",
+    )
+    parser.add_argument(
         "--small-account",
         action="store_true",
         help=(
-            "Live small-account profile: $100 start, 90%% VTI, 1%% risk, "
-            "$10 max order, scaled min notional"
+            "Live small-account profile: $100 start, 85%% VTI + 5%% SPY trend, 1%% risk, "
+            "$10 max order, scaled min notional (use --vti-core 0.90 for legacy baseline)"
         ),
+    )
+    parser.add_argument(
+        "--no-nyse-conditional",
+        action="store_true",
+        help="Disable NYSE conditional-on-SPY filter (paper aggressive only)",
+    )
+    parser.add_argument(
+        "--compare-nyse-conditional",
+        action="store_true",
+        help="Compare paper aggressive with vs without NYSE conditional-on-SPY filter",
     )
     parser.add_argument(
         "--compare-paper-aggressive",
@@ -4210,9 +5718,34 @@ if __name__ == "__main__":
         help="Starting equity for small-account / live-thinking sim (default: SMALL_ACCOUNT_BACKTEST_EQUITY or 300 with --with-news)",
     )
     parser.add_argument(
+        "--compare-realistic-research-v13",
+        action="store_true",
+        help="Compare Realistic Research v1.2 vs v1.3 (stat arb, shorts, core, monitoring)",
+    )
+    parser.add_argument(
+        "--compare-stat-arb-v13-push",
+        action="store_true",
+        help="Compare Stat Arb v1.3 before (10-12p RR1.5) vs pushed (10-14p RR1.6 Z2.6)",
+    )
+    parser.add_argument(
+        "--compare-stat-arb-v12",
+        action="store_true",
+        help="Compare stat arb v1.1 vs v1.2 (8-10 pairs, 1.5 RR, trailing stop)",
+    )
+    parser.add_argument(
         "--compare-stat-arb",
         action="store_true",
         help="Compare paper aggressive with vs without statistical arbitrage sleeve",
+    )
+    parser.add_argument(
+        "--compare-opportunistic-shorts",
+        action="store_true",
+        help="Compare paper v1.1c with vs without opportunistic shorts (max 15%%)",
+    )
+    parser.add_argument(
+        "--compare-universe-size",
+        action="store_true",
+        help="Compare legacy (75/35/160) vs expanded (110/45/180) universe sizing",
     )
     parser.add_argument(
         "--compare-stat-arb-optimized",
@@ -4300,6 +5833,19 @@ if __name__ == "__main__":
         help="Disable default 5/10 bps slippage; use zero unless --equity-slippage-bps set",
     )
     parser.add_argument(
+        "--stat-arb-report",
+        dest="stat_arb_report",
+        action="store_true",
+        default=None,
+        help="Print per-sleeve attribution (default: on for --paper-aggressive)",
+    )
+    parser.add_argument(
+        "--no-stat-arb-report",
+        dest="stat_arb_report",
+        action="store_false",
+        help="Skip stat arb / sleeve attribution block in backtest report",
+    )
+    parser.add_argument(
         "--walk-forward",
         type=int,
         default=0,
@@ -4378,6 +5924,13 @@ if __name__ == "__main__":
             use_max=args.max,
             small_account=args.small_account,
         )
+    elif args.compare_nyse_conditional:
+        if not args.paper_aggressive:
+            print("--compare-nyse-conditional requires --paper-aggressive")
+            sys.exit(1)
+        run_nyse_conditional_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
     elif args.compare_paper_aggressive:
         run_paper_aggressive_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
@@ -4419,6 +5972,41 @@ if __name__ == "__main__":
         )
     elif args.compare_vol:
         run_vol_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_opportunistic_shorts:
+        if not args.paper_aggressive:
+            print("--compare-opportunistic-shorts requires --paper-aggressive")
+            sys.exit(1)
+        run_opportunistic_short_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_universe_size:
+        if not args.paper_aggressive:
+            print("--compare-universe-size requires --paper-aggressive")
+            sys.exit(1)
+        run_universe_size_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_realistic_research_v13:
+        if not args.paper_aggressive:
+            print("--compare-realistic-research-v13 requires --paper-aggressive")
+            sys.exit(1)
+        run_realistic_research_v13_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_stat_arb_v13_push:
+        if not args.paper_aggressive:
+            print("--compare-stat-arb-v13-push requires --paper-aggressive")
+            sys.exit(1)
+        run_stat_arb_v13_push_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_stat_arb_v12:
+        if not args.paper_aggressive:
+            print("--compare-stat-arb-v12 requires --paper-aggressive")
+            sys.exit(1)
+        run_stat_arb_v12_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_stat_arb:
@@ -4482,6 +6070,25 @@ if __name__ == "__main__":
         vti_core = max(0.0, min(1.0, args.vti_core))
         if args.small_account and vti_core <= 0:
             vti_core = config.SMALL_ACCOUNT_VTI_CORE_PCT
+        if args.no_nyse_conditional and args.paper_aggressive:
+            config.PAPER_NYSE_CONDITIONAL_ON_SPY = False
+        if args.dynamic_core:
+            config.DYNAMIC_CORE_ENABLED = True
+        regime_filter = None
+        if args.regime:
+            regime_filter = resolve_regime_name(args.regime)
+            if not regime_filter:
+                from modules.backtester_core import RHYME_REGIME_LABELS
+
+                print(f"Unknown regime: {args.regime}")
+                print(
+                    "Valid examples: "
+                    + ", ".join(r.split(":")[0].strip() for r in RHYME_REGIME_LABELS)
+                )
+                raise SystemExit(1)
+        if args.deep_history_indicators_only and not args.deep_history:
+            print("ERROR: --deep-history-indicators-only requires --deep-history")
+            raise SystemExit(1)
         run_performance_test(
             days=args.days,
             refresh=args.refresh,
@@ -4489,6 +6096,17 @@ if __name__ == "__main__":
             vti_core_pct=vti_core,
             paper_aggressive=args.paper_aggressive,
             small_account=args.small_account,
+            stat_arb_report=args.stat_arb_report,
+            paper_crypto_enabled=(
+                True if args.paper_crypto
+                else False if args.paper_aggressive
+                else None
+            ),
+            regime_filter=regime_filter,
+            regime_breakdown=args.regime_breakdown,
+            deep_history=args.deep_history,
+            deep_history_indicators_only=args.deep_history_indicators_only,
+            max_years=max(1, int(args.max_years)),
         )
         if args.paper_aggressive:
             print(f"Paper sleeve flags: {config.get_paper_feature_flags()}")

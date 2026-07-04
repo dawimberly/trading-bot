@@ -19,6 +19,15 @@ def _parse_env_bool(key: str, *, default: str = "false") -> bool:
     return os.getenv(key, default).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _env_bool_first(*keys: str, default: str = "false") -> bool:
+    """First set env var wins; otherwise use default string."""
+    for key in keys:
+        raw = os.getenv(key)
+        if raw is not None:
+            return raw.strip().lower() in ("1", "true", "yes", "on")
+    return default.strip().lower() in ("1", "true", "yes", "on")
+
+
 def _append_loaded_env(loaded: list[str], path: Path) -> None:
     try:
         resolved = str(path.resolve())
@@ -34,9 +43,14 @@ def _load_project_dotenv() -> None:
     env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
     if env_override and os.path.isfile(env_override):
         load_dotenv(env_override, override=True)
-        loaded.append(str(Path(env_override).resolve()))
+        _append_loaded_env(loaded, Path(env_override))
+        stock_env = _CONFIG_DIR / ".env"
+        if stock_env.is_file():
+            load_dotenv(stock_env, override=False)
+            _append_loaded_env(loaded, stock_env)
         _normalize_alpaca_env_keys()
-        os.environ["PYTHONTRADING_LOADED_ENV"] = ";".join(loaded)
+        if loaded:
+            os.environ["PYTHONTRADING_LOADED_ENV"] = ";".join(loaded)
         return
 
     try:
@@ -329,7 +343,24 @@ MA_WINDOW = 45
 # Opt-in (default off): NYSE overlap, beta scaling, SPY MA exit, adaptive/cofire.
 # DERIVED_BEAR_PAUSE stays off.
 #
-# --- VTI passive core + active satellite (backtest winner: 80/20 Sharpe vs active-only) ---
+# === MOST REALISTIC PAPER / RESEARCH DEFAULT (locked 2026-06) ===
+# v1.0: Minimal + Deep History Indicators Only (walk-forward + Monte Carlo robust).
+# v1.1: v1.0 + Tail Risk Controls (vol ceiling, DD scaling, RHYME_B buffers, sector safety).
+# Core: locked SPY @ 40% passive (90d Sharpe VTI 0.56 vs SPY 0.60) — 60% active sleeve budget.
+#
+# Tail-risk additions in v1.1 (modules/paper_risk_controls.py, modules/sector_screener.py):
+#   - TAIL_RISK_CONTROLS_ENABLED — master switch (paper/research default ON)
+#   - Vol ceiling — scale risk when ann. vol > PAPER_VOL_CEILING_PCT (default 17%)
+#   - Portfolio vol cap — rolling equity vol vs PORTFOLIO_VOL_CEILING_PCT (18%)
+#   - Drawdown tiers — 5% DD → 0.6× risk; 8% DD → 0.3× risk
+#   - RHYME_B — sleeve cap trim + PAPER_REGIME_B_RISK_MULT (0.50×) + cash buffer boost
+#   - Per-name cap — PAPER_MAX_POSITION_PCT 8%
+#   - Weak-regime sleeve cap — PAPER_REGIME_WEAK_SLEEVE_MAX_PCT 25% in B/D/E
+#   - Sector screener — limit expansion when SECTOR_HIGH_VOL_CEILING_PCT exceeded
+REALISTIC_RESEARCH_VERSION = "1.3"
+REALISTIC_RESEARCH_PROFILE_VERSION = REALISTIC_RESEARCH_VERSION
+#
+# --- VTI passive core + active satellite ---
 VTI_CORE_ENABLED = os.getenv("VTI_CORE_ENABLED", "true").lower() in (
     "1",
     "true",
@@ -340,17 +371,14 @@ VTI_CORE_SYMBOL = os.getenv("VTI_CORE_SYMBOL", "VTI").strip().upper()
 # Rebalance VTI when |current - target| / equity exceeds this (avoids daily churn)
 VTI_CORE_REBALANCE_DRIFT_PCT = float(os.getenv("VTI_CORE_REBALANCE_DRIFT_PCT", "0.02"))
 
-# Paper research book (PAPER_APCA_*) — aggressive profit mode; live ~$100 stays conservative
-# --- Best Paper Bot (Profile B) — locked defaults for beat-mutual-funds goal ---
-# Core ON: dynamic VTI | dynamic risk | stat arb | vol overlay | options | overlap | chunk | co-fire
-# Core OFF: macro regime | social | risk parity | stat arb optimized | equity pairs | spy MA exit
-# Opt-in: thinking engine (Ollama) via PAPER_THINKING_ENGINE_ENABLED=true
+# Paper research book (PAPER_APCA_*) — uses REALISTIC_RESEARCH_PROFILE defaults below.
 PAPER_AGGRESSIVE_ENABLED = os.getenv("PAPER_AGGRESSIVE", "true").lower() in (
     "1",
     "true",
     "yes",
 )
-PAPER_VTI_CORE_PCT = float(os.getenv("PAPER_VTI_CORE_PCT", "0.20"))
+PAPER_VTI_CORE_PCT = float(os.getenv("PAPER_VTI_CORE_PCT", "0.80"))
+# Fixed passive core for paper research (80% VTI / 20% active sleeves when PAPER_DYNAMIC_VTI=false).
 PAPER_SOCIAL_SLEEVE_CAP_PCT = float(os.getenv("PAPER_SOCIAL_SLEEVE_CAP_PCT", "0.20"))
 PAPER_ACTIVE_SLEEVE_BOOST = float(os.getenv("PAPER_ACTIVE_SLEEVE_BOOST", "1.40"))
 PAPER_WISDOM_SIZING_FLOOR = float(os.getenv("PAPER_WISDOM_SIZING_FLOOR", "1.0"))
@@ -397,6 +425,14 @@ BOND_SLEEVE_SYMBOL = os.getenv("BOND_SLEEVE_SYMBOL", "TLT").strip().upper() or "
 STRICT_PIT_BACKTEST = _parse_env_bool("STRICT_PIT_BACKTEST", default="false")
 # Classic crypto pairs sleeve — off by default on live and paper bots
 PAPER_CRYPTO_ENABLED = _parse_env_bool("PAPER_CRYPTO_ENABLED", default="false")
+PAPER_CRYPTO_MAX_PAIRS = int(os.getenv("PAPER_CRYPTO_MAX_PAIRS", "4"))
+PAPER_CRYPTO_MAX_TRADES = int(os.getenv("PAPER_CRYPTO_MAX_TRADES", "2"))
+PAPER_CRYPTO_Z_EXIT = float(os.getenv("PAPER_CRYPTO_Z_EXIT", "0.5"))
+PAPER_CRYPTO_Z_ENTRY_BUMP = float(os.getenv("PAPER_CRYPTO_Z_ENTRY_BUMP", "0.4"))
+PAPER_CRYPTO_MAX_HOLD_BARS = int(os.getenv("PAPER_CRYPTO_MAX_HOLD_BARS", "8"))
+PAPER_CRYPTO_MIN_NOTIONAL_MULT = float(os.getenv("PAPER_CRYPTO_MIN_NOTIONAL_MULT", "1.25"))
+PAPER_CRYPTO_RISK_MULT = float(os.getenv("PAPER_CRYPTO_RISK_MULT", "1.25"))
+PAPER_CRYPTO_REGIME_FILTER = _parse_env_bool("PAPER_CRYPTO_REGIME_FILTER", default="true")
 CRYPTO_SLEEVE_ENABLED = _parse_env_bool("CRYPTO_SLEEVE_ENABLED", default="false")
 PAPER_CRYPTO_V2_SYMBOLS = [
     "BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LINK-USD", "ADA-USD",
@@ -413,11 +449,47 @@ CRYPTO_EXPANDED_MAX_SYMBOLS = int(os.getenv("CRYPTO_EXPANDED_MAX_SYMBOLS", "48")
 CRYPTO_EXPANDED_MIN_BARS = int(os.getenv("CRYPTO_EXPANDED_MIN_BARS", "30"))
 _backtest_crypto_expanded_prefetch = False
 PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
-PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
+PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "false").lower() in (
     "1",
     "true",
     "yes",
 )
+# Dynamic core allocator — off by default (experiment: fixed 80% core beat dynamic allocator).
+_paper_dynamic_core_default = "false"
+DYNAMIC_CORE_ENABLED = os.getenv("DYNAMIC_CORE_ENABLED", _paper_dynamic_core_default).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DYNAMIC_CORE_LIVE_ENABLED = os.getenv("DYNAMIC_CORE_LIVE_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+DYNAMIC_CORE_MIN_PCT = float(os.getenv("DYNAMIC_CORE_MIN_PCT", "0.30"))
+DYNAMIC_CORE_MAX_PCT = float(os.getenv("DYNAMIC_CORE_MAX_PCT", "0.50"))
+DYNAMIC_CORE_REVIEW_DAYS = int(os.getenv("DYNAMIC_CORE_REVIEW_DAYS", "30"))
+DYNAMIC_CORE_LOOKBACK_DAYS = int(os.getenv("DYNAMIC_CORE_LOOKBACK_DAYS", "90"))
+# Locked core allocator (paper research final 2026-06): SPY @ 40% passive slice.
+# Sharpe 90d lookback: VTI 0.56 vs SPY 0.60 — frees 60% for active sleeves vs 15% @ 85% VTI.
+CORE_ALLOCATOR_LOCKED = _env_bool_first("CORE_ALLOCATOR_LOCKED", default="true")
+CORE_ALLOCATOR_LOCKED_CHOICE = (
+    os.getenv("CORE_ALLOCATOR_LOCKED_CHOICE", "spy").strip().lower() or "spy"
+)
+# Deep indicator context for regime/MAs; sim window stays on --days (see backtester --deep-history).
+DEEP_HISTORY_ENABLED = _env_bool_first("DEEP_HISTORY_ENABLED", default="true")
+DEEP_HISTORY_INDICATORS_ONLY = _env_bool_first(
+    "DEEP_HISTORY_INDICATORS_ONLY", default="true"
+)
+# When True, VTI core floats 35–75% (DYNAMIC_VTI_PAPER_FLOOR) by vol/stress.
+PAPER_SOFT_PAUSE_ENABLED = os.getenv("PAPER_SOFT_PAUSE", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Paper-only: in PAUSED_REGIMES (wisdom/rhyme bear+vol), size down instead of blocking.
+# Pair with PAPER_DYNAMIC_VTI=false + PAPER_VTI_CORE_PCT=0.80 for fixed 80/20 core/active split.
+PAPER_SOFT_PAUSE_SIZING_MULT = float(os.getenv("PAPER_SOFT_PAUSE_SIZING_MULT", "0.50"))
 PAPER_DYNAMIC_RISK_ENABLED = os.getenv("PAPER_DYNAMIC_RISK_ENABLED", "true").lower() in (
     "1",
     "true",
@@ -430,10 +502,77 @@ PAPER_DYNAMIC_UNIVERSE_ENABLED = _paper_dyn_univ.lower() in ("1", "true", "yes")
 PAPER_DYNAMIC_UNIVERSE_STRICT = os.getenv(
     "PAPER_DYNAMIC_UNIVERSE_STRICT", "false"
 ).lower() in ("1", "true", "yes")
-PAPER_RISK_CALM_BULL_PCT = float(os.getenv("PAPER_RISK_CALM_BULL_PCT", "0.03"))
-PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.022"))
-PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.01"))
-DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.40"))
+# Dynamic sector screener — expand momentum/stat-arb pools in strong sectors (paper only).
+DYNAMIC_SECTOR_SCREENER_ENABLED = _env_bool_first(
+    "DYNAMIC_SECTOR_SCREENER_ENABLED", default="true"
+)
+BASE_UNIVERSE_SIZE = int(os.getenv("BASE_UNIVERSE_SIZE", "110"))
+SECTOR_EXPANSION_SIZE = int(os.getenv("SECTOR_EXPANSION_SIZE", "45"))
+SECTOR_STRENGTH_MA_WINDOW = int(os.getenv("SECTOR_STRENGTH_MA_WINDOW", "200"))
+MAX_ACTIVE_SECTORS = int(os.getenv("MAX_ACTIVE_SECTORS", "3"))
+MAX_ACTIVE_SECTORS_STRONG = int(os.getenv("MAX_ACTIVE_SECTORS_STRONG", "4"))
+SECTOR_STRONG_SCORE_MIN = float(os.getenv("SECTOR_STRONG_SCORE_MIN", "0.06"))
+SECTOR_MAX_TOTAL_TICKERS = int(os.getenv("SECTOR_MAX_TOTAL_TICKERS", "180"))
+SECTOR_STRENGTH_THRESHOLD = float(os.getenv("SECTOR_STRENGTH_THRESHOLD", "0.0"))
+SECTOR_RS_MIN = float(os.getenv("SECTOR_RS_MIN", "0.0"))
+SECTOR_FALLBACK_MOMENTUM_COUNT = int(os.getenv("SECTOR_FALLBACK_MOMENTUM_COUNT", "18"))
+SECTOR_SCREENER_LOG_FILE = os.getenv(
+    "SECTOR_SCREENER_LOG_FILE", "logs/sector_screener.jsonl"
+)
+SECTOR_SCREENER_STATE_FILE = os.getenv(
+    "SECTOR_SCREENER_STATE_FILE", "data/sector_screener_state.json"
+)
+# Tuned defaults for paper-aggressive (minimal research profile, 2026-06).
+PAPER_RISK_PER_TRADE = float(os.getenv("PAPER_RISK_PER_TRADE", "0.018"))
+PAPER_RISK_CALM_BULL_PCT = float(
+    os.getenv("PAPER_RISK_CALM_BULL_PCT", str(PAPER_RISK_PER_TRADE))
+)
+PAPER_RISK_MODERATE_PCT = float(os.getenv("PAPER_RISK_MODERATE_PCT", "0.0105"))
+PAPER_RISK_STRESS_PCT = float(os.getenv("PAPER_RISK_STRESS_PCT", "0.007"))
+# Regime + drawdown risk multiplier (paper aggressive); see modules/paper_risk_controls.py
+PAPER_REGIME_DD_RISK_ENABLED = os.getenv("PAPER_REGIME_DD_RISK_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+PAPER_REGIME_B_RISK_MULT = float(os.getenv("PAPER_REGIME_B_RISK_MULT", "0.50"))
+PAPER_REGIME_D_RISK_MULT = float(os.getenv("PAPER_REGIME_D_RISK_MULT", "0.75"))
+PAPER_DD_RISK_WARN_PCT = float(os.getenv("PAPER_DD_RISK_WARN_PCT", "0.05"))
+PAPER_DD_RISK_MULT_5 = float(os.getenv("PAPER_DD_RISK_MULT_5", "0.6"))
+PAPER_DD_RISK_SEVERE_PCT = float(os.getenv("PAPER_DD_RISK_SEVERE_PCT", "0.08"))
+PAPER_DD_RISK_MULT_8 = float(os.getenv("PAPER_DD_RISK_MULT_8", "0.3"))
+# Legacy alias (pre-8% severe tier)
+PAPER_DD_RISK_MULT_7 = float(os.getenv("PAPER_DD_RISK_MULT_7", str(PAPER_DD_RISK_MULT_8)))
+PAPER_POSITION_MAX_HOLD_BARS = int(os.getenv("PAPER_POSITION_MAX_HOLD_BARS", "30"))
+PER_NAME_MAX_PCT = float(os.getenv("PER_NAME_MAX_PCT", "0.08"))
+PAPER_MAX_POSITION_PCT = float(os.getenv("PAPER_MAX_POSITION_PCT", str(PER_NAME_MAX_PCT)))
+# Tail-risk overlay (Realistic Research v1.1) — portfolio vol cap, panic buffers, sector safety.
+# Default ON for paper/research; set TAIL_RISK_CONTROLS_ENABLED=false to disable.
+TAIL_RISK_CONTROLS_ENABLED = _env_bool_first("TAIL_RISK_CONTROLS_ENABLED", default="true")
+PORTFOLIO_VOL_WINDOW = int(os.getenv("PORTFOLIO_VOL_WINDOW", "20"))
+PORTFOLIO_VOL_CEILING_PCT = float(os.getenv("PORTFOLIO_VOL_CEILING_PCT", "0.18"))
+PORTFOLIO_VOL_MIN_RISK_MULT = float(os.getenv("PORTFOLIO_VOL_MIN_RISK_MULT", "0.35"))
+PAPER_REGIME_B_CASH_BUFFER_BOOST = float(os.getenv("PAPER_REGIME_B_CASH_BUFFER_BOOST", "0.12"))
+SECTOR_HIGH_VOL_CEILING_PCT = float(os.getenv("SECTOR_HIGH_VOL_CEILING_PCT", "0.18"))
+SECTOR_HIGH_VOL_EXPANSION_CAP = int(os.getenv("SECTOR_HIGH_VOL_EXPANSION_CAP", "10"))
+SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS = int(os.getenv("SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS", "1"))
+# Portfolio vol ceiling (annualized) — paper default 17%; live uses VOL_CEILING_PCT.
+PAPER_VOL_CEILING_PCT = float(os.getenv("PAPER_VOL_CEILING_PCT", "0.17"))
+VOL_CEILING_ENABLED = os.getenv("VOL_CEILING_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+VOL_CEILING_PCT = float(os.getenv("VOL_CEILING_PCT", "0.18"))
+PAPER_TRAILING_STOP_ARM_PCT = float(os.getenv("PAPER_TRAILING_STOP_ARM_PCT", "0.10"))
+PAPER_TRAILING_STOP_TRAIL_PCT = float(os.getenv("PAPER_TRAILING_STOP_TRAIL_PCT", "0.05"))
+PAPER_SPY_MAX_EXPOSURE_PCT = float(os.getenv("PAPER_SPY_MAX_EXPOSURE_PCT", "0.46"))
+PAPER_NYSE_MAX_EXPOSURE_PCT = float(os.getenv("PAPER_NYSE_MAX_EXPOSURE_PCT", "0.20"))
+PAPER_CRYPTO_MAX_EXPOSURE_PCT = float(os.getenv("PAPER_CRYPTO_MAX_EXPOSURE_PCT", "0.12"))
+PAPER_HALT_RESUME_DRAWDOWN_PCT = float(os.getenv("PAPER_HALT_RESUME_DRAWDOWN_PCT", "0.06"))
+PAPER_HALT_RECOVERY_RISK_MULT = float(os.getenv("PAPER_HALT_RECOVERY_RISK_MULT", "0.65"))
+PAPER_HALT_RECOVERY_CLEAR_PCT = float(os.getenv("PAPER_HALT_RECOVERY_CLEAR_PCT", "0.03"))
+DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.35"))
 # Advanced sleeve features — paper aggressive only (live Profile A stays off)
 PAPER_NYSE_OVERLAP_FILTER_ENABLED = os.getenv(
     "PAPER_NYSE_OVERLAP_FILTER_ENABLED", "true"
@@ -464,14 +603,49 @@ PAPER_EQUITY_PAIRS = os.getenv("PAPER_EQUITY_PAIRS", "false").lower() in (
     "true",
     "yes",
 )
-PAPER_STAT_ARB_ENABLED = os.getenv("PAPER_STAT_ARB_ENABLED", "true").lower() in (
+PAPER_STAT_ARB_ENABLED = _env_bool_first(
+    "PAPER_STAT_ARB_ENABLED", "STAT_ARB_ENABLED", default="true"
+)
+PAPER_PAIR_MIN_CORRELATION = float(os.getenv("PAPER_PAIR_MIN_CORRELATION", "0.65"))
+PAPER_PAIR_Z_THRESHOLD = float(os.getenv("PAPER_PAIR_Z_THRESHOLD", "2.0"))
+PAPER_PAIR_Z_EXIT = float(os.getenv("PAPER_PAIR_Z_EXIT", "0.5"))
+PAPER_PAIR_Z_DYNAMIC = os.getenv("PAPER_PAIR_Z_DYNAMIC", "true").lower() in (
     "1",
     "true",
     "yes",
 )
-PAPER_PAIR_MIN_CORRELATION = float(os.getenv("PAPER_PAIR_MIN_CORRELATION", "0.75"))
-PAPER_PAIR_Z_THRESHOLD = float(os.getenv("PAPER_PAIR_Z_THRESHOLD", "2.5"))
-PAPER_PAIR_Z_EXIT = float(os.getenv("PAPER_PAIR_Z_EXIT", "0.5"))
+PAPER_PAIR_Z_CALM = float(os.getenv("PAPER_PAIR_Z_CALM", "1.8"))
+PAPER_PAIR_Z_STRESS = float(os.getenv("PAPER_PAIR_Z_STRESS", "2.4"))
+PAPER_PAIR_COINT_SLOPE = float(os.getenv("PAPER_PAIR_COINT_SLOPE", "-0.01"))
+PAPER_STAT_ARB_MAX_TRADES = int(os.getenv("PAPER_STAT_ARB_MAX_TRADES", "2"))
+# Stat arb v1.1 (Realistic Research) — cointegration, tighter corr, overlap guard, RR exits.
+PAPER_STAT_ARB_MIN_CORR = float(os.getenv("PAPER_STAT_ARB_MIN_CORR", "0.72"))
+PAPER_STAT_ARB_MAX_PAIRS = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS", "10"))
+PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_EXPANDED", "12"))
+PAPER_STAT_ARB_MAX_PAIRS_CEILING = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_CEILING", "14"))
+PAPER_STAT_ARB_MAX_HOLD_BARS = int(os.getenv("PAPER_STAT_ARB_MAX_HOLD_BARS", "35"))
+PAPER_STAT_ARB_Z_ENTRY_BASE = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_BASE", "2.0"))
+PAPER_STAT_ARB_Z_ENTRY_MAX = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_MAX", "2.6"))
+PAPER_STAT_ARB_RISK_REWARD = float(os.getenv("PAPER_STAT_ARB_RISK_REWARD", "1.6"))
+PAPER_STAT_ARB_COINT_PVALUE = float(os.getenv("PAPER_STAT_ARB_COINT_PVALUE", "0.12"))
+PAPER_STAT_ARB_Z_EXIT = float(os.getenv("PAPER_STAT_ARB_Z_EXIT", "0.5"))
+PAPER_STAT_ARB_MIN_REVERT_FRAC = float(os.getenv("PAPER_STAT_ARB_MIN_REVERT_FRAC", "0.55"))
+PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = float(
+    os.getenv("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME", "25000000")
+)
+PAPER_STAT_ARB_TRAILING_ARM_FRAC = float(
+    os.getenv("PAPER_STAT_ARB_TRAILING_ARM_FRAC", "0.50")
+)
+PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = float(
+    os.getenv("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC", "0.35")
+)
+PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF = _env_bool_first(
+    "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF", default="true"
+)
+PAPER_STAT_ARB_SECTOR_NEUTRAL_BOOST = float(
+    os.getenv("PAPER_STAT_ARB_SECTOR_NEUTRAL_BOOST", "1.12")
+)
+PAPER_STAT_ARB_USE_COINT = _env_bool_first("PAPER_STAT_ARB_USE_COINT", default="true")
 STAT_ARB_LOOKBACK = int(os.getenv("STAT_ARB_LOOKBACK", "60"))
 # Optimized stat arb — paper/backtest only (default off; live unchanged)
 PAPER_STAT_ARB_OPTIMIZED = os.getenv("PAPER_STAT_ARB_OPTIMIZED", "false").lower() in (
@@ -480,13 +654,60 @@ PAPER_STAT_ARB_OPTIMIZED = os.getenv("PAPER_STAT_ARB_OPTIMIZED", "false").lower(
     "yes",
 )
 STAT_ARB_MAX_HOLD_BARS = int(os.getenv("STAT_ARB_MAX_HOLD_BARS", "35"))
-STAT_ARB_PROFIT_Z_DELTA = float(os.getenv("STAT_ARB_PROFIT_Z_DELTA", "1.5"))
+STAT_ARB_PROFIT_Z_DELTA = float(os.getenv("STAT_ARB_PROFIT_Z_DELTA", "1.2"))
 STAT_ARB_CORR_HALF_LIFE = float(os.getenv("STAT_ARB_CORR_HALF_LIFE", "25"))
+# Opportunistic directional shorts — Realistic Research v1.1c paper only.
+PROTECTIVE_SHORT_ENABLED = _env_bool_first(
+    "PROTECTIVE_SHORT_ENABLED", "PAPER_PROTECTIVE_SHORT_ENABLED", default="true"
+)
+SHORT_OPPORTUNISTIC_ENABLED = _env_bool_first(
+    "SHORT_OPPORTUNISTIC_ENABLED", "PAPER_SHORT_OPPORTUNISTIC_ENABLED", default="false"
+)
+PROTECTIVE_SHORT_MAX_PCT = float(os.getenv("PROTECTIVE_SHORT_MAX_PCT", "0.15"))
+PROTECTIVE_SHORT_MIN_PCT = float(os.getenv("PROTECTIVE_SHORT_MIN_PCT", "0.08"))
+SHORT_DEEP_BEAR_MIN_DEPTH = float(os.getenv("SHORT_DEEP_BEAR_MIN_DEPTH", "0.030"))
+SHORT_RHYME_B_MIN_DEPTH = float(os.getenv("SHORT_RHYME_B_MIN_DEPTH", "0.020"))
+SHORT_RHYME_E_ENABLED = _env_bool_first(
+    "SHORT_RHYME_E_ENABLED", "PAPER_SHORT_RHYME_E_ENABLED", default="true"
+)
+SHORT_RHYME_E_STRONG_BUBBLE = float(os.getenv("SHORT_RHYME_E_STRONG_BUBBLE", "0.60"))
+SHORT_WEAK_MOMENTUM_MAX = float(os.getenv("SHORT_WEAK_MOMENTUM_MAX", "-0.05"))
+SHORT_SINGLE_NAME_MAX_TRADES = int(os.getenv("SHORT_SINGLE_NAME_MAX_TRADES", "1"))
+SHORT_BROAD_SYMBOLS_RAW = os.getenv("SHORT_BROAD_SYMBOLS", "SPY,QQQ")
+SHORT_VIX_SPIKE_CONFIRM = _env_bool_first(
+    "SHORT_VIX_SPIKE_CONFIRM", "PAPER_SHORT_VIX_SPIKE_CONFIRM", default="true"
+)
+SHORT_VIX_MIN_LEVEL = float(os.getenv("SHORT_VIX_MIN_LEVEL", "25"))
+SHORT_VIX_REQUIRE_RISING = _env_bool_first(
+    "SHORT_VIX_REQUIRE_RISING", "PAPER_SHORT_VIX_REQUIRE_RISING", default="true"
+)
+SHORT_RSI_PERIOD = int(os.getenv("SHORT_RSI_PERIOD", "14"))
+SHORT_RSI_EXHAUSTION_MIN = float(os.getenv("SHORT_RSI_EXHAUSTION_MIN", "70"))
+SHORT_MA200_WINDOW = int(os.getenv("SHORT_MA200_WINDOW", "200"))
+SHORT_MA200_EXTENSION_PCT = float(os.getenv("SHORT_MA200_EXTENSION_PCT", "0.08"))
+SHORT_MA200_EXTENSION_LOOKBACK = int(os.getenv("SHORT_MA200_EXTENSION_LOOKBACK", "25"))
+SHORT_MOMENTUM_EXHAUSTION_LOOKBACK = int(os.getenv("SHORT_MOMENTUM_EXHAUSTION_LOOKBACK", "10"))
+SHORT_MOMENTUM_EXHAUSTION_MIN = float(os.getenv("SHORT_MOMENTUM_EXHAUSTION_MIN", "0.02"))
+SHORT_BUBBLE_SCORE_MIN = float(os.getenv("SHORT_BUBBLE_SCORE_MIN", "0.45"))
+SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "0.03"))
+SHORT_STOP_LOSS_PCT = float(os.getenv("SHORT_STOP_LOSS_PCT", "0.02"))
+SHORT_MIN_HOLD_BARS = int(os.getenv("SHORT_MIN_HOLD_BARS", "4"))
+SHORT_MA_EXIT_BUFFER = float(os.getenv("SHORT_MA_EXIT_BUFFER", "0.008"))
+SHORT_TIME_EXIT_BARS = int(os.getenv("SHORT_TIME_EXIT_BARS", "30"))
+SHORT_MAX_HOLD_BARS = int(os.getenv("SHORT_MAX_HOLD_BARS", "30"))
+SHORT_EXIT_MIN_Z = float(os.getenv("SHORT_EXIT_MIN_Z", "0.8"))
+SHORT_TRAILING_ARM_FRAC = float(os.getenv("SHORT_TRAILING_ARM_FRAC", "0.50"))
+SHORT_TRAILING_PULLBACK_FRAC = float(os.getenv("SHORT_TRAILING_PULLBACK_FRAC", "0.35"))
+SHORT_REGIME_B_SIZE_MULT = float(os.getenv("SHORT_REGIME_B_SIZE_MULT", "1.10"))
+SHORT_REGIME_E_SIZE_MULT = float(os.getenv("SHORT_REGIME_E_SIZE_MULT", "0.85"))
+SHORT_VOL_SIZE_FLOOR = float(os.getenv("SHORT_VOL_SIZE_FLOOR", "0.55"))
+SHORT_LONG_HEDGE_ENABLED = _env_bool_first(
+    "SHORT_LONG_HEDGE_ENABLED", "PAPER_SHORT_LONG_HEDGE_ENABLED", default="true"
+)
+SHORT_LONG_HEDGE_FLOOR = float(os.getenv("SHORT_LONG_HEDGE_FLOOR", "0.78"))
 # Local LLM thinking engine (Ollama) — paper only; run scripts/setup_ollama.py first
-PAPER_THINKING_ENGINE_ENABLED = os.getenv("PAPER_THINKING_ENGINE_ENABLED", "false").lower() in (
-    "1",
-    "true",
-    "yes",
+PAPER_THINKING_ENGINE_ENABLED = _env_bool_first(
+    "PAPER_THINKING_ENGINE_ENABLED", "THINKING_ENGINE_ENABLED", default="false"
 )
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
 OLLAMA_FALLBACK_MODELS = os.getenv(
@@ -498,6 +719,20 @@ THINKING_CACHE_HOURS = int(os.getenv("THINKING_CACHE_HOURS", "24"))
 THINKING_ENGINE_STATE_FILE = os.getenv("THINKING_ENGINE_STATE_FILE", "thinking_engine_state.json")
 THINKING_ENGINE_OUTPUT_FILE = os.getenv("THINKING_ENGINE_OUTPUT_FILE", "thinking_engine_last.json")
 THINKING_APPROVAL_FILE = os.getenv("THINKING_APPROVAL_FILE", "thinking_engine_approval.json")
+# Optional Moonshot/Kimi cloud deep thinker — daily only; off by default (cost + latency).
+KIMI_API_ENABLED = _env_bool_first("KIMI_API_ENABLED", default="false")
+# Moonshot direct or NVIDIA NIM (nvapi-...); NVIDIA_API_KEY is an alias for KIMI_API_KEY
+KIMI_API_KEY = os.getenv("KIMI_API_KEY", "") or os.getenv("NVIDIA_API_KEY", "")
+KIMI_MODEL = os.getenv("KIMI_MODEL", "kimi-latest")
+KIMI_TEMPERATURE = float(os.getenv("KIMI_TEMPERATURE", "0.3"))
+KIMI_MAX_TOKENS = int(os.getenv("KIMI_MAX_TOKENS", "4096"))
+KIMI_TOP_P = os.getenv("KIMI_TOP_P")  # optional; e.g. 1.0 for NVIDIA NIM
+KIMI_DAILY_THINK = _env_bool_first("KIMI_DAILY_THINK", default="true")
+# Moonshot: https://api.moonshot.ai/v1 | NVIDIA NIM: https://integrate.api.nvidia.com/v1
+KIMI_API_BASE_URL = os.getenv("KIMI_API_BASE_URL", "https://api.moonshot.ai/v1")
+KIMI_TIMEOUT_SEC = int(os.getenv("KIMI_TIMEOUT_SEC", "120"))
+KIMI_MAX_RETRIES = int(os.getenv("KIMI_MAX_RETRIES", "3"))
+KIMI_STATE_FILE = os.getenv("KIMI_STATE_FILE", "data/kimi_daily_state.json")
 # Production hard cap — applies to paper and live (never exceed ±6% per sleeve)
 THINKING_PRODUCTION_MAX_SLEEVE_DELTA = float(
     os.getenv("THINKING_PRODUCTION_MAX_SLEEVE_DELTA", "0.06")
@@ -587,6 +822,17 @@ _paper_aggressive_ctx = False
 FUND_CASH_BUFFER_PCT = 0.15
 SPY_SLEEVE_CAP_PCT = 0.45
 NYSE_SLEEVE_CAP_PCT = 0.20
+# Dedicated stat-arb sleeve (paper/research) — independent of NYSE momentum cap.
+STAT_ARB_SLEEVE_CAP_PCT = float(os.getenv("STAT_ARB_SLEEVE_CAP_PCT", "0.07"))
+STAT_ARB_SLEEVE_CAP_ENABLED = _env_bool_first(
+    "STAT_ARB_SLEEVE_CAP_ENABLED", default="true"
+)
+STAT_ARB_VOL_SCALING_ENABLED = _env_bool_first(
+    "STAT_ARB_VOL_SCALING_ENABLED", default="true"
+)
+STAT_ARB_VOL_MIN_NOTIONAL_SCALE = float(
+    os.getenv("STAT_ARB_VOL_MIN_NOTIONAL_SCALE", "0.30")
+)
 # NYSE picks vs SPY sleeve: skip high-beta / high-corr names when SPY is active
 _nyse_overlap_env = os.getenv("NYSE_OVERLAP_FILTER_ENABLED") or os.getenv(
     "NYSE_ANTI_OVERLAP_ENABLED", "false"
@@ -621,9 +867,13 @@ NYSE_SECTOR_TECH_CAP = int(os.getenv("NYSE_SECTOR_TECH_CAP", "0"))
 CRYPTO_SLEEVE_CAP_PCT = 0.20
 CRYPTO_VOL_ONLY = True  # crypto pairs only when cross-asset volatility is High
 
-# --- SPY sleeve settings ---
+# --- SPY / NYSE sleeve settings (live Profile A defaults) ---
 SPY_BOT_SYMBOL = "SPY"
-SPY_MA_WINDOW = 200
+SPY_MA_WINDOW = int(os.getenv("SPY_MA_WINDOW", "200"))
+NYSE_MA_WINDOW = int(os.getenv("NYSE_MA_WINDOW", "50"))
+# Paper-aggressive tuned defaults (tail-risk tuning Option A, 2026-06).
+PAPER_SPY_MA_WINDOW = int(os.getenv("PAPER_SPY_MA_WINDOW", "160"))
+PAPER_NYSE_MA_WINDOW = int(os.getenv("PAPER_NYSE_MA_WINDOW", "70"))
 SPY_RISK_PER_TRADE = SPY_SLEEVE_CAP_PCT  # legacy alias for backtests
 SPY_EXIT_ON_MA_BREAK = os.getenv("SPY_EXIT_ON_MA_BREAK", "false").lower() in (
     "1",
@@ -645,6 +895,10 @@ SPY_LEDGER_PATH = "spy_trading_history.jsonl"
 SPY_RISK_EVENTS_LOG = "spy_risk_events.log"
 REFRESH_INTERVAL = 900
 
+# --- Real-time Alpaca WebSocket (modules/real_time_data.py) ---
+# Default on for paper, off for live — set REAL_TIME_WEBSOCKET_ENABLED explicitly to override.
+REAL_TIME_FLUSH_SEC = int(os.getenv("REAL_TIME_FLUSH_SEC", "5"))
+
 # --- Scan schedule (run_all.py): crypto overnight; SPY/NYSE around US open ---
 SCAN_SCHEDULE_ENABLED = os.getenv("SCAN_SCHEDULE_ENABLED", "true").lower() in (
     "1",
@@ -664,6 +918,8 @@ MAX_DRAWDOWN_PCT = float(os.getenv("MAX_DRAWDOWN_PCT", "0.10"))
 HALT_RESUME_DRAWDOWN_PCT = float(os.getenv("HALT_RESUME_DRAWDOWN_PCT", "0.08"))
 # Minimum seconds halted before auto-resume (stops rapid halt/resume flicker).
 HALT_MIN_SECONDS = int(os.getenv("HALT_MIN_SECONDS", "300"))
+# Backtest / daily bars: min bars halted before auto-resume (wall-clock ignored when > 0).
+HALT_MIN_BARS = int(os.getenv("HALT_MIN_BARS", "3"))
 HALT_LIQUIDATE_ON_BREACH = os.getenv("HALT_LIQUIDATE_ON_BREACH", "true").lower() in (
     "1",
     "true",
@@ -674,8 +930,57 @@ BACKTEST_DAYS = 365
 
 # --- Sentiment (regime input) — "price" is free and matches backtests ---
 SENTIMENT_SOURCE = os.getenv("SENTIMENT_SOURCE", "price").strip().lower()
-# Daily bars rarely hit ±0.5; lower for RHYME_B/E pause (0.5 = legacy, never fires)
-REGIME_SENTIMENT_THRESHOLD = float(os.getenv("REGIME_SENTIMENT_THRESHOLD", "0.5"))
+# Applied to normalized sentiment in [-1, 1] (see normalize_regime_sentiment).
+# 0.12 balances responsiveness vs excessive RHYME_E; legacy 0.5 never fired on daily.
+REGIME_SENTIMENT_THRESHOLD = float(os.getenv("REGIME_SENTIMENT_THRESHOLD", "0.12"))
+# |sentiment| at or below this is treated as raw price momentum (not web blend).
+REGIME_RAW_SENTIMENT_MAX = float(os.getenv("REGIME_RAW_SENTIMENT_MAX", "0.25"))
+# Vol High/Low cutoffs — 5m cross-asset stdev is much smaller than daily.
+REGIME_VOL_THRESHOLD_5M = float(os.getenv("REGIME_VOL_THRESHOLD_5M", "0.008"))
+REGIME_VOL_THRESHOLD_DAILY = float(os.getenv("REGIME_VOL_THRESHOLD_DAILY", "0.02"))
+REGIME_DAILY_LOOKBACK_DAYS = int(os.getenv("REGIME_DAILY_LOOKBACK_DAYS", "120"))
+REGIME_HYSTERESIS_ENABLED = os.getenv("REGIME_HYSTERESIS_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+REGIME_MIN_DWELL_SEC = int(os.getenv("REGIME_MIN_DWELL_SEC", "3600"))
+# Stronger sentiment required to flip RHYME quadrant when already in a regime.
+REGIME_HYSTERESIS_SENTIMENT_BUMP = float(
+    os.getenv("REGIME_HYSTERESIS_SENTIMENT_BUMP", "0.05")
+)
+# Daily backtest / bar clock: min bars before regime label can change (smoother flips).
+REGIME_MIN_DWELL_BARS = int(os.getenv("REGIME_MIN_DWELL_BARS", "8"))
+# Dynamic per-regime sizing (paper aggressive) — replaces hard PAUSED_REGIMES blocks.
+PAPER_REGIME_DYNAMIC_SIZING_ENABLED = os.getenv(
+    "PAPER_REGIME_DYNAMIC_SIZING_ENABLED", "true"
+).lower() in ("1", "true", "yes")
+PAPER_REGIME_A_SIZING_MULT = float(os.getenv("PAPER_REGIME_A_SIZING_MULT", "1.2"))
+PAPER_REGIME_B_SIZING_MULT = float(os.getenv("PAPER_REGIME_B_SIZING_MULT", "0.30"))
+PAPER_REGIME_C_SIZING_MULT = float(os.getenv("PAPER_REGIME_C_SIZING_MULT", "1.0"))
+PAPER_REGIME_D_SIZING_MULT = float(os.getenv("PAPER_REGIME_D_SIZING_MULT", "0.7"))
+PAPER_REGIME_E_SIZING_MULT = float(os.getenv("PAPER_REGIME_E_SIZING_MULT", "1.60"))
+# Weak RHYME (B/D/E): per-sleeve exposure ceiling as fraction of equity.
+PAPER_REGIME_WEAK_SLEEVE_MAX_PCT = float(os.getenv("PAPER_REGIME_WEAK_SLEEVE_MAX_PCT", "0.25"))
+# COT / positioning overlay — off by default (experiment: neutral-negative); opt-in via COT_OVERLAY_ENABLED
+POSITIONING_OVERLAY_ENABLED = _env_bool_first(
+    "POSITIONING_OVERLAY_ENABLED", "COT_OVERLAY_ENABLED", default="false"
+)
+POSITIONING_OVERLAY_LIVE_ENABLED = os.getenv(
+    "POSITIONING_OVERLAY_LIVE_ENABLED", "false"
+).lower() in ("1", "true", "yes")
+COT_DATA_FILE = os.getenv("COT_DATA_FILE", "reference/cot_es.json")
+COT_API_ENABLED = os.getenv("COT_API_ENABLED", "false").lower() in ("1", "true", "yes")
+COT_CONTRACT_LABEL = os.getenv("COT_CONTRACT_LABEL", "E-mini S&P 500")
+# Large-spec net as fraction of open interest (negative = net short).
+COT_NET_SHORT_THRESH = float(os.getenv("COT_NET_SHORT_THRESH", "-0.08"))
+COT_NET_LONG_THRESH = float(os.getenv("COT_NET_LONG_THRESH", "0.08"))
+COT_EXTREME_SHORT_THRESH = float(os.getenv("COT_EXTREME_SHORT_THRESH", "-0.15"))
+COT_EXTREME_LONG_THRESH = float(os.getenv("COT_EXTREME_LONG_THRESH", "0.15"))
+COT_BULLISH_MULT = float(os.getenv("COT_BULLISH_MULT", "1.2"))
+COT_BULLISH_EXTREME_MULT = float(os.getenv("COT_BULLISH_EXTREME_MULT", "1.4"))
+COT_BEARISH_MULT = float(os.getenv("COT_BEARISH_MULT", "0.8"))
+COT_BEARISH_EXTREME_MULT = float(os.getenv("COT_BEARISH_EXTREME_MULT", "0.6"))
 DERIVED_BEAR_PAUSE_ENABLED = os.getenv("DERIVED_BEAR_PAUSE_ENABLED", "false").lower() in (
     "1",
     "true",
@@ -700,7 +1005,7 @@ SENTIMENT_GAP_THRESHOLD_NORMAL = float(
     os.getenv("SENTIMENT_GAP_THRESHOLD_NORMAL", "0.35")
 )
 SENTIMENT_GAP_THRESHOLD_DEFENSIVE = float(
-    os.getenv("SENTIMENT_GAP_THRESHOLD_DEFENSIVE", "0.40")
+    os.getenv("SENTIMENT_GAP_THRESHOLD_DEFENSIVE", "0.50")
 )
 DYNAMIC_SIZING_MULTIPLIER_MAX = float(os.getenv("DYNAMIC_SIZING_MULTIPLIER_MAX", "1.5"))
 DYNAMIC_SIZING_MULTIPLIER_MIN = float(os.getenv("DYNAMIC_SIZING_MULTIPLIER_MIN", "0.5"))
@@ -1004,6 +1309,22 @@ REBALANCE_ON_STARTUP = os.getenv("REBALANCE_ON_STARTUP", "false").lower() in (
     "yes",
 )
 
+# --- Operating Layer + Wisdom Layer (strategic rebalance) ---
+REBALANCE_ENABLED = _env_bool_first(
+    "REBALANCE_ENABLED", "WISDOM_LAYER_ENABLED", default="false"
+)
+REBALANCE_CORE_TARGET = float(os.getenv("REBALANCE_CORE_TARGET", "0.80"))
+REBALANCE_BAND_WIDTH = float(os.getenv("REBALANCE_BAND_WIDTH", "0.08"))
+REBALANCE_CORE_MIN = float(os.getenv("REBALANCE_CORE_MIN", "0.70"))
+REBALANCE_CORE_MAX = float(os.getenv("REBALANCE_CORE_MAX", "0.90"))
+REBALANCE_TACTICAL_MIN = float(os.getenv("REBALANCE_TACTICAL_MIN", "0.10"))
+REBALANCE_TACTICAL_MAX = float(os.getenv("REBALANCE_TACTICAL_MAX", "0.30"))
+REBALANCE_CASH_MIN = float(os.getenv("REBALANCE_CASH_MIN", "0.05"))
+REBALANCE_CASH_MAX = float(os.getenv("REBALANCE_CASH_MAX", "0.15"))
+WISDOM_CONVICTION_THRESHOLD = float(os.getenv("WISDOM_CONVICTION_THRESHOLD", "0.75"))
+WISDOM_MAX_CORE_SHIFT_PCT = float(os.getenv("WISDOM_MAX_CORE_SHIFT_PCT", "0.10"))
+WISDOM_LOG_FILE = os.getenv("WISDOM_LOG_FILE", "logs/wisdom_log.jsonl")
+
 # --- Game plan (yield gate + metal sleeve + stress cash) — backtest: game_plan_gld / gld_slv_cper ---
 GAME_PLAN_ENABLED = os.getenv("GAME_PLAN_ENABLED", "true").lower() in (
     "1",
@@ -1043,7 +1364,8 @@ if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
 
 # --- Risk & sizing (tuned at REFERENCE_EQUITY; scales down for small live accounts) ---
 REFERENCE_EQUITY = float(os.getenv("REFERENCE_EQUITY", "100000"))
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.02"))
+# Base risk when dynamic paper risk is off; live Profile A default 2%.
+RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "0.018"))
 MAX_NOTIONAL_PER_ORDER = float(os.getenv("MAX_NOTIONAL_PER_ORDER", "10000"))
 # Small live account safety (< threshold equity): conservative sizing + higher VTI core
 SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
@@ -1051,7 +1373,22 @@ SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
 )
 SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
 SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
-SMALL_ACCOUNT_VTI_CORE_PCT = float(os.getenv("SMALL_ACCOUNT_VTI_CORE_PCT", "0.90"))
+# Live conservative profile (alpaca_live small account): 85% VTI + 5% active sleeve winner.
+LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.85"))
+LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.05"))
+# v1.1c 365d evidence: SPY MA200 best risk-adjusted live sleeve (PF 114, 98% win vs NYSE unrealized).
+LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "spy").strip().lower()
+LIVE_CONSERVATIVE_ENABLED = _env_bool_first("LIVE_CONSERVATIVE_ENABLED", default="true")
+LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
+    "vti_core_pct": LIVE_VTI_CORE_PCT,
+    "active_sleeve_pct": LIVE_SMALL_ACTIVE_SLEEVE_PCT,
+    "active_sleeve": LIVE_ACTIVE_SLEEVE_CHOICE,
+    "risk_per_trade": SMALL_ACCOUNT_RISK_PER_TRADE,
+    "max_notional_per_order": SMALL_ACCOUNT_MAX_NOTIONAL,
+}
+SMALL_ACCOUNT_VTI_CORE_PCT = float(
+    os.getenv("SMALL_ACCOUNT_VTI_CORE_PCT", str(LIVE_VTI_CORE_PCT))
+)
 SMALL_ACCOUNT_BACKTEST_EQUITY = float(
     os.getenv("SMALL_ACCOUNT_BACKTEST_EQUITY", "100")
 )
@@ -1059,13 +1396,18 @@ SMALL_ACCOUNT_BACKTEST_EQUITY = float(
 _account_equity: float | None = None
 _small_account_mode = False
 _backtest_small_account_ctx = False
+_backtest_live_conservative_ctx = False
 _backtest_paper_sleeves_ctx = False
+_backtest_vti_ceiling: float | None = None
 _backtest_strict_pit_ctx = False
 _live_thinking_sim_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
     "regime": "",
     "macro_stress": False,
+    "drawdown": 0.0,
+    "recovery_mode": False,
+    "equity_history": [],
 }
 # Min order at REFERENCE_EQUITY; effective_min_notional() scales with live equity (floor $1 Alpaca).
 MIN_NOTIONAL = float(os.getenv("MIN_NOTIONAL", "10"))
@@ -1360,6 +1702,30 @@ TELEGRAM_LIVE_FILL_MIN_USD = float(os.getenv("TELEGRAM_LIVE_FILL_MIN_USD", "5"))
 TELEGRAM_ALERT_SPACEX = _parse_env_bool("TELEGRAM_ALERT_SPACEX", default="false")
 TELEGRAM_ALERT_BTC = _parse_env_bool("TELEGRAM_ALERT_BTC", default="false")
 TELEGRAM_ALERT_SOCIAL = _parse_env_bool("TELEGRAM_ALERT_SOCIAL", default="false")
+TELEGRAM_WEEKLY_SUMMARY_TIME = os.getenv("TELEGRAM_WEEKLY_SUMMARY_TIME", "16:30").strip()
+TELEGRAM_WEEKLY_LIVE_ENABLED = _parse_env_bool("TELEGRAM_WEEKLY_LIVE_ENABLED", default="false")
+
+
+def telegram_weekly_summary_enabled() -> bool:
+    """Friday weekly Telegram: on by default for paper; live needs TELEGRAM_WEEKLY_LIVE_ENABLED."""
+    raw = os.getenv("TELEGRAM_WEEKLY_SUMMARY_ENABLED", "").strip().lower()
+    if raw in ("false", "0", "no", "off"):
+        return False
+    if raw in ("true", "1", "yes", "on"):
+        return True
+    if PAPER_TRADING:
+        return True
+    return bool(TELEGRAM_WEEKLY_LIVE_ENABLED)
+
+
+def email_weekly_summary_enabled() -> bool:
+    """Legacy weekly email — off unless EMAIL_WEEKLY_SUMMARY_ENABLED=true."""
+    raw = os.getenv("EMAIL_WEEKLY_SUMMARY_ENABLED", "").strip().lower()
+    if raw not in ("true", "1", "yes", "on"):
+        return False
+    if PAPER_TRADING:
+        return True
+    return _parse_env_bool("EMAIL_WEEKLY_LIVE_ENABLED", default="false")
 
 
 def telegram_alert_policy_summary() -> str:
@@ -1373,6 +1739,8 @@ def telegram_alert_policy_summary() -> str:
         bits.append("yield gate")
     if TELEGRAM_ALERT_DAILY_SUMMARY:
         bits.append(f"daily@{TELEGRAM_DAILY_SUMMARY_TIME} ET")
+    if telegram_weekly_summary_enabled():
+        bits.append(f"weekly Fri@{TELEGRAM_WEEKLY_SUMMARY_TIME} ET")
     if TELEGRAM_ALERT_LIVE_FILLS and not PAPER_TRADING:
         bits.append(f"live fills>${TELEGRAM_LIVE_FILL_MIN_USD:.0f}")
     return ", ".join(bits) if bits else "all high-signal alerts off"
@@ -1417,6 +1785,16 @@ def set_backtest_paper_sleeves_context(active: bool) -> None:
 
 def backtest_paper_sleeves_context() -> bool:
     return _backtest_paper_sleeves_ctx
+
+
+def set_backtest_vti_ceiling(pct: float | None) -> None:
+    """Paper backtest: max VTI core when PAPER_DYNAMIC_VTI is off (incl. --vti-core)."""
+    global _backtest_vti_ceiling
+    _backtest_vti_ceiling = float(pct) if pct is not None and pct > 0 else None
+
+
+def backtest_vti_ceiling() -> float | None:
+    return _backtest_vti_ceiling
 
 
 def set_backtest_strict_pit_context(active: bool) -> None:
@@ -1482,6 +1860,9 @@ def set_dynamic_risk_context(
     vol_score: float | None = None,
     regime: str | None = None,
     macro_stress: bool | None = None,
+    drawdown: float | None = None,
+    recovery_mode: bool | None = None,
+    equity_history: list[float] | None = None,
 ) -> None:
     """Update per-cycle inputs for paper dynamic risk (run_all / backtester)."""
     global _dynamic_risk_ctx
@@ -1491,6 +1872,84 @@ def set_dynamic_risk_context(
         _dynamic_risk_ctx["regime"] = str(regime)
     if macro_stress is not None:
         _dynamic_risk_ctx["macro_stress"] = bool(macro_stress)
+    if drawdown is not None:
+        _dynamic_risk_ctx["drawdown"] = max(0.0, float(drawdown))
+    if recovery_mode is not None:
+        _dynamic_risk_ctx["recovery_mode"] = bool(recovery_mode)
+    if equity_history is not None:
+        _dynamic_risk_ctx["equity_history"] = [float(x) for x in equity_history if x is not None]
+
+
+def effective_halt_resume_drawdown_pct() -> float:
+    if paper_aggressive_context():
+        return PAPER_HALT_RESUME_DRAWDOWN_PCT
+    return HALT_RESUME_DRAWDOWN_PCT
+
+
+def paper_sleeve_hard_cap_pct(sleeve_key: str) -> float | None:
+    if not paper_aggressive_context():
+        return None
+    caps = {
+        "spy": PAPER_SPY_MAX_EXPOSURE_PCT,
+        "nyse": PAPER_NYSE_MAX_EXPOSURE_PCT,
+        "crypto": PAPER_CRYPTO_MAX_EXPOSURE_PCT,
+    }
+    return caps.get(sleeve_key)
+
+
+def set_backtest_live_conservative_context(enabled: bool) -> None:
+    global _backtest_live_conservative_ctx
+    _backtest_live_conservative_ctx = bool(enabled)
+
+
+def backtest_live_conservative_context() -> bool:
+    return bool(_backtest_live_conservative_ctx)
+
+
+def live_conservative_profile_active() -> bool:
+    """85/15 live small-account split: 85% VTI + 5% SPY trend (v1.1c winner) + legacy active."""
+    if not LIVE_CONSERVATIVE_ENABLED:
+        return False
+    if paper_aggressive_context() or paper_only_sleeves_active():
+        return False
+    if backtest_small_account_context():
+        return backtest_live_conservative_context()
+    if PAPER_TRADING:
+        return False
+    return is_small_account()
+
+
+def enforce_live_small_account_profile() -> None:
+    """Apply live conservative defaults for alpaca_live small accounts (.env overrides win)."""
+    global SMALL_ACCOUNT_VTI_CORE_PCT
+    if not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
+        SMALL_ACCOUNT_VTI_CORE_PCT = LIVE_VTI_CORE_PCT
+
+
+def format_live_conservative_banner() -> str:
+    sleeve_labels = {
+        "spy": "SPY trend",
+        "stat_arb": "Stat Arb",
+        "nyse": "NYSE momentum",
+        "cash": "cash buffer",
+    }
+    sleeve = sleeve_labels.get(LIVE_ACTIVE_SLEEVE_CHOICE, LIVE_ACTIVE_SLEEVE_CHOICE)
+    legacy_active = max(
+        0.0, 1.0 - LIVE_VTI_CORE_PCT - LIVE_SMALL_ACTIVE_SLEEVE_PCT
+    )
+    return (
+        f"Live Conservative {LIVE_VTI_CORE_PCT:.0%}/{legacy_active:.0%}: "
+        f"{LIVE_VTI_CORE_PCT:.0%} VTI | {LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {sleeve} | "
+        f"{legacy_active:.0%} NYSE/active | "
+        f"{SMALL_ACCOUNT_RISK_PER_TRADE:.0%} risk | ${SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max/order"
+    )
+
+
+def get_live_profile_summary() -> str:
+    return (
+        f"Live Conservative: {LIVE_VTI_CORE_PCT:.0%} VTI | "
+        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY trend | crypto OFF | thinking OFF | static universe"
+    )
 
 
 def configure_account_profile(equity: float) -> dict:
@@ -1498,12 +1957,21 @@ def configure_account_profile(equity: float) -> dict:
     global _account_equity, _small_account_mode
     _account_equity = float(equity)
     _small_account_mode = _account_equity < SMALL_ACCOUNT_EQUITY_THRESHOLD
+    if _small_account_mode and not PAPER_TRADING:
+        enforce_live_small_account_profile()
     return {
         "equity": _account_equity,
         "small_account": _small_account_mode,
+        "live_conservative": live_conservative_profile_active(),
         "risk_per_trade": effective_risk_per_trade(_account_equity),
         "max_notional_per_order": effective_max_notional_per_order(),
         "vti_core_pct": vti_core_allocation_pct(equity=_account_equity),
+        "active_sleeve_pct": LIVE_SMALL_ACTIVE_SLEEVE_PCT
+        if live_conservative_profile_active()
+        else 0.0,
+        "active_sleeve": LIVE_ACTIVE_SLEEVE_CHOICE
+        if live_conservative_profile_active()
+        else "",
     }
 
 
@@ -1513,6 +1981,8 @@ def effective_risk_per_trade(
     vol_score: float | None = None,
     regime: str | None = None,
     macro_stress: bool | None = None,
+    drawdown: float | None = None,
+    recovery_mode: bool | None = None,
 ) -> float:
     eq = float(equity) if equity is not None else (_account_equity or REFERENCE_EQUITY)
     if is_small_account(eq):
@@ -1531,8 +2001,77 @@ def effective_risk_per_trade(
     ):
         from modules.fund_config import get_dynamic_risk_per_trade
 
-        return get_dynamic_risk_per_trade(eq, float(vs), reg, bool(stress))
-    return RISK_PER_TRADE
+        base = get_dynamic_risk_per_trade(eq, float(vs), reg, bool(stress))
+    else:
+        base = RISK_PER_TRADE
+    if PAPER_REGIME_DD_RISK_ENABLED and paper_aggressive_context():
+        from modules.paper_risk_controls import regime_dd_risk_multiplier
+
+        dd = (
+            drawdown
+            if drawdown is not None
+            else float(_dynamic_risk_ctx.get("drawdown", 0.0))
+        )
+        rec = (
+            recovery_mode
+            if recovery_mode is not None
+            else bool(_dynamic_risk_ctx.get("recovery_mode", False))
+        )
+        base = round(base * regime_dd_risk_multiplier(reg, dd, recovery_mode=rec), 6)
+    if effective_positioning_overlay_enabled():
+        from modules.positioning_overlay import positioning_risk_multiplier
+
+        base = round(base * positioning_risk_multiplier(), 6)
+    if VOL_CEILING_ENABLED and paper_aggressive_context():
+        from modules.paper_risk_controls import vol_ceiling_risk_multiplier
+
+        base = round(base * vol_ceiling_risk_multiplier(vs), 6)
+    if effective_tail_risk_controls():
+        from modules.risk_management import portfolio_vol_risk_multiplier
+
+        hist = _dynamic_risk_ctx.get("equity_history") or []
+        base = round(
+            base
+            * portfolio_vol_risk_multiplier(
+                hist,
+                ceiling=PORTFOLIO_VOL_CEILING_PCT,
+                window=PORTFOLIO_VOL_WINDOW,
+                min_mult=PORTFOLIO_VOL_MIN_RISK_MULT,
+            ),
+            6,
+        )
+    return base
+
+
+def effective_per_name_max_pct() -> float:
+    """Strict per-name ceiling (default 8%)."""
+    return min(float(PER_NAME_MAX_PCT), float(PAPER_MAX_POSITION_PCT))
+
+
+def effective_tail_risk_controls() -> bool:
+    """Conservative tail-risk overlay — paper/research only."""
+    if not TAIL_RISK_CONTROLS_ENABLED:
+        return False
+    if not PAPER_TRADING and not backtest_paper_sleeves_context():
+        return False
+    return bool(
+        is_realistic_research_active()
+        or paper_chase_mode_enabled()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
+    )
+
+
+def effective_positioning_overlay_enabled() -> bool:
+    """COT positioning overlay — paper aggressive default; live opt-in."""
+    if not POSITIONING_OVERLAY_ENABLED:
+        return False
+    if paper_aggressive_context() or backtest_paper_sleeves_context():
+        return True
+    if POSITIONING_OVERLAY_LIVE_ENABLED and not PAPER_TRADING:
+        return True
+    return False
 
 
 def effective_min_notional(equity: float | None = None) -> float:
@@ -1682,6 +2221,20 @@ def backtest_fetch_tickers() -> list[str]:
             from modules.crypto_universe import expanded_crypto_symbols
 
             tickers = sorted(set(tickers) | set(expanded_crypto_symbols()))
+        except ImportError:
+            pass
+    if effective_dynamic_sector_screener() or DYNAMIC_SECTOR_SCREENER_ENABLED:
+        try:
+            from modules.sector_screener import (
+                sector_etf_symbols,
+                sector_expansion_prefetch_tickers,
+            )
+
+            tickers = sorted(
+                set(tickers)
+                | set(sector_etf_symbols())
+                | set(sector_expansion_prefetch_tickers())
+            )
         except ImportError:
             pass
     return tickers
@@ -1854,9 +2407,15 @@ def print_live_stack_flags() -> None:
             f"  vti_core:             {alloc['vti_core']:.0%} {VTI_CORE_SYMBOL} passive | "
             f"active {active_fund_fraction():.0%}"
         )
+    stat_part = (
+        f" | stat_arb {alloc['stat_arb']:.0%}"
+        if alloc.get("stat_arb", 0) > 0
+        else ""
+    )
     print(
         f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
-        f"NYSE {alloc['nyse']:.0%} | metal {alloc['metal']:.0%} | cash {alloc['cash_buffer']:.0%}"
+        f"NYSE {alloc['nyse']:.0%}{stat_part} | metal {alloc['metal']:.0%} | "
+        f"cash {alloc['cash_buffer']:.0%}"
     )
     if SOCIAL_SLEEVE_ENABLED:
         print(
@@ -2036,9 +2595,12 @@ def get_best_paper_restart_lines() -> list[str]:
 
 def get_live_profile_defaults_line() -> str:
     try:
-        return _load_best_paper_config().get_live_profile_summary()
+        summary = _load_best_paper_config().get_live_profile_summary()
+        if summary:
+            return summary
     except (ImportError, AttributeError):
-        return "Live Profile A: 90% VTI | crypto OFF | thinking OFF | static universe"
+        pass
+    return get_live_profile_summary()
 
 
 def get_top1_conservative_blend_line() -> str:
@@ -2060,7 +2622,15 @@ def print_paper_research_stack_flags() -> None:
     try:
         alloc = fund_allocation_pct()
         stack = get_best_paper_bot_stack()
-        print("--- Best Paper Bot (paper_aggressive / Profile B) ---")
+        print("--- Best Paper Bot (realistic research / Profile B) ---")
+        if is_realistic_research_active():
+            for line in format_realistic_research_startup_lines():
+                print(f"  {line}")
+        research_line = format_research_mode_banner()
+        if research_line:
+            print(f"--- {research_line} ---")
+        for line in paper_frequency_mode_lines():
+            print(f"  {line}")
         if paper_chase_mode_enabled():
             print("  paper_chase_mode:       ON (PAPER_CHASE_MODE)")
         print(f"  game_plan:              {gp}")
@@ -2088,11 +2658,18 @@ def print_paper_research_stack_flags() -> None:
             f"({PAPER_RISK_CALM_BULL_PCT:.1%} calm bull / "
             f"{PAPER_RISK_MODERATE_PCT:.1%} moderate / {PAPER_RISK_STRESS_PCT:.1%} stress)"
         )
+        z_label = (
+            f"Z>={PAPER_PAIR_Z_THRESHOLD} (dynamic {PAPER_PAIR_Z_CALM}-{PAPER_PAIR_Z_STRESS})"
+            if PAPER_PAIR_Z_DYNAMIC
+            else f"Z>={PAPER_PAIR_Z_THRESHOLD}"
+        )
         print(
             f"  stat_arb:             "
             f"{'on' if stack['stat_arb'] and effective_stat_arb_enabled() else 'off'} "
-            f"(corr>{PAPER_PAIR_MIN_CORRELATION}, Z>={PAPER_PAIR_Z_THRESHOLD})"
+            f"(corr>{PAPER_PAIR_MIN_CORRELATION}, {z_label}, "
+            f"max_trades={PAPER_STAT_ARB_MAX_TRADES})"
         )
+        print(f"  nyse_stat_arb_path:   {nyse_stat_arb_mode_label()}")
         print(
             f"  vol_overlay:          "
             f"{'on' if stack['vol_overlay'] and effective_vol_trading_enabled() else 'off'} "
@@ -2119,11 +2696,21 @@ def print_paper_research_stack_flags() -> None:
             f"  vti_core:             {alloc['vti_core']:.0%} {VTI_CORE_SYMBOL} | "
             f"active boost {PAPER_ACTIVE_SLEEVE_BOOST:.2f}x"
         )
+        print(
+            f"  crypto_sleeve:        "
+            f"{'on' if effective_crypto_enabled() else 'off (PAPER_CRYPTO_ENABLED=false)'}"
+        )
         print(f"  crypto_vol_only:      {effective_crypto_vol_only()}")
         print(f"  wisdom_sizing_floor:  {PAPER_WISDOM_SIZING_FLOOR}")
+        stat_part = (
+            f" | stat_arb {alloc['stat_arb']:.0%}"
+            if alloc.get("stat_arb", 0) > 0
+            else ""
+        )
         print(
             f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
-            f"NYSE {alloc['nyse']:.0%} | metal {alloc['metal']:.0%} | cash {alloc['cash_buffer']:.0%}"
+            f"NYSE {alloc['nyse']:.0%}{stat_part} | metal {alloc['metal']:.0%} | "
+            f"cash {alloc['cash_buffer']:.0%}"
         )
         social_cap = effective_social_sleeve_cap_pct()
         if SOCIAL_SLEEVE_ENABLED:
@@ -2215,7 +2802,7 @@ def paper_only_sleeves_active() -> bool:
 
 
 def enforce_best_paper_stack() -> None:
-    """Disable weak/redundant paper sleeves (Profile B locked stack v2)."""
+    """Disable weak/redundant paper sleeves (Profile B locked stack v3)."""
     global PAPER_RISK_PARITY_ENABLED
     global PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     global PAPER_SOCIAL_SLEEVE_ENABLED
@@ -2232,6 +2819,427 @@ def enforce_best_paper_stack() -> None:
     PAPER_STAT_ARB_OPTIMIZED = False
     PAPER_SOCIAL_MACRO_BOOST_ENABLED = False
     PAPER_CRYPTO_V2_ENABLED = False
+    enforce_realistic_research_profile()
+
+
+def _env_explicit(*keys: str) -> bool:
+    return any(os.getenv(key) is not None for key in keys)
+
+
+def enforce_realistic_research_profile() -> None:
+    """Re-apply Realistic Research v1.3 locks (.env overrides win)."""
+    global DYNAMIC_CORE_ENABLED
+    global DEEP_HISTORY_ENABLED
+    global DEEP_HISTORY_INDICATORS_ONLY
+    global REBALANCE_ENABLED
+    global POSITIONING_OVERLAY_ENABLED
+    global PAPER_DYNAMIC_VTI_ENABLED
+    global PAPER_VTI_CORE_PCT
+    global VTI_CORE_PCT
+    global PAPER_RISK_PER_TRADE
+    global PAPER_RISK_CALM_BULL_PCT
+    global RISK_PER_TRADE
+    global PAPER_POSITION_MAX_HOLD_BARS
+    global PAPER_REGIME_B_SIZING_MULT
+    global PAPER_REGIME_B_RISK_MULT
+    global TAIL_RISK_CONTROLS_ENABLED
+    global VOL_CEILING_ENABLED
+    global PAPER_VOL_CEILING_PCT
+    global PORTFOLIO_VOL_CEILING_PCT
+    global PORTFOLIO_VOL_MIN_RISK_MULT
+    global PORTFOLIO_VOL_WINDOW
+    global PAPER_REGIME_DD_RISK_ENABLED
+    global PAPER_REGIME_D_RISK_MULT
+    global PAPER_DD_RISK_WARN_PCT
+    global PAPER_DD_RISK_MULT_5
+    global PAPER_DD_RISK_SEVERE_PCT
+    global PAPER_DD_RISK_MULT_8
+    global PAPER_REGIME_B_CASH_BUFFER_BOOST
+    global PAPER_MAX_POSITION_PCT
+    global PER_NAME_MAX_PCT
+    global SECTOR_HIGH_VOL_CEILING_PCT
+    global SECTOR_HIGH_VOL_EXPANSION_CAP
+    global SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS
+    global PAPER_REGIME_WEAK_SLEEVE_MAX_PCT
+    global CORE_ALLOCATOR_LOCKED
+    global CORE_ALLOCATOR_LOCKED_CHOICE
+    global DYNAMIC_SECTOR_SCREENER_ENABLED
+    global STAT_ARB_SLEEVE_CAP_ENABLED
+    global STAT_ARB_SLEEVE_CAP_PCT
+    global STAT_ARB_VOL_SCALING_ENABLED
+    global STAT_ARB_VOL_MIN_NOTIONAL_SCALE
+    global PAPER_STAT_ARB_MIN_DOLLAR_VOLUME
+    global PAPER_STAT_ARB_TRAILING_ARM_FRAC
+    global PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC
+    global PAPER_STAT_ARB_MAX_PAIRS
+    global PAPER_STAT_ARB_MAX_PAIRS_EXPANDED
+    global PAPER_STAT_ARB_MAX_PAIRS_CEILING
+    global PAPER_STAT_ARB_Z_ENTRY_BASE
+    global PAPER_STAT_ARB_Z_ENTRY_MAX
+    global PAPER_STAT_ARB_RISK_REWARD
+    global PAPER_STAT_ARB_MIN_CORR
+    global PAPER_STAT_ARB_COINT_PVALUE
+    global PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF
+    global PROTECTIVE_SHORT_MAX_PCT
+    global SHORT_RHYME_E_ENABLED
+
+    if not _env_explicit("DYNAMIC_CORE_ENABLED"):
+        DYNAMIC_CORE_ENABLED = True
+    if not _env_explicit("DEEP_HISTORY_ENABLED"):
+        DEEP_HISTORY_ENABLED = True
+    if not _env_explicit("DEEP_HISTORY_INDICATORS_ONLY"):
+        DEEP_HISTORY_INDICATORS_ONLY = True
+    if not _env_explicit("REBALANCE_ENABLED", "WISDOM_LAYER_ENABLED"):
+        REBALANCE_ENABLED = False
+    if not _env_explicit("POSITIONING_OVERLAY_ENABLED", "COT_OVERLAY_ENABLED"):
+        POSITIONING_OVERLAY_ENABLED = False
+    if not _env_explicit("PAPER_DYNAMIC_VTI", "PAPER_DYNAMIC_VTI_ENABLED"):
+        PAPER_DYNAMIC_VTI_ENABLED = False
+    if not _env_explicit("CORE_ALLOCATOR_LOCKED"):
+        CORE_ALLOCATOR_LOCKED = False if DYNAMIC_CORE_ENABLED else True
+    if not _env_explicit("CORE_ALLOCATOR_LOCKED_CHOICE"):
+        CORE_ALLOCATOR_LOCKED_CHOICE = "spy"
+    if not _env_explicit("PAPER_VTI_CORE_PCT", "VTI_CORE_PCT"):
+        PAPER_VTI_CORE_PCT = 0.40 if CORE_ALLOCATOR_LOCKED else 0.40
+    if not _env_explicit("VTI_CORE_PCT"):
+        VTI_CORE_PCT = 0.80
+    if not _env_explicit("PAPER_RISK_PER_TRADE", "RISK_PER_TRADE"):
+        PAPER_RISK_PER_TRADE = 0.018
+    if not _env_explicit("PAPER_RISK_CALM_BULL_PCT"):
+        PAPER_RISK_CALM_BULL_PCT = PAPER_RISK_PER_TRADE
+    if not _env_explicit("RISK_PER_TRADE"):
+        RISK_PER_TRADE = 0.018
+    if not _env_explicit("PAPER_POSITION_MAX_HOLD_BARS"):
+        PAPER_POSITION_MAX_HOLD_BARS = 30
+    if not _env_explicit("PAPER_REGIME_B_SIZING_MULT"):
+        PAPER_REGIME_B_SIZING_MULT = 0.30
+    if not _env_explicit("PAPER_REGIME_B_RISK_MULT"):
+        PAPER_REGIME_B_RISK_MULT = 0.50
+
+    # --- Tail Risk Controls v1.1 (paper/research locks) ---
+    if not _env_explicit("TAIL_RISK_CONTROLS_ENABLED"):
+        TAIL_RISK_CONTROLS_ENABLED = True
+    if not _env_explicit("VOL_CEILING_ENABLED"):
+        VOL_CEILING_ENABLED = True
+    if not _env_explicit("PAPER_VOL_CEILING_PCT"):
+        PAPER_VOL_CEILING_PCT = 0.17
+    if not _env_explicit("PORTFOLIO_VOL_CEILING_PCT"):
+        PORTFOLIO_VOL_CEILING_PCT = 0.18
+    if not _env_explicit("PORTFOLIO_VOL_MIN_RISK_MULT"):
+        PORTFOLIO_VOL_MIN_RISK_MULT = 0.35
+    if not _env_explicit("PORTFOLIO_VOL_WINDOW"):
+        PORTFOLIO_VOL_WINDOW = 20
+    if not _env_explicit("PAPER_REGIME_DD_RISK_ENABLED"):
+        PAPER_REGIME_DD_RISK_ENABLED = True
+    if not _env_explicit("PAPER_REGIME_D_RISK_MULT"):
+        PAPER_REGIME_D_RISK_MULT = 0.75
+    if not _env_explicit("PAPER_DD_RISK_WARN_PCT"):
+        PAPER_DD_RISK_WARN_PCT = 0.05
+    if not _env_explicit("PAPER_DD_RISK_MULT_5"):
+        PAPER_DD_RISK_MULT_5 = 0.6
+    if not _env_explicit("PAPER_DD_RISK_SEVERE_PCT"):
+        PAPER_DD_RISK_SEVERE_PCT = 0.08
+    if not _env_explicit("PAPER_DD_RISK_MULT_8"):
+        PAPER_DD_RISK_MULT_8 = 0.3
+    if not _env_explicit("PAPER_REGIME_B_CASH_BUFFER_BOOST"):
+        PAPER_REGIME_B_CASH_BUFFER_BOOST = 0.12
+    if not _env_explicit("PAPER_MAX_POSITION_PCT", "PER_NAME_MAX_PCT"):
+        PAPER_MAX_POSITION_PCT = 0.08
+    if not _env_explicit("PER_NAME_MAX_PCT"):
+        PER_NAME_MAX_PCT = 0.08
+    if not _env_explicit("SECTOR_HIGH_VOL_CEILING_PCT"):
+        SECTOR_HIGH_VOL_CEILING_PCT = 0.18
+    if not _env_explicit("SECTOR_HIGH_VOL_EXPANSION_CAP"):
+        SECTOR_HIGH_VOL_EXPANSION_CAP = 10
+    if not _env_explicit("SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS"):
+        SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS = 1
+    if not _env_explicit("PAPER_REGIME_WEAK_SLEEVE_MAX_PCT"):
+        PAPER_REGIME_WEAK_SLEEVE_MAX_PCT = 0.25
+    if not _env_explicit("DYNAMIC_SECTOR_SCREENER_ENABLED"):
+        DYNAMIC_SECTOR_SCREENER_ENABLED = True
+    if not _env_explicit("BASE_UNIVERSE_SIZE"):
+        BASE_UNIVERSE_SIZE = 110
+    if not _env_explicit("SECTOR_EXPANSION_SIZE"):
+        SECTOR_EXPANSION_SIZE = 45
+    if not _env_explicit("SECTOR_MAX_TOTAL_TICKERS"):
+        SECTOR_MAX_TOTAL_TICKERS = 180
+    if not _env_explicit("MAX_ACTIVE_SECTORS_STRONG"):
+        MAX_ACTIVE_SECTORS_STRONG = 4
+    if not _env_explicit("SECTOR_FALLBACK_MOMENTUM_COUNT"):
+        SECTOR_FALLBACK_MOMENTUM_COUNT = 18
+    if not _env_explicit("PAPER_STAT_ARB_MIN_CORR"):
+        PAPER_STAT_ARB_MIN_CORR = 0.72
+    if not _env_explicit("PAPER_STAT_ARB_MAX_PAIRS"):
+        PAPER_STAT_ARB_MAX_PAIRS = 10
+    if not _env_explicit("PAPER_STAT_ARB_MAX_PAIRS_EXPANDED"):
+        PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = 12
+    if not _env_explicit("PAPER_STAT_ARB_MAX_PAIRS_CEILING"):
+        PAPER_STAT_ARB_MAX_PAIRS_CEILING = 14
+    if not _env_explicit("PAPER_STAT_ARB_MAX_HOLD_BARS"):
+        PAPER_STAT_ARB_MAX_HOLD_BARS = 35
+    if not _env_explicit("PAPER_STAT_ARB_Z_ENTRY_BASE"):
+        PAPER_STAT_ARB_Z_ENTRY_BASE = 2.0
+    if not _env_explicit("PAPER_STAT_ARB_Z_ENTRY_MAX"):
+        PAPER_STAT_ARB_Z_ENTRY_MAX = 2.6
+    if not _env_explicit("PAPER_STAT_ARB_RISK_REWARD"):
+        PAPER_STAT_ARB_RISK_REWARD = 1.6
+    if not _env_explicit("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME"):
+        PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = 25_000_000
+    if not _env_explicit("PAPER_STAT_ARB_TRAILING_ARM_FRAC"):
+        PAPER_STAT_ARB_TRAILING_ARM_FRAC = 0.50
+    if not _env_explicit("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC"):
+        PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = 0.35
+    if not _env_explicit("PAPER_STAT_ARB_COINT_PVALUE"):
+        PAPER_STAT_ARB_COINT_PVALUE = 0.12
+    if not _env_explicit("PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF"):
+        PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF = True
+    if not _env_explicit("STAT_ARB_SLEEVE_CAP_ENABLED"):
+        STAT_ARB_SLEEVE_CAP_ENABLED = True
+    if not _env_explicit("STAT_ARB_SLEEVE_CAP_PCT"):
+        STAT_ARB_SLEEVE_CAP_PCT = 0.07
+    if not _env_explicit("STAT_ARB_VOL_SCALING_ENABLED"):
+        STAT_ARB_VOL_SCALING_ENABLED = True
+    if not _env_explicit("STAT_ARB_VOL_MIN_NOTIONAL_SCALE"):
+        STAT_ARB_VOL_MIN_NOTIONAL_SCALE = 0.30
+    if not _env_explicit("PROTECTIVE_SHORT_ENABLED", "PAPER_PROTECTIVE_SHORT_ENABLED"):
+        PROTECTIVE_SHORT_ENABLED = True
+    if not _env_explicit("SHORT_OPPORTUNISTIC_ENABLED", "PAPER_SHORT_OPPORTUNISTIC_ENABLED"):
+        SHORT_OPPORTUNISTIC_ENABLED = True
+    if not _env_explicit("PROTECTIVE_SHORT_MAX_PCT"):
+        PROTECTIVE_SHORT_MAX_PCT = 0.15
+    if not _env_explicit("PROTECTIVE_SHORT_MIN_PCT"):
+        PROTECTIVE_SHORT_MIN_PCT = 0.08
+    if not _env_explicit("SHORT_RHYME_E_STRONG_BUBBLE"):
+        SHORT_RHYME_E_STRONG_BUBBLE = 0.60
+    if not _env_explicit("SHORT_MAX_HOLD_BARS"):
+        SHORT_MAX_HOLD_BARS = 30
+    if not _env_explicit("SHORT_OPPORTUNISTIC_ENABLED", "PAPER_SHORT_OPPORTUNISTIC_ENABLED"):
+        SHORT_OPPORTUNISTIC_ENABLED = False
+    if not _env_explicit("SHORT_RHYME_B_MIN_DEPTH"):
+        SHORT_RHYME_B_MIN_DEPTH = 0.020
+    if not _env_explicit("SHORT_RHYME_E_ENABLED", "PAPER_SHORT_RHYME_E_ENABLED"):
+        SHORT_RHYME_E_ENABLED = True
+    if not _env_explicit("SHORT_BUBBLE_SCORE_MIN"):
+        SHORT_BUBBLE_SCORE_MIN = 0.45
+    if not _env_explicit("SHORT_VIX_MIN_LEVEL"):
+        SHORT_VIX_MIN_LEVEL = 25.0
+    if effective_core_allocator_locked():
+        try:
+            from modules.core_allocator import lock_core_allocator
+
+            lock_core_allocator()
+        except ImportError:
+            pass
+
+
+# Subprocess env defaults for portal paper book / run_paper_bot (live book must not inherit).
+REALISTIC_RESEARCH_ENV: dict[str, str] = {
+    "PAPER_AGGRESSIVE": "true",
+    "VTI_CORE_PCT": "0.80",
+    "PAPER_VTI_CORE_PCT": "0.40",
+    "PAPER_DYNAMIC_VTI": "false",
+    "DYNAMIC_CORE_ENABLED": "true",
+    "DYNAMIC_CORE_MIN_PCT": "0.30",
+    "DYNAMIC_CORE_MAX_PCT": "0.50",
+    "DYNAMIC_CORE_REVIEW_DAYS": "30",
+    "CORE_ALLOCATOR_LOCKED": "false",
+    "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
+    "DEEP_HISTORY_ENABLED": "true",
+    "DEEP_HISTORY_INDICATORS_ONLY": "true",
+    "RISK_PER_TRADE": "0.018",
+    "PAPER_RISK_PER_TRADE": "0.018",
+    "PAPER_POSITION_MAX_HOLD_BARS": "30",
+    "PAPER_REGIME_B_SIZING_MULT": "0.30",
+    "PAPER_REGIME_B_RISK_MULT": "0.50",
+    "TAIL_RISK_CONTROLS_ENABLED": "true",
+    "VOL_CEILING_ENABLED": "true",
+    "PAPER_VOL_CEILING_PCT": "0.17",
+    "PORTFOLIO_VOL_CEILING_PCT": "0.18",
+    "PORTFOLIO_VOL_MIN_RISK_MULT": "0.35",
+    "PORTFOLIO_VOL_WINDOW": "20",
+    "PAPER_REGIME_DD_RISK_ENABLED": "true",
+    "PAPER_REGIME_D_RISK_MULT": "0.75",
+    "PAPER_DD_RISK_WARN_PCT": "0.05",
+    "PAPER_DD_RISK_MULT_5": "0.6",
+    "PAPER_DD_RISK_SEVERE_PCT": "0.08",
+    "PAPER_DD_RISK_MULT_8": "0.3",
+    "PAPER_REGIME_B_CASH_BUFFER_BOOST": "0.12",
+    "PAPER_MAX_POSITION_PCT": "0.08",
+    "PER_NAME_MAX_PCT": "0.08",
+    "SECTOR_HIGH_VOL_CEILING_PCT": "0.18",
+    "SECTOR_HIGH_VOL_EXPANSION_CAP": "10",
+    "SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS": "1",
+    "PAPER_REGIME_WEAK_SLEEVE_MAX_PCT": "0.25",
+    "REALISTIC_RESEARCH_VERSION": REALISTIC_RESEARCH_VERSION,
+    "WISDOM_LAYER_ENABLED": "false",
+    "REBALANCE_ENABLED": "false",
+    "COT_OVERLAY_ENABLED": "false",
+    "POSITIONING_OVERLAY_ENABLED": "false",
+    "STAT_ARB_ENABLED": "true",
+    "PAPER_STAT_ARB_ENABLED": "true",
+    "PAPER_STAT_ARB_MIN_CORR": "0.72",
+    "PAPER_STAT_ARB_MAX_PAIRS": "10",
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": "12",
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": "14",
+    "PAPER_STAT_ARB_MAX_HOLD_BARS": "35",
+    "PAPER_STAT_ARB_Z_ENTRY_BASE": "2.0",
+    "PAPER_STAT_ARB_Z_ENTRY_MAX": "2.6",
+    "PAPER_STAT_ARB_RISK_REWARD": "1.6",
+    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": "25000000",
+    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": "0.50",
+    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": "0.35",
+    "PAPER_STAT_ARB_COINT_PVALUE": "0.12",
+    "PAPER_STAT_ARB_USE_COINT": "true",
+    "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF": "true",
+    "PAPER_STAT_ARB_SECTOR_NEUTRAL_BOOST": "1.12",
+    "STAT_ARB_SLEEVE_CAP_ENABLED": "true",
+    "STAT_ARB_SLEEVE_CAP_PCT": "0.07",
+    "STAT_ARB_VOL_SCALING_ENABLED": "true",
+    "STAT_ARB_VOL_MIN_NOTIONAL_SCALE": "0.30",
+    "PROTECTIVE_SHORT_ENABLED": "true",
+    "SHORT_OPPORTUNISTIC_ENABLED": "true",
+    "PROTECTIVE_SHORT_MAX_PCT": "0.15",
+    "PROTECTIVE_SHORT_MIN_PCT": "0.08",
+    "SHORT_RHYME_E_STRONG_BUBBLE": "0.60",
+    "SHORT_MAX_HOLD_BARS": "30",
+    "SHORT_LONG_HEDGE_ENABLED": "true",
+    "SHORT_LONG_HEDGE_FLOOR": "0.78",
+    "SHORT_OPPORTUNISTIC_ENABLED": "false",
+    "SHORT_VIX_SPIKE_CONFIRM": "true",
+    "SHORT_VIX_MIN_LEVEL": "25",
+    "SHORT_VIX_REQUIRE_RISING": "true",
+    "SHORT_RHYME_E_ENABLED": "true",
+    "SHORT_BUBBLE_SCORE_MIN": "0.45",
+    "THINKING_ENGINE_ENABLED": "false",
+    "PAPER_THINKING_ENGINE_ENABLED": "false",
+    "DYNAMIC_SECTOR_SCREENER_ENABLED": "true",
+    "BASE_UNIVERSE_SIZE": "110",
+    "SECTOR_EXPANSION_SIZE": "45",
+    "SECTOR_MAX_TOTAL_TICKERS": "180",
+    "MAX_ACTIVE_SECTORS_STRONG": "4",
+    "SECTOR_FALLBACK_MOMENTUM_COUNT": "18",
+    "EMAIL_WEEKLY_SUMMARY_ENABLED": "false",
+    "TELEGRAM_WEEKLY_SUMMARY_ENABLED": "true",
+}
+
+
+def apply_realistic_research_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Merge locked realistic research defaults (setdefault — explicit env wins)."""
+    merged = dict(env or os.environ)
+    for key, value in REALISTIC_RESEARCH_ENV.items():
+        merged.setdefault(key, value)
+    return merged
+
+
+def clear_paper_research_env(env: dict[str, str]) -> dict[str, str]:
+    """Strip paper-research keys from subprocess env (live alpaca_live book)."""
+    out = dict(env)
+    out.pop("PAPER_CHASE_MODE", None)
+    for key in REALISTIC_RESEARCH_ENV:
+        out.pop(key, None)
+    return out
+
+
+def is_realistic_research_active() -> bool:
+    """True when paper chase / Profile B book is running."""
+    return bool(PAPER_TRADING and paper_chase_mode_enabled())
+
+
+def format_paper_live_profile_line() -> str:
+    """Cross-book startup line: paper v1.3 aggressive vs live conservative."""
+    return (
+        f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive) | "
+        f"Live Bot: Conservative {LIVE_VTI_CORE_PCT:.0%} VTI"
+    )
+
+
+def format_universe_pool_label() -> str:
+    """Compact universe cap summary for banners."""
+    return (
+        f"universe base {BASE_UNIVERSE_SIZE} + sector x{SECTOR_EXPANSION_SIZE} "
+        f"(cap {SECTOR_MAX_TOTAL_TICKERS})"
+    )
+
+
+def format_realistic_research_headline() -> str:
+    """Prominent version line for paper bot startup."""
+    features = "Stat Arb v1.3 | Dynamic Core 30-50% | Protective Shorts"
+    return (
+        f">>> REALISTIC RESEARCH v{REALISTIC_RESEARCH_VERSION} (LOCKED) "
+        f"- {features} | Paper Bot Default <<<"
+    )
+
+
+def format_realistic_research_banner() -> str:
+    """Detail line for the locked realistic research profile."""
+    sector_on = effective_dynamic_sector_screener() or (
+        DYNAMIC_SECTOR_SCREENER_ENABLED and PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED
+    )
+    sector_flag = "ON" if sector_on else "OFF"
+    tail_flag = "ON" if effective_tail_risk_controls() else "OFF"
+    core_pct = vti_core_allocation_pct()
+    if effective_dynamic_core_enabled():
+        from modules.core_allocator import core_allocator_snapshot
+
+        snap = core_allocator_snapshot()
+        vti_sh = (snap.get("metrics") or {}).get("vti", {}).get("sharpe", 0.0)
+        spy_sh = (snap.get("metrics") or {}).get("spy", {}).get("sharpe", 0.0)
+        core_label = (
+            f"Dynamic {VTI_CORE_SYMBOL}/{SPY_BOT_SYMBOL} "
+            f"{DYNAMIC_CORE_MIN_PCT:.0%}-{DYNAMIC_CORE_MAX_PCT:.0%} "
+            f"@ {core_pct:.0%} (Sharpe VTI {vti_sh:.2f} vs SPY {spy_sh:.2f})"
+        )
+    elif effective_core_allocator_locked():
+        from modules.core_allocator import current_core_choice
+
+        core_label = f"{current_core_choice().upper()} @ {core_pct:.0%} core (locked)"
+    else:
+        core_label = f"{VTI_CORE_PCT:.0%} {VTI_CORE_SYMBOL} core"
+    short_note = ""
+    if effective_opportunistic_short_enabled():
+        short_note = f" | {format_opportunistic_short_banner()}"
+    return (
+        f"Tail Risk: {tail_flag} | {core_label} | "
+        f"risk {RISK_PER_TRADE:.1%} | hold {PAPER_POSITION_MAX_HOLD_BARS}d | "
+        f"vol cap {PAPER_VOL_CEILING_PCT:.0%} | RHYME_B x{PAPER_REGIME_B_SIZING_MULT:.2f} | "
+        f"sector {sector_flag} | {format_universe_pool_label()}"
+        f"{short_note}"
+    )
+
+
+def format_realistic_research_startup_lines() -> list[str]:
+    """Multi-line startup block: headline, stat arb, profile details."""
+    lines = [
+        format_realistic_research_headline(),
+    ]
+    stat_line = format_stat_arb_research_line()
+    if stat_line:
+        lines.append(stat_line)
+    lines.append(format_realistic_research_banner())
+    return lines
+
+
+def realistic_research_profile_snapshot() -> dict[str, bool | float | str]:
+    """Serializable snapshot for reports / experiment exports."""
+    return {
+        "version": REALISTIC_RESEARCH_VERSION,
+        "tail_risk_controls": effective_tail_risk_controls(),
+        "vol_ceiling_pct": PAPER_VOL_CEILING_PCT,
+        "portfolio_vol_ceiling_pct": PORTFOLIO_VOL_CEILING_PCT,
+        "dd_risk_warn_pct": PAPER_DD_RISK_WARN_PCT,
+        "dd_risk_severe_pct": PAPER_DD_RISK_SEVERE_PCT,
+        "per_name_max_pct": PAPER_MAX_POSITION_PCT,
+        "vti_core_pct": VTI_CORE_PCT,
+        "deep_history_enabled": DEEP_HISTORY_ENABLED,
+        "deep_history_indicators_only": DEEP_HISTORY_INDICATORS_ONLY,
+        "risk_per_trade": RISK_PER_TRADE,
+        "paper_position_max_hold_bars": PAPER_POSITION_MAX_HOLD_BARS,
+        "paper_regime_b_sizing_mult": PAPER_REGIME_B_SIZING_MULT,
+        "wisdom_layer_enabled": REBALANCE_ENABLED,
+        "cot_overlay_enabled": POSITIONING_OVERLAY_ENABLED,
+        "dynamic_core_enabled": DYNAMIC_CORE_ENABLED,
+        "paper_dynamic_vti": PAPER_DYNAMIC_VTI_ENABLED,
+    }
 
 
 def init_paper_chase_if_enabled() -> list[str]:
@@ -2258,7 +3266,8 @@ def init_paper_chase_if_enabled() -> list[str]:
                 extras.append(f"universe_refresh_{uni.get('count', 0)}")
         except Exception:
             pass
-        extras.insert(0, "best_paper_stack_v2_locked")
+        extras.insert(0, f"realistic_research_v{REALISTIC_RESEARCH_VERSION}")
+        extras.insert(1, "best_paper_stack_v3_locked")
     return extras
 
 
@@ -2266,10 +3275,33 @@ def set_paper_aggressive_context(active: bool) -> None:
     """Thread-local style flag: paper research runner / social paper book."""
     global _paper_aggressive_ctx
     _paper_aggressive_ctx = bool(active)
+    if _paper_aggressive_ctx:
+        enforce_realistic_research_profile()
 
 
 def paper_aggressive_context() -> bool:
     return PAPER_AGGRESSIVE_ENABLED and _paper_aggressive_ctx
+
+
+def research_mode_ready() -> bool:
+    """Paper aggressive with stat arb sleeve (research / attribution stack)."""
+    if not paper_aggressive_context():
+        return False
+    return effective_stat_arb_enabled()
+
+
+def format_research_mode_banner() -> str | None:
+    if not research_mode_ready():
+        return None
+    if effective_crypto_enabled():
+        return (
+            "Research Mode Ready: stat arb + crypto ON — "
+            "see PAPER_RESEARCH_PROFILE.md"
+        )
+    return (
+        "Research Mode Ready: stat arb ON | crypto sleeve OFF "
+        "(PAPER_CRYPTO_ENABLED=false) — see PAPER_RESEARCH_PROFILE.md"
+    )
 
 
 def get_paper_feature_flags() -> dict[str, bool]:
@@ -2282,6 +3314,8 @@ def get_paper_feature_flags() -> dict[str, bool]:
         "dynamic_risk": PAPER_DYNAMIC_RISK_ENABLED,
         "stat_arb": effective_stat_arb_enabled(),
         "vol_overlay": effective_vol_trading_enabled(),
+        "positioning_overlay": effective_positioning_overlay_enabled(),
+        "dynamic_core": effective_dynamic_core_enabled(),
         "options": effective_options_sleeve_enabled(),
         "macro_regime": effective_macro_regime_adaptor_enabled(),
         "thinking_engine": effective_thinking_engine_enabled(),
@@ -2365,11 +3399,226 @@ def effective_stat_arb_enabled() -> bool:
     return bool(paper_only_sleeves_active() and PAPER_STAT_ARB_ENABLED)
 
 
+def short_broad_symbols() -> tuple[str, ...]:
+    out: list[str] = []
+    for raw in SHORT_BROAD_SYMBOLS_RAW.split(","):
+        sym = raw.strip().upper()
+        if sym:
+            out.append(sym)
+    return tuple(out or (SPY_BOT_SYMBOL, "QQQ"))
+
+
+def effective_protective_short_enabled() -> bool:
+    return bool(PROTECTIVE_SHORT_ENABLED)
+
+
+def effective_short_opportunistic_single_names() -> bool:
+    return bool(SHORT_OPPORTUNISTIC_ENABLED)
+
+
+def effective_protective_short_max_pct() -> float:
+    return max(0.0, min(0.50, float(PROTECTIVE_SHORT_MAX_PCT)))
+
+
+def effective_protective_short_min_pct() -> float:
+    lo = max(0.0, float(PROTECTIVE_SHORT_MIN_PCT))
+    return min(lo, effective_protective_short_max_pct())
+
+
+def effective_opportunistic_short_enabled() -> bool:
+    """Directional shorts — paper/research only; never live Profile A."""
+    if not effective_protective_short_enabled():
+        return False
+    return bool(paper_only_sleeves_active() or backtest_paper_sleeves_context())
+
+
+def format_opportunistic_short_banner() -> str:
+    if not effective_opportunistic_short_enabled():
+        return "Protective Shorts: OFF"
+    lo = effective_protective_short_min_pct()
+    hi = effective_protective_short_max_pct()
+    return (
+        f"Protective Shorts: ON ({lo:.0%}-{hi:.0%}, selective triggers)"
+    )
+
+
 def effective_crypto_v2_enabled() -> bool:
     """Dual-entry crypto sleeve (MR + breakout) — paper aggressive only, default off."""
     if not paper_only_sleeves_active() or not PAPER_CRYPTO_V2_ENABLED:
         return False
     return True
+
+
+def effective_paper_soft_pause() -> bool:
+    """Paper-only: in PAUSED_REGIMES, size down instead of blocking new entries."""
+    if effective_regime_dynamic_sizing():
+        return False
+    if not PAPER_SOFT_PAUSE_ENABLED:
+        return False
+    return bool(
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+    )
+
+
+def effective_regime_dynamic_sizing() -> bool:
+    """Paper aggressive: per-RHYME sizing multipliers instead of hard entry pauses."""
+    if not PAPER_REGIME_DYNAMIC_SIZING_ENABLED:
+        return False
+    return bool(
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+    )
+
+
+def paper_fixed_vti_ceiling() -> float | None:
+    """When paper aggressive with fixed VTI, cap core pct for sleeve room."""
+    if effective_dynamic_core_enabled():
+        return None
+    if not (paper_aggressive_context() or backtest_paper_sleeves_context()):
+        return None
+    if PAPER_DYNAMIC_VTI_ENABLED:
+        return None
+    bt_ceiling = backtest_vti_ceiling()
+    if bt_ceiling is not None:
+        return bt_ceiling
+    return float(PAPER_VTI_CORE_PCT)
+
+
+def clamp_paper_vti_core(pct: float) -> float:
+    ceiling = paper_fixed_vti_ceiling()
+    if ceiling is None:
+        return float(pct)
+    return round(min(float(pct), ceiling), 6)
+
+
+def effective_vol_ceiling_pct() -> float:
+    """Annualized vol cap for risk scaling — paper-aggressive uses PAPER_VOL_CEILING_PCT."""
+    if paper_aggressive_context() or backtest_paper_sleeves_context():
+        return float(PAPER_VOL_CEILING_PCT)
+    return float(VOL_CEILING_PCT)
+
+
+def effective_paper_risk_calm_pct() -> float:
+    """Calm-bull risk cap for paper-aggressive dynamic risk tiers."""
+    if paper_aggressive_context() or backtest_paper_sleeves_context():
+        return float(PAPER_RISK_PER_TRADE)
+    return float(PAPER_RISK_CALM_BULL_PCT)
+
+
+def effective_spy_ma_window() -> int:
+    """SPY trend MA — paper-aggressive uses tuned PAPER_SPY_MA_WINDOW (default 160)."""
+    if paper_aggressive_context() or backtest_paper_sleeves_context():
+        return int(PAPER_SPY_MA_WINDOW)
+    return int(SPY_MA_WINDOW)
+
+
+def effective_nyse_ma_window() -> int:
+    """NYSE momentum MA — paper-aggressive uses tuned PAPER_NYSE_MA_WINDOW (default 70)."""
+    if paper_aggressive_context() or backtest_paper_sleeves_context():
+        return int(PAPER_NYSE_MA_WINDOW)
+    return int(NYSE_MA_WINDOW)
+
+
+def paper_tuned_defaults_line() -> str:
+    """One-line summary of paper-aggressive defaults (tail-risk tuning Option A)."""
+    return (
+        f">>> PAPER TUNED DEFAULTS (tail-risk Option A) — "
+        f"SPY MA{PAPER_SPY_MA_WINDOW} | NYSE MA{PAPER_NYSE_MA_WINDOW} | "
+        f"risk {PAPER_RISK_PER_TRADE:.1%} calm / {PAPER_RISK_MODERATE_PCT:.1%} mod / "
+        f"{PAPER_RISK_STRESS_PCT:.1%} stress | RHYME_B x{PAPER_REGIME_B_SIZING_MULT:.2f} | "
+        f"RHYME_E x{PAPER_REGIME_E_SIZING_MULT:.2f} | "
+        f"max hold {PAPER_POSITION_MAX_HOLD_BARS} bars | "
+        f"vol cap {PAPER_VOL_CEILING_PCT:.0%} | "
+        f"per-name cap {PAPER_MAX_POSITION_PCT:.0%} | "
+        f"DD risk x{PAPER_DD_RISK_MULT_5:.1f} @ {PAPER_DD_RISK_WARN_PCT:.0%}+ / "
+        f"x{PAPER_DD_RISK_MULT_8:.1f} @ {PAPER_DD_RISK_SEVERE_PCT:.0%}+"
+    )
+
+
+def paper_frequency_mode_lines() -> list[str]:
+    """Startup lines for paper-aggressive trade-frequency tuning (soft pause + fixed VTI)."""
+    if not (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+    ):
+        return []
+    lines: list[str] = [paper_tuned_defaults_line()]
+    if effective_regime_dynamic_sizing():
+        lines.append(
+            ">>> PAPER REGIME DYNAMIC SIZING — entries always on; "
+            f"A x{PAPER_REGIME_A_SIZING_MULT:.1f} | C x{PAPER_REGIME_C_SIZING_MULT:.1f} | "
+            f"D x{PAPER_REGIME_D_SIZING_MULT:.1f} | E x{PAPER_REGIME_E_SIZING_MULT:.1f} | "
+            f"B x{PAPER_REGIME_B_SIZING_MULT:.1f} "
+            f"| weak B/D/E sleeve cap {PAPER_REGIME_WEAK_SLEEVE_MAX_PCT:.0%} "
+            f"(hysteresis bump {REGIME_HYSTERESIS_SENTIMENT_BUMP:.2f}, "
+            f"dwell {REGIME_MIN_DWELL_BARS} bars)"
+        )
+    elif effective_paper_soft_pause():
+        lines.append(
+            ">>> PAPER SOFT PAUSE ENABLED - higher frequency, "
+            f"{PAPER_SOFT_PAUSE_SIZING_MULT:.0%} sizing on pause regimes "
+            "(entries allowed; daily loss circuit still blocks)"
+        )
+    if not PAPER_DYNAMIC_VTI_ENABLED:
+        ceiling = paper_fixed_vti_ceiling() or PAPER_VTI_CORE_PCT
+        lines.append(
+            f">>> PAPER FIXED VTI - {ceiling:.0%} {VTI_CORE_SYMBOL} core | "
+            f"{1.0 - ceiling:.0%} active sleeve budget (thinking/RP capped)"
+        )
+    elif effective_paper_soft_pause():
+        lines.append(
+            ">>> TIP: PAPER_DYNAMIC_VTI=false + PAPER_VTI_CORE_PCT=0.80 "
+            "frees sleeve room (fewer no_room skips)"
+        )
+    if effective_positioning_overlay_enabled():
+        from modules.positioning_overlay import format_positioning_banner
+
+        cot_line = format_positioning_banner()
+        if cot_line:
+            lines.append(cot_line)
+    if effective_dynamic_core_enabled() or effective_core_allocator_locked():
+        from modules.core_allocator import format_core_allocator_banner
+
+        core_line = format_core_allocator_banner()
+        if core_line:
+            lines.append(core_line)
+    stat_line = format_stat_arb_research_line()
+    if stat_line:
+        lines.append(stat_line)
+    if effective_dynamic_sector_screener() or (
+        DYNAMIC_SECTOR_SCREENER_ENABLED and PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED
+    ):
+        from modules.sector_screener import format_sector_screener_banner
+
+        sector_line = format_sector_screener_banner()
+        if sector_line:
+            lines.append(sector_line)
+    if KIMI_API_ENABLED or effective_kimi_deep_thinker_enabled():
+        from modules.kimi_client import format_kimi_deep_thinker_banner
+
+        kimi_line = format_kimi_deep_thinker_banner()
+        if kimi_line:
+            lines.append(kimi_line)
+    return lines
+
+
+def effective_dynamic_sector_screener() -> bool:
+    """Sector ETF strength expansion — paper/research only; never live Profile A."""
+    if not DYNAMIC_SECTOR_SCREENER_ENABLED:
+        return False
+    if not PAPER_TRADING and not backtest_paper_sleeves_context():
+        return False
+    return bool(
+        backtest_paper_sleeves_context()
+        or paper_aggressive_context()
+        or paper_chase_mode_enabled()
+        or is_realistic_research_active()
+        or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
+    )
 
 
 def effective_paper_dynamic_universe() -> bool:
@@ -2455,6 +3704,21 @@ def effective_thinking_engine_enabled() -> bool:
     return bool(backtest_paper_sleeves_context())
 
 
+def effective_kimi_deep_thinker_enabled() -> bool:
+    """Moonshot/Kimi daily deep reasoning — optional; never on live money by default."""
+    if not KIMI_API_ENABLED or not (KIMI_API_KEY or "").strip():
+        return False
+    if not PAPER_TRADING and not backtest_paper_sleeves_context():
+        return False
+    if ALLOW_LIVE_TRADING and not PAPER_TRADING:
+        return False
+    return bool(
+        paper_only_sleeves_active()
+        or backtest_paper_sleeves_context()
+        or (PAPER_TRADING and paper_chase_mode_enabled())
+    )
+
+
 def effective_thinking_max_sleeve_delta(*, live_sim: bool = False) -> float:
     """Hard production cap ±6% per sleeve (ignores confidence amplification)."""
     if live_sim:
@@ -2524,20 +3788,245 @@ def effective_equity_pairs_enabled() -> bool:
     return effective_market_neutral_pairs_enabled() and PAPER_EQUITY_PAIRS
 
 
+def nyse_stat_arb_mode_label() -> str:
+    """Human-readable NYSE path when stat arb is enabled on paper."""
+    if not paper_only_sleeves_active():
+        return "live_profile"
+    if not effective_stat_arb_enabled():
+        return "momentum_only"
+    if effective_equity_pairs_enabled():
+        return "pairs_only (PAPER_EQUITY_PAIRS=true)"
+    return "momentum + stat_arb (default; set PAPER_EQUITY_PAIRS=true for pairs-only)"
+
+
+def effective_stat_arb_min_correlation() -> float:
+    if effective_stat_arb_enabled():
+        return float(PAPER_STAT_ARB_MIN_CORR)
+    return effective_pair_min_correlation()
+
+
+def effective_stat_arb_max_pairs() -> int:
+    return max(1, int(PAPER_STAT_ARB_MAX_PAIRS))
+
+
+def effective_stat_arb_max_pairs_expanded() -> int:
+    return max(effective_stat_arb_max_pairs(), int(PAPER_STAT_ARB_MAX_PAIRS_EXPANDED))
+
+
+def effective_stat_arb_max_pairs_ceiling() -> int:
+    return max(
+        effective_stat_arb_max_pairs_expanded(),
+        int(PAPER_STAT_ARB_MAX_PAIRS_CEILING),
+    )
+
+
+def effective_stat_arb_max_hold_bars() -> int:
+    return max(1, int(PAPER_STAT_ARB_MAX_HOLD_BARS))
+
+
+def effective_stat_arb_z_entry(
+    *,
+    volatility: str | None = None,
+    regime: str | None = None,
+) -> float:
+    """Dynamic Z entry between PAPER_STAT_ARB_Z_ENTRY_BASE and _MAX by vol/regime."""
+    if not effective_stat_arb_enabled():
+        return effective_pair_z_threshold(2.0, volatility=volatility, regime=regime)
+    base = float(PAPER_STAT_ARB_Z_ENTRY_BASE)
+    ceiling = float(PAPER_STAT_ARB_Z_ENTRY_MAX)
+    vol = (volatility or "").strip().lower()
+    reg = (regime or "").strip().lower()
+    if vol in ("high", "stress", "elevated") or reg in ("stress", "crisis", "bear"):
+        return ceiling
+    if vol in ("low", "calm", "quiet") or reg in ("bull", "calm", "recovery"):
+        return base
+    mid = vol in ("moderate", "normal", "medium") or reg in ("neutral", "range", "sideways")
+    if mid:
+        return round(base + (ceiling - base) * 0.5, 3)
+    z = effective_pair_z_threshold(base, volatility=volatility, regime=regime)
+    return round(min(max(z, base), ceiling), 3)
+
+
+def effective_stat_arb_risk_reward() -> float:
+    return max(0.5, float(PAPER_STAT_ARB_RISK_REWARD))
+
+
+def effective_stat_arb_min_dollar_volume() -> float:
+    return max(0.0, float(PAPER_STAT_ARB_MIN_DOLLAR_VOLUME))
+
+
+def effective_stat_arb_trailing_arm_frac() -> float:
+    return max(0.1, min(1.0, float(PAPER_STAT_ARB_TRAILING_ARM_FRAC)))
+
+
+def effective_stat_arb_trailing_pullback_frac() -> float:
+    return max(0.1, min(0.9, float(PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC)))
+
+
+def format_stat_arb_pairs_label() -> str:
+    """Compact max-pairs range for banners."""
+    return (
+        f"max {effective_stat_arb_max_pairs()}-{effective_stat_arb_max_pairs_ceiling()} pairs "
+        f"Z {PAPER_STAT_ARB_Z_ENTRY_BASE:.1f}-{PAPER_STAT_ARB_Z_ENTRY_MAX:.1f}"
+    )
+
+
+def effective_stat_arb_z_exit() -> float:
+    if effective_stat_arb_enabled():
+        return float(PAPER_STAT_ARB_Z_EXIT)
+    return effective_pair_z_exit()
+
+
+def effective_stat_arb_profit_z_delta() -> float:
+    if effective_stat_arb_enabled():
+        return float(STAT_ARB_PROFIT_Z_DELTA)
+    return float(STAT_ARB_PROFIT_Z_DELTA)
+
+
+def format_stat_arb_research_line() -> str | None:
+    """One-line stat arb config for realistic research / paper startup."""
+    if not effective_stat_arb_enabled():
+        return None
+    cap_line = ""
+    if effective_stat_arb_sleeve_cap_enabled():
+        cap_line = f" | {format_stat_arb_dedicated_cap_label()}"
+    sector_note = ""
+    if PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF:
+        sector_note = f" | sector-neutral x{PAPER_STAT_ARB_SECTOR_NEUTRAL_BOOST:.2f}"
+    return (
+        f">>> STAT ARB v1.3: cointegration p<{PAPER_STAT_ARB_COINT_PVALUE:.2f} | "
+        f"corr>={effective_stat_arb_min_correlation():.2f} | "
+        f"liquidity>${effective_stat_arb_min_dollar_volume()/1e6:.0f}M | "
+        f"{format_stat_arb_pairs_label()} | "
+        f"hold={effective_stat_arb_max_hold_bars()}b | RR {effective_stat_arb_risk_reward():.1f}:1 + trail"
+        f"{sector_note} | NYSE overlap blocked{cap_line}"
+    )
+
+
 def effective_pair_min_correlation() -> float:
     if effective_stat_arb_enabled() or effective_market_neutral_pairs_enabled():
         return PAPER_PAIR_MIN_CORRELATION
     return CRYPTO_MIN_CORRELATION
 
 
-def effective_pair_z_threshold(default: float = 2.0) -> float:
+def effective_pair_coint_slope() -> float:
     if effective_stat_arb_enabled() or effective_market_neutral_pairs_enabled():
-        return PAPER_PAIR_Z_THRESHOLD
-    return default
+        return PAPER_PAIR_COINT_SLOPE
+    return -0.02
+
+
+def effective_pair_z_threshold(
+    default: float = 2.0,
+    *,
+    volatility: str | None = None,
+    regime: str | None = None,
+) -> float:
+    if not (
+        effective_stat_arb_enabled() or effective_market_neutral_pairs_enabled()
+    ):
+        return default
+    base = PAPER_PAIR_Z_THRESHOLD
+    if not PAPER_PAIR_Z_DYNAMIC:
+        return base
+    vol = (volatility or "").strip().lower()
+    if vol in ("high", "stress", "elevated"):
+        return max(base, PAPER_PAIR_Z_STRESS)
+    if vol in ("low", "calm", "quiet"):
+        return min(base, PAPER_PAIR_Z_CALM)
+    reg = (regime or "").strip().lower()
+    if reg in ("stress", "crisis", "bear"):
+        return max(base, PAPER_PAIR_Z_STRESS)
+    if reg in ("bull", "calm", "recovery"):
+        return min(base, PAPER_PAIR_Z_CALM)
+    return base
+
+
+def effective_stat_arb_max_trades() -> int:
+    if effective_stat_arb_enabled():
+        return max(1, PAPER_STAT_ARB_MAX_TRADES)
+    return 1
 
 
 def effective_pair_z_exit() -> float:
     return PAPER_PAIR_Z_EXIT
+
+
+def effective_crypto_max_pairs() -> int:
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return max(1, PAPER_CRYPTO_MAX_PAIRS)
+    return 2
+
+
+def effective_crypto_max_trades_per_cycle() -> int:
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return max(1, PAPER_CRYPTO_MAX_TRADES)
+    return 2
+
+
+def effective_crypto_z_exit() -> float:
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return PAPER_CRYPTO_Z_EXIT
+    return PAPER_PAIR_Z_EXIT
+
+
+def effective_crypto_z_entry(
+    default: float = 2.0,
+    *,
+    volatility: str | None = None,
+    regime: str | None = None,
+) -> float:
+    """Stricter Z entry for crypto pairs vs NYSE stat arb."""
+    base = effective_pair_z_threshold(
+        default, volatility=volatility, regime=regime
+    )
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return base + max(0.0, PAPER_CRYPTO_Z_ENTRY_BUMP)
+    return base
+
+
+def effective_crypto_max_hold_bars() -> int:
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return max(1, PAPER_CRYPTO_MAX_HOLD_BARS)
+    return STAT_ARB_MAX_HOLD_BARS
+
+
+def effective_crypto_min_notional(equity: float | None = None) -> float:
+    return effective_min_notional(equity) * max(1.0, PAPER_CRYPTO_MIN_NOTIONAL_MULT)
+
+
+def effective_crypto_risk_mult() -> float:
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return max(1.0, PAPER_CRYPTO_RISK_MULT)
+    return 1.0
+
+
+def effective_crypto_regime_filter() -> bool:
+    if paper_aggressive_context() and effective_crypto_enabled():
+        return PAPER_CRYPTO_REGIME_FILTER
+    return False
+
+
+def effective_crypto_regime_sizing_mult(regime: str | None) -> float:
+    """Scale crypto pair size by regime; 0 = blocked."""
+    if not effective_crypto_regime_filter():
+        return 1.0
+    reg = str(regime or "")
+    if reg == "RHYME_B: Panic_Volatility":
+        return 0.0
+    if reg == "RHYME_E: Steady_Bearish_Decline":
+        return 0.0
+    return 1.0
+
+
+def scale_crypto_pair_notional(notional: float | None, equity: float | None = None) -> float | None:
+    """Apply crypto risk mult and min-notional floor for pair entries."""
+    if notional is None:
+        return None
+    scaled = round(float(notional) * effective_crypto_risk_mult(), 2)
+    floor = effective_crypto_min_notional(equity)
+    if scaled < floor:
+        return None
+    return scaled
 
 
 def effective_spy_exit_on_ma_break() -> bool:
@@ -2610,6 +4099,45 @@ def get_vti_core_pct(
     )
 
 
+def effective_core_allocator_locked() -> bool:
+    """Paper research: fixed passive core from allocator winner (default SPY @ 40%)."""
+    if not CORE_ALLOCATOR_LOCKED:
+        return False
+    if not PAPER_TRADING and not backtest_paper_sleeves_context():
+        return False
+    return bool(
+        is_realistic_research_active()
+        or paper_chase_mode_enabled()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or (PAPER_AGGRESSIVE_ENABLED and PAPER_TRADING)
+    )
+
+
+def effective_dynamic_core_enabled() -> bool:
+    from modules.core_allocator import effective_dynamic_core_enabled as _on
+
+    return _on()
+
+
+def effective_real_time_websocket_enabled() -> bool:
+    """Paper default on; live default off. Explicit REAL_TIME_WEBSOCKET_ENABLED overrides."""
+    raw = (os.getenv("REAL_TIME_WEBSOCKET_ENABLED") or "").strip()
+    if raw:
+        return raw.lower() in ("1", "true", "yes", "on")
+    return bool(PAPER_TRADING)
+
+
+def effective_real_time_crypto_ws() -> bool:
+    """Optional crypto WebSocket leg (default: follow crypto sleeve when WS enabled)."""
+    if not effective_real_time_websocket_enabled():
+        return False
+    raw = (os.getenv("REAL_TIME_CRYPTO_WS") or "").strip()
+    if raw:
+        return raw.lower() in ("1", "true", "yes", "on")
+    return bool(crypto_sleeve_enabled())
+
+
 def vti_core_allocation_pct(
     equity: float | None = None,
     vol_score: float | None = None,
@@ -2618,6 +4146,16 @@ def vti_core_allocation_pct(
 ) -> float:
     if not VTI_CORE_ENABLED:
         return 0.0
+    from modules.core_allocator import effective_vti_core_pct as _dynamic_core
+
+    dynamic = _dynamic_core(
+        equity,
+        vol_score=vol_score,
+        macro_stress=macro_stress,
+        volatility=volatility,
+    )
+    if dynamic is not None:
+        return dynamic
     if paper_only_sleeves_active():
         eq = equity if equity is not None and equity > 0 else (_account_equity or 0.0)
         if eq > 0:
@@ -2633,9 +4171,14 @@ def vti_core_allocation_pct(
             pct = PAPER_VTI_CORE_PCT
     elif is_small_account(equity):
         pct = SMALL_ACCOUNT_VTI_CORE_PCT
+        if live_conservative_profile_active() and not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
+            pct = LIVE_VTI_CORE_PCT
     else:
         pct = VTI_CORE_PCT
-    return round(min(0.95, pct), 6) if pct > 0 else 0.0
+    if pct > 0:
+        pct = clamp_paper_vti_core(pct)
+        return round(min(0.95, pct), 6)
+    return 0.0
 
 
 def vti_core_enabled() -> bool:
@@ -2667,13 +4210,21 @@ def long_fund_scale() -> float:
     return scale
 
 
+def _long_sleeve_base_cap_sum() -> float:
+    """Sum of base long-sleeve caps; crypto omitted when sleeve disabled."""
+    total = SPY_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
+    if effective_stat_arb_sleeve_cap_enabled():
+        total += STAT_ARB_SLEEVE_CAP_PCT
+    if effective_crypto_enabled():
+        total += CRYPTO_SLEEVE_CAP_PCT
+    return total
+
+
 def active_sleeve_scale() -> float:
     """Scale active SPY/crypto/NYSE caps (VTI core + metal/social reserves)."""
     af = active_fund_fraction()
     lf = long_fund_scale()
-    long_sum = (
-        SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
-    )
+    long_sum = _long_sleeve_base_cap_sum()
     if long_sum <= 0:
         return 0.0
     base_scale = round(lf * af, 6)
@@ -2699,17 +4250,89 @@ def apply_paper_wisdom_floor(wisdom: dict | None) -> dict | None:
     return wisdom
 
 
-def effective_sleeve_cap(base_pct: float) -> float:
+def _live_small_active_baseline_scale() -> float:
+    """Frozen 10% active fraction (pre-85% VTI) so NYSE cap stays unchanged."""
+    af = 0.10
+    lf = long_fund_scale()
+    long_sum = _long_sleeve_base_cap_sum()
+    if long_sum <= 0:
+        return 0.0
+    return round(lf * af / long_sum, 6)
+
+
+def _live_conservative_sleeve_boost(sleeve: str | None) -> float:
+    if not live_conservative_profile_active():
+        return 0.0
+    choice = LIVE_ACTIVE_SLEEVE_CHOICE
+    if choice == "spy" and sleeve == "spy":
+        return LIVE_SMALL_ACTIVE_SLEEVE_PCT
+    if choice == "cash" and sleeve == "cash":
+        return LIVE_SMALL_ACTIVE_SLEEVE_PCT
+    return 0.0
+
+
+def effective_sleeve_cap(base_pct: float, *, sleeve: str | None = None) -> float:
+    if sleeve == "stat_arb" and effective_stat_arb_sleeve_cap_enabled():
+        return round(STAT_ARB_SLEEVE_CAP_PCT * active_sleeve_scale(), 6)
+    if live_conservative_profile_active():
+        cap = round(base_pct * _live_small_active_baseline_scale(), 6)
+        cap = round(cap + _live_conservative_sleeve_boost(sleeve), 6)
+        return cap
     return round(base_pct * active_sleeve_scale(), 6)
+
+
+def effective_stat_arb_sleeve_cap_enabled() -> bool:
+    """Dedicated stat-arb cap — paper/research with stat arb on only."""
+    if not STAT_ARB_SLEEVE_CAP_ENABLED:
+        return False
+    if not effective_stat_arb_enabled():
+        return False
+    return bool(
+        paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    )
+
+
+def effective_stat_arb_cap() -> float:
+    """Effective equity fraction for the dedicated stat-arb sleeve."""
+    if not effective_stat_arb_sleeve_cap_enabled():
+        return 0.0
+    return effective_sleeve_cap(STAT_ARB_SLEEVE_CAP_PCT, sleeve="stat_arb")
+
+
+def effective_stat_arb_vol_scaling_enabled() -> bool:
+    if not STAT_ARB_VOL_SCALING_ENABLED:
+        return False
+    if not effective_stat_arb_sleeve_cap_enabled():
+        return False
+    return effective_tail_risk_controls()
+
+
+def effective_stat_arb_vol_ceiling_pct() -> float:
+    return float(PORTFOLIO_VOL_CEILING_PCT)
+
+
+def format_stat_arb_dedicated_cap_label() -> str:
+    """Human label for startup banner (base cap % + vol scaling note)."""
+    base_pct = int(round(float(STAT_ARB_SLEEVE_CAP_PCT) * 100))
+    vol_note = " (vol scaled)" if effective_stat_arb_vol_scaling_enabled() else ""
+    return f"Stat Arb sleeve: {base_pct}% dedicated{vol_note}"
 
 
 def effective_cash_buffer_pct() -> float:
     """Cash headroom so VTI core + active sleeves + metal sum to 100% of equity."""
     metal = METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0
     vti = vti_core_allocation_pct()
-    long_caps = (
-        SPY_SLEEVE_CAP_PCT + CRYPTO_SLEEVE_CAP_PCT + NYSE_SLEEVE_CAP_PCT
-    ) * active_sleeve_scale()
+    if live_conservative_profile_active():
+        long_caps = (
+            effective_sleeve_cap(SPY_SLEEVE_CAP_PCT, sleeve="spy")
+            + effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT, sleeve="nyse")
+        )
+        if effective_crypto_enabled():
+            long_caps += effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT, sleeve="crypto")
+    else:
+        long_caps = _long_sleeve_base_cap_sum() * active_sleeve_scale()
     cash = round(1.0 - metal - vti - long_caps, 6)
     if cash < 0:
         raise ValueError(
@@ -2721,11 +4344,22 @@ def effective_cash_buffer_pct() -> float:
 
 def fund_allocation_pct() -> dict[str, float]:
     """Current sleeve + cash cap fractions (sum to 1.0)."""
+    crypto_cap = (
+        effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT)
+        if effective_crypto_enabled()
+        else 0.0
+    )
+    stat_arb_cap = (
+        effective_stat_arb_cap()
+        if effective_stat_arb_sleeve_cap_enabled()
+        else 0.0
+    )
     return {
         "vti_core": vti_core_allocation_pct(),
         "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
-        "crypto": effective_sleeve_cap(CRYPTO_SLEEVE_CAP_PCT),
+        "crypto": crypto_cap,
         "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),
+        "stat_arb": stat_arb_cap,
         "metal": METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0,
         "cash_buffer": effective_cash_buffer_pct(),
     }

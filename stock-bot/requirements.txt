@@ -4,7 +4,7 @@ python-dotenv
 tavily-python
 yfinance
 pandas
-numpy
+statsmodels>=0.14.0
 ccxt
 
 # (backtesting lib was for removed modules/backtest_engine.py; main backtester uses native pandas/yf sim)

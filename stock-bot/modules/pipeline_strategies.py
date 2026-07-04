@@ -9,6 +9,15 @@ from modules.crypto_universe import crypto_trading_columns
 PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
 
 
+def regime_soft_pause_sizing_multiplier(regime, *, wisdom_paused=False) -> float:
+    """Paper soft-pause: scale entries in PAUSED_REGIMES instead of blocking."""
+    if wisdom_paused and not config.effective_paper_soft_pause():
+        return config.PAPER_SOFT_PAUSE_SIZING_MULT if config.PAPER_SOFT_PAUSE_ENABLED else 0.0
+    if config.effective_paper_soft_pause() and regime in PAUSED_REGIMES:
+        return float(config.PAPER_SOFT_PAUSE_SIZING_MULT)
+    return 1.0
+
+
 def regime_entries_paused(regime, data=None, sentiment=None):
     """True when new entries should be blocked (rhyme pause, bear, or daily loss circuit)."""
     try:
@@ -105,12 +114,18 @@ def execute_atomic_pair_entry(
     short_sym: str,
     leg_n: float,
     *,
+    pair_key: str = "",
+    strategy: str = "",
     max_wait: float = PAIR_FILL_WAIT,
 ) -> tuple[bool, float | None, float | None]:
     """Both legs must fill; unwind any single-leg fill immediately."""
-    long_order = executor.execute_order(long_sym, "buy", notional=leg_n)
+    long_order = executor.execute_order(
+        long_sym, "buy", notional=leg_n, reason=pair_key or None, strategy=strategy or None
+    )
     long_ok = bool(_count_if_filled(executor, long_order, max_wait=max_wait))
-    short_order = executor.execute_order(short_sym, "sell", notional=leg_n)
+    short_order = executor.execute_order(
+        short_sym, "sell", notional=leg_n, reason=pair_key or None, strategy=strategy or None
+    )
     short_ok = bool(_count_if_filled(executor, short_order, max_wait=max_wait))
     if long_ok and short_ok:
         long_n = _order_fill_notional(executor, long_order, max_wait=0) or leg_n
@@ -128,6 +143,7 @@ def execute_atomic_pair_exit(
     long_sym: str,
     short_sym: str,
     *,
+    pair_key: str = "",
     max_wait: float = PAIR_FILL_WAIT,
 ) -> bool:
     """Close both legs; return True only when neither has exposure."""
@@ -1021,6 +1037,8 @@ def run_equity_strategy(
     log_fn=None,
     portfolio_manager=None,
     yield_gated=False,
+    pick_log=None,
+    volatility=None,
 ):
     """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
     if regime_entries_paused(regime, data):
@@ -1036,6 +1054,8 @@ def run_equity_strategy(
     for symbol in ranked:
         if trades >= max_trades:
             break
+        if pick_log is not None:
+            pick_log.append(symbol)
         pair_key = symbol + "/MA50"
         if _on_cooldown(
             pair_cooldown,
@@ -1075,6 +1095,57 @@ def run_equity_strategy(
             if notional is None:
                 notional = getattr(executor, "compute_notional", lambda: "")()
             log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+    return trades
+
+
+def run_nyse_momentum_and_stat_arb(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    max_trades=MAX_EQUITY_TRADES,
+    log_fn=None,
+    portfolio_manager=None,
+    yield_gated=False,
+    pick_log=None,
+    volatility=None,
+    full_data=None,
+) -> int:
+    """NYSE MA50 momentum plus stat-arb pairs (default paper path when PAPER_EQUITY_PAIRS=false)."""
+    trades = run_equity_strategy(
+        data,
+        executor,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        max_trades=max_trades,
+        log_fn=log_fn,
+        portfolio_manager=portfolio_manager,
+        yield_gated=yield_gated,
+        pick_log=pick_log,
+        volatility=volatility,
+    )
+    if config.effective_stat_arb_enabled() and not config.effective_equity_pairs_enabled():
+        from modules.stat_arb_sleeve import run_equity_stat_arb
+
+        trades += run_equity_stat_arb(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_bars=cooldown_bars,
+            log_fn=log_fn,
+            portfolio_manager=portfolio_manager,
+            yield_gated=yield_gated,
+            volatility=volatility,
+        )
     return trades
 
 
@@ -1147,3 +1218,248 @@ def run_international_strategy(*_args, **_kwargs) -> int:
 def run_bond_strategy(*_args, **_kwargs) -> int:
     """Bond sleeve placeholder — disabled on live; full impl in research branch."""
     return 0
+
+
+def _rsi(series, period: int) -> float | None:
+    if len(series) < period + 2:
+        return None
+    s = series.astype(float)
+    delta = s.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    last_loss = float(loss.iloc[-1])
+    if last_loss <= 1e-12:
+        return 100.0
+    rs = float(gain.iloc[-1]) / last_loss
+    return float(100.0 - (100.0 / (1.0 + rs)))
+
+
+def _short_spy_extension_above_ma200(data, symbol: str) -> tuple[bool, float]:
+    """True if price was >8% above 200d MA within recent lookback."""
+    if symbol not in data.columns:
+        return False, 0.0
+    series = data[symbol].dropna()
+    ma_w = int(config.SHORT_MA200_WINDOW)
+    lb = int(config.SHORT_MA200_EXTENSION_LOOKBACK)
+    if len(series) < ma_w + 5:
+        return False, 0.0
+    peak_ext = 0.0
+    tail = series.iloc[-(lb + 1) :]
+    for i in range(len(tail)):
+        window = series.iloc[: len(series) - len(tail) + i + 1]
+        if len(window) < ma_w:
+            continue
+        ma = window.rolling(ma_w).mean().iloc[-1]
+        px = float(tail.iloc[i])
+        if ma > 0 and px > ma:
+            peak_ext = max(peak_ext, (px / ma) - 1.0)
+    threshold = float(config.SHORT_MA200_EXTENSION_PCT)
+    return peak_ext >= threshold, peak_ext
+
+
+def short_momentum_exhaustion_signal(data, symbol: str | None = None) -> tuple[bool, str, float]:
+    """RSI > threshold OR recent >8% extension above 200d MA."""
+    sym = symbol or config.SPY_BOT_SYMBOL
+    if sym not in data.columns:
+        return False, "no_data", 0.0
+    series = data[sym].dropna()
+    rsi = _rsi(series, int(config.SHORT_RSI_PERIOD))
+    ext_ok, ext = _short_spy_extension_above_ma200(data, sym)
+    if rsi is not None and rsi >= config.SHORT_RSI_EXHAUSTION_MIN:
+        return True, f"rsi_{rsi:.0f}", float(rsi)
+    if ext_ok:
+        return True, f"ma200_ext_{ext:.1%}", ext
+    lb = max(5, int(config.SHORT_MOMENTUM_EXHAUSTION_LOOKBACK))
+    if len(series) >= lb + 5:
+        prior = float(series.iloc[-lb] / series.iloc[-lb - 5] - 1.0)
+        recent = float(series.iloc[-1] / series.iloc[-5] - 1.0)
+        if prior >= config.SHORT_MOMENTUM_EXHAUSTION_MIN and recent < 0:
+            return True, "rollover", prior
+    return False, "no_exhaustion", float(rsi or 0.0)
+
+
+def short_vix_spike_confirmed(
+    data,
+    *,
+    volatility: str | None = None,
+    vol_score: float | None = None,
+) -> tuple[bool, str, float | None]:
+    from modules.opportunistic_short_sleeve import _resolve_vix_level, _vix_change_pct
+
+    if not config.SHORT_VIX_SPIKE_CONFIRM:
+        return True, "vix_confirm_off", None
+    vix = _resolve_vix_level(data, volatility=volatility, vol_score=vol_score)
+    chg = _vix_change_pct(data)
+    rising = chg is not None and chg > 0
+    if config.SHORT_VIX_REQUIRE_RISING:
+        if vix is not None and vix >= config.SHORT_VIX_MIN_LEVEL and rising:
+            return True, f"vix_{vix:.1f}_rising", vix
+        if vix is None or vix < config.SHORT_VIX_MIN_LEVEL:
+            return False, "vix_low", vix
+        return False, "vix_not_rising", vix
+    if vix is not None and vix >= config.SHORT_VIX_MIN_LEVEL:
+        return True, f"vix_{vix:.1f}", vix
+    return False, "vix_low", vix
+
+
+def evaluate_short_entry_triggers(
+    data,
+    regime: str,
+    *,
+    volatility: str | None = None,
+    vol_score: float | None = None,
+) -> dict:
+    """Selective protective shorts — RHYME_B or (RHYME_E + bubble≥60) + VIX rising + exhaustion."""
+    from modules.opportunistic_short_sleeve import bubble_risk_score, _spy_market_down_signal
+
+    reg = str(regime or "")
+    spy = config.SPY_BOT_SYMBOL
+    ma_window = config.effective_spy_ma_window()
+    result = {
+        "allowed": False,
+        "regime": reg,
+        "reject": "unknown",
+        "trigger_reason": "",
+        "bubble_score": 0.0,
+        "vix_reason": "",
+        "exhaustion_reason": "",
+    }
+    if not config.effective_opportunistic_short_enabled():
+        result["reject"] = "shorts_disabled"
+        return result
+
+    bear_b = "RHYME_B" in reg
+    bear_e = config.SHORT_RHYME_E_ENABLED and "RHYME_E" in reg
+    if not bear_b and not bear_e:
+        result["reject"] = "regime_not_bear"
+        return result
+
+    bubble = bubble_risk_score(data, regime, volatility=volatility, vol_score=vol_score)
+    result["bubble_score"] = bubble
+
+    vix_ok, vix_reason, _vix = short_vix_spike_confirmed(
+        data, volatility=volatility, vol_score=vol_score
+    )
+    result["vix_reason"] = vix_reason
+    if not vix_ok:
+        result["reject"] = vix_reason
+        return result
+
+    exhausted, exh_reason, _ = short_momentum_exhaustion_signal(data, spy)
+    result["exhaustion_reason"] = exh_reason
+    if not exhausted:
+        result["reject"] = "no_exhaustion"
+        return result
+
+    if bear_b:
+        bearish, depth = _spy_market_down_signal(data, spy, ma_window)
+        if bearish and depth >= config.SHORT_RHYME_B_MIN_DEPTH:
+            result["allowed"] = True
+            result["trigger_reason"] = (
+                f"RHYME_B|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
+            )
+            return result
+        result["reject"] = f"rhyme_b_depth_{depth:.3f}"
+        return result
+
+    if bear_e:
+        if bubble >= config.SHORT_RHYME_E_STRONG_BUBBLE:
+            bearish, depth = _spy_market_down_signal(data, spy, ma_window)
+            if bearish and depth >= config.SHORT_DEEP_BEAR_MIN_DEPTH:
+                result["allowed"] = True
+                result["trigger_reason"] = (
+                    f"RHYME_E|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
+                )
+                return result
+            result["reject"] = f"rhyme_e_depth_{depth:.3f}"
+            return result
+        result["reject"] = f"rhyme_e_bubble_{bubble:.2f}"
+        return result
+
+    result["reject"] = "regime_not_bear"
+    return result
+
+
+def run_opportunistic_short_strategy(*args, **kwargs) -> int:
+    """Opportunistic directional shorts — Realistic Research paper only."""
+    from modules.opportunistic_short_sleeve import run_opportunistic_short_strategy as _run
+
+    return _run(*args, **kwargs)
+
+
+def summarize_entry_skip_reason(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    yield_gated=False,
+    market_open=True,
+    volatility=None,
+    wisdom_paused=False,
+) -> str:
+    """Return a token describing why no entries fired this cycle (for skip funnel)."""
+    if wisdom_paused and not config.effective_paper_soft_pause():
+        return "wisdom_paused"
+    if regime_entries_paused(regime, data):
+        if config.effective_paper_soft_pause():
+            pass
+        else:
+            return "regime_paused"
+    if not market_open:
+        return "equity_session_closed"
+    if yield_gated:
+        return "yield_gated"
+    if config.effective_cofire_budget_enabled() and hasattr(executor, "begin_deployment_cycle"):
+        resolve_cycle_deploy(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+            volatility=volatility,
+            yield_gated=yield_gated,
+            market_open=market_open,
+        )
+        rooms = getattr(executor, "_cofire_notionals", None) or {}
+        if rooms:
+            return "signals_ok"
+    equity_cols = _nyse_equity_columns(data)
+    ranked = _equity_momentum_ranked(data, equity_cols, yield_gated=yield_gated, regime=regime)
+    if ranked:
+        sym = ranked[0]
+        pair_key = sym + "/MA50"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            return "nyse_cooldown"
+        room = _sleeve_room(
+            executor, config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT), executor.nyse_sleeve_value
+        )
+        if hasattr(executor, "portfolio"):
+            min_n = config.effective_min_notional(executor.portfolio.equity(executor.prices))
+        else:
+            min_n = config.effective_min_notional(float(executor._get_account().equity))
+        if room < min_n:
+            return "nyse_no_room"
+        return "signals_ok"
+    if _spy_buy_intent(
+        data,
+        regime,
+        now,
+        pair_cooldown,
+        cooldown_seconds=cooldown_seconds,
+        cooldown_bars=cooldown_bars,
+        yield_gated=yield_gated,
+    ):
+        return "signals_ok"
+    return "no_ma50_candidates"

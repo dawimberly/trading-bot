@@ -21,7 +21,7 @@ import config
 from modules.safe_io import install_safe_stdout, write_json_atomic, fatal_startup
 from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError, AlpacaValidationError
 from modules.alpaca_executor import AlpacaExecutor
-from modules.data_loader import load_close_matrix
+from modules.real_time_data import load_live_close_matrix, start_realtime_feed, format_status_line
 from modules.data_refresh import RefreshScheduler
 from modules.market_hours import is_equity_market_open
 from modules.wisdom_sentiment import resolve_wisdom_regime
@@ -34,6 +34,7 @@ from modules.pipeline_strategies import (
     run_spy_exits,
     run_spy_strategy,
     resolve_cycle_deploy,
+    summarize_entry_skip_reason,
 )
 from modules.portfolio_manager import PortfolioManager
 from modules.holdings_reconcile import reconcile
@@ -127,6 +128,7 @@ _startup_rebalanced = False
 _macro_daily_bootstrapped = False
 _last_cycle_schedule = None
 _live_startup_confirmed = False
+_strategic_rebalancer = None
 
 
 def _gap_wide(gap) -> bool:
@@ -288,9 +290,9 @@ def _equity_log(symbol, side, regime, pair_key, _z, notional=""):
 
 def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
     if side == "buy":
-        logging.getLogger(__name__).info("SPY SLEEVE buy", extra={"symbol": symbol, "notional": notional, "ma_window": config.SPY_MA_WINDOW, "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
+        logging.getLogger(__name__).info("SPY SLEEVE buy", extra={"symbol": symbol, "notional": notional, "ma_window": config.effective_spy_ma_window(), "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
     else:
-        logging.getLogger(__name__).info("SPY SLEEVE sell", extra={"symbol": symbol, "notional": notional, "ma_window": config.SPY_MA_WINDOW, "regime": regime})
+        logging.getLogger(__name__).info("SPY SLEEVE sell", extra={"symbol": symbol, "notional": notional, "ma_window": config.effective_spy_ma_window(), "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
     log_trade(symbol, side, regime)
     trade_journal.log_signal(
         symbol, side, regime, pair_key, momentum, _last_equity, notional
@@ -334,6 +336,8 @@ def _write_heartbeat(
     dynamic_vol_score=None,
     thinking_engine=None,
     risk_parity=None,
+    entry_skip_reason=None,
+    entry_skip_daily=None,
 ):
     macro_stress = bool(
         wisdom
@@ -385,6 +389,10 @@ def _write_heartbeat(
         }
     if risk_parity:
         payload["risk_parity"] = risk_parity
+    if entry_skip_reason is not None:
+        payload["entry_skip_reason"] = entry_skip_reason
+    if entry_skip_daily:
+        payload["entry_skip_daily"] = entry_skip_daily
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
@@ -503,6 +511,7 @@ def main():
         log_event("daily_loss_circuit", reason=dl_reason, equity=equity)
 
     prev_halted = risk_manager.halted
+    risk_manager.record_equity(equity)
     can_trade = risk_manager.check_drawdown(equity)
     if not can_trade:
         if risk_manager.should_liquidate_on_breach() and market_open:
@@ -566,7 +575,11 @@ def main():
     log_event("cycle_start", timestamp=str(datetime.datetime.now()))
     print("--- Pipeline Cycle: " + str(datetime.datetime.now()) + " ---")
     print(f"--- {format_scan_schedule_line(schedule)} ---")
-    data = load_close_matrix()
+    data = load_live_close_matrix()
+    if config.effective_dynamic_core_enabled():
+        from modules.core_allocator import maybe_refresh_core_allocation
+
+        maybe_refresh_core_allocation(data)
     if data.empty or len(data) < 20:
         db = config.resolve_db_path()
         db_size = db.stat().st_size if db.is_file() else 0
@@ -595,7 +608,8 @@ def main():
             print(f"--- Felix transcript sync skipped: {felix_sync['error']} ---")
 
     wisdom = config.apply_paper_wisdom_floor(resolve_wisdom_regime(data))
-    regime = wisdom["regime"]
+    display_regime = wisdom["regime"]
+    regime = wisdom.get("entries_regime", display_regime)
     vol = wisdom["volatility"]
     if wisdom.get("felix_video_id"):
         print(
@@ -620,9 +634,28 @@ def main():
         executor.set_sleeve_pnl(None)
 
     if hasattr(executor, "set_wisdom_sizing_multiplier"):
-        executor.set_wisdom_sizing_multiplier(wisdom.get("sizing_multiplier", 1.0))
+        from modules.regime_sizing import effective_regime_sizing_multiplier
 
-    from modules.market_context import cross_asset_vol_score, get_volatility
+        sizing = float(wisdom.get("sizing_multiplier", 1.0))
+        regime_mult = effective_regime_sizing_multiplier(
+            display_regime, wisdom_paused=bool(wisdom.get("wisdom_paused"))
+        )
+        if config.effective_regime_dynamic_sizing():
+            if wisdom.get("wisdom_mode") == "dynamic":
+                sizing = round(sizing * regime_mult, 3)
+            else:
+                sizing = regime_mult
+        else:
+            from modules.pipeline_strategies import regime_soft_pause_sizing_multiplier
+
+            soft_mult = regime_soft_pause_sizing_multiplier(
+                regime, wisdom_paused=bool(wisdom.get("wisdom_paused"))
+            )
+            if soft_mult < 0.999:
+                sizing = round(sizing * soft_mult, 3)
+        executor.set_wisdom_sizing_multiplier(sizing)
+    if hasattr(executor, "set_current_regime"):
+        executor.set_current_regime(display_regime)
 
     vol_label = get_volatility(data)
     vol_score = cross_asset_vol_score(data)
@@ -685,6 +718,12 @@ def main():
         regime=regime,
         macro_stress=macro_stress_flag,
     )
+    dd = risk_manager.current_drawdown(equity)
+    config.set_dynamic_risk_context(
+        drawdown=dd,
+        recovery_mode=risk_manager.recovery_mode,
+        equity_history=risk_manager.recent_equity_history(),
+    )
     if config.effective_paper_profit_protect_enabled():
         from modules.dynamic_risk import update_profit_protect_context
 
@@ -706,6 +745,11 @@ def main():
     if wisdom.get("wisdom_paused"):
         tier = wisdom.get("gap_tier") or wisdom.get("wisdom_mode")
         pause_s = f" | DYNAMIC PAUSE ({tier})"
+        if regime != display_regime:
+            print(
+                f"--- Wisdom pause: entries gated as {regime} "
+                f"(classified {display_regime}) ---"
+            )
     elif wisdom.get("wisdom_mode") == "dynamic":
         tier = wisdom.get("gap_tier")
         mult = wisdom.get("sizing_multiplier", 1.0)
@@ -740,9 +784,22 @@ def main():
         pnl_line = format_sleeve_pnl_line(sleeve_pnl)
         if pnl_line != "flat":
             pnl_s = f" | P&L: {pnl_line}"
+    regime_sz = ""
+    if config.effective_regime_dynamic_sizing():
+        from modules.regime_sizing import effective_regime_sizing_multiplier
+
+        rm = effective_regime_sizing_multiplier(
+            display_regime, wisdom_paused=bool(wisdom.get("wisdom_paused"))
+        )
+        regime_sz = f" | sizing x{rm:.2f}"
+        from modules.regime_sizing import regime_sleeve_exposure_ceiling
+
+        ceil = regime_sleeve_exposure_ceiling(display_regime)
+        if ceil is not None:
+            regime_sz += f" | sleeve cap {ceil:.0%}"
     print(
-        f"--- Regime: {regime} | Vol: {vol} | "
-        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{gp_s}{macro_s}{pnl_s} | "
+        f"--- Regime: {display_regime} | Vol: {vol} | "
+        f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{regime_sz}{gp_s}{macro_s}{pnl_s} | "
         f"Equity session: {'OPEN' if market_open else 'CLOSED'} | "
         f"phase: {schedule.get('phase', '?')} ---"
     )
@@ -896,7 +953,39 @@ def main():
                     print(f"--- Kraken SPCX buy skipped/failed: {kraken_buy['error']} ---")
 
     vti_result = None
-    if config.vti_core_enabled() and market_open:
+    if config.REBALANCE_ENABLED and market_open:
+        global _strategic_rebalancer
+        from modules.operating_layer import run_operating_cycle_live
+        from modules.rebalancer import StrategicRebalancer
+
+        if _strategic_rebalancer is None:
+            _strategic_rebalancer = StrategicRebalancer()
+        op_result = run_operating_cycle_live(
+            executor,
+            regime=display_regime,
+            vol=vol,
+            macro_stress=macro_stress_flag,
+            vol_score=vol_score,
+            bar_date=datetime.date.today(),
+            market_open=market_open,
+            rebalancer=_strategic_rebalancer,
+        )
+        if op_result:
+            wisdom_rec = op_result.get("wisdom") or {}
+            core_tgt = op_result.get("core_target", config.REBALANCE_CORE_TARGET)
+            if not op_result.get("skipped"):
+                print(
+                    f"--- Operating Layer rebalance -> core {core_tgt:.0%} "
+                    f"(drift {op_result.get('drift', {}).get('max_drift', 0):.1%}) "
+                    f"| wisdom {wisdom_rec.get('action', 'hold')} "
+                    f"conv {wisdom_rec.get('conviction', 0):.2f} ---"
+                )
+            elif wisdom_rec.get("accepted"):
+                print(
+                    f"--- Operating Layer: wisdom {wisdom_rec.get('action')} "
+                    f"conv {wisdom_rec.get('conviction', 0):.2f} (no rebalance trigger) ---"
+                )
+    elif config.vti_core_enabled() and market_open:
         vti_result = rebalance_vti_core(
             executor,
             market_open=market_open,
@@ -1031,10 +1120,10 @@ def main():
                 yield_gated=yield_gated,
             )
         else:
-            from modules.pipeline_strategies import run_ipo_safety_trims
+            from modules.pipeline_strategies import run_ipo_safety_trims, run_nyse_momentum_and_stat_arb
 
             run_ipo_safety_trims(data, executor)
-            nyse_trades = run_equity_strategy(
+            nyse_trades = run_nyse_momentum_and_stat_arb(
                 data,
                 executor,
                 regime,
@@ -1081,6 +1170,18 @@ def main():
                     macro_stress=macro_stress_flag,
                     macro_window=macro_window,
                 )
+        if config.effective_opportunistic_short_enabled():
+            from modules.opportunistic_short_sleeve import run_opportunistic_short_strategy
+
+            run_opportunistic_short_strategy(
+                data,
+                executor,
+                regime,
+                now,
+                pair_cooldown,
+                log_fn=_equity_log,
+                volatility=vol,
+            )
         gp_result = run_game_plan_cycle(
             executor,
             regime,
@@ -1185,6 +1286,34 @@ def main():
             f" | Metal ${round(sleeves['metal_value'], 2)}/"
             f"${round(sleeves['metal_cap'], 2)}"
         )
+    total_entries = int(c) + int(s) + int(nyse_trades)
+    if total_entries > 0:
+        entry_skip_reason = "traded"
+    else:
+        entry_skip_reason = summarize_entry_skip_reason(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            yield_gated=yield_gated,
+            market_open=equity_scans,
+            volatility=vol,
+            wisdom_paused=bool(wisdom.get("wisdom_paused")),
+        )
+    print(f"--- Entry gates: {entry_skip_reason} ---")
+    from modules.entry_skip_tracker import (
+        maybe_emit_daily_summary,
+        record_cycle,
+    )
+
+    entry_skip_daily = record_cycle(entry_skip_reason)
+    maybe_emit_daily_summary()
+    print(
+        f"=== CYCLE STATUS: spy={s} nyse={nyse_trades} crypto={c} | "
+        f"gates={entry_skip_reason} | today skipped={entry_skip_daily.get('skipped_cycles', 0)} "
+        f"({entry_skip_daily.get('top_skip', '—')}) ==="
+    )
     print(
         f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
         f"Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
@@ -1216,15 +1345,42 @@ def main():
         notes=(
             f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
             f"nyse_cap={config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT):.2%}; "
-            f"{gp_notes}"
+            f"entry_gates={entry_skip_reason}; {gp_notes}"
         ),
     )
     try:
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as exc:
         _warn_nonfatal("Alert error", exc)
+    try:
+        if config.telegram_weekly_summary_enabled():
+            from modules.weekly_telegram_summary import send_weekly_telegram_summary
+
+            send_weekly_telegram_summary(
+                equity=equity,
+                cash=cash,
+                regime=display_regime,
+                wisdom=wisdom,
+                sleeves=sleeves,
+                market_open=market_open,
+            )
+    except Exception as exc:
+        _warn_nonfatal("Weekly Telegram summary", exc)
+    try:
+        from modules.weekly_report import maybe_generate_weekly_report
+
+        maybe_generate_weekly_report(
+            equity=equity,
+            cash=cash,
+            regime=display_regime,
+            wisdom=wisdom,
+            sleeves=sleeves,
+            market_open=market_open,
+        )
+    except Exception as exc:
+        _warn_nonfatal("Weekly report", exc)
     _write_heartbeat(
-        regime,
+        display_regime,
         equity,
         cash,
         c,
@@ -1253,6 +1409,8 @@ def main():
         }
         if (risk_parity_meta or pod_risk_meta)
         else None,
+        entry_skip_reason=entry_skip_reason,
+        entry_skip_daily=entry_skip_daily,
     )
 
     wisdom_journal.log_cycle(
@@ -1331,11 +1489,14 @@ def _print_account_startup_summary(equity: float) -> None:
         f"VTI target {vti:.0%} | risk {config.effective_risk_per_trade():.0%}/trade ---"
     )
     if config.is_small_account(equity):
-        print(
-            f"--- Small account profile (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
-            f"max order ${config.effective_max_notional_per_order(equity):,.2f} | "
-            f"VTI {vti:.0%} ---"
-        )
+        if config.live_conservative_profile_active():
+            print(f"--- {config.format_live_conservative_banner()} ---")
+        else:
+            print(
+                f"--- Small account profile (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
+                f"max order ${config.effective_max_notional_per_order(equity):,.2f} | "
+                f"VTI {vti:.0%} ---"
+            )
 
 
 def _print_startup_banner():
@@ -1355,14 +1516,85 @@ def _print_startup_banner():
         print("=" * 60)
     print("--- Starting 24/7 Weinstein-Iteration Engine ---")
     print(f"--- Alpaca: {mode} ({endpoint}) ---")
+    print(config.format_paper_live_profile_line())
+    if config.is_realistic_research_active():
+        for line in config.format_realistic_research_startup_lines():
+            print(line)
     if config.paper_aggressive_context():
+        vti_mode = (
+            f"fixed {config.PAPER_VTI_CORE_PCT:.0%} VTI"
+            if not config.PAPER_DYNAMIC_VTI_ENABLED
+            else "dynamic VTI 35-75%"
+        )
+        soft = (
+            f" | regime sizing A={config.PAPER_REGIME_A_SIZING_MULT:.1f} "
+            f"C={config.PAPER_REGIME_C_SIZING_MULT:.1f} D={config.PAPER_REGIME_D_SIZING_MULT:.1f} "
+            f"E={config.PAPER_REGIME_E_SIZING_MULT:.1f} B={config.PAPER_REGIME_B_SIZING_MULT:.1f}"
+            if config.effective_regime_dynamic_sizing()
+            else (
+                f" | soft-pause {config.PAPER_SOFT_PAUSE_SIZING_MULT:.0%}"
+                if config.effective_paper_soft_pause()
+                else ""
+            )
+        )
         print(
-            "--- Paper SHARPE CHASE: dynamic VTI 40-75% (calm/stress) | "
+            f"--- Paper SHARPE CHASE: {vti_mode} | "
             f"active boost x{config.PAPER_ACTIVE_SLEEVE_BOOST} | "
-            f"wisdom floor x{config.PAPER_WISDOM_SIZING_FLOOR} | "
+            f"wisdom floor x{config.PAPER_WISDOM_SIZING_FLOOR}{soft} | "
             f"crypto vol-only={config.effective_crypto_vol_only()} | "
             f"cycle {config.CYCLE_INTERVAL_SEC}s | refresh {config.REFRESH_INTERVAL}s ---"
         )
+        for line in config.paper_frequency_mode_lines():
+            print(line)
+        research_line = config.format_research_mode_banner()
+        if research_line:
+            print(f"--- {research_line} ---")
+        try:
+            from modules.pipeline_strategies import load_pipeline_data
+            from modules.market_context import current_regime_from_data
+            from modules.regime_sizing import format_regime_sizing_line
+
+            _banner_data = load_pipeline_data()
+            _banner_regime = current_regime_from_data(_banner_data)
+            if _banner_regime:
+                print(f"--- {format_regime_sizing_line(_banner_regime)} ---")
+        except Exception:
+            pass
+        try:
+            from modules.positioning_overlay import format_positioning_banner
+
+            _cot_line = format_positioning_banner()
+            if _cot_line:
+                print(f"--- {_cot_line} ---")
+        except Exception:
+            pass
+        try:
+            from modules.core_allocator import format_core_allocator_banner
+
+            _core_line = format_core_allocator_banner()
+            if _core_line:
+                print(f"--- {_core_line} ---")
+        except Exception:
+            pass
+        try:
+            from modules.operating_layer import format_operating_layer_banner
+
+            _op_line = format_operating_layer_banner()
+            if _op_line:
+                print(f"--- {_op_line} ---")
+        except Exception:
+            pass
+    ws_line = format_status_line()
+    if ws_line:
+        print(f"--- {ws_line} ---")
+    try:
+        from modules.kimi_client import format_kimi_deep_thinker_banner
+
+        kimi_line = format_kimi_deep_thinker_banner()
+        if kimi_line and config.effective_kimi_deep_thinker_enabled():
+            print(kimi_line)
+    except ImportError:
+        pass
     _print_kraken_banner()
     alloc = config.fund_allocation_pct()
     if config.vti_core_enabled():
@@ -1394,15 +1626,21 @@ def _print_startup_banner():
             )
     config.print_recommended_stack_flags()
     risk_pct = config.effective_risk_per_trade()
+    spy_ma = config.effective_spy_ma_window()
+    nyse_ma = config.effective_nyse_ma_window()
     print(
-        f"--- SPY MA{config.SPY_MA_WINDOW} | crypto Z-pairs | NYSE MA50 | "
-        f"{risk_pct:.0%}/trade within sleeve ---"
+        f"--- SPY MA{spy_ma} | crypto Z-pairs | "
+        f"NYSE MA{nyse_ma} | "
+        f"{risk_pct:.1%}/trade within sleeve ---"
     )
     if config.is_small_account():
-        print(
-            f"--- Small account safety: max ${config.effective_max_notional_per_order():,.2f}/order | "
-            f"VTI {config.vti_core_allocation_pct():.0%} core ---"
-        )
+        if config.live_conservative_profile_active():
+            print(f"--- {config.format_live_conservative_banner()} ---")
+        else:
+            print(
+                f"--- Small account safety: max ${config.effective_max_notional_per_order():,.2f}/order | "
+                f"VTI {config.vti_core_allocation_pct():.0%} core ---"
+            )
     print(
         f"--- Order sizing: scales with equity (ref ${config.REFERENCE_EQUITY:,.0f} -> "
         f"min ${config.MIN_NOTIONAL:.0f}; $100 account -> min "
@@ -1496,6 +1734,10 @@ def _print_startup_banner():
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     if alerts.alerts_configured():
         print(f"--- Alerts: on — {config.telegram_alert_policy_summary()} ---")
+        if config.telegram_weekly_summary_enabled():
+            print(
+                f"--- Weekly Telegram: Fridays after {config.TELEGRAM_WEEKLY_SUMMARY_TIME} ET ---"
+            )
     else:
         print("--- Alerts: off (set TELEGRAM_* or SMTP_* in .env) ---")
     if not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING:
@@ -1523,12 +1765,15 @@ def _confirm_live_trading_startup(equity: float) -> None:
     )
     print("=" * 60)
     if profile.get("small_account"):
-        print(
-            f"--- Small account safety (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
-            f"{profile['risk_per_trade']:.0%} risk | "
-            f"max ${profile['max_notional_per_order']:,.2f}/order | "
-            f"VTI {profile['vti_core_pct']:.0%} ---"
-        )
+        if profile.get("live_conservative"):
+            print(f"--- {config.format_live_conservative_banner()} ---")
+        else:
+            print(
+                f"--- Small account safety (<${config.SMALL_ACCOUNT_EQUITY_THRESHOLD:,.0f}): "
+                f"{profile['risk_per_trade']:.0%} risk | "
+                f"max ${profile['max_notional_per_order']:,.2f}/order | "
+                f"VTI {profile['vti_core_pct']:.0%} ---"
+            )
     print("--- Press Ctrl+C within 10 seconds to abort ---")
     for remaining in range(10, 0, -1):
         print(f"Starting live trading loop in {remaining}s...")
@@ -1587,6 +1832,9 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"[WARN] Could not load Alpaca account at startup: {exc}")
         print(f"       {_alpaca_startup_hint(exc)}")
+    if config.effective_real_time_websocket_enabled():
+        start_realtime_feed()
+        time.sleep(1.5)
     _print_startup_banner()
     if startup_equity is not None:
         _print_account_startup_summary(startup_equity)

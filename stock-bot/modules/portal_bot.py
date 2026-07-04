@@ -84,9 +84,131 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env["ALLOW_LIVE_TRADING"] = "yes" if allow_live else "no"
     if spec.get("paper_chase") or (paper and book_id == "alpaca_paper"):
         env["PAPER_CHASE_MODE"] = "1"
+        from config import apply_realistic_research_env
+
+        env = apply_realistic_research_env(env)
     else:
         env.pop("PAPER_CHASE_MODE", None)
+        if book_id == "alpaca_live":
+            from config import clear_paper_research_env
+
+            env = clear_paper_research_env(env)
     return env
+
+
+def _child_pids(pid: int) -> list[int]:
+    """Direct child process IDs (Windows WMI)."""
+    if not _pid_alive(pid):
+        return []
+    try:
+        if sys.platform == "win32":
+            cmd = (
+                f"Get-CimInstance Win32_Process -Filter \"ParentProcessId={pid}\" | "
+                "Select-Object -ExpandProperty ProcessId"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return [int(x.strip()) for x in out.splitlines() if x.strip().isdigit()]
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+        return []
+    return []
+
+
+def _parent_pid(pid: int) -> int | None:
+    try:
+        if sys.platform == "win32":
+            cmd = (
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").ParentProcessId"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).strip()
+            return int(out) if out.isdigit() else None
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+        return None
+    return None
+
+
+def _is_descendant_of(pid: int, ancestor: int) -> bool:
+    current = _parent_pid(pid)
+    depth = 0
+    while current is not None and depth < 32:
+        if current == ancestor:
+            return True
+        current = _parent_pid(current)
+        depth += 1
+    return False
+
+
+def _descendant_pids(root: int) -> set[int]:
+    seen: set[int] = set()
+    stack = [root]
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        stack.extend(_child_pids(pid))
+    seen.discard(root)
+    return seen
+
+
+def _portal_launched(cmd: str) -> bool:
+    return " -u " in f" {cmd} "
+
+
+def _paper_run_all_child(username: str) -> int | None:
+    supervisor = bot_pid(username, "alpaca_paper")
+    if supervisor is None:
+        return None
+    for pid in sorted(_descendant_pids(supervisor)):
+        cmd = _process_cmdline(pid) or ""
+        if "run_all.py" in cmd and not _portal_launched(cmd):
+            return pid
+    return None
+
+
+def _paper_allowed_descendants(supervisor: int) -> set[int]:
+    """Only the paper supervisor's single run_all.py worker (not nested dup supervisors)."""
+    allowed: set[int] = set()
+    for pid in sorted(_descendant_pids(supervisor)):
+        cmd = _process_cmdline(pid) or ""
+        if "run_paper_bot.py" in cmd:
+            continue
+        if "run_all.py" in cmd:
+            allowed.add(pid)
+            break
+    return allowed
+
+
+def _managed_bot_pids(username: str) -> set[int]:
+    """PIDs that may run for this user (supervisors, live chain, one paper run_all)."""
+    allowed: set[int] = set()
+    live = bot_pid(username, "alpaca_live")
+    if live is not None:
+        allowed.add(live)
+        walk = live
+        for _ in range(32):
+            parent = _parent_pid(walk)
+            if parent is None:
+                break
+            cmd = _process_cmdline(parent) or ""
+            if "run_all.py" not in cmd:
+                break
+            allowed.add(parent)
+            walk = parent
+    paper = bot_pid(username, "alpaca_paper")
+    if paper is not None:
+        allowed.add(paper)
+        allowed |= _paper_allowed_descendants(paper)
+    return allowed
 
 
 def _find_script_pids(script_name: str) -> list[int]:
@@ -157,17 +279,73 @@ def _tracked_book_pids(username: str) -> set[int]:
     return pids
 
 
-def stop_orphan_project_bots(preserve_pids: set[int] | None = None) -> tuple[int, str]:
+def trim_portal_duplicate_bots(username: str) -> tuple[int, str]:
+    """Remove extra portal-launched supervisors and stray paper run_all workers."""
+    live = bot_pid(username, "alpaca_live")
+    paper = bot_pid(username, "alpaca_paper")
+    stopped = 0
+    notes: list[str] = []
+    for pid in _find_script_pids("run_paper_bot.py"):
+        if paper is not None and pid == paper:
+            continue
+        cmd = _process_cmdline(pid) or ""
+        if not _portal_launched(cmd):
+            continue
+        ok, msg = _graceful_stop_pid(pid)
+        if ok:
+            stopped += 1
+        else:
+            notes.append(msg)
+    paper_supervisor = paper
+    for pid in _find_script_pids("run_all.py"):
+        if live is not None and pid == live:
+            continue
+        if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
+            parent = _parent_pid(pid)
+            pcmd = _process_cmdline(parent) or "" if parent else ""
+            if parent and "run_all.py" in pcmd:
+                ok, msg = _graceful_stop_pid(pid)
+                if ok:
+                    stopped += 1
+                else:
+                    notes.append(msg)
+            continue
+        cmd = _process_cmdline(pid) or ""
+        if _portal_launched(cmd):
+            ok, msg = _graceful_stop_pid(pid)
+            if ok:
+                stopped += 1
+            else:
+                notes.append(msg)
+    summary = f"Trimmed {stopped} duplicate bot process(es)." if stopped else "No duplicate bot processes."
+    if notes:
+        summary += " " + "; ".join(notes)
+    return stopped, summary
+
+
+def stop_orphan_project_bots(
+    preserve_pids: set[int] | None = None,
+    *,
+    username: str | None = None,
+) -> tuple[int, str]:
     """Stop stray run_paper_bot / run_all processes for this repo (no pid file)."""
-    preserve = preserve_pids or set()
+    preserve = set(preserve_pids or set())
+    if username:
+        preserve |= _managed_bot_pids(username)
     stopped = 0
     notes: list[str] = []
     for script in ("run_paper_bot.py", "run_all.py"):
         pids = _find_script_pids(script)
         if pids:
-            print(f"Found {len(pids)} orphan {script} process(es)...", flush=True)
+            print(f"Found {len(pids)} {script} process(es)...", flush=True)
         for pid in pids:
             if pid in preserve:
+                continue
+            live_supervisor = bot_pid(username, "alpaca_live") if username else None
+            paper_supervisor = bot_pid(username, "alpaca_paper") if username else None
+            if live_supervisor is not None and _is_descendant_of(live_supervisor, pid):
+                continue
+            if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
                 continue
             print(f"Stopping orphan {script} PID {pid}...", flush=True)
             ok, msg = _graceful_stop_pid(pid)
@@ -312,7 +490,7 @@ def restart_all_bots(username: str) -> tuple[bool, str]:
             continue
         if bot_running(username, book_id):
             stop_bot(username, book_id)
-    stopped, orphan_msg = stop_orphan_project_bots()
+    stopped, orphan_msg = stop_orphan_project_bots(username=username)
     if stopped:
         time.sleep(1.0)
 
@@ -393,6 +571,9 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
     env["WISDOM_SCORECARD_FILE"] = str(slot_dir / "wisdom_scorecard.json")
     env["WISDOM_JOURNAL_FILE"] = str(slot_dir / "wisdom_journal.csv")
     if paper_chase:
+        from config import apply_realistic_research_env
+
+        env = apply_realistic_research_env(env)
         env["PAPER_CHASE_MODE"] = "1"
         env["PAPER_TRADING"] = "true"
 
@@ -547,7 +728,7 @@ def stop_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     if not ok:
         return False, msg
     # run_paper_bot.py supervises a child run_all.py — clean up stragglers
-    stop_orphan_project_bots(preserve_pids=_tracked_book_pids(username))
+    stop_orphan_project_bots(preserve_pids=_tracked_book_pids(username), username=username)
     return True, f"Bot stopped for {book_id} ({msg})"
 
 
