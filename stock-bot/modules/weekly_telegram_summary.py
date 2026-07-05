@@ -85,6 +85,20 @@ def send_weekly_telegram_summary(
         sleeves=sleeves,
     )
     message = format_weekly_telegram_message(data)
+    if config.paper_chase_mode_enabled():
+        try:
+            from modules.weekly_report import format_telegram_research_addon, gather_weekly_report
+
+            report = gather_weekly_report(
+                equity=equity,
+                cash=cash,
+                regime=regime,
+                wisdom=wisdom,
+                sleeves=sleeves,
+            )
+            message += format_telegram_research_addon(report)
+        except Exception as exc:
+            logger.debug("Telegram research addon skipped: %s", exc)
 
     if dry_run:
         print(message)

@@ -149,7 +149,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 **Two profiles (do not mix on the same book without intent):**
 
 - **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
-- **Profile B — paper v1.3** (`paper_aggressive` / Realistic Research): dynamic core 30–50%, **NYSE momentum + stat arb** (10–14 pairs, RR 1.6), protective shorts, tail risk; vol overlay + options; overlap/chunk/co-fire **on**; thinking opt-in. See [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
+- **Profile B — paper v1.4** (`paper_aggressive` / Realistic Research): **locked default** — dynamic core 30–50%, **NYSE momentum + stat arb** (10–14 pairs, RR 1.6), **protective + sector shorts** (8–15%, RHYME_E waiver), tail risk; vol overlay + options; overlap/chunk/co-fire **on**; weekly Telegram + Bot Health Score. See [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
 
 ---
 
@@ -298,7 +298,9 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **SPY / NYSE MAs** | **MA150 / MA70** (tuned 365d grid) | `PAPER_SPY_MA_WINDOW`, `PAPER_NYSE_MA_WINDOW` |
 | **RHYME_E sizing** | **1.60×** | `PAPER_REGIME_E_SIZING_MULT` |
 | **NYSE max hold** | **60 bars** | `PAPER_POSITION_MAX_HOLD_BARS` |
-| **Stat arb** | v1.3: corr≥0.72, coint p&lt;0.12, **10–14 pairs**, Z 2.0–2.6, RR **1.6:1** + trail, $25M liquidity; runs **with** NYSE momentum (not pairs-only) | `PAPER_STAT_ARB_*` in `.env.example` |
+| **Stat arb** | v1.4: corr≥0.72, coint p&lt;0.12, **10–14 pairs**, Z 2.0–2.6, RR **1.6:1** + trail + 35b max, $25M liquidity, sector-neutral pref | `PAPER_STAT_ARB_*` in `.env.example` |
+| **Protective shorts** | v1.4: **8–15%** gross, RR **1.6:1**, RHYME_E exhaustion waiver, **sector ETF shorts** (≤8%/name) | `PROTECTIVE_SHORT_*`, `SECTOR_SHORT_*` |
+| **Monitoring** | Weekly MD/HTML report + **Friday Telegram** (Health Score, 30d/all-time Sharpe, bubble, short activity) | `TELEGRAM_WEEKLY_SUMMARY_ENABLED` |
 | **Vol overlay** | VIX regime hedge/income | `PAPER_VOL_TRADING_ENABLED=true` |
 | **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
 | **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
@@ -329,9 +331,34 @@ python scripts/account/preflight.py   # paper chase context
 
 Restart paper bot after changing thinking env: `python run_paper_bot.py`
 
-#### Research velocity profile
+#### Research velocity profile (Realistic Research v1.4 — locked)
 
-For **research velocity** (order flow, stat arb funnels, attribution), use **[`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md)** — **Realistic Research v1.3** locked default for `alpaca_paper`: dynamic core 30–50%, stat arb 10–14 pairs, protective shorts (15%), weekly Telegram summary. Startup prints `>>> REALISTIC RESEARCH v1.3` and `>>> STAT ARB v1.3: ...`.
+For **research velocity** (order flow, stat arb funnels, attribution), use **[`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md)** — **Realistic Research v1.4** is the **official locked default** for `alpaca_paper`:
+
+- **Tagline:** `v1.4 — improved shorts + Stat Arb`
+- **Dynamic core** VTI/SPY 30–50% (40% SPY fallback)
+- **Stat arb** 10–14 pairs, RR 1.6, trailing exits, $25M liquidity filter
+- **Protective + sector shorts** 8–15% gross, RHYME_E waiver (bubble≥60, no exhaustion)
+- **Weekly monitoring:** Bot Health Score, 30d/all-time Sharpe, bubble score, short activity (MD/HTML + Telegram)
+
+Startup prints:
+```
+>>> REALISTIC RESEARCH v1.4 (LOCKED) - Stat Arb 10-14p | Dynamic Core 30-50% | Protective + Sector Shorts | RHYME_E waiver | v1.4 — improved shorts + Stat Arb | Paper Bot Default <<<
+>>> STAT ARB v1.4: ... RR 1.6:1 + trail ...
+```
+
+**1000-day validation** (`python backtester.py --days 1000 --paper-aggressive --no-thinking` → `backtest_v14_1000day.txt`):
+
+Effective simulation window **~800 calendar days** (2024-04-26 → 2026-07-05) due to deep-history data availability; allocator window pinned at 1000 bars.
+
+| Version | Window | Return | Sharpe | Max DD | Stat Arb PnL | Short PnL | Fires |
+|---------|--------|--------|--------|--------|--------------|-----------|-------|
+| v1.2 | 365d | +22.68% | 1.46 | -7.14% | +$9.41 | $0 | 0 |
+| v1.3 (shorts ON) | 365d | +25.10% | 1.52 | -7.17% | -$59.38 | -$217.48 | 7/80 |
+| v1.4 | 365d | +26.48% | 1.56 | -7.17% | -$58.57 | -$94.49 | 7/80 |
+| **v1.4** | **~800d** | **+47.14%** | **1.07** | **-16.02%** | **-$51.83** | **-$454.68** | **11/189** |
+
+v1.4 improved short sleeve economics vs v1.3 on the 365d window (+$123 short PnL delta). Longer window shows higher absolute return but deeper drawdown and stat-arb drag; monitor on paper before any live adoption.
 
 **Stat arb validation (365d):**
 

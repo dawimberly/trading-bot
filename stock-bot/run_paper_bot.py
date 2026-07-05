@@ -1,8 +1,9 @@
-"""24/7 paper bot — Realistic Research v1.3 (locked default for alpaca_paper).
+"""24/7 paper bot — Realistic Research v1.4 (locked default for alpaca_paper).
 
 Uses run_all.py with PAPER_CHASE_MODE and enforce_realistic_research_profile():
-  - Locked SPY @ 40% core, deep-history indicators only, 1.8% risk
-  - Stat Arb v1.3: 10–14 pairs, 1.6:1 RR, trailing stop, $25M liquidity filter
+  - Dynamic core VTI/SPY 30-50% (40% SPY fallback)
+  - Stat Arb v1.4: 10–14 pairs, 1.6:1 RR, trailing stop, $25M liquidity filter
+  - Protective + sector shorts 8-15% gross, RHYME_E exhaustion waiver
   - Runs alongside NYSE momentum (not pairs-only mode)
   - Dedicated 7% stat-arb sleeve with portfolio-vol scaling
   - Tail Risk Controls ON (vol ceiling, DD scaling, RHYME_B buffers, sector screener)
@@ -133,9 +134,10 @@ def main() -> None:
     print(
         f"Paper bot engine: run_all.py | "
         f"Realistic Research v{config.REALISTIC_RESEARCH_VERSION} | "
-        f"deep-history indicators-only"
+        f"{config.REALISTIC_RESEARCH_TAGLINE} | deep-history indicators-only"
     )
-    print(f"Heartbeat: {env['HEARTBEAT_FILE']} | Journal: {env['PAPER_JOURNAL_CSV']}")    for line in config.paper_frequency_mode_lines():
+    print(f"Heartbeat: {env['HEARTBEAT_FILE']} | Journal: {env['PAPER_JOURNAL_CSV']}")
+    for line in config.paper_frequency_mode_lines():
         print(line)
     if crypto_enabled:
         if _paper_only_ok(env):

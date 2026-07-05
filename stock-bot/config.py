@@ -357,8 +357,9 @@ MA_WINDOW = 45
 #   - Per-name cap — PAPER_MAX_POSITION_PCT 8%
 #   - Weak-regime sleeve cap — PAPER_REGIME_WEAK_SLEEVE_MAX_PCT 25% in B/D/E
 #   - Sector screener — limit expansion when SECTOR_HIGH_VOL_CEILING_PCT exceeded
-REALISTIC_RESEARCH_VERSION = "1.3"
+REALISTIC_RESEARCH_VERSION = "1.4"
 REALISTIC_RESEARCH_PROFILE_VERSION = REALISTIC_RESEARCH_VERSION
+REALISTIC_RESEARCH_TAGLINE = "v1.4 — improved shorts + Stat Arb"
 #
 # --- VTI passive core + active satellite ---
 VTI_CORE_ENABLED = os.getenv("VTI_CORE_ENABLED", "true").lower() in (
@@ -665,19 +666,35 @@ SHORT_OPPORTUNISTIC_ENABLED = _env_bool_first(
 )
 PROTECTIVE_SHORT_MAX_PCT = float(os.getenv("PROTECTIVE_SHORT_MAX_PCT", "0.15"))
 PROTECTIVE_SHORT_MIN_PCT = float(os.getenv("PROTECTIVE_SHORT_MIN_PCT", "0.08"))
+SECTOR_SHORT_ENABLED = _env_bool_first(
+    "SECTOR_SHORT_ENABLED", "PAPER_SECTOR_SHORT_ENABLED", default="true"
+)
+SECTOR_SHORT_MAX_PCT = float(os.getenv("SECTOR_SHORT_MAX_PCT", "0.08"))
+SECTOR_SHORT_MAX_SCORE = float(os.getenv("SECTOR_SHORT_MAX_SCORE", "-0.04"))
+SECTOR_SHORT_MIN_RS_VS_SPY = float(os.getenv("SECTOR_SHORT_MIN_RS_VS_SPY", "-0.03"))
+SECTOR_SHORT_MAX_POSITIONS = int(os.getenv("SECTOR_SHORT_MAX_POSITIONS", "2"))
 SHORT_DEEP_BEAR_MIN_DEPTH = float(os.getenv("SHORT_DEEP_BEAR_MIN_DEPTH", "0.030"))
 SHORT_RHYME_B_MIN_DEPTH = float(os.getenv("SHORT_RHYME_B_MIN_DEPTH", "0.020"))
 SHORT_RHYME_E_ENABLED = _env_bool_first(
     "SHORT_RHYME_E_ENABLED", "PAPER_SHORT_RHYME_E_ENABLED", default="true"
 )
-SHORT_RHYME_E_STRONG_BUBBLE = float(os.getenv("SHORT_RHYME_E_STRONG_BUBBLE", "0.60"))
+SHORT_RHYME_E_EXHAUSTION_REQUIRED = _env_bool_first(
+    "SHORT_RHYME_E_EXHAUSTION_REQUIRED",
+    "PAPER_SHORT_RHYME_E_EXHAUSTION_REQUIRED",
+    default="false",
+)
+SHORT_RHYME_E_STRONG_BUBBLE = float(os.getenv("SHORT_RHYME_E_STRONG_BUBBLE", "0.65"))
+SHORT_BUBBLE_MIN_FOR_RHYME_E = float(os.getenv("SHORT_BUBBLE_MIN_FOR_RHYME_E", "60"))
 SHORT_WEAK_MOMENTUM_MAX = float(os.getenv("SHORT_WEAK_MOMENTUM_MAX", "-0.05"))
 SHORT_SINGLE_NAME_MAX_TRADES = int(os.getenv("SHORT_SINGLE_NAME_MAX_TRADES", "1"))
 SHORT_BROAD_SYMBOLS_RAW = os.getenv("SHORT_BROAD_SYMBOLS", "SPY,QQQ")
 SHORT_VIX_SPIKE_CONFIRM = _env_bool_first(
     "SHORT_VIX_SPIKE_CONFIRM", "PAPER_SHORT_VIX_SPIKE_CONFIRM", default="true"
 )
-SHORT_VIX_MIN_LEVEL = float(os.getenv("SHORT_VIX_MIN_LEVEL", "25"))
+SHORT_VIX_MIN_LEVEL = float(
+    os.getenv("SHORT_VIX_MIN") or os.getenv("SHORT_VIX_MIN_LEVEL") or "22"
+)
+SHORT_VIX_MIN = SHORT_VIX_MIN_LEVEL
 SHORT_VIX_REQUIRE_RISING = _env_bool_first(
     "SHORT_VIX_REQUIRE_RISING", "PAPER_SHORT_VIX_REQUIRE_RISING", default="true"
 )
@@ -689,7 +706,7 @@ SHORT_MA200_EXTENSION_LOOKBACK = int(os.getenv("SHORT_MA200_EXTENSION_LOOKBACK",
 SHORT_MOMENTUM_EXHAUSTION_LOOKBACK = int(os.getenv("SHORT_MOMENTUM_EXHAUSTION_LOOKBACK", "10"))
 SHORT_MOMENTUM_EXHAUSTION_MIN = float(os.getenv("SHORT_MOMENTUM_EXHAUSTION_MIN", "0.02"))
 SHORT_BUBBLE_SCORE_MIN = float(os.getenv("SHORT_BUBBLE_SCORE_MIN", "0.45"))
-SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "0.03"))
+SHORT_PROFIT_TARGET_PCT = float(os.getenv("SHORT_PROFIT_TARGET_PCT", "0.032"))
 SHORT_STOP_LOSS_PCT = float(os.getenv("SHORT_STOP_LOSS_PCT", "0.02"))
 SHORT_MIN_HOLD_BARS = int(os.getenv("SHORT_MIN_HOLD_BARS", "4"))
 SHORT_MA_EXIT_BUFFER = float(os.getenv("SHORT_MA_EXIT_BUFFER", "0.008"))
@@ -2827,7 +2844,7 @@ def _env_explicit(*keys: str) -> bool:
 
 
 def enforce_realistic_research_profile() -> None:
-    """Re-apply Realistic Research v1.3 locks (.env overrides win)."""
+    """Re-apply Realistic Research v1.4 locks (.env overrides win)."""
     global DYNAMIC_CORE_ENABLED
     global DEEP_HISTORY_ENABLED
     global DEEP_HISTORY_INDICATORS_ONLY
@@ -2881,7 +2898,14 @@ def enforce_realistic_research_profile() -> None:
     global PAPER_STAT_ARB_COINT_PVALUE
     global PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF
     global PROTECTIVE_SHORT_MAX_PCT
+    global PROTECTIVE_SHORT_MIN_PCT
     global SHORT_RHYME_E_ENABLED
+    global SECTOR_SHORT_ENABLED
+    global SECTOR_SHORT_MAX_PCT
+    global SHORT_PROFIT_TARGET_PCT
+    global SHORT_STOP_LOSS_PCT
+    global SHORT_RHYME_E_EXHAUSTION_REQUIRED
+    global SHORT_BUBBLE_MIN_FOR_RHYME_E
 
     if not _env_explicit("DYNAMIC_CORE_ENABLED"):
         DYNAMIC_CORE_ENABLED = True
@@ -3004,17 +3028,41 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("PROTECTIVE_SHORT_ENABLED", "PAPER_PROTECTIVE_SHORT_ENABLED"):
         PROTECTIVE_SHORT_ENABLED = True
     if not _env_explicit("SHORT_OPPORTUNISTIC_ENABLED", "PAPER_SHORT_OPPORTUNISTIC_ENABLED"):
-        SHORT_OPPORTUNISTIC_ENABLED = True
+        SHORT_OPPORTUNISTIC_ENABLED = False
     if not _env_explicit("PROTECTIVE_SHORT_MAX_PCT"):
         PROTECTIVE_SHORT_MAX_PCT = 0.15
     if not _env_explicit("PROTECTIVE_SHORT_MIN_PCT"):
         PROTECTIVE_SHORT_MIN_PCT = 0.08
+    if not _env_explicit("SECTOR_SHORT_ENABLED", "PAPER_SECTOR_SHORT_ENABLED"):
+        SECTOR_SHORT_ENABLED = True
+    if not _env_explicit("SECTOR_SHORT_MAX_PCT"):
+        SECTOR_SHORT_MAX_PCT = 0.08
+    if not _env_explicit("SECTOR_SHORT_MAX_SCORE"):
+        SECTOR_SHORT_MAX_SCORE = -0.04
+    if not _env_explicit("SECTOR_SHORT_MIN_RS_VS_SPY"):
+        SECTOR_SHORT_MIN_RS_VS_SPY = -0.03
+    if not _env_explicit("SECTOR_SHORT_MAX_POSITIONS"):
+        SECTOR_SHORT_MAX_POSITIONS = 2
+    if not _env_explicit("SHORT_PROFIT_TARGET_PCT"):
+        SHORT_PROFIT_TARGET_PCT = 0.032
+    if not _env_explicit("SHORT_STOP_LOSS_PCT"):
+        SHORT_STOP_LOSS_PCT = 0.02
+    if not _env_explicit("SHORT_RHYME_E_EXHAUSTION_REQUIRED", "PAPER_SHORT_RHYME_E_EXHAUSTION_REQUIRED"):
+        SHORT_RHYME_E_EXHAUSTION_REQUIRED = False
+    if not _env_explicit("SHORT_BUBBLE_MIN_FOR_RHYME_E"):
+        SHORT_BUBBLE_MIN_FOR_RHYME_E = 60.0
     if not _env_explicit("SHORT_RHYME_E_STRONG_BUBBLE"):
-        SHORT_RHYME_E_STRONG_BUBBLE = 0.60
+        SHORT_RHYME_E_STRONG_BUBBLE = 0.65
     if not _env_explicit("SHORT_MAX_HOLD_BARS"):
         SHORT_MAX_HOLD_BARS = 30
-    if not _env_explicit("SHORT_OPPORTUNISTIC_ENABLED", "PAPER_SHORT_OPPORTUNISTIC_ENABLED"):
-        SHORT_OPPORTUNISTIC_ENABLED = False
+    if not _env_explicit("SHORT_LONG_HEDGE_ENABLED", "PAPER_SHORT_LONG_HEDGE_ENABLED"):
+        SHORT_LONG_HEDGE_ENABLED = True
+    if not _env_explicit("SHORT_LONG_HEDGE_FLOOR"):
+        SHORT_LONG_HEDGE_FLOOR = 0.78
+    if not _env_explicit("SHORT_VIX_SPIKE_CONFIRM", "PAPER_SHORT_VIX_SPIKE_CONFIRM"):
+        SHORT_VIX_SPIKE_CONFIRM = True
+    if not _env_explicit("SHORT_VIX_REQUIRE_RISING", "PAPER_SHORT_VIX_REQUIRE_RISING"):
+        SHORT_VIX_REQUIRE_RISING = True
     if not _env_explicit("SHORT_RHYME_B_MIN_DEPTH"):
         SHORT_RHYME_B_MIN_DEPTH = 0.020
     if not _env_explicit("SHORT_RHYME_E_ENABLED", "PAPER_SHORT_RHYME_E_ENABLED"):
@@ -3022,7 +3070,7 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("SHORT_BUBBLE_SCORE_MIN"):
         SHORT_BUBBLE_SCORE_MIN = 0.45
     if not _env_explicit("SHORT_VIX_MIN_LEVEL"):
-        SHORT_VIX_MIN_LEVEL = 25.0
+        SHORT_VIX_MIN_LEVEL = 22.0
     if effective_core_allocator_locked():
         try:
             from modules.core_allocator import lock_core_allocator
@@ -3097,16 +3145,25 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "STAT_ARB_VOL_SCALING_ENABLED": "true",
     "STAT_ARB_VOL_MIN_NOTIONAL_SCALE": "0.30",
     "PROTECTIVE_SHORT_ENABLED": "true",
-    "SHORT_OPPORTUNISTIC_ENABLED": "true",
     "PROTECTIVE_SHORT_MAX_PCT": "0.15",
     "PROTECTIVE_SHORT_MIN_PCT": "0.08",
-    "SHORT_RHYME_E_STRONG_BUBBLE": "0.60",
+    "SECTOR_SHORT_ENABLED": "true",
+    "SECTOR_SHORT_MAX_PCT": "0.08",
+    "SECTOR_SHORT_MAX_SCORE": "-0.04",
+    "SECTOR_SHORT_MIN_RS_VS_SPY": "-0.03",
+    "SECTOR_SHORT_MAX_POSITIONS": "2",
+    "SHORT_PROFIT_TARGET_PCT": "0.032",
+    "SHORT_STOP_LOSS_PCT": "0.02",
+    "SHORT_RHYME_E_EXHAUSTION_REQUIRED": "false",
+    "SHORT_BUBBLE_MIN_FOR_RHYME_E": "60",
+    "SHORT_VIX_MIN": "22",
+    "SHORT_RHYME_E_STRONG_BUBBLE": "0.65",
     "SHORT_MAX_HOLD_BARS": "30",
     "SHORT_LONG_HEDGE_ENABLED": "true",
     "SHORT_LONG_HEDGE_FLOOR": "0.78",
     "SHORT_OPPORTUNISTIC_ENABLED": "false",
     "SHORT_VIX_SPIKE_CONFIRM": "true",
-    "SHORT_VIX_MIN_LEVEL": "25",
+    "SHORT_VIX_MIN_LEVEL": "22",
     "SHORT_VIX_REQUIRE_RISING": "true",
     "SHORT_RHYME_E_ENABLED": "true",
     "SHORT_BUBBLE_SCORE_MIN": "0.45",
@@ -3146,11 +3203,15 @@ def is_realistic_research_active() -> bool:
 
 
 def format_paper_live_profile_line() -> str:
-    """Cross-book startup line: paper v1.3 aggressive vs live conservative."""
+    """Cross-book startup line: paper v1.4 aggressive vs live conservative."""
     return (
         f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive) | "
-        f"Live Bot: Conservative {LIVE_VTI_CORE_PCT:.0%} VTI"
+        f"{REALISTIC_RESEARCH_TAGLINE} | Live Bot: Conservative {LIVE_VTI_CORE_PCT:.0%} VTI"
     )
+
+
+def format_realistic_research_tagline() -> str:
+    return REALISTIC_RESEARCH_TAGLINE
 
 
 def format_universe_pool_label() -> str:
@@ -3163,10 +3224,12 @@ def format_universe_pool_label() -> str:
 
 def format_realistic_research_headline() -> str:
     """Prominent version line for paper bot startup."""
-    features = "Stat Arb v1.3 | Dynamic Core 30-50% | Protective Shorts"
+    features = (
+        "Stat Arb 10-14p | Dynamic Core 30-50% | Protective + Sector Shorts | RHYME_E waiver"
+    )
     return (
         f">>> REALISTIC RESEARCH v{REALISTIC_RESEARCH_VERSION} (LOCKED) "
-        f"- {features} | Paper Bot Default <<<"
+        f"- {features} | {REALISTIC_RESEARCH_TAGLINE} | Paper Bot Default <<<"
     )
 
 
@@ -3211,6 +3274,7 @@ def format_realistic_research_startup_lines() -> list[str]:
     """Multi-line startup block: headline, stat arb, profile details."""
     lines = [
         format_realistic_research_headline(),
+        f">>> {REALISTIC_RESEARCH_TAGLINE} <<<",
     ]
     stat_line = format_stat_arb_research_line()
     if stat_line:
@@ -3432,14 +3496,34 @@ def effective_opportunistic_short_enabled() -> bool:
     return bool(paper_only_sleeves_active() or backtest_paper_sleeves_context())
 
 
+def effective_short_bubble_min_for_rhyme_e() -> float:
+    """Bubble Risk Score floor for RHYME_E shorts (accepts 60 or 0.60)."""
+    v = float(SHORT_BUBBLE_MIN_FOR_RHYME_E)
+    return v / 100.0 if v > 1.0 else v
+
+
+def effective_short_rhyme_e_exhaustion_required() -> bool:
+    return bool(SHORT_RHYME_E_EXHAUSTION_REQUIRED)
+
+
+def effective_sector_short_enabled() -> bool:
+    """Sector ETF shorts — paper/research only."""
+    if not effective_opportunistic_short_enabled():
+        return False
+    return bool(SECTOR_SHORT_ENABLED)
+
+
 def format_opportunistic_short_banner() -> str:
     if not effective_opportunistic_short_enabled():
         return "Protective Shorts: OFF"
     lo = effective_protective_short_min_pct()
     hi = effective_protective_short_max_pct()
-    return (
-        f"Protective Shorts: ON ({lo:.0%}-{hi:.0%}, selective triggers)"
-    )
+    line = f"Protective Shorts: ON ({lo:.0%}-{hi:.0%}, RR 1.6, selective)"
+    if not effective_short_rhyme_e_exhaustion_required():
+        line += " | RHYME_E waiver active"
+    if effective_sector_short_enabled():
+        line += f" | Sector shorts <={SECTOR_SHORT_MAX_PCT:.0%}/name"
+    return line
 
 
 def effective_crypto_v2_enabled() -> bool:
@@ -3894,7 +3978,7 @@ def format_stat_arb_research_line() -> str | None:
     if PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF:
         sector_note = f" | sector-neutral x{PAPER_STAT_ARB_SECTOR_NEUTRAL_BOOST:.2f}"
     return (
-        f">>> STAT ARB v1.3: cointegration p<{PAPER_STAT_ARB_COINT_PVALUE:.2f} | "
+        f">>> STAT ARB v{REALISTIC_RESEARCH_VERSION}: cointegration p<{PAPER_STAT_ARB_COINT_PVALUE:.2f} | "
         f"corr>={effective_stat_arb_min_correlation():.2f} | "
         f"liquidity>${effective_stat_arb_min_dollar_volume()/1e6:.0f}M | "
         f"{format_stat_arb_pairs_label()} | "

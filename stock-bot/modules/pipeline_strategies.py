@@ -1309,12 +1309,13 @@ def evaluate_short_entry_triggers(
     volatility: str | None = None,
     vol_score: float | None = None,
 ) -> dict:
-    """Selective protective shorts — RHYME_B or (RHYME_E + bubble≥60) + VIX rising + exhaustion."""
+    """Protective shorts — RHYME_B: VIX + exhaustion + depth; RHYME_E: VIX + bubble + depth (exhaustion optional)."""
     from modules.opportunistic_short_sleeve import bubble_risk_score, _spy_market_down_signal
 
     reg = str(regime or "")
     spy = config.SPY_BOT_SYMBOL
     ma_window = config.effective_spy_ma_window()
+    bubble_min_e = config.effective_short_bubble_min_for_rhyme_e()
     result = {
         "allowed": False,
         "regime": reg,
@@ -1323,6 +1324,7 @@ def evaluate_short_entry_triggers(
         "bubble_score": 0.0,
         "vix_reason": "",
         "exhaustion_reason": "",
+        "regime_path": "",
     }
     if not config.effective_opportunistic_short_enabled():
         result["reject"] = "shorts_disabled"
@@ -1334,6 +1336,7 @@ def evaluate_short_entry_triggers(
         result["reject"] = "regime_not_bear"
         return result
 
+    result["regime_path"] = "RHYME_B" if bear_b else "RHYME_E"
     bubble = bubble_risk_score(data, regime, volatility=volatility, vol_score=vol_score)
     result["bubble_score"] = bubble
 
@@ -1343,6 +1346,21 @@ def evaluate_short_entry_triggers(
     result["vix_reason"] = vix_reason
     if not vix_ok:
         result["reject"] = vix_reason
+        return result
+
+    if bear_e and not config.effective_short_rhyme_e_exhaustion_required():
+        if bubble < bubble_min_e:
+            result["reject"] = "bubble_low"
+            return result
+        bearish, depth = _spy_market_down_signal(data, spy, ma_window)
+        if not bearish or depth < config.SHORT_DEEP_BEAR_MIN_DEPTH:
+            result["reject"] = "depth_low"
+            return result
+        result["allowed"] = True
+        result["exhaustion_reason"] = "waived"
+        result["trigger_reason"] = (
+            f"RHYME_E|waived|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
+        )
         return result
 
     exhausted, exh_reason, _ = short_momentum_exhaustion_signal(data, spy)
@@ -1359,21 +1377,21 @@ def evaluate_short_entry_triggers(
                 f"RHYME_B|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
             )
             return result
-        result["reject"] = f"rhyme_b_depth_{depth:.3f}"
+        result["reject"] = "depth_low"
         return result
 
     if bear_e:
-        if bubble >= config.SHORT_RHYME_E_STRONG_BUBBLE:
-            bearish, depth = _spy_market_down_signal(data, spy, ma_window)
-            if bearish and depth >= config.SHORT_DEEP_BEAR_MIN_DEPTH:
-                result["allowed"] = True
-                result["trigger_reason"] = (
-                    f"RHYME_E|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
-                )
-                return result
-            result["reject"] = f"rhyme_e_depth_{depth:.3f}"
+        if bubble < bubble_min_e:
+            result["reject"] = "bubble_low"
             return result
-        result["reject"] = f"rhyme_e_bubble_{bubble:.2f}"
+        bearish, depth = _spy_market_down_signal(data, spy, ma_window)
+        if bearish and depth >= config.SHORT_DEEP_BEAR_MIN_DEPTH:
+            result["allowed"] = True
+            result["trigger_reason"] = (
+                f"RHYME_E|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
+            )
+            return result
+        result["reject"] = "depth_low"
         return result
 
     result["reject"] = "regime_not_bear"

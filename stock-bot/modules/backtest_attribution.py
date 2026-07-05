@@ -112,7 +112,7 @@ class BacktestAttribution:
         if trigger.get("allowed"):
             self.short_trigger_fires += 1
         else:
-            reject = str(trigger.get("reject") or "unknown")
+            reject = normalize_short_reject(str(trigger.get("reject") or "unknown"))
             self.short_trigger_rejects[reject] += 1
 
     def record_short_entry(self, trigger_reason: str) -> None:
@@ -816,6 +816,16 @@ def format_crypto_banner(attribution: dict | None) -> str | None:
     return line
 
 
+def normalize_short_reject(reason: str) -> str:
+    """Stable reject tokens for attribution and logs."""
+    r = (reason or "unknown").strip()
+    if r.startswith("rhyme_e_bubble_") or r.startswith("rhyme_b_bubble_"):
+        return "bubble_low"
+    if r.startswith("rhyme_e_depth_") or r.startswith("rhyme_b_depth_"):
+        return "depth_low"
+    return r.split(":")[0][:32] or "unknown"
+
+
 def format_short_trigger_log(trigger: dict) -> str:
     """Human-readable line when a protective short gate passes."""
     if not trigger.get("allowed"):
@@ -828,6 +838,16 @@ def format_short_trigger_log(trigger: dict) -> str:
     return f"Short triggered: {regime} + {vix} + {exh} (bubble={bubble:.2f})"
 
 
+def format_short_scan_log(trigger: dict) -> str:
+    """Human-readable line for every bear-regime short scan (pass or reject)."""
+    path = str(trigger.get("regime_path") or trigger.get("regime") or "SHORT")[:40]
+    if trigger.get("allowed"):
+        return format_short_trigger_log(trigger)
+    reject = normalize_short_reject(str(trigger.get("reject") or "unknown"))
+    bubble = float(trigger.get("bubble_score") or 0.0)
+    return f"Short scan rejected: {path} — {reject} (bubble={bubble:.2f})"
+
+
 def format_short_trigger_summary(os_data: dict) -> str:
     """Compact fires/scans + top reject and fire reasons for reports."""
     scans = int(os_data.get("trigger_scans", 0) or 0)
@@ -837,7 +857,7 @@ def format_short_trigger_summary(os_data: dict) -> str:
     parts = [f"Short fires: {fires}/{scans} scans"]
     rejects = os_data.get("trigger_rejects") or {}
     if rejects:
-        top_rej = sorted(rejects.items(), key=lambda x: -x[1])[:3]
+        top_rej = sorted(rejects.items(), key=lambda x: -x[1])[:5]
         parts.append("Rejects: " + ", ".join(f"{k}={v}" for k, v in top_rej))
     triggers = os_data.get("entry_triggers") or {}
     if triggers:
@@ -860,6 +880,8 @@ def format_opportunistic_short_banner(attribution: dict | None = None) -> str | 
     lo = config.effective_protective_short_min_pct()
     hi = config.effective_protective_short_max_pct()
     line = f"Protective Shorts: ON ({lo:.0%}-{hi:.0%}, selective triggers)"
+    if not config.effective_short_rhyme_e_exhaustion_required():
+        line += " | RHYME_E waiver active"
     if trips or abs(pnl) > 1e-9:
         line += f" | {trips} trips PnL ${pnl:+.2f}"
     wr = float(os_data.get("win_rate_pct", 0) or sleeve.get("win_rate_pct", 0) or 0)
@@ -870,7 +892,7 @@ def format_opportunistic_short_banner(attribution: dict | None = None) -> str | 
     if trips:
         line += f" | win {wr:.0f}% | hold {avg_hold:.0f}b"
     if scans:
-        line += f" | triggers {fires}/{scans} | entries {entries}"
+        line += f" | entries {entries}"
         summary = format_short_trigger_summary(os_data)
         if summary:
             line += f" | {summary}"

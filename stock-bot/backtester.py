@@ -2664,6 +2664,14 @@ _LEGACY_V12_REALISTIC_RESEARCH = {
 }
 
 
+_LEGACY_V13_REALISTIC_RESEARCH = {
+    "SECTOR_SHORT_ENABLED": False,
+    "PROTECTIVE_SHORT_MIN_PCT": 0.12,
+    "SHORT_PROFIT_TARGET_PCT": 0.03,
+    "SHORT_STOP_LOSS_PCT": 0.02,
+}
+
+
 def _realistic_research_config_snapshot() -> dict[str, float | int | bool]:
     return {
         "PAPER_STAT_ARB_MIN_CORR": float(config.PAPER_STAT_ARB_MIN_CORR),
@@ -2675,8 +2683,22 @@ def _realistic_research_config_snapshot() -> dict[str, float | int | bool]:
         "DYNAMIC_CORE_ENABLED": bool(config.DYNAMIC_CORE_ENABLED),
         "CORE_ALLOCATOR_LOCKED": bool(config.CORE_ALLOCATOR_LOCKED),
         "PROTECTIVE_SHORT_MAX_PCT": float(config.PROTECTIVE_SHORT_MAX_PCT),
+        "PROTECTIVE_SHORT_MIN_PCT": float(config.PROTECTIVE_SHORT_MIN_PCT),
         "SHORT_RHYME_E_ENABLED": bool(config.SHORT_RHYME_E_ENABLED),
+        "SECTOR_SHORT_ENABLED": bool(config.SECTOR_SHORT_ENABLED),
+        "SHORT_PROFIT_TARGET_PCT": float(config.SHORT_PROFIT_TARGET_PCT),
+        "SHORT_STOP_LOSS_PCT": float(config.SHORT_STOP_LOSS_PCT),
     }
+
+
+def _realistic_research_v13_config_snapshot() -> dict[str, float | int | bool]:
+    snap = _realistic_research_config_snapshot()
+    snap.update(_LEGACY_V13_REALISTIC_RESEARCH)
+    return snap
+
+
+def _realistic_research_v14_config_snapshot() -> dict[str, float | int | bool]:
+    return _realistic_research_config_snapshot()
 
 
 def _apply_realistic_research_config(values: dict[str, float | int | bool]) -> None:
@@ -2701,7 +2723,113 @@ def _v13_validation_metrics(result: dict) -> dict[str, float | int]:
     except Exception:
         base["core_vti_pct"] = 0.40
         base["core_choice"] = "spy"
+    base["short_fires"] = int(os_data.get("trigger_fires", 0) or 0)
+    base["short_scans"] = int(os_data.get("trigger_scans", 0) or 0)
     return base
+
+
+def run_realistic_research_v14_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare Realistic Research v1.3 vs v1.4 (sector shorts, RR 1.6, 8-15% gross)."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Realistic Research v1.3", _realistic_research_v13_config_snapshot()),
+        ("Realistic Research v1.4", _realistic_research_v14_config_snapshot()),
+    ]
+    print("--- REALISTIC RESEARCH v1.4 VALIDATION (v1.3 vs v1.4) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'SA PnL':>9} {'Short$':>8} {'Trips':>6} {'Fires':>6} {'Core%':>6}"
+    )
+    print("-" * 96)
+
+    saved = _realistic_research_config_snapshot()
+    saved_short = config.PROTECTIVE_SHORT_ENABLED
+    original_enforce = config.enforce_realistic_research_profile
+    results: list[tuple[str, dict]] = []
+
+    def _skip_profile_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_profile_enforce
+        for label, cfg in configs:
+            _apply_realistic_research_config(cfg)
+            config.PROTECTIVE_SHORT_ENABLED = True
+            try:
+                from modules.core_allocator import reset_core_allocator_state
+
+                reset_core_allocator_state()
+            except ImportError:
+                pass
+            result = run_backtest(data, track_metrics=True, **base_kwargs)
+            m = _v13_validation_metrics(result)
+            att = result.get("attribution") or {}
+            os_att = att.get("opportunistic_short") or {}
+            sleeve = (att.get("sleeves") or {}).get("opportunistic_short") or {}
+            m["short_trips"] = int(sleeve.get("round_trips", 0) or 0)
+            triggers = os_att.get("entry_triggers") or {}
+            if triggers:
+                top = sorted(triggers.items(), key=lambda x: -x[1])[:2]
+                m["short_reasons"] = ", ".join(f"{k.split('|')[0]}×{v}" for k, v in top)
+            else:
+                m["short_reasons"] = "—"
+            results.append((label, m))
+            print(
+                f"{label:<28} "
+                f"{m['return_pct']:>+7.2f}% "
+                f"{m['sharpe']:>7.2f} "
+                f"{m['max_dd']:>7.2f}% "
+                f"{m['stat_arb_pnl']:>+9.2f} "
+                f"{m['short_pnl']:>+8.2f} "
+                f"{m['short_trips']:>6} "
+                f"{m['short_fires']:>6} "
+                f"{m['core_vti_pct']*100:>5.0f}%"
+            )
+            from modules.backtest_attribution import format_short_trigger_summary
+
+            trig = format_short_trigger_summary(os_att)
+            if trig:
+                print(f"  {trig}")
+    finally:
+        config.enforce_realistic_research_profile = original_enforce
+        _apply_realistic_research_config(saved)
+        config.PROTECTIVE_SHORT_ENABLED = saved_short
+        original_enforce()
+
+    print("-" * 96)
+    if len(results) == 2:
+        _, m0 = results[0]
+        _, m1 = results[1]
+        print(
+            f"Delta (v1.4 - v1.3): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+            f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+            f"short PnL ${m1['short_pnl'] - m0['short_pnl']:+.2f} | "
+            f"fires {m1['short_fires']} / scans {m1['short_scans']}"
+        )
 
 
 def run_realistic_research_v13_compare(days=None, refresh=False, use_max=False) -> None:
@@ -2724,7 +2852,7 @@ def run_realistic_research_v13_compare(days=None, refresh=False, use_max=False) 
     }
     configs = [
         ("Realistic Research v1.2", _LEGACY_V12_REALISTIC_RESEARCH),
-        ("Realistic Research v1.3", _realistic_research_config_snapshot()),
+        ("Realistic Research v1.3", _realistic_research_v13_config_snapshot()),
     ]
     print("--- REALISTIC RESEARCH v1.3 VALIDATION (v1.2 vs v1.3) ---")
     print(
@@ -5718,6 +5846,11 @@ if __name__ == "__main__":
         help="Starting equity for small-account / live-thinking sim (default: SMALL_ACCOUNT_BACKTEST_EQUITY or 300 with --with-news)",
     )
     parser.add_argument(
+        "--compare-realistic-research-v14",
+        action="store_true",
+        help="Compare Realistic Research v1.3 vs v1.4 (sector shorts, RR 1.6, 8-15%% gross)",
+    )
+    parser.add_argument(
         "--compare-realistic-research-v13",
         action="store_true",
         help="Compare Realistic Research v1.2 vs v1.3 (stat arb, shorts, core, monitoring)",
@@ -5986,6 +6119,13 @@ if __name__ == "__main__":
             print("--compare-universe-size requires --paper-aggressive")
             sys.exit(1)
         run_universe_size_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_realistic_research_v14:
+        if not args.paper_aggressive:
+            print("--compare-realistic-research-v14 requires --paper-aggressive")
+            sys.exit(1)
+        run_realistic_research_v14_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_realistic_research_v13:
