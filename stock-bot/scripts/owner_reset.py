@@ -64,6 +64,71 @@ def _force_clear_all_pids(username: str) -> None:
             print(f"Cleared PID file for {book_id}", flush=True)
 
 
+def _live_preserve_pids(username: str) -> set[int]:
+    """PIDs to preserve during paper-only orphan sweep (live book + parent chain)."""
+    from modules.portal_bot import _parent_pid, _process_cmdline, bot_pid
+
+    preserve: set[int] = set()
+    live = bot_pid(username, "alpaca_live")
+    if live is None:
+        return preserve
+    preserve.add(live)
+    walk = live
+    for _ in range(32):
+        parent = _parent_pid(walk)
+        if parent is None:
+            break
+        cmd = _process_cmdline(parent) or ""
+        if "run_all.py" not in cmd:
+            break
+        preserve.add(parent)
+        walk = parent
+    return preserve
+
+
+def _clear_paper_pid_only(username: str) -> None:
+    from modules.portal_bot import book_pid_path
+
+    path = book_pid_path(username, "alpaca_paper")
+    if path.is_file():
+        path.unlink(missing_ok=True)
+
+
+def clean_restart_paper_only(username: str) -> tuple[bool, str]:
+    """Kill orphans (preserve live), start paper bot only — no live restart or dashboard."""
+    from modules.portal_bot import (
+        bot_running,
+        start_bot,
+        stop_bot,
+        stop_orphan_project_bots,
+    )
+    from modules.portal_paths import bind_project_root, has_alpaca_config
+
+    bind_project_root(ROOT)
+
+    if not has_alpaca_config(username, "alpaca_paper"):
+        return False, "alpaca_paper: Alpaca keys missing in portal — aborting (paper only)."
+
+    _clear_paper_pid_only(username)
+
+    if bot_running(username, "alpaca_paper"):
+        _ok, stop_msg = stop_bot(username, "alpaca_paper")
+        if not _ok:
+            return False, f"stop paper: {stop_msg}"
+        time.sleep(1.0)
+
+    preserve = _live_preserve_pids(username)
+    stopped, orphan_msg = stop_orphan_project_bots(
+        preserve_pids=preserve, username=username
+    )
+    if stopped:
+        time.sleep(1.0)
+
+    ok, msg = start_bot(username, "alpaca_paper", skip_orphan_stop=True)
+    detail = orphan_msg if orphan_msg else "Paper bot started."
+    return ok, f"{msg} | {detail}" if ok else msg
+
+
 def _default_username() -> str:
     prefs = ROOT / "data" / "portal" / "desktop_prefs.json"
     if prefs.is_file():
