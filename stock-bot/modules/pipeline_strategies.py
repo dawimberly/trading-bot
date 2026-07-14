@@ -1,10 +1,14 @@
 """Crypto pair and equity MA50 strategies shared by run_all.py and backtester.py."""
 
+import logging
+
 import numpy as np
 
 import config
 from modules import deployment_sizing
 from modules.crypto_universe import crypto_trading_columns
+
+logger = logging.getLogger(__name__)
 
 PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
 
@@ -66,6 +70,18 @@ CRYPTO_Z_THRESHOLD = 2.0
 MAX_CRYPTO_TRADES = 2
 MAX_EQUITY_TRADES = 1
 COOLDOWN_SECONDS = 3600
+
+
+def load_pipeline_data(*, interval: str = "1d", days=None, force_refresh: bool = False):
+    """Close-price matrix for pipeline sleeves, RVOL scans, and startup banners."""
+    try:
+        from modules.real_time_data import load_live_close_matrix
+
+        return load_live_close_matrix(interval=interval, days=days, force_refresh=force_refresh)
+    except ImportError:
+        from modules.data_loader import load_close_matrix
+
+        return load_close_matrix(interval=interval, days=days, force_refresh=force_refresh)
 
 
 PAIR_FILL_WAIT = 5.0
@@ -189,12 +205,12 @@ def _pair_leg_notional(total_notional, executor, *, sleeve_attempted: bool = Fal
         if total_notional is None:
             return None, None
     leg = round(float(total_notional) / 2, 2)
-    min_n = config.MIN_NOTIONAL
+    min_n = config.effective_min_notional()
     if hasattr(executor, "_get_account"):
         try:
             min_n = config.effective_min_notional(float(executor._get_account().equity))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("equity-scaled min notional unavailable, using default: %s", exc)
     if leg < min_n:
         return None, None
     return leg, leg
@@ -347,7 +363,9 @@ def equity_pair_trade_intents(
     """Long strongest / short weakest NYSE name when spread z-score fires (paper only)."""
     if not config.effective_equity_pairs_enabled():
         return []
-    if regime_entries_paused(regime, data) or yield_gated:
+    if regime_entries_paused(regime, data) or config.effective_yield_gate(
+        yield_gated, regime=regime
+    ):
         return []
 
     equity_cols = _nyse_equity_columns(data)
@@ -573,20 +591,111 @@ def run_crypto_strategy(
 
 def _nyse_equity_columns(data):
     """NYSE momentum sleeve symbols (static columns or dynamic screener)."""
-    return config.nyse_momentum_universe(data.columns)
+    # Live Profile A: never use screener / USE_DYNAMIC_UNIVERSE (fixed pool only).
+    live_book = not config.PAPER_TRADING and not config.paper_only_sleeves_active()
+    if live_book:
+        allowed = set(config.get_nyse_universe_fixed())
+        cols = [c for c in data.columns if c in allowed]
+    elif config.USE_DYNAMIC_UNIVERSE:
+        # Paper: fixed ∪ screener via get_nyse_universe(); intersect with loaded bars.
+        allowed = set(config.get_nyse_universe())
+        cols = [
+            c
+            for c in data.columns
+            if c in allowed and config._nyse_eligible_symbol(c)
+        ]
+        if not cols:
+            cols = config.nyse_momentum_universe(data.columns)
+    else:
+        cols = config.nyse_momentum_universe(data.columns)
+    if config.effective_rvol_scanner_enabled():
+        try:
+            from modules.volume_analysis import apply_rvol_universe_boost
+
+            cols = apply_rvol_universe_boost(cols, data)
+        except Exception as exc:
+            logger.debug("RVOL universe boost skipped: %s", exc)
+    return cols
 
 
-def _equity_momentum_candidates(data, equity_cols):
+def _equity_momentum_candidates(data, equity_cols, executor=None):
     rows = []
+    # v1.5.1: allow entries within a small band below MA (flexibility) to reduce drag.
+    tol = max(0.0, float(getattr(config, "NYSE_MA_ENTRY_TOLERANCE_PCT", 0.0)))
+    entry_floor = 1.0 - tol
     for symbol in equity_cols:
         prices = data[symbol].dropna()
         if len(prices) < 20:
             continue
         ma50 = prices.rolling(window=min(50, len(prices))).mean().iloc[-1]
         current = prices.iloc[-1]
-        if current > ma50 and ma50 > 0:
+        if ma50 > 0 and current > ma50 * entry_floor:
             rows.append((current / ma50 - 1, symbol))
     rows.sort(reverse=True)
+    # v1.5.1: amplify scanner-driven rank boosts (RVOL/ORB/Catalyst) so high-signal
+    # names rise in the momentum ranking without changing base momentum economics.
+    #
+    # EXTENSION POINT — adding a new scanner/signal rank boost:
+    #   Follow the guarded block pattern below: gate on a config.effective_*()
+    #   flag, import the boost fn lazily inside the try (avoids import cycles and
+    #   keeps the scanner optional), add `score + boost(sym, data) * rank_w`, then
+    #   re-sort. Always keep the `except -> logger.debug` so a broken scanner
+    #   degrades to base momentum instead of killing the whole ranking pass.
+    rank_w = float(getattr(config, "NYSE_RANK_SCANNER_WEIGHT", 1.0))
+    if config.effective_insider_monitor_enabled():
+        try:
+            from modules.insider_monitor import momentum_rank_boost
+
+            rows = [
+                (score + momentum_rank_boost(sym, executor), sym) for score, sym in rows
+            ]
+            rows.sort(reverse=True)
+        except Exception as exc:
+            logger.debug("insider momentum rank boost skipped: %s", exc)
+    if config.effective_rvol_scanner_enabled():
+        try:
+            from modules.volume_analysis import rvol_momentum_rank_boost
+
+            rows = [
+                (score + rvol_momentum_rank_boost(sym, data) * rank_w, sym)
+                for score, sym in rows
+            ]
+            rows.sort(reverse=True)
+        except Exception as exc:
+            logger.debug("RVOL momentum rank boost skipped: %s", exc)
+    if config.effective_orb_enabled():
+        try:
+            from modules.orb_strategy import orb_momentum_rank_boost
+
+            rows = [
+                (score + orb_momentum_rank_boost(sym, data) * rank_w, sym)
+                for score, sym in rows
+            ]
+            rows.sort(reverse=True)
+        except Exception as exc:
+            logger.debug("ORB momentum rank boost skipped: %s", exc)
+    if config.effective_catalyst_scoring_enabled():
+        try:
+            from modules.catalyst_scoring import catalyst_momentum_rank_boost
+
+            rows = [
+                (score + catalyst_momentum_rank_boost(sym, data) * rank_w, sym)
+                for score, sym in rows
+            ]
+            rows.sort(reverse=True)
+        except Exception as exc:
+            logger.debug("catalyst momentum rank boost skipped: %s", exc)
+    if config.effective_multi_timeframe_enabled():
+        try:
+            from modules.multi_timeframe import multi_timeframe_momentum_rank_boost
+
+            rows = [
+                (score + multi_timeframe_momentum_rank_boost(sym, data), sym)
+                for score, sym in rows
+            ]
+            rows.sort(reverse=True)
+        except Exception as exc:
+            logger.debug("multi-timeframe momentum rank boost skipped: %s", exc)
     return [s for _, s in rows]
 
 
@@ -616,7 +725,9 @@ def _spy_vs_equity_metrics(data, symbol, lookback=None):
 
 
 def _spy_sleeve_active(data, *, yield_gated=False, regime=None):
-    if regime_entries_paused(regime, data) or yield_gated:
+    if regime_entries_paused(regime, data) or config.effective_yield_gate(
+        yield_gated, regime=regime
+    ):
         return False
     bullish, _ = _spy_market_up_signal(data, config.SPY_BOT_SYMBOL, config.SPY_MA_WINDOW)
     return bullish
@@ -688,8 +799,9 @@ def _equity_momentum_ranked(
     *,
     yield_gated=False,
     regime=None,
+    executor=None,
 ):
-    ranked = _equity_momentum_candidates(data, equity_cols)
+    ranked = _equity_momentum_candidates(data, equity_cols, executor=executor)
     if not ranked:
         return ranked
     if config.effective_paper_dynamic_universe_strict():
@@ -729,7 +841,8 @@ def _holds_symbol(executor, symbol):
             config.normalize_symbol(p.symbol) == target
             for p in executor.client.get_all_positions()
         )
-    except Exception:
+    except Exception as exc:
+        logger.debug("position lookup via broker failed for %s: %s", target, exc)
         return False
 
 
@@ -757,7 +870,9 @@ def _spy_buy_intent(
 ):
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
-    if regime_entries_paused(regime, data) or yield_gated:
+    if regime_entries_paused(regime, data) or config.effective_yield_gate(
+        yield_gated, regime=regime
+    ):
         return False
     bullish, _ = _spy_market_up_signal(data, symbol, ma_window)
     if not bullish:
@@ -857,13 +972,23 @@ def resolve_cycle_deploy(
     rooms = {}
     spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
     crypto_cap = config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
-    nyse_cap = config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT)
+    nyse_cap = config.effective_nyse_sleeve_cap_pct()
+    if hasattr(executor, "_get_account"):
+        try:
+            acct = executor._get_account()
+            eq = float(acct.equity)
+            ca = float(acct.cash)
+            nyse_cap = config.effective_nyse_sleeve_cap_pct(
+                equity=eq, cash=ca
+            )
+        except Exception as exc:
+            logger.debug("NYSE cap account probe failed; using default cap: %s", exc)
 
     if hasattr(executor, "portfolio"):
         equity = executor.portfolio.equity(executor.prices)
     else:
         equity = float(executor._get_account().equity)
-    min_n = config.effective_min_notional(equity)
+    room_min = config.effective_no_room_min_notional(equity)
 
     if market_open and _spy_buy_intent(
         data,
@@ -875,7 +1000,7 @@ def resolve_cycle_deploy(
         yield_gated=yield_gated,
     ):
         room = _sleeve_room(executor, spy_cap, executor.spy_sleeve_value)
-        if room >= min_n:
+        if room >= room_min:
             rooms["spy"] = room
 
     if (
@@ -892,7 +1017,7 @@ def resolve_cycle_deploy(
     )
     ):
         room = _sleeve_room(executor, crypto_cap, executor.crypto_sleeve_value)
-        if room >= min_n:
+        if room >= room_min:
             rooms["crypto"] = room
 
     if market_open and _nyse_buy_intent(
@@ -905,7 +1030,7 @@ def resolve_cycle_deploy(
         yield_gated=yield_gated,
     ):
         room = _sleeve_room(executor, nyse_cap, executor.nyse_sleeve_value)
-        if room >= min_n:
+        if room >= room_min:
             rooms["nyse"] = room
 
     if len(rooms) < 2:
@@ -988,7 +1113,7 @@ def run_spy_strategy(
     ma_window = ma_window or config.SPY_MA_WINDOW
     if regime_entries_paused(regime, data):
         return 0
-    if yield_gated:
+    if config.effective_yield_gate(yield_gated, regime=regime):
         return 0
     bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
     if not bullish:
@@ -1045,7 +1170,7 @@ def run_equity_strategy(
         return 0
     equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
-        data, equity_cols, yield_gated=yield_gated, regime=regime
+        data, equity_cols, yield_gated=yield_gated, regime=regime, executor=executor
     )
     if not ranked:
         return 0
@@ -1065,6 +1190,13 @@ def run_equity_strategy(
             cooldown_bars=cooldown_bars,
         ):
             continue
+        try:
+            from modules.strategy_performance import classify_nyse_entry_tags, format_reason_with_tags
+
+            boost_tags = classify_nyse_entry_tags(symbol, data)
+            pair_key = format_reason_with_tags(pair_key, boost_tags)
+        except Exception as exc:
+            logger.debug("NYSE entry tag classification skipped for %s: %s", symbol, exc)
         notional = None
         if hasattr(executor, "compute_nyse_notional"):
             notional = executor.compute_nyse_notional()
@@ -1082,11 +1214,65 @@ def run_equity_strategy(
                 notional = round(float(notional) * vol_scale, 2)
                 if notional < min_n:
                     continue
+            if config.effective_conviction_sizing_enabled():
+                from modules.risk_management import (
+                    compute_conviction_score,
+                    scale_notional_by_conviction,
+                )
+
+                equity = float(executor._get_account().equity)
+                conviction = compute_conviction_score(
+                    symbol, data, regime, sleeve="nyse"
+                )
+                notional = scale_notional_by_conviction(
+                    notional,
+                    equity,
+                    conviction,
+                    symbol=symbol,
+                    data=data,
+                )
+                if notional is None or notional < min_n:
+                    continue
+            if config.effective_correlation_guard_enabled():
+                from modules.risk_management import apply_correlation_guard_notional
+
+                notional = apply_correlation_guard_notional(
+                    notional,
+                    float(executor._get_account().equity),
+                    executor,
+                    data,
+                    symbol=symbol,
+                )
+                if notional is None or notional < min_n:
+                    continue
+            if config.effective_insider_signal_boost_enabled():
+                try:
+                    from modules.insider_signal_handler import cap_insider_boost_notional
+
+                    notional = cap_insider_boost_notional(
+                        symbol,
+                        notional,
+                        float(executor._get_account().equity),
+                        executor,
+                    )
+                    if notional is None or notional < min_n:
+                        continue
+                except Exception as exc:
+                    logger.debug("insider notional cap skipped for %s: %s", symbol, exc)
         order = executor.execute_order(
             symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
         )
         if not _count_if_filled(executor, order):
             continue
+        if config.effective_insider_signal_boost_enabled():
+            try:
+                from modules.insider_signal_handler import get_boost_snapshot, record_insider_boost_trade
+
+                snap = get_boost_snapshot()
+                if float((snap.get("momentum_boosts") or {}).get(symbol, 0)) > 0:
+                    record_insider_boost_trade("momentum")
+            except Exception as exc:
+                logger.debug("insider boost trade record skipped: %s", exc)
         pair_cooldown[pair_key] = now
         trades += 1
         if portfolio_manager:
@@ -1107,7 +1293,7 @@ def run_nyse_momentum_and_stat_arb(
     *,
     cooldown_seconds=COOLDOWN_SECONDS,
     cooldown_bars=None,
-    max_trades=MAX_EQUITY_TRADES,
+    max_trades=None,
     log_fn=None,
     portfolio_manager=None,
     yield_gated=False,
@@ -1116,6 +1302,11 @@ def run_nyse_momentum_and_stat_arb(
     full_data=None,
 ) -> int:
     """NYSE MA50 momentum plus stat-arb pairs (default paper path when PAPER_EQUITY_PAIRS=false)."""
+    if max_trades is None:
+        try:
+            max_trades = config.effective_max_equity_trades()
+        except Exception:
+            max_trades = MAX_EQUITY_TRADES
     trades = run_equity_strategy(
         data,
         executor,
@@ -1163,7 +1354,9 @@ def spy_mirror_intent(
     """Intent to mirror SPY sleeve buy on Kraken (QQQ/SPY .EQ), or None."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
-    if regime_entries_paused(regime, data) or yield_gated:
+    if regime_entries_paused(regime, data) or config.effective_yield_gate(
+        yield_gated, regime=regime
+    ):
         return None
     bullish, momentum = _spy_market_up_signal(data, symbol, ma_window)
     if not bullish:
@@ -1194,7 +1387,7 @@ def nyse_mirror_intent(
         return None
     equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
-        data, equity_cols, yield_gated=yield_gated, regime=regime
+        data, equity_cols, yield_gated=yield_gated, regime=regime, executor=executor
     )
     if not ranked:
         return None
@@ -1302,6 +1495,24 @@ def short_vix_spike_confirmed(
     return False, "vix_low", vix
 
 
+def _spy_bear_streak(data, symbol: str, bars: int | None = None) -> tuple[bool, int]:
+    """Consecutive down daily bars on symbol (most recent first)."""
+    need = bars or int(config.SHORT_RHYME_E_BEAR_STREAK_BARS)
+    if symbol not in data.columns:
+        return False, 0
+    series = data[symbol].dropna()
+    if len(series) < need + 1:
+        return False, 0
+    rets = series.pct_change().dropna()
+    streak = 0
+    for val in reversed(rets.iloc[-need:].tolist()):
+        if float(val) < 0:
+            streak += 1
+        else:
+            break
+    return streak >= need, streak
+
+
 def evaluate_short_entry_triggers(
     data,
     regime: str,
@@ -1310,7 +1521,7 @@ def evaluate_short_entry_triggers(
     vol_score: float | None = None,
 ) -> dict:
     """Protective shorts — RHYME_B: VIX + exhaustion + depth; RHYME_E: VIX + bubble + depth (exhaustion optional)."""
-    from modules.opportunistic_short_sleeve import bubble_risk_score, _spy_market_down_signal
+    from modules.bubble_risk import compute_bubble_risk
 
     reg = str(regime or "")
     spy = config.SPY_BOT_SYMBOL
@@ -1322,9 +1533,13 @@ def evaluate_short_entry_triggers(
         "reject": "unknown",
         "trigger_reason": "",
         "bubble_score": 0.0,
+        "bubble_score_100": 0.0,
+        "buffett_ratio_pct": None,
+        "buffett_signal": "",
         "vix_reason": "",
         "exhaustion_reason": "",
         "regime_path": "",
+        "bear_streak": 0,
     }
     if not config.effective_opportunistic_short_enabled():
         result["reject"] = "shorts_disabled"
@@ -1337,8 +1552,15 @@ def evaluate_short_entry_triggers(
         return result
 
     result["regime_path"] = "RHYME_B" if bear_b else "RHYME_E"
-    bubble = bubble_risk_score(data, regime, volatility=volatility, vol_score=vol_score)
+    bubble_ctx = compute_bubble_risk(data, regime, volatility=volatility, vol_score=vol_score)
+    bubble = float(bubble_ctx["score_normalized"])
     result["bubble_score"] = bubble
+    result["bubble_score_100"] = float(bubble_ctx["score_100"])
+    buff = bubble_ctx.get("buffett") or {}
+    result["buffett_ratio_pct"] = buff.get("ratio_pct")
+    result["buffett_signal"] = buff.get("signal") or ""
+
+    from modules.opportunistic_short_sleeve import _spy_market_down_signal
 
     vix_ok, vix_reason, _vix = short_vix_spike_confirmed(
         data, volatility=volatility, vol_score=vol_score
@@ -1352,6 +1574,18 @@ def evaluate_short_entry_triggers(
         if bubble < bubble_min_e:
             result["reject"] = "bubble_low"
             return result
+        streak_ok, streak = _spy_bear_streak(data, spy)
+        result["bear_streak"] = streak
+        vix_waiver = (
+            _vix is not None
+            and float(_vix) >= float(config.SHORT_RHYME_E_BEAR_STREAK_VIX_WAIVER)
+        )
+        min_waiver = int(config.SHORT_RHYME_E_WAIVER_MIN_STREAK)
+        if not streak_ok:
+            if not vix_waiver or streak < min_waiver:
+                result["reject"] = "bear_streak"
+                return result
+        result["vix_waiver_active"] = bool(vix_waiver and not streak_ok)
         bearish, depth = _spy_market_down_signal(data, spy, ma_window)
         if not bearish or depth < config.SHORT_DEEP_BEAR_MIN_DEPTH:
             result["reject"] = "depth_low"
@@ -1359,7 +1593,7 @@ def evaluate_short_entry_triggers(
         result["allowed"] = True
         result["exhaustion_reason"] = "waived"
         result["trigger_reason"] = (
-            f"RHYME_E|waived|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
+            f"RHYME_E|waived|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}|streak={streak}"
         )
         return result
 
@@ -1384,11 +1618,23 @@ def evaluate_short_entry_triggers(
         if bubble < bubble_min_e:
             result["reject"] = "bubble_low"
             return result
+        streak_ok, streak = _spy_bear_streak(data, spy)
+        result["bear_streak"] = streak
+        vix_waiver = (
+            _vix is not None
+            and float(_vix) >= float(config.SHORT_RHYME_E_BEAR_STREAK_VIX_WAIVER)
+        )
+        min_waiver = int(config.SHORT_RHYME_E_WAIVER_MIN_STREAK)
+        if not streak_ok:
+            if not vix_waiver or streak < min_waiver:
+                result["reject"] = "bear_streak"
+                return result
+        result["vix_waiver_active"] = bool(vix_waiver and not streak_ok)
         bearish, depth = _spy_market_down_signal(data, spy, ma_window)
         if bearish and depth >= config.SHORT_DEEP_BEAR_MIN_DEPTH:
             result["allowed"] = True
             result["trigger_reason"] = (
-                f"RHYME_E|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}"
+                f"RHYME_E|{exh_reason}|{vix_reason}|bubble={bubble:.2f}|depth={depth:.3f}|streak={streak}"
             )
             return result
         result["reject"] = "depth_low"
@@ -1420,6 +1666,7 @@ def summarize_entry_skip_reason(
     wisdom_paused=False,
 ) -> str:
     """Return a token describing why no entries fired this cycle (for skip funnel)."""
+    yield_gated = config.effective_yield_gate(yield_gated, regime=regime)
     if wisdom_paused and not config.effective_paper_soft_pause():
         return "wisdom_paused"
     if regime_entries_paused(regime, data):
@@ -1460,14 +1707,22 @@ def summarize_entry_skip_reason(
             cooldown_bars=cooldown_bars,
         ):
             return "nyse_cooldown"
-        room = _sleeve_room(
-            executor, config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT), executor.nyse_sleeve_value
-        )
         if hasattr(executor, "portfolio"):
-            min_n = config.effective_min_notional(executor.portfolio.equity(executor.prices))
+            equity = executor.portfolio.equity(executor.prices)
+            cash = None
         else:
-            min_n = config.effective_min_notional(float(executor._get_account().equity))
-        if room < min_n:
+            acct = executor._get_account()
+            equity = float(acct.equity)
+            cash = float(acct.cash)
+        if cash is None and hasattr(executor, "_get_account"):
+            try:
+                cash = float(executor._get_account().cash)
+            except Exception:
+                cash = None
+        nyse_cap = config.effective_nyse_sleeve_cap_pct(equity=equity, cash=cash)
+        room = _sleeve_room(executor, nyse_cap, executor.nyse_sleeve_value)
+        room_min = config.effective_no_room_min_notional(equity, cash=cash)
+        if room < room_min:
             return "nyse_no_room"
         return "signals_ok"
     if _spy_buy_intent(

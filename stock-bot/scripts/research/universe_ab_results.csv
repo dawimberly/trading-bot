@@ -1,0 +1,4 @@
+universe,n_candidates,n_in_data,total_return_pct,sharpe,max_drawdown_pct,win_rate_pct,total_trades,avg_pnl_per_trade,best_month,worst_month,nyse_signals,top5_tickers
+Fixed,29,29,17.56,0.97,-12.78,40.1,45,0.39,2026-04 +16.1%,2026-03 -7.6%,7,LMT:158.00; MU:111.00; GS:103.00; AAPL:101.00; UNH:100.00
+Screener,75,75,20.1,1.23,-12.06,36.9,43,0.467,2026-04 +11.8%,2026-03 -7.1%,5,UMC:228.00; MTRN:224.00; CNC:220.00; TWST:220.00; VSXY:216.00
+Combined,103,103,20.75,1.25,-11.97,37.2,44,0.472,2026-04 +12.3%,2026-03 -7.0%,5,UMC:228.00; MTRN:224.00; CNC:220.00; TWST:220.00; VSXY:216.00

@@ -23,7 +23,6 @@ from backtest_crypto_vol import (
     STOP_LOSS_PCT,
     TAKE_PROFIT_PCT,
     TIMEOUT_BARS,
-    UNIVERSE_V4,
     enrich,
     entry_signal,
     fetch_alpaca_hourly,
@@ -40,8 +39,13 @@ HEARTBEAT_PATH = ROOT / "crypto_vol_heartbeat.json"
 JOURNAL_PATH = ROOT / "crypto_vol_journal.csv"
 COOLDOWN_PATH = ROOT / "crypto_vol_cooldown.json"
 
-# v4 universe: WIF, BONK, RENDER, SOL, AVAX (no ARB)
-UNIVERSE = UNIVERSE_V4
+# RENDER-only backtest: Sharpe 2.72 vs 1.18 on 5-coin universe (180d).
+# WIF/BONK/AVAX dropped — added noise with near-zero return contribution.
+# SOL kept as single backup for trade frequency.
+UNIVERSE = {
+    "RENDER/USD": "RENDER/USD",
+    "SOL/USD": "SOL/USD",
+}
 set_entry_params(DROP_PCT, RSI_MAX_V4, RSI_MIN_V4)
 
 CRYPTO_VOL_SYMBOLS = frozenset(
@@ -90,8 +94,24 @@ def _paper_only_blocked(*, paper_chase_context: bool = False) -> str | None:
 
 
 def _order_symbol(label: str) -> str:
-    """Universe label (WIF/USD) -> executor symbol (WIF-USD)."""
-    return config.normalize_symbol(label)
+    """Universe label (WIF/USD) -> Alpaca crypto order symbol (WIF/USD).
+
+    Keep slash form for Alpaca trading; do not normalize to WIF-USD (that form
+    is rejected when the pair is outside the main CRYPTO_TICKERS set).
+    """
+    raw = UNIVERSE.get(label, label)
+    return str(raw).replace("-", "/")
+
+
+_INVALID_CRYPTO_PAIRS: set[str] = set()
+
+
+def _mark_invalid_crypto_pair(symbol: str) -> None:
+    _INVALID_CRYPTO_PAIRS.add(str(symbol).upper())
+
+
+def _is_known_invalid_crypto_pair(symbol: str) -> bool:
+    return str(symbol).upper() in _INVALID_CRYPTO_PAIRS
 
 
 def _universe_label(sym_norm: str) -> str:
@@ -384,7 +404,24 @@ def _process_exits(
             "notes": f"exit@{exit_price:.6f}",
         }
         if not dry_run:
-            order = executor.execute_full_exit(_order_symbol(label))
+            order_sym = _order_symbol(label)
+            if _is_known_invalid_crypto_pair(order_sym):
+                logger.warning("Skipping invalid crypto pair: %s", order_sym)
+                continue
+            try:
+                order = executor.execute_full_exit(order_sym)
+            except Exception as exc:
+                _mark_invalid_crypto_pair(order_sym)
+                logger.warning("Skipping invalid crypto pair: %s (%s)", order_sym, exc)
+                act["notes"] = f"skipped_invalid: {exc}"
+                actions.append(act)
+                _log_action(
+                    {
+                        "timestamp": now.isoformat(timespec="seconds"),
+                        **act,
+                    }
+                )
+                continue
             act["ok"] = order is not None
             actions.append(act)
             _log_action(
@@ -464,7 +501,24 @@ def _process_entries(
             ),
         }
         if not dry_run:
-            order = executor.execute_order(_order_symbol(label), "buy", notional=buy_n)
+            order_sym = _order_symbol(label)
+            if _is_known_invalid_crypto_pair(order_sym):
+                logger.warning("Skipping invalid crypto pair: %s", order_sym)
+                continue
+            try:
+                order = executor.execute_order(order_sym, "buy", notional=buy_n)
+            except Exception as exc:
+                _mark_invalid_crypto_pair(order_sym)
+                logger.warning("Skipping invalid crypto pair: %s (%s)", order_sym, exc)
+                act["notes"] = f"skipped_invalid: {exc}"
+                actions.append(act)
+                _log_action(
+                    {
+                        "timestamp": now.isoformat(timespec="seconds"),
+                        **act,
+                    }
+                )
+                continue
             act["ok"] = order is not None
             if act["ok"]:
                 executor.refresh_cache()
@@ -472,6 +526,9 @@ def _process_entries(
                 cash = float(executor.client.get_account().cash)
                 open_count += 1
                 held.add(sym_norm)
+            elif order is None:
+                # execute_order may return None on soft reject; still continue.
+                pass
             actions.append(act)
             _log_action(
                 {

@@ -11,6 +11,7 @@ Satellite research scripts (shared helpers in modules/backtest_common.py):
 
 Run:  python backtester.py
        python backtester.py --days 180
+       python backtester.py --days 365 --compare-universe
        python backtester.py --days 365 --paper-aggressive --compare-final
        python backtester.py --days 365 --paper-aggressive --fast-mode
        python backtester.py --days 365 --deep-history --max-years 20
@@ -198,6 +199,12 @@ class BacktestExecutor:
         self._regime_spy_scale = float(spy_scale)
         self._regime_nyse_scale = float(nyse_scale)
 
+    def set_portfolio_constructor_scales(
+        self, *, spy_scale: float = 1.0, nyse_scale: float = 1.0
+    ) -> None:
+        self._pc_spy_scale = float(spy_scale)
+        self._pc_nyse_scale = float(nyse_scale)
+
     def set_current_regime(self, regime: str) -> None:
         self._current_regime = str(regime or "")
 
@@ -371,9 +378,11 @@ class BacktestExecutor:
         if sleeve == "spy":
             scale *= getattr(self, "_regime_spy_scale", 1.0)
             scale *= getattr(self, "_thinking_spy_scale", 1.0)
+            scale *= getattr(self, "_pc_spy_scale", 1.0)
         elif sleeve == "nyse":
             scale *= getattr(self, "_regime_nyse_scale", 1.0)
             scale *= getattr(self, "_thinking_nyse_scale", 1.0)
+            scale *= getattr(self, "_pc_nyse_scale", 1.0)
         elif sleeve == "stat_arb":
             scale *= getattr(self, "_regime_nyse_scale", 1.0)
             scale *= self.pod_risk_scale("stat_arb")
@@ -530,6 +539,46 @@ class BacktestExecutor:
                 **kwargs,
             )
         return None
+
+    def execute_reduce_notional(
+        self, symbol, reduce_notional, *, reason="reduce", sleeve=None
+    ):
+        """Reduce long (sell) or short (buy cover) up to reduce_notional."""
+        pos = self._find_position(symbol)
+        if pos is None:
+            return None
+        price = self.prices.get(pos.symbol)
+        if price is None or not np.isfinite(price) or price <= 0:
+            return None
+        qty = float(pos.qty)
+        if qty == 0:
+            return None
+        reduce_notional = float(reduce_notional)
+        kwargs = {"reason": reason, "sleeve": sleeve}
+        if qty > 0:
+            mv = qty * float(price)
+            sell_notional = min(reduce_notional, mv)
+            if sell_notional < config.MIN_NOTIONAL:
+                if config.paper_aggressive_context() and mv <= config.MIN_NOTIONAL * 3:
+                    return self.execute_full_exit(
+                        pos.symbol, reason=reason or "dust_exit", sleeve=sleeve
+                    )
+                return None
+            return self.execute_order(
+                pos.symbol, "sell", notional=round(sell_notional, 2), **kwargs
+            )
+        abs_qty = abs(qty)
+        mv = abs_qty * float(price)
+        cover_notional = min(reduce_notional, mv)
+        if cover_notional < config.MIN_NOTIONAL:
+            return None
+        return self.execute_order(
+            pos.symbol,
+            "buy",
+            notional=round(cover_notional, 2),
+            pair_cover=True,
+            **kwargs,
+        )
 
     def execute_order(self, symbol, side, notional=None, reduce_only=False, **kwargs):
         price = self.prices.get(symbol)
@@ -931,7 +980,23 @@ def _resolve_backtest_vti_pct(
     macro_stress_flag: bool,
     paper_aggressive: bool,
     fixed_vti_core_pct: float,
+    data=None,
+    regime: str | None = None,
+    insider_state: dict | None = None,
 ) -> float:
+    if paper_aggressive and config.PAPER_DYNAMIC_VTI_ENABLED:
+        return config.clamp_paper_vti_core(
+            config.get_vti_core_pct(
+                equity,
+                vol_score=vol_score,
+                macro_stress=macro_stress_flag,
+                volatility=volatility,
+                is_paper_aggressive=True,
+                regime=regime,
+                data=data,
+                insider_state=insider_state,
+            )
+        )
     if config.effective_dynamic_core_enabled() or config.effective_core_allocator_locked():
         from modules.core_allocator import effective_vti_core_pct
 
@@ -952,6 +1017,9 @@ def _resolve_backtest_vti_pct(
         vol_score=vol_score,
         macro_stress=macro_stress_flag,
         volatility=volatility,
+        regime=regime,
+        data=data,
+        insider_state=insider_state,
     )
 
 
@@ -1132,11 +1200,18 @@ def run_backtest(
         ensure_vix_daily()
 
     fixed_vti_core_pct = vti_core_pct
-    if paper_aggressive and config.effective_core_allocator_locked() and vti_core_pct <= 0:
+    if (
+        paper_aggressive
+        and config.effective_core_allocator_locked()
+        and vti_core_pct <= 0
+        and not config.PAPER_DYNAMIC_VTI_ENABLED
+    ):
         from modules.core_allocator import effective_vti_core_pct, lock_core_allocator
 
         lock_core_allocator()
         fixed_vti_core_pct = float(effective_vti_core_pct() or config.PAPER_VTI_CORE_PCT)
+    elif paper_aggressive and config.PAPER_DYNAMIC_VTI_ENABLED and vti_core_pct <= 0:
+        fixed_vti_core_pct = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
     elif paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED:
         fixed_vti_core_pct = (
             vti_core_pct if vti_core_pct > 0 else config.PAPER_VTI_CORE_PCT
@@ -1312,7 +1387,15 @@ def run_backtest(
         "scales": {"spy_scale": 1.0, "nyse_scale": 1.0, "crypto_scale": 1.0},
         "vti_pct": None,
         "events": [],
+        "sample_headlines": [],
     }
+    historical_news_on = bool(
+        paper_aggressive and config.effective_historical_news_enabled()
+    )
+    if historical_news_on:
+        from modules.historical_news import preload_headline_pool
+
+        preload_headline_pool()
     from modules.crypto_dual_sleeve import CryptoV2State
 
     crypto_v2_book = CryptoV2State()
@@ -1364,6 +1447,35 @@ def run_backtest(
             regime_label = regime
             regime_counts[regime] = regime_counts.get(regime, 0) + 1
         regime_series.append(regime_label)
+
+        bar_date = data.index[i].date()
+        if historical_news_on:
+            from modules.historical_news import (
+                build_backtest_news_digest,
+                sample_headline_titles,
+                set_backtest_news_context,
+            )
+
+            news_digest_bar = build_backtest_news_digest(window, regime, vol, bar_date)
+            set_backtest_news_context(
+                bar_date,
+                news_digest_bar,
+                regime=regime,
+                vol=vol,
+            )
+            if len(thinking_cache["sample_headlines"]) < 6:
+                for title in sample_headline_titles(limit=6):
+                    if title not in thinking_cache["sample_headlines"]:
+                        thinking_cache["sample_headlines"].append(title)
+            if config.effective_insider_signal_boost_enabled():
+                try:
+                    from modules.insider_signal_handler import (
+                        apply_insider_signals_to_strategies,
+                    )
+
+                    apply_insider_signals_to_strategies(regime=regime)
+                except Exception:
+                    pass
 
         prev_halted = risk_manager.halted
         can_trade = risk_manager.check_drawdown(eq)
@@ -1453,6 +1565,7 @@ def run_backtest(
                 bar_index=i,
                 allocator_data=allocator_data,
             )
+        pc_decision = None
         if config.REBALANCE_ENABLED:
             from modules.operating_layer import run_operating_cycle_backtest
 
@@ -1480,6 +1593,14 @@ def run_backtest(
                     f"conv {wisdom_rec.get('conviction', 0):.2f} ---"
                 )
         else:
+            insider_state_bt = None
+            if config.effective_insider_signal_boost_enabled():
+                try:
+                    from modules.insider_signal_handler import apply_insider_signals_to_strategies
+
+                    insider_state_bt = apply_insider_signals_to_strategies(regime=regime)
+                except Exception:
+                    insider_state_bt = None
             vti_core_pct = _resolve_backtest_vti_pct(
                 eq,
                 vol_score=vol_score,
@@ -1487,13 +1608,40 @@ def run_backtest(
                 macro_stress_flag=macro_stress_flag,
                 paper_aggressive=paper_aggressive,
                 fixed_vti_core_pct=fixed_vti_core_pct,
+                data=window,
+                regime=regime,
+                insider_state=insider_state_bt,
             )
             vti_core_pct = config.clamp_paper_vti_core(vti_core_pct)
+            if config.effective_portfolio_constructor_enabled():
+                try:
+                    from modules.dynamic_vti_allocator import (
+                        get_last_vti_allocation_decision,
+                    )
+                    from modules.portfolio_constructor import (
+                        build_portfolio_context,
+                        compute_portfolio_decision,
+                    )
+
+                    vti_detail = (get_last_vti_allocation_decision() or {}).get(
+                        "detail"
+                    ) or {}
+                    pc_ctx = build_portfolio_context(
+                        data=window,
+                        regime=regime,
+                        bubble_score_100=vti_detail.get("bubble_score_100"),
+                        insider_state=insider_state_bt,
+                    )
+                    pc_decision = compute_portfolio_decision(pc_ctx)
+                except Exception:
+                    pc_decision = None
         thinking_scales = dict(thinking_cache["scales"])
         live_thinking = simulate_live_thinking and small_account
         thinking_on = config.effective_thinking_engine_enabled() and (
             paper_aggressive or live_thinking
         )
+        use_hist_news = historical_news_on
+        news_active = bool(with_news or use_hist_news)
         if thinking_on:
             from modules.thinking_engine import (
                 apply_thinking_tilt_to_caps,
@@ -1505,23 +1653,32 @@ def run_backtest(
                 config.LIVE_THINKING_MAX_SLEEVE_DELTA if live_thinking else None
             )
             refresh = thinking_cache["regime"] != regime
-            bar_date = data.index[i].date()
             news_digest: dict | None = None
-            if with_news:
+            if news_active:
                 if thinking_cache.get("last_news_date") != bar_date:
                     thinking_cache["last_news_date"] = bar_date
                     refresh = True
             if refresh:
                 vti_before = vti_core_pct
-                if with_news:
-                    from modules.thinking_news import synthesize_backtest_news
+                if news_active:
+                    if use_hist_news:
+                        from modules.historical_news import build_backtest_news_digest
 
-                    news_digest = synthesize_backtest_news(
-                        window,
-                        regime,
-                        vol,
-                        slot="premarket",
-                    )
+                        news_digest = build_backtest_news_digest(
+                            window,
+                            regime,
+                            vol,
+                            bar_date,
+                        )
+                    else:
+                        from modules.thinking_news import synthesize_backtest_news
+
+                        news_digest = synthesize_backtest_news(
+                            window,
+                            regime,
+                            vol,
+                            slot="premarket",
+                        )
                     thinking = build_backtest_thinking_result(
                         window,
                         regime,
@@ -1576,7 +1733,10 @@ def run_backtest(
                         event["news_slot"] = news_digest.get("slot")
                         event["news_impact_score"] = news_digest.get("news_impact_score")
                         event["news_theme_summary"] = news_digest.get("theme_summary")
-                    elif with_news:
+                        sample = news_digest.get("headlines") or []
+                        if sample:
+                            event["news_headlines"] = list(sample)[:3]
+                    elif news_active:
                         event["news_impact_score"] = thinking.get("news_impact_score")
                         event["news_theme_summary"] = summary.get("news_theme_summary")
                     thinking_cache["events"].append(event)
@@ -1628,6 +1788,11 @@ def run_backtest(
                 nyse_scale=macro_regime.get("nyse_scale", 1.0),
             )
         executor.set_thinking_sleeve_scales(**thinking_scales)
+        if pc_decision is not None:
+            executor.set_portfolio_constructor_scales(
+                spy_scale=pc_decision.active_sleeve_mult,
+                nyse_scale=pc_decision.active_sleeve_mult,
+            )
         if config.effective_risk_parity_enabled() and paper_aggressive:
             from modules.risk_parity_sleeve import apply_risk_parity_cycle
             from modules.thinking_engine import executor_scales_from_caps
@@ -1762,6 +1927,45 @@ def run_backtest(
             from modules.opportunistic_short_sleeve import run_opportunistic_short_strategy
 
             run_opportunistic_short_strategy(
+                window,
+                executor,
+                regime,
+                i,
+                pair_cooldown,
+                cooldown_bars=cooldown_bars,
+                volatility=vol,
+            )
+        if config.effective_orb_momentum_enabled() and config.ORB_MOMENTUM_BACKTEST_ENABLED:
+            from modules.orb_momentum_sleeve import run_orb_momentum_backtest_day
+
+            run_orb_momentum_backtest_day(
+                window,
+                executor,
+                regime,
+                i,
+                pair_cooldown,
+                cooldown_bars=cooldown_bars,
+                volatility=vol,
+            )
+        if config.effective_vol_breakout_enabled() and config.VOL_BREAKOUT_BACKTEST_ENABLED:
+            from modules.vol_breakout_sleeve import run_vol_breakout_backtest_day
+
+            run_vol_breakout_backtest_day(
+                window,
+                executor,
+                regime,
+                i,
+                pair_cooldown,
+                cooldown_bars=cooldown_bars,
+                volatility=vol,
+            )
+        if (
+            config.effective_sector_rotation_enabled()
+            and getattr(config, "SECTOR_ROTATION_BACKTEST_ENABLED", True)
+        ):
+            from modules.sector_rotation import run_sector_rotation_backtest_day
+
+            run_sector_rotation_backtest_day(
                 window,
                 executor,
                 regime,
@@ -1999,14 +2203,18 @@ def run_backtest(
         from modules.stat_arb_sleeve import force_close_all_pairs
 
         last_executor.prices = data.iloc[-1]
-        force_close_all_pairs(
-            last_executor, data.iloc[:], regime="", now=len(data) - 1
-        )
+        force_close_all_pairs(last_executor, regime="", now=len(data) - 1)
     if attribution_tracker is not None and last_executor is not None:
         att = attribution_tracker.finalize(last_executor.prices)
         att["stat_arb_enabled"] = config.effective_stat_arb_enabled()
         att["crypto_enabled"] = config.crypto_sleeve_enabled()
         result["attribution"] = att
+        try:
+            from modules.strategy_performance import ingest_backtest_attribution
+
+            ingest_backtest_attribution(att)
+        except Exception:
+            pass
     if macro_portfolio is not None and macro_curve:
         macro_init = macro_portfolio.initial_capital
         macro_final = round(macro_curve[-1], 2)
@@ -2154,6 +2362,24 @@ def run_backtest(
                     config.effective_thinking_max_sleeve_delta() * 100, 1
                 ),
             }
+    if historical_news_on:
+        from modules.historical_news import clear_backtest_news_context
+
+        samples = list(thinking_cache.get("sample_headlines") or [])
+        if not samples:
+            for ev in thinking_cache.get("events") or []:
+                for line in ev.get("news_headlines") or []:
+                    if line not in samples:
+                        samples.append(str(line))
+                    if len(samples) >= 6:
+                        break
+                if len(samples) >= 6:
+                    break
+        result["historical_news"] = {
+            "enabled": True,
+            "sample_headlines": samples[:6],
+        }
+        clear_backtest_news_context()
     if config.effective_crypto_v2_enabled() and last_executor is not None:
         from modules.crypto_dual_sleeve import summarize_crypto_v2_trades_from_executor
 
@@ -2409,10 +2635,10 @@ def run_opportunistic_short_compare(days=None, refresh=False, use_max=False) -> 
     lo = config.effective_protective_short_min_pct()
     hi = config.effective_protective_short_max_pct()
     configs = [
-        ("RR v1.3 (shorts OFF)", {**base_kwargs, "opportunistic_short": False}),
-        (f"RR v1.3 (shorts {lo:.0%}–{hi:.0%})", {**base_kwargs, "opportunistic_short": True}),
+        ("RR v1.4 (shorts OFF)", {**base_kwargs, "opportunistic_short": False}),
+        (f"RR v1.4 (shorts tuned {lo:.0%}-RHYME_E {config.SHORT_RHYME_E_MAX_PCT:.0%}/RHYME_B {config.SHORT_RHYME_B_MAX_PCT:.0%})", {**base_kwargs, "opportunistic_short": True}),
     ]
-    print(f"--- PROTECTIVE SHORTS A/B (Realistic Research v1.3, {lo:.0%}–{hi:.0%}) ---")
+    print(f"--- PROTECTIVE SHORTS A/B (Realistic Research v1.4 tuned) ---")
     print(
         f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
@@ -2508,6 +2734,131 @@ def run_opportunistic_short_compare(days=None, refresh=False, use_max=False) -> 
         trig_summary = format_short_trigger_summary(m1.get("os_att") or {})
         if trig_summary:
             print(trig_summary)
+
+
+def _insider_boost_compare_metrics(result: dict) -> dict[str, float | int]:
+    att = result.get("attribution") or {}
+    sleeves = att.get("sleeves") or {}
+    sa = att.get("stat_arb") or {}
+    short_sleeve = sleeves.get("opportunistic_short") or {}
+    os_att = att.get("opportunistic_short") or {}
+    try:
+        from modules.insider_signal_handler import insider_boost_trade_counts
+
+        boost_counts = insider_boost_trade_counts()
+    except Exception:
+        boost_counts = {"total": 0, "momentum": 0, "stat_arb": 0, "short": 0}
+    return {
+        "return_pct": float(result.get("total_return_pct", 0) or 0),
+        "sharpe": float(result.get("sharpe", 0) or 0),
+        "max_dd": float(result.get("max_drawdown_pct", 0) or 0),
+        "stat_arb_pnl": float((sleeves.get("stat_arb") or {}).get("total_pnl_usd", 0) or 0),
+        "stat_arb_pairs": int(sa.get("pair_entries", 0) or 0),
+        "short_pnl": float(short_sleeve.get("total_pnl_usd", 0) or 0),
+        "short_trips": int(short_sleeve.get("round_trips", 0) or 0),
+        "short_fires": int(os_att.get("trigger_fires", 0) or 0),
+        "short_entries": int(os_att.get("entry_fills", 0) or 0),
+        "boosted_trades": int(boost_counts.get("total", 0) or 0),
+        "boosted_momentum": int(boost_counts.get("momentum", 0) or 0),
+        "boosted_stat_arb": int(boost_counts.get("stat_arb", 0) or 0),
+        "boosted_short": int(boost_counts.get("short", 0) or 0),
+    }
+
+
+def run_insider_boost_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare Realistic Research with Insider Boost v1.5 ON vs OFF."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+        "paper_thinking": False,
+    }
+    configs = [
+        ("Insider Boost v1.5 OFF", False),
+        ("Insider Boost v1.5 ON", True),
+    ]
+    print("--- INSIDER BOOST v1.5 A/B (Realistic Research paper) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'SA PnL':>9} {'Short PnL':>10} {'Boosted':>8}"
+    )
+    print("-" * 88)
+
+    saved_boost = config.INSIDER_BOOST_ENABLED
+    saved_signal = config.INSIDER_SIGNAL_BOOST_ENABLED
+    original_enforce = config.enforce_realistic_research_profile
+    results: list[tuple[str, dict]] = []
+
+    def _skip_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_enforce
+        for label, on in configs:
+            config.INSIDER_BOOST_ENABLED = on
+            config.INSIDER_SIGNAL_BOOST_ENABLED = on
+            try:
+                from modules.insider_signal_handler import reset_insider_boost_trade_counters
+
+                reset_insider_boost_trade_counters()
+            except Exception:
+                pass
+            result = run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                **base_kwargs,
+            )
+            metrics = _insider_boost_compare_metrics(result)
+            results.append((label, metrics))
+            print(
+                f"{label:<28} "
+                f"{metrics['return_pct']:>+7.2f}% "
+                f"{metrics['sharpe']:>7.2f} "
+                f"{metrics['max_dd']:>7.2f}% "
+                f"{metrics['stat_arb_pnl']:>+9.2f} "
+                f"{metrics['short_pnl']:>+10.2f} "
+                f"{metrics['boosted_trades']:>8}"
+            )
+    finally:
+        config.enforce_realistic_research_profile = original_enforce
+        config.INSIDER_BOOST_ENABLED = saved_boost
+        config.INSIDER_SIGNAL_BOOST_ENABLED = saved_signal
+        original_enforce()
+
+    print("-" * 88)
+    if len(results) == 2:
+        _, m0 = results[0]
+        _, m1 = results[1]
+        print(
+            f"Delta (ON - OFF): "
+            f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+            f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+            f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+            f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+            f"short PnL ${m1['short_pnl'] - m0['short_pnl']:+.2f} | "
+            f"boosted trades {m1['boosted_trades'] - m0['boosted_trades']:+d} "
+            f"(mom {m1['boosted_momentum'] - m0['boosted_momentum']:+d}, "
+            f"sa {m1['boosted_stat_arb'] - m0['boosted_stat_arb']:+d}, "
+            f"short {m1['boosted_short'] - m0['boosted_short']:+d})"
+        )
 
 
 _LEGACY_UNIVERSE_CONFIG = {
@@ -4826,6 +5177,229 @@ def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -
     print("-" * 76)
 
 
+def run_orb_momentum_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without RVOL+ORB momentum sleeve."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Paper (ORB momentum OFF)", {**base_kwargs, "orb_momentum": False}),
+        (
+            f"Paper (ORB+RVOL ON, risk {config.ORB_MOMENTUM_RISK_PCT:.0%}, "
+            f"max {config.ORB_MOMENTUM_MAX_SIZE_PCT:.0%}, RR {config.ORB_MOMENTUM_RR:.1f})",
+            {**base_kwargs, "orb_momentum": True},
+        ),
+    ]
+    print("--- RVOL + ORB MOMENTUM A/B (daily breakout proxy) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(
+        f"{'Config':<56} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}"
+    )
+    print("-" * 84)
+
+    saved_enabled = config.ORB_MOMENTUM_ENABLED
+    saved_bt = config.ORB_MOMENTUM_BACKTEST_ENABLED
+    original_enforce = config.enforce_realistic_research_profile
+
+    def _skip_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_enforce
+        for label, kwargs in configs:
+            on = bool(kwargs.pop("orb_momentum", True))
+            config.ORB_MOMENTUM_ENABLED = on
+            config.ORB_MOMENTUM_BACKTEST_ENABLED = on
+            result = run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                **kwargs,
+            )
+            print(
+                f"{label:<56} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}%"
+            )
+    finally:
+        config.ORB_MOMENTUM_ENABLED = saved_enabled
+        config.ORB_MOMENTUM_BACKTEST_ENABLED = saved_bt
+        config.enforce_realistic_research_profile = original_enforce
+    print("-" * 84)
+    print(
+        "Note: backtest uses a daily OR proxy (break prior 5d high + return-vs-avg "
+        "RVOL proxy). Live/paper uses true 30m ORB + yfinance RVOL."
+    )
+
+
+def run_vol_breakout_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without ATR volatility-breakout sleeve."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Paper (Vol breakout OFF)", {**base_kwargs, "vol_breakout": False}),
+        (
+            f"Paper (ATR vol-BO ON, expand>={config.VOL_BREAKOUT_ATR_EXPAND_MULT:.1f}x, "
+            f"risk≤{config.VOL_BREAKOUT_RISK_PCT:.0%})",
+            {**base_kwargs, "vol_breakout": True},
+        ),
+    ]
+    print("--- ATR VOLATILITY BREAKOUT A/B (daily expansion proxy) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(f"{'Config':<62} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
+    print("-" * 90)
+
+    saved_enabled = config.VOL_BREAKOUT_ENABLED
+    saved_bt = config.VOL_BREAKOUT_BACKTEST_ENABLED
+    original_enforce = config.enforce_realistic_research_profile
+
+    def _skip_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_enforce
+        for label, kwargs in configs:
+            on = bool(kwargs.pop("vol_breakout", True))
+            config.VOL_BREAKOUT_ENABLED = on
+            config.VOL_BREAKOUT_BACKTEST_ENABLED = on
+            result = run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                **kwargs,
+            )
+            print(
+                f"{label:<62} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}%"
+            )
+    finally:
+        config.VOL_BREAKOUT_ENABLED = saved_enabled
+        config.VOL_BREAKOUT_BACKTEST_ENABLED = saved_bt
+        config.enforce_realistic_research_profile = original_enforce
+    print("-" * 90)
+    print(
+        "Note: backtest uses daily ATR expansion (current ATR vs prior baseline) + "
+        "break of N-day high + return-vs-avg RVOL proxy. Paper uses live RVOL/MTF."
+    )
+
+
+def run_sector_rotation_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with vs without sector SPDR rotation sleeve."""
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "stat_arb_report": True,
+    }
+    configs = [
+        ("Paper (Sector rotation OFF)", {**base_kwargs, "sector_rotation": False}),
+        (
+            f"Paper (Sector rot ON, top {config.SECTOR_ROTATION_TOP_N}, "
+            f"max/sector {config.SECTOR_ROTATION_MAX_SECTOR_PCT:.0%}, "
+            f"sleeve≤{config.SECTOR_ROTATION_CAP_PCT:.0%})",
+            {**base_kwargs, "sector_rotation": True},
+        ),
+    ]
+    print("--- SECTOR ROTATION A/B (momentum + RS vs SPY, monthly/regime) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    print(f"{'Config':<72} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8}")
+    print("-" * 100)
+
+    saved_enabled = config.SECTOR_ROTATION_ENABLED
+    saved_paper = config.PAPER_SECTOR_ROTATION_ENABLED
+    saved_bt = config.SECTOR_ROTATION_BACKTEST_ENABLED
+    original_enforce = config.enforce_realistic_research_profile
+
+    def _skip_enforce() -> None:
+        return None
+
+    try:
+        config.enforce_realistic_research_profile = _skip_enforce
+        for label, kwargs in configs:
+            on = bool(kwargs.pop("sector_rotation", True))
+            config.SECTOR_ROTATION_ENABLED = on
+            config.PAPER_SECTOR_ROTATION_ENABLED = on
+            config.SECTOR_ROTATION_BACKTEST_ENABLED = on
+            result = run_backtest(
+                data,
+                track_active_exposure=True,
+                track_metrics=True,
+                **kwargs,
+            )
+            print(
+                f"{label:<72} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}%"
+            )
+    finally:
+        config.SECTOR_ROTATION_ENABLED = saved_enabled
+        config.PAPER_SECTOR_ROTATION_ENABLED = saved_paper
+        config.SECTOR_ROTATION_BACKTEST_ENABLED = saved_bt
+        config.enforce_realistic_research_profile = original_enforce
+    print("-" * 100)
+    print(
+        "Note: rotates into top 2–3 sector SPDRs by momentum + RS vs SPY; "
+        "rebalances monthly or on major regime change; max 25% per sector; "
+        "sleeve scales with Smart Dynamic VTI + conviction."
+    )
+
+
 def run_nyse_conditional_compare(days=None, refresh=False, use_max=False) -> None:
     """Paper aggressive: NYSE conditional-on-SPY filter on vs off."""
     if use_max:
@@ -5013,8 +5587,257 @@ def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> Non
     print("-" * 82)
 
 
+def _fixed_nyse_universe_list() -> list[str]:
+    """Static equity candidates from get_nyse_universe() (dynamic OFF)."""
+    saved = bool(config.USE_DYNAMIC_UNIVERSE)
+    config.USE_DYNAMIC_UNIVERSE = False
+    try:
+        return [
+            str(t).strip().upper()
+            for t in config.get_nyse_universe()
+            if str(t).strip()
+        ]
+    finally:
+        config.USE_DYNAMIC_UNIVERSE = saved
+
+
+def _best_worst_month_labels(result: dict) -> tuple[str, str]:
+    idx = result.get("equity_index") or []
+    vals = result.get("equity_values") or []
+    if len(idx) < 2 or len(vals) < 2:
+        return "—", "—"
+    curve = pd.Series(vals, index=pd.to_datetime(idx))
+    monthly = curve.resample("ME").last().pct_change().dropna() * 100.0
+    if monthly.empty:
+        return "—", "—"
+    best_i = monthly.idxmax()
+    worst_i = monthly.idxmin()
+    return (
+        f"{best_i.strftime('%Y-%m')} {monthly.loc[best_i]:+.1f}%",
+        f"{worst_i.strftime('%Y-%m')} {monthly.loc[worst_i]:+.1f}%",
+    )
+
+
+def _top_tickers_by_pnl(result: dict, allowed: set[str] | None = None, n: int = 5):
+    """Top N equity tickers by realized MA50 PnL (fallback: pick counts)."""
+    att = result.get("attribution") or {}
+    by_sym: dict[str, float] = {}
+    for trip in att.get("round_trips") or []:
+        if str(trip.get("strategy") or "") != "ma50_momentum":
+            continue
+        sym = config.normalize_symbol(str(trip.get("symbol") or ""))
+        if not sym or "/" in sym or config.is_crypto(sym):
+            continue
+        if allowed is not None and sym not in allowed:
+            continue
+        by_sym[sym] = by_sym.get(sym, 0.0) + float(trip.get("pnl_usd") or 0.0)
+    if by_sym:
+        return sorted(by_sym.items(), key=lambda x: -x[1])[:n]
+    picks = result.get("nyse_pick_counts") or {}
+    rows = [(s, float(c)) for s, c in picks.items() if allowed is None or s in allowed]
+    return sorted(rows, key=lambda x: -x[1])[:n]
+
+
+def _universe_ab_metrics(result: dict) -> dict:
+    best_m, worst_m = _best_worst_month_labels(result)
+    return {
+        "total_return_pct": float(result.get("total_return_pct") or 0.0),
+        "sharpe": float(result.get("sharpe") or 0.0),
+        "max_drawdown_pct": float(result.get("max_drawdown_pct") or 0.0),
+        "win_rate_pct": float(result.get("win_rate_pct") or 0.0),
+        "total_trades": int(result.get("total_orders") or 0),
+        "avg_pnl_per_trade": float(result.get("avg_trade_return_pct") or 0.0),
+        "best_month": best_m,
+        "worst_month": worst_m,
+        "equity_universe_size": int(result.get("equity_universe_size") or 0),
+        "nyse_signals": int(result.get("nyse_signals") or 0),
+    }
+
+
+def run_compare_universe(days=None, refresh=False, use_max=False) -> None:
+    """Three-way NYSE candidate universe A/B: fixed vs screener vs combined.
+
+    Overrides only the NYSE/equity candidate list via nyse_momentum_universe;
+    strategy, sizing, regime gates, yield gate, and fees stay identical to a
+    normal --days N run (not paper-aggressive).
+    """
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    config.PAPER_DEPLOY_DEBUG = False
+
+    sim_days = days or config.BACKTEST_DAYS
+    fixed = _fixed_nyse_universe_list()
+    screener = list(config.load_screener_universe_tickers() or [])
+    if not screener:
+        screener = _prefetch_screener_for_backtest(
+            sim_days, refresh=refresh, use_max=use_max
+        )
+    else:
+        # Still ensure price history exists for screener-only names.
+        _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+
+    combined = list(dict.fromkeys([*fixed, *screener]))
+    variants: list[tuple[str, list[str]]] = [
+        ("Fixed", fixed),
+        ("Screener", screener),
+        ("Combined", combined),
+    ]
+
+    # Expand daily matrix to include screener symbols (fetch list only).
+    saved_use_dyn = bool(config.USE_DYNAMIC_UNIVERSE)
+    config.USE_DYNAMIC_UNIVERSE = True
+    try:
+        from modules.data_loader import clear_close_matrix_cache
+
+        clear_close_matrix_cache()
+        reset_caches()
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+    finally:
+        config.USE_DYNAMIC_UNIVERSE = saved_use_dyn
+
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        return
+
+    available = {str(c).upper() for c in data.columns}
+    for label, tickers in variants:
+        in_data = sum(1 for t in tickers if t in available)
+        print(
+            f"{label} universe: {len(tickers)} tickers "
+            f"({in_data} with price data in window)"
+        )
+
+    print("--- UNIVERSE A/B (fixed vs screener vs combined) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars) | days={sim_days}"
+    )
+    print(
+        "Override: NYSE candidate pool only | "
+        "same sizing / regime / yield gate / fees as normal backtest"
+    )
+
+    saved_universe_fn = config.nyse_momentum_universe
+    results: list[tuple[str, list[str], dict, dict]] = []
+    try:
+        for label, tickers in variants:
+            allowed = {str(t).strip().upper() for t in tickers if str(t).strip()}
+            order = {t: i for i, t in enumerate(tickers)}
+
+            def _forced(data_columns, *, _allowed=allowed, _order=order):
+                cols = [
+                    c
+                    for c in data_columns
+                    if str(c).upper() in _allowed and config._nyse_eligible_symbol(c)
+                ]
+                return sorted(
+                    cols,
+                    key=lambda c: _order.get(str(c).upper(), 10_000),
+                )
+
+            config.nyse_momentum_universe = _forced
+            print(f"\n>>> Running {label} ({len(tickers)} candidates)...")
+            result = run_backtest(
+                data,
+                track_metrics=True,
+                stat_arb_report=True,
+            )
+            metrics = _universe_ab_metrics(result)
+            metrics["n_candidates"] = len(tickers)
+            metrics["n_in_data"] = sum(1 for t in tickers if t in available)
+            results.append((label, tickers, result, metrics))
+            release_backtest_memory(collect=True)
+    finally:
+        config.nyse_momentum_universe = saved_universe_fn
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+
+    if len(results) != 3:
+        print("Universe A/B incomplete — expected 3 runs.")
+        return
+
+    # --- Comparison table ---
+    headers = [
+        f"{lab} ({m['n_candidates']})" for lab, _t, _r, m in results
+    ]
+    rows = [
+        ("Total return %", [f"{m['total_return_pct']:+.2f}" for *_a, m in results]),
+        ("Sharpe ratio", [f"{m['sharpe']:.2f}" for *_a, m in results]),
+        ("Max drawdown %", [f"{m['max_drawdown_pct']:.2f}" for *_a, m in results]),
+        ("Win rate %", [f"{m['win_rate_pct']:.1f}" for *_a, m in results]),
+        ("Total trades", [f"{m['total_trades']}" for *_a, m in results]),
+        (
+            "Avg PnL per trade",
+            [f"{m['avg_pnl_per_trade']:+.3f}%" for *_a, m in results],
+        ),
+        ("Best month", [m["best_month"] for *_a, m in results]),
+        ("Worst month", [m["worst_month"] for *_a, m in results]),
+    ]
+
+    col_w = max(14, max(len(h) for h in headers))
+    metric_w = 18
+    print("\n| Metric".ljust(metric_w + 2) + "".join(f"| {h:<{col_w}} " for h in headers) + "|")
+    print("|" + "-" * (metric_w + 1) + "".join("|" + "-" * (col_w + 2) for _ in headers) + "|")
+    for name, vals in rows:
+        line = f"| {name:<{metric_w}}"
+        for v in vals:
+            line += f"| {str(v):<{col_w}} "
+        print(line + "|")
+
+    # --- Top 5 tickers per universe ---
+    print("\nTop 5 best-performing tickers (MA50 realized PnL):")
+    for label, tickers, result, _m in results:
+        allowed = {str(t).strip().upper() for t in tickers}
+        top = _top_tickers_by_pnl(result, allowed=allowed, n=5)
+        if not top:
+            print(f"  {label}: (none)")
+            continue
+        parts = []
+        for sym, val in top:
+            # PnL dollars when attribution present; else pick count
+            if result.get("attribution"):
+                parts.append(f"{sym} (${val:+,.0f})")
+            else:
+                parts.append(f"{sym} ({int(val)} picks)")
+        print(f"  {label}: {', '.join(parts)}")
+
+    # --- CSV ---
+    out_path = Path("scripts/research/universe_ab_results.csv")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_rows = []
+    for label, tickers, result, m in results:
+        allowed = {str(t).strip().upper() for t in tickers}
+        top = _top_tickers_by_pnl(result, allowed=allowed, n=5)
+        top_str = "; ".join(
+            f"{s}:{v:.2f}" for s, v in top
+        )
+        csv_rows.append(
+            {
+                "universe": label,
+                "n_candidates": m["n_candidates"],
+                "n_in_data": m["n_in_data"],
+                "total_return_pct": m["total_return_pct"],
+                "sharpe": m["sharpe"],
+                "max_drawdown_pct": m["max_drawdown_pct"],
+                "win_rate_pct": m["win_rate_pct"],
+                "total_trades": m["total_trades"],
+                "avg_pnl_per_trade": m["avg_pnl_per_trade"],
+                "best_month": m["best_month"],
+                "worst_month": m["worst_month"],
+                "nyse_signals": m["nyse_signals"],
+                "top5_tickers": top_str,
+            }
+        )
+    pd.DataFrame(csv_rows).to_csv(out_path, index=False)
+    print(f"\nSaved: {out_path.resolve()}")
+    print("-" * 82)
+
+
 def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare fixed 20% VTI vs dynamic 40-75% VTI on paper aggressive profile."""
+    """Compare fixed passive core vs Smart Dynamic VTI 35-75% on paper aggressive profile."""
+    config.enforce_realistic_research_profile()
     if use_max:
         data = _ensure_daily_data(0, refresh=refresh, use_max=True)
     else:
@@ -5025,13 +5848,18 @@ def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
+    fixed_pct = config.PAPER_VTI_CORE_PCT
+    if config.effective_core_allocator_locked():
+        from modules.core_allocator import CORE_VTI_PCT, current_core_choice
+
+        fixed_pct = float(CORE_VTI_PCT.get(current_core_choice(), fixed_pct))
     configs = [
         (
-            f"Fixed {config.PAPER_VTI_CORE_PCT:.0%} VTI (paper)",
+            f"Fixed {fixed_pct:.0%} core (paper)",
             {"paper_aggressive": True, "paper_dynamic_vti": False},
         ),
         (
-            "Dynamic VTI 40-75% (paper)",
+            "Smart Dynamic VTI (paper)",
             {"paper_aggressive": True, "paper_dynamic_vti": True},
         ),
     ]
@@ -5203,6 +6031,8 @@ def run_performance_test(
     deep_history: bool = False,
     deep_history_indicators_only: bool = False,
     max_years: int = 20,
+    paper_thinking: bool | None = None,
+    with_news: bool = False,
 ):
     if paper_aggressive and not deep_history and config.DEEP_HISTORY_ENABLED:
         deep_history = True
@@ -5271,7 +6101,7 @@ def run_performance_test(
         elif config.PAPER_DYNAMIC_VTI_ENABLED:
             print(
                 f"--- PAPER AGGRESSIVE: dynamic {VTI_CORE_SYMBOL} "
-                f"({config.DYNAMIC_VTI_PAPER_FLOOR:.0%}-75% by vol/stress) | "
+                f"({config.DYNAMIC_VTI_PAPER_FLOOR:.0%}-{config.DYNAMIC_VTI_PAPER_CEILING:.0%} smart allocator) | "
                 f"boost {config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x ---"
             )
         else:
@@ -5471,6 +6301,8 @@ def run_performance_test(
         max_years=max_years,
         allocator_data=allocator_data,
         deep_history_indicators_only=deep_history_indicators_only,
+        paper_thinking=paper_thinking,
+        with_news=with_news,
     )
     core = (result or {}).get("core_allocator") or {}
     if core:
@@ -5497,6 +6329,7 @@ def run_performance_test(
     print("--- FUND BACKTEST REPORT (SPY + vol-gated crypto + NYSE) ---")
     if result.get("attribution"):
         from modules.backtest_attribution import (
+            format_bubble_risk_banner,
             format_crypto_banner,
             format_opportunistic_short_banner,
             format_stat_arb_banner,
@@ -5505,6 +6338,9 @@ def run_performance_test(
         stat_arb_banner = format_stat_arb_banner(result["attribution"])
         if stat_arb_banner:
             print(stat_arb_banner)
+        bubble_banner = format_bubble_risk_banner(result["attribution"])
+        if bubble_banner:
+            print(bubble_banner)
         short_banner = format_opportunistic_short_banner(result["attribution"])
         if short_banner:
             print(short_banner)
@@ -5523,6 +6359,23 @@ def run_performance_test(
         f"metal {alloc['metal']:.1%} | "
         f"cash {alloc['cash_buffer']:.1%}"
     )
+    hist_news = result.get("historical_news") or {}
+    if hist_news.get("enabled"):
+        print("Historical news simulation: ON")
+        for line in hist_news.get("sample_headlines") or []:
+            print(f"  headline: {line[:120]}")
+    thinking_block = result.get("thinking_tilt") or result.get("live_thinking_sim") or {}
+    if thinking_block.get("events") and hist_news.get("enabled"):
+        print("Thinking engine (sample headlines from tilts):")
+        shown = 0
+        for ev in thinking_block.get("events") or []:
+            for hl in ev.get("news_headlines") or []:
+                print(f"  - {str(hl)[:120]}")
+                shown += 1
+                if shown >= 3:
+                    break
+            if shown >= 3:
+                break
     if result.get("vti_core_pct") is not None:
         core_avg = float(result["vti_core_pct"]) * 100
         if config.effective_core_allocator_locked():
@@ -5660,6 +6513,56 @@ def run_performance_test(
     print("---------------------------------------------------")
 
 
+def _apply_best_test_defaults(args: argparse.Namespace) -> None:
+    """Lock paper-aggressive v1.5.2 stack + default 1000d window + MC 30."""
+    args.paper_aggressive = True
+    if int(args.days) == int(config.BACKTEST_DAYS):
+        args.days = 1000
+    if int(getattr(args, "monte_carlo", 0) or 0) <= 0:
+        args.monte_carlo = 30
+    config.enforce_realistic_research_profile()
+    config.PAPER_THINKING_ENGINE_ENABLED = True
+    RUN_OPTIONS.no_thinking = False
+    RUN_OPTIONS.full_accuracy = True
+    RUN_OPTIONS.fast_mode = False
+
+
+def _run_post_backtest_monte_carlo(args: argparse.Namespace, mc_runs: int) -> int:
+    import importlib.util
+
+    mc_path = (
+        Path(__file__).resolve().parent / "scripts" / "analysis" / "monte_carlo_backtest.py"
+    )
+    spec = importlib.util.spec_from_file_location("monte_carlo_backtest", mc_path)
+    if spec is None or spec.loader is None:
+        print(f"Monte Carlo module not found: {mc_path}")
+        return 1
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mc_argv = [
+        "--paper-aggressive",
+        "--days",
+        str(args.days),
+        "--mc-runs",
+        str(mc_runs),
+    ]
+    if args.refresh:
+        mc_argv.append("--refresh")
+    if args.max:
+        mc_argv.append("--max")
+    if args.small_account:
+        mc_argv.append("--small-account")
+    if RUN_OPTIONS.no_thinking:
+        mc_argv.append("--no-thinking")
+    if args.no_realistic_costs:
+        mc_argv.append("--no-realistic-costs")
+    mc_args = mod.build_parser().parse_args(mc_argv)
+    print("\n" + "=" * 60)
+    print(f"=== Monte Carlo phase ({mc_runs} runs) ===")
+    print("=" * 60)
+    return int(mod.run_monte_carlo(mc_args))
+
+
 if __name__ == "__main__":
     from modules.logging_utils import setup_project_logging
 
@@ -5722,6 +6625,21 @@ if __name__ == "__main__":
         help="Paper research profile: 20%% VTI, boosted sleeves, social 20%%, crypto all vol",
     )
     parser.add_argument(
+        "--best-test",
+        action="store_true",
+        help=(
+            "Best thorough backtest: paper-aggressive v1.5.2, enriched thinking, "
+            "historical news, Monte Carlo 30 (default 1000 days)"
+        ),
+    )
+    parser.add_argument(
+        "--monte-carlo",
+        type=int,
+        default=0,
+        metavar="N",
+        help="After main backtest, run N Monte Carlo simulations (default: 30 with --best-test)",
+    )
+    parser.add_argument(
         "--dynamic-core",
         action="store_true",
         help="Enable dynamic core allocator (VTI/SPY/blend/cash); overrides --vti-core",
@@ -5764,6 +6682,14 @@ if __name__ == "__main__":
         "--compare-paper-aggressive",
         action="store_true",
         help="Compare live 80/20 vs paper aggressive vs active-only (table)",
+    )
+    parser.add_argument(
+        "--compare-universe",
+        action="store_true",
+        help=(
+            "Three-way NYSE universe A/B: fixed get_nyse_universe() vs "
+            "screener_universe.json vs combined (same strategy, override candidates only)"
+        ),
     )
     parser.add_argument(
         "--compare-dynamic-universe",
@@ -5874,6 +6800,26 @@ if __name__ == "__main__":
         "--compare-opportunistic-shorts",
         action="store_true",
         help="Compare paper v1.1c with vs without opportunistic shorts (max 15%%)",
+    )
+    parser.add_argument(
+        "--compare-orb-momentum",
+        action="store_true",
+        help="Compare paper aggressive with vs without RVOL+ORB momentum sleeve",
+    )
+    parser.add_argument(
+        "--compare-vol-breakout",
+        action="store_true",
+        help="Compare paper aggressive with vs without ATR volatility-breakout sleeve",
+    )
+    parser.add_argument(
+        "--compare-sector-rotation",
+        action="store_true",
+        help="Compare paper aggressive with vs without sector SPDR rotation sleeve",
+    )
+    parser.add_argument(
+        "--compare-insider-boost",
+        action="store_true",
+        help="Compare Insider Boost v1.5 ON vs OFF (momentum/stat-arb/short tilts)",
     )
     parser.add_argument(
         "--compare-universe-size",
@@ -6021,6 +6967,13 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    if args.best_test:
+        _apply_best_test_defaults(args)
+        print(
+            "--- BEST TEST: Realistic Research v1.5.2 | thinking ON | "
+            f"{args.days}d + Monte Carlo {args.monte_carlo} ---"
+        )
+
     RUN_OPTIONS.fast_mode = bool(args.fast_mode)
     RUN_OPTIONS.no_thinking = bool(args.no_thinking)
     RUN_OPTIONS.realistic_costs = not args.no_realistic_costs
@@ -6068,6 +7021,10 @@ if __name__ == "__main__":
         run_paper_aggressive_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_universe:
+        run_compare_universe(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
     elif args.compare_dynamic_universe:
         if not args.paper_aggressive:
             print("--compare-dynamic-universe requires --paper-aggressive")
@@ -6112,6 +7069,34 @@ if __name__ == "__main__":
             print("--compare-opportunistic-shorts requires --paper-aggressive")
             sys.exit(1)
         run_opportunistic_short_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_orb_momentum:
+        if not args.paper_aggressive:
+            print("--compare-orb-momentum requires --paper-aggressive")
+            sys.exit(1)
+        run_orb_momentum_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_vol_breakout:
+        if not args.paper_aggressive:
+            print("--compare-vol-breakout requires --paper-aggressive")
+            sys.exit(1)
+        run_vol_breakout_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_sector_rotation:
+        if not args.paper_aggressive:
+            print("--compare-sector-rotation requires --paper-aggressive")
+            sys.exit(1)
+        run_sector_rotation_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_insider_boost:
+        if not args.paper_aggressive:
+            print("--compare-insider-boost requires --paper-aggressive")
+            sys.exit(1)
+        run_insider_boost_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_universe_size:
@@ -6247,6 +7232,13 @@ if __name__ == "__main__":
             deep_history=args.deep_history,
             deep_history_indicators_only=args.deep_history_indicators_only,
             max_years=max(1, int(args.max_years)),
+            paper_thinking=True if args.best_test else None,
+            with_news=bool(args.with_news or args.best_test),
         )
         if args.paper_aggressive:
             print(f"Paper sleeve flags: {config.get_paper_feature_flags()}")
+        mc_runs = int(getattr(args, "monte_carlo", 0) or 0)
+        if mc_runs > 0:
+            rc = _run_post_backtest_monte_carlo(args, mc_runs)
+            if rc != 0:
+                raise SystemExit(rc)

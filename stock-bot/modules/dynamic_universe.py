@@ -301,6 +301,12 @@ def equity_sleeve_universe(data_columns) -> list[str]:
 
     screener_set = frozenset(screener)
     dynamic = [c for c in cols if c in screener_set and config._nyse_eligible_symbol(c)]
+    # Screener tickers often lack price history after a refresh — fall back / merge
+    # so the NYSE sleeve is not stuck on a 0–1 name book with idle cash.
+    min_cover = int(getattr(config, "PAPER_DYNAMIC_UNIVERSE_MIN_COVER", 8) or 8)
+    if len(dynamic) < min_cover:
+        merged = list(dict.fromkeys([*dynamic, *static]))
+        return merged
     return dynamic or static
 
 
@@ -311,6 +317,72 @@ def backtest_extra_tickers() -> list[str]:
     tickers = config.load_screener_universe_tickers() or []
     base = set(config.UNIVERSE)
     return sorted(t for t in tickers if t not in base)
+
+
+def live_equity_refresh_symbols() -> list[str]:
+    """Static equity universe + screener names for live 5m refresh."""
+    symbols = list(config.equity_universe())
+    if not (config.USE_DYNAMIC_UNIVERSE or config.effective_paper_dynamic_universe()):
+        return symbols
+    extra = config.load_screener_universe_tickers() or []
+    for sym in extra:
+        if sym and sym not in symbols:
+            symbols.append(sym)
+    return symbols
+
+
+def prefetch_screener_price_data(
+    tickers: list[str] | None = None,
+    *,
+    days: int = 120,
+    include_5m: bool = True,
+    include_daily: bool = True,
+) -> dict:
+    """
+    Pull yfinance history for screener symbols into SQLite so the live close
+    matrix / dynamic universe intersection is not empty after a refresh.
+    """
+    tickers = list(tickers or config.load_screener_universe_tickers() or [])
+    tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
+    static = set(config.equity_universe())
+    extra = [t for t in dict.fromkeys(tickers) if t not in static]
+    out = {
+        "requested": len(tickers),
+        "extra": len(extra),
+        "skipped_static": len(tickers) - len(extra),
+        "fetched_5m": 0,
+        "fetched_daily": 0,
+    }
+    if not extra:
+        return out
+
+    if include_5m:
+        try:
+            from fetch_data import fetch_and_store
+
+            fetch_and_store(extra)
+            out["fetched_5m"] = len(extra)
+        except Exception as exc:
+            logger.warning("screener 5m prefetch failed: %s", exc)
+            out["error_5m"] = str(exc)
+
+    if include_daily:
+        try:
+            from fetch_data import fetch_daily_history_for_tickers
+
+            fetch_daily_history_for_tickers(extra, days=days)
+            out["fetched_daily"] = len(extra)
+        except Exception as exc:
+            logger.warning("screener daily prefetch failed: %s", exc)
+            out["error_daily"] = str(exc)
+
+    try:
+        from modules.data_loader import clear_close_matrix_cache
+
+        clear_close_matrix_cache()
+    except Exception:
+        pass
+    return out
 
 
 def build_offline_screener_seed() -> dict:
@@ -402,24 +474,42 @@ def maybe_refresh_screener_universe(
         }
 
     try:
-        from scripts.analysis.universe_screener import run_screener
+        from scripts.analysis.universe_screener import screen_universe
 
         load_screener_ticker_meta(force=True)
-        result = run_screener()
+        result = screen_universe()
         logger.info(
-            "dynamic_universe refreshed: %s tickers (%s IPO)",
+            "dynamic_universe refreshed: %s tickers",
             len(result.get("tickers") or []),
-            result.get("ipo_count", 0),
         )
-        return {"action": "refreshed", **result, **screener_universe_meta()}
+        # Prefetch runs inside screen_universe; report ticker count only.
+        return {
+            "action": "refreshed",
+            "tickers": result.get("tickers") or [],
+            "generated_at": result.get("generated_at"),
+            **screener_universe_meta(),
+        }
     except Exception as exc:
         logger.warning("dynamic_universe refresh failed: %s", exc)
         if not Path(config.SCREENER_UNIVERSE_PATH).is_file():
             try:
                 seed = build_offline_screener_seed()
+                prefetch_screener_price_data(seed.get("tickers") or [])
                 return {"action": "offline_seed", **seed, **screener_universe_meta()}
             except Exception as seed_exc:
                 logger.warning("offline screener seed failed: %s", seed_exc)
+        # Fresh file may exist but lacks price coverage — still prefetch.
+        try:
+            pref = prefetch_screener_price_data()
+            if pref.get("extra"):
+                return {
+                    "action": "prefetch_only",
+                    "error": str(exc),
+                    "prefetch": pref,
+                    **screener_universe_meta(),
+                }
+        except Exception:
+            pass
         return {
             "action": "failed",
             "error": str(exc),
