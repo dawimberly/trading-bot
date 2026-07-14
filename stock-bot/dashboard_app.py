@@ -687,7 +687,12 @@ def _fetch_alpaca_fills(username: str, book_id: str, limit: int = TRADES_LIMIT) 
         from alpaca.trading.requests import GetOrdersRequest
 
         client = _book_trading_client(username, book_id)
-        req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=limit, nested=True)
+        # Fetch extra closed orders so buy/sell pairs can form closed trades.
+        req = GetOrdersRequest(
+            status=QueryOrderStatus.CLOSED,
+            limit=max(limit * 4, 120),
+            nested=True,
+        )
         orders = list(client.get_orders(filter=req))
         rows = []
         for order in orders:
@@ -698,6 +703,7 @@ def _fetch_alpaca_fills(username: str, book_id: str, limit: int = TRADES_LIMIT) 
             filled_at = getattr(order, "filled_at", None) or getattr(
                 order, "submitted_at", None
             )
+            price = float(avg)
             sym = config.normalize_symbol(order.symbol)
             rows.append(
                 {
@@ -705,13 +711,163 @@ def _fetch_alpaca_fills(username: str, book_id: str, limit: int = TRADES_LIMIT) 
                     "event": "fill",
                     "symbol": sym,
                     "side": str(getattr(order, "side", "")).split(".")[-1].lower(),
-                    "notional": round(qty * float(avg), 2),
+                    "notional": round(qty * price, 2),
+                    "qty": qty,
+                    "price": price,
                     "sleeve": _infer_sleeve(sym),
                 }
             )
         return pd.DataFrame(rows)
     except Exception:
         return pd.DataFrame()
+
+
+def _closed_trades_from_fills(
+    fills_df: pd.DataFrame,
+    *,
+    limit: int = TRADES_LIMIT,
+) -> list[dict]:
+    """FIFO-match buy/sell fills into closed trades with entry/exit prices and dates."""
+    from collections import defaultdict, deque
+
+    if fills_df is None or fills_df.empty:
+        return []
+
+    work = fills_df.copy()
+    work["timestamp"] = pd.to_datetime(work["timestamp"], errors="coerce")
+    work = work.dropna(subset=["timestamp"]).sort_values("timestamp")
+
+    longs: dict[str, deque] = defaultdict(deque)
+    shorts: dict[str, deque] = defaultdict(deque)
+    closed: list[dict] = []
+
+    def _lot_fields(row) -> tuple[str, str, float, float, object, str] | None:
+        sym = config.normalize_symbol(str(row.get("symbol") or ""))
+        side = str(row.get("side") or "").lower()
+        event = str(row.get("event") or "").lower()
+        if event in ("exit", "sell", "close") and not side:
+            side = "sell"
+        if event in ("entry", "buy") and not side:
+            side = "buy"
+        if not sym or side not in ("buy", "sell"):
+            return None
+        try:
+            price = float(row.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        try:
+            qty = float(row.get("qty") or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        try:
+            notional = float(row.get("notional") or 0)
+        except (TypeError, ValueError):
+            notional = 0.0
+        if qty <= 0 and price > 0 and notional > 0:
+            qty = notional / price
+        if price <= 0 and qty > 0 and notional > 0:
+            price = notional / qty
+        if price <= 0 or qty <= 0:
+            return None
+        sleeve = str(row.get("sleeve") or "").strip() or _infer_sleeve(sym)
+        return sym, side, price, qty, row["timestamp"], sleeve
+
+    def _close(
+        *,
+        sym: str,
+        entry: dict,
+        exit_price: float,
+        match_qty: float,
+        exit_ts,
+        is_short: bool,
+    ) -> None:
+        entry_px = float(entry["price"])
+        if is_short:
+            pnl = (entry_px - exit_price) * match_qty
+            buy_px, sell_px = exit_price, entry_px
+            buy_ts, sell_ts = exit_ts, entry["ts"]
+        else:
+            pnl = (exit_price - entry_px) * match_qty
+            buy_px, sell_px = entry_px, exit_price
+            buy_ts, sell_ts = entry["ts"], exit_ts
+        pnl_pct = (
+            100.0 * (pnl / (entry_px * match_qty)) if entry_px > 0 and match_qty > 0 else 0.0
+        )
+        sleeve = str(entry.get("sleeve") or _infer_sleeve(sym))
+        closed.append(
+            {
+                "Ticker": sym,
+                "Qty": match_qty,
+                "Entry": buy_px,
+                "Exit": sell_px,
+                "P&L $": pnl,
+                "P&L %": pnl_pct,
+                "Bought": buy_ts,
+                "Sold": sell_ts,
+                "Sleeve": sleeve,
+                "_qty": match_qty,
+                "_entry": buy_px,
+                "_exit": sell_px,
+                "_pnl": pnl,
+                "_pnl_pct": pnl_pct,
+                "timestamp": sell_ts,
+                "event": "fill",
+                "symbol": sym,
+                "side": "sell",
+                "notional": round(buy_px * match_qty, 2),
+                "sleeve": sleeve,
+            }
+        )
+
+    for _, row in work.iterrows():
+        parsed = _lot_fields(row)
+        if not parsed:
+            continue
+        sym, side, price, qty, ts, sleeve = parsed
+        remaining = qty
+        if side == "buy":
+            while remaining > 1e-9 and shorts[sym]:
+                entry = shorts[sym][0]
+                match_qty = min(remaining, float(entry["qty"]))
+                _close(
+                    sym=sym,
+                    entry=entry,
+                    exit_price=price,
+                    match_qty=match_qty,
+                    exit_ts=ts,
+                    is_short=True,
+                )
+                remaining -= match_qty
+                entry["qty"] = float(entry["qty"]) - match_qty
+                if float(entry["qty"]) <= 1e-9:
+                    shorts[sym].popleft()
+            if remaining > 1e-9:
+                longs[sym].append(
+                    {"price": price, "qty": remaining, "ts": ts, "sleeve": sleeve}
+                )
+        else:
+            while remaining > 1e-9 and longs[sym]:
+                entry = longs[sym][0]
+                match_qty = min(remaining, float(entry["qty"]))
+                _close(
+                    sym=sym,
+                    entry=entry,
+                    exit_price=price,
+                    match_qty=match_qty,
+                    exit_ts=ts,
+                    is_short=False,
+                )
+                remaining -= match_qty
+                entry["qty"] = float(entry["qty"]) - match_qty
+                if float(entry["qty"]) <= 1e-9:
+                    longs[sym].popleft()
+            if remaining > 1e-9:
+                shorts[sym].append(
+                    {"price": price, "qty": remaining, "ts": ts, "sleeve": sleeve}
+                )
+
+    closed.sort(key=lambda r: r["Sold"], reverse=True)
+    return closed[:limit]
 
 
 def _load_trade_history(
@@ -757,12 +913,13 @@ def _load_trade_history(
         return None
 
     journal_df["sleeve"] = journal_df["symbol"].fillna("").astype(str).map(_infer_sleeve)
-    keep = ["timestamp", "event", "symbol", "side", "notional", "sleeve"]
+    keep = ["timestamp", "event", "symbol", "side", "notional", "qty", "price", "sleeve"]
     cols = [c for c in keep if c in journal_df.columns]
     out = journal_df[cols].copy()
     out["timestamp"] = pd.to_datetime(out["timestamp"], errors="coerce")
     out = out.dropna(subset=["timestamp"]).sort_values("timestamp", ascending=False)
-    return out.head(limit).reset_index(drop=True)
+    # Keep enough fill history for buy/sell pairing in the Trades tab.
+    return out.head(max(limit * 4, 120)).reset_index(drop=True)
 
 
 def _filter_equity_journal(path: Path, df: pd.DataFrame, book_id: str) -> pd.DataFrame:
@@ -1168,9 +1325,13 @@ class DataTable(ctk.CTkFrame):
                     "Sleeve": 88,
                     "sleeve": 88,
                     "Qty": 80,
+                    "Entry": 88,
+                    "Exit": 88,
                     "Current": 92,
                     "P&L $": 88,
                     "P&L %": 72,
+                    "Bought": 118,
+                    "Sold": 118,
                     "Time": 118,
                     "Side": 56,
                     "Notional": 88,
@@ -1178,7 +1339,14 @@ class DataTable(ctk.CTkFrame):
                 width = widths.get(col, 80)
             else:
                 width = 88 if col in ("Ticker", "symbol", "event", "sleeve") else 72
-            anchor = "w" if col in ("Ticker", "symbol", "Time", "timestamp") else "center"
+            left_cols = ("Ticker", "symbol", "Time", "timestamp", "Bought", "Sold", "Sleeve", "sleeve")
+            right_cols = ("Qty", "Entry", "Exit", "Current", "P&L $", "P&L %", "Notional")
+            if col in left_cols:
+                anchor = "w"
+            elif col in right_cols:
+                anchor = "e"
+            else:
+                anchor = "center"
             self._tree.column(col, width=width, anchor=anchor, stretch=col in ("Ticker", "symbol"))
         self._tree.tag_configure("profit", foreground=COLORS["green"])
         self._tree.tag_configure("loss", foreground=COLORS["red"])
@@ -2120,7 +2288,7 @@ class TradingDashboardApp(ctk.CTk):
         self._trades_tab_hint.pack(fill="x", padx=12, pady=(10, 4))
         self._trades_table = DataTable(
             self._tab_trades,
-            ["timestamp", "event", "symbol", "side", "notional", "sleeve"],
+            ["Ticker", "Qty", "Entry", "Exit", "P&L $", "P&L %", "Bought", "Sold", "Sleeve"],
             height=14,
             large=True,
         )
@@ -3165,25 +3333,61 @@ class TradingDashboardApp(ctk.CTk):
             )
             self._trades_tab_hint.configure(text=empty)
             return
+
+        closed = _closed_trades_from_fills(journal_df, limit=TRADES_LIMIT)
+        if not closed:
+            self._trades_table.clear()
+            n_fills = len(journal_df)
+            self._trades_tab_hint.configure(
+                text=(
+                    f"No closed buy/sell pairs yet · {n_fills} fill(s) loaded "
+                    "(open positions show on Positions)"
+                )
+            )
+            return
+
+        def _fmt_ts(ts) -> str:
+            if hasattr(ts, "strftime"):
+                return ts.strftime("%Y-%m-%d %H:%M")
+            s = str(ts or "")
+            return s[:16].replace("T", " ") if s else "—"
+
         rows = []
-        for _, row in journal_df.iterrows():
-            item = row.to_dict()
-            if hasattr(item.get("timestamp"), "strftime"):
-                item["timestamp"] = item["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-            notional = item.get("notional")
-            if notional is not None and notional != "":
-                try:
-                    item["notional"] = f"${float(notional):,.2f}"
-                except (TypeError, ValueError):
-                    pass
-            rows.append(item)
+        for trade in closed:
+            qty = float(trade.get("_qty") or trade.get("Qty") or 0)
+            entry = float(trade.get("_entry") or trade.get("Entry") or 0)
+            exit_px = float(trade.get("_exit") or trade.get("Exit") or 0)
+            pnl = float(trade.get("_pnl") or trade.get("P&L $") or 0)
+            pnl_pct = float(trade.get("_pnl_pct") or trade.get("P&L %") or 0)
+            rows.append(
+                {
+                    "Ticker": trade.get("Ticker") or trade.get("symbol") or "—",
+                    "Qty": f"{qty:.4g}",
+                    "Entry": f"${entry:,.2f}",
+                    "Exit": f"${exit_px:,.2f}",
+                    "P&L $": f"${pnl:+,.2f}",
+                    "P&L %": f"{pnl_pct:+.2f}%",
+                    "Bought": _fmt_ts(trade.get("Bought")),
+                    "Sold": _fmt_ts(trade.get("Sold")),
+                    "Sleeve": trade.get("Sleeve") or trade.get("sleeve") or "—",
+                    "_qty": qty,
+                    "_entry": entry,
+                    "_exit": exit_px,
+                    "_pnl": pnl,
+                    "_pnl_pct": pnl_pct,
+                }
+            )
 
-        self._trades_table.set_rows(rows)
-
-        n_fill = sum(1 for r in rows if r.get("event") == "fill")
-        n_sig = sum(1 for r in rows if r.get("event") == "signal")
-        summary = f"{len(rows)} rows · {n_sig} signals · {n_fill} fills"
-        self._trades_tab_hint.configure(text=summary)
+        self._trades_table.set_rows(rows, pnl_col="_pnl")
+        realized = sum(float(r["_pnl"]) for r in rows)
+        color = COLORS["green"] if realized >= 0 else COLORS["red"]
+        self._trades_tab_hint.configure(
+            text=(
+                f"{len(rows)} closed trade(s) · realized P&L ${realized:+,.2f} "
+                f"· newest first"
+            ),
+            text_color=color,
+        )
 
     def _fill_wisdom(
         self,

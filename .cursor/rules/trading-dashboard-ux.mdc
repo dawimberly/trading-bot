@@ -53,7 +53,7 @@ Color-blind: do not rely on red vs green alone — pair with text ("Running", "L
 ## 4. Trading mental models
 
 - **Positions:** table columns — Ticker, Qty, Entry, Current, P&L $, P&L % (industry standard)
-- **Trades:** chronological journal, newest first
+- **Trades:** closed round-trips — Ticker, Qty, Entry, Exit, P&L $, P&L %, Bought, Sold (newest first)
 - **Order book:** N/A (bot-driven); show **sleeve caps / exposure** instead of fake order UI
 - Button states: every `CTkButton` needs distinct `fg_color` / `hover_color`; disabled = `state="disabled"` + muted color
 - Dark theme only for desktop monitor; no white flashes on refresh
