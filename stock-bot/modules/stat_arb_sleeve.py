@@ -17,7 +17,6 @@ from modules.crypto_vol_gate import crypto_trading_allowed
 from modules.pipeline_strategies import (
     _leg_has_exposure,
     _momentum_score,
-    _nyse_equity_columns,
     _on_cooldown,
     execute_atomic_pair_entry,
     execute_atomic_pair_exit,
@@ -25,9 +24,27 @@ from modules.pipeline_strategies import (
 )
 from modules.safe_io import read_json_file, write_json_file
 
-LOOKBACK_DEFAULT = 60
-
 BOOK_FILE = Path(os.getenv("STAT_ARB_BOOK_FILE", "stat_arb_open_book.json"))
+
+
+def _coerce_bar_index(value) -> int:
+    """Normalize live datetime / backtest bar index for hold tracking."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    ts = getattr(value, "timestamp", None)
+    if callable(ts):
+        try:
+            return int(ts() // 86400)
+        except Exception:
+            pass
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
 
 
 def stat_arb_pair_symbols(executor) -> set[str]:
@@ -190,8 +207,6 @@ def _prune_stale_pair_symbols(executor, tracked_symbols: set[str]) -> list[str]:
 
 def reconcile_stat_arb_book(executor) -> dict:
     """Sync in-memory/disk pair book with Alpaca positions after restart."""
-    from modules.pipeline_strategies import _leg_has_exposure
-
     book = _open_book(executor)
     kept: list[str] = []
     removed: list[str] = []
@@ -262,6 +277,8 @@ def reconcile_stat_arb_book(executor) -> dict:
     return {
         "kept": kept,
         "removed": removed,
+        # Orphans are logged for visibility but intentionally NOT surfaced here:
+        # callers must never auto-close untracked legs (see test_stat_arb_reconcile).
         "orphans": [],
         "ignored": ignored,
         "resolved": resolved,
@@ -291,7 +308,11 @@ def cointegration_test(
     min_corr: float,
     lookback: int,
 ) -> tuple[bool, float]:
-    """Engle-Granger cointegration via statsmodels.tsa.stattools.coint (v1.1)."""
+    """Engle-Granger cointegration via statsmodels.tsa.stattools.coint (v1.1).
+
+    Falls back to the lightweight residual-slope test when statsmodels is
+    unavailable or the ADF/coint call fails — never silently reject all pairs.
+    """
     sub = pd.concat([y, x], axis=1).dropna().tail(lookback)
     if len(sub) < 30:
         return False, 1.0
@@ -307,15 +328,15 @@ def cointegration_test(
             _score, pvalue, _crit = coint(yv, xv)
             if float(pvalue) > float(config.PAPER_STAT_ARB_COINT_PVALUE):
                 return False, beta
+            return True, beta
         except Exception as exc:
-            logger.debug("coint test failed for pair", extra={"error": str(exc)})
-            return False, beta
-    else:
-        ok, beta = engle_granger_cointegrated(
-            y, x, min_corr=min_corr, lookback=lookback
-        )
-        return ok, beta
-    return True, beta
+            logger.debug(
+                "coint test unavailable/failed — Engle-Granger fallback: %s", exc
+            )
+            return engle_granger_cointegrated(
+                y, x, min_corr=min_corr, lookback=lookback
+            )
+    return engle_granger_cointegrated(y, x, min_corr=min_corr, lookback=lookback)
 
 
 def engle_granger_cointegrated(
@@ -375,7 +396,7 @@ def _no_room_reject_rate(executor) -> float | None:
 
 
 def _dynamic_equity_max_pairs(executor) -> int:
-    """Base cap 10; expand to 12–14 when sleeve room is plentiful (no_room rate < 30%)."""
+    """Base cap (8); expand toward 12 when sleeve room is plentiful (low no_room rate)."""
     base = config.effective_stat_arb_max_pairs()
     rate = _no_room_reject_rate(executor)
     if rate is None:
@@ -391,24 +412,53 @@ def _symbol_liquidity_ok(symbol: str, data: pd.DataFrame | None = None) -> bool:
     """Skip illiquid names for stat-arb legs (screener $vol or core-universe fallback)."""
     sym = config.normalize_symbol(symbol)
     min_adv = config.effective_stat_arb_min_dollar_volume()
+    min_px = float(getattr(config, "PAPER_UNIVERSE_MIN_PRICE", 5) or 5)
     try:
         from modules.dynamic_universe import load_screener_ticker_meta
 
         meta = load_screener_ticker_meta().get(sym, {})
     except ImportError:
         meta = {}
-    adv = float(meta.get("avg_dollar_volume") or 0)
+    adv = float(
+        meta.get("avg_dollar_volume")
+        or meta.get("dollar_volume")
+        or meta.get("avg_dollar_vol")
+        or 0
+    )
     if adv >= min_adv:
         return True
-    if data is not None and sym in data.columns:
+
+    prices = None
+    if data is not None and sym in getattr(data, "columns", []):
         prices = data[sym].dropna().tail(20)
-        if len(prices) >= 5 and float(prices.iloc[-1]) < float(
-            getattr(config, "PAPER_UNIVERSE_MIN_PRICE", 5) or 5
-        ):
+        if len(prices) >= 5 and float(prices.iloc[-1]) < min_px:
             return False
+
+    # Core static universe: always tradable for pairs even when screener meta
+    # omits dollar volume (common with offline / sparse screener seeds).
     if adv <= 0 and sym in config.UNIVERSE:
         return True
+
+    # Sparse screener meta: allow names with enough recent price history and
+    # price above the floor so pair discovery is not starved when ADV is absent.
+    # Does not relax risk caps — only avoids false illiquid rejects.
+    if adv <= 0 and prices is not None and len(prices) >= 10:
+        return float(prices.iloc[-1]) >= min_px
+
     return False
+
+
+def _leg_volatility_ok(symbol: str, data, *, lookback: int, max_vol: float) -> bool:
+    """Skip a leg whose recent daily-return std exceeds *max_vol* (0 disables)."""
+    if max_vol <= 0 or data is None or symbol not in getattr(data, "columns", []):
+        return True
+    prices = data[symbol].dropna().tail(max(20, lookback))
+    if len(prices) < 20:
+        return True  # insufficient history — don't reject on unknown vol
+    rets = prices.pct_change().dropna()
+    if rets.empty:
+        return True
+    return float(rets.std()) <= max_vol
 
 
 def _equity_exit_decision(
@@ -430,9 +480,27 @@ def _equity_exit_decision(
     favorable = _z_reverted_toward_zero(entry_z, z)
     best_fav = max(float(pos.get("best_favorable", 0.0)), favorable)
     pos["best_favorable"] = best_fav
-    trail_arm = profit_delta * config.effective_stat_arb_trailing_arm_frac()
+    # v1.5.2 fill-rate: arm trail at 50% of profit-z; exit on 35% pullback from best.
+    profit_gate = profit_delta * config.effective_stat_arb_trail_min_profit_frac()
+    trail_arm = max(profit_delta * config.effective_stat_arb_trailing_arm_frac(), profit_gate)
     trail_pull = config.effective_stat_arb_trailing_pullback_frac()
+    if config.effective_exit_optimization_enabled():
+        from modules.exit_management import record_exit_event
+
+        if (
+            config.effective_stat_arb_partial_exit_enabled()
+            and not pos.get("partial_taken")
+        ):
+            rr = float(config.PARTIAL_EXIT_RR)
+            if favorable >= profit_delta * rr:
+                pos["partial_taken"] = True
+                record_exit_event("partial", pos.get("pair_key", ""), sleeve="stat_arb", partial=True)
+                return True, "partial_1r", False
     if best_fav >= trail_arm and favorable < best_fav * (1.0 - trail_pull):
+        if config.effective_exit_optimization_enabled():
+            from modules.exit_management import record_exit_event
+
+            record_exit_event("trail", pos.get("pair_key", ""), sleeve="stat_arb")
         return True, "trailing_stop", False
 
     if entry_z:
@@ -454,8 +522,23 @@ def _equity_exit_decision(
     if now is not None:
         entry_bar = pos.get("entry_bar")
         if entry_bar is not None:
-            held = int(now) - int(entry_bar)
-            if held >= config.effective_stat_arb_max_hold_bars():
+            held = _coerce_bar_index(now) - _coerce_bar_index(entry_bar)
+            # v1.5.2: soft time exit — close aging pairs with partial reversion
+            # before max hold / EOD force-close bleed.
+            soft_hold = max(15, config.effective_stat_arb_equity_max_hold_bars() - 5)
+            if held >= soft_hold:
+                reverted_now = _z_reverted_toward_zero(entry_z, z)
+                if reverted_now >= profit_delta * 0.35 and abs(z) <= abs(entry_z) * 0.90:
+                    return True, "time_soft", False
+            # Equity pairs: dedicated max hold (aligned with shared 35-bar fill-rate default).
+            max_hold = config.effective_stat_arb_equity_max_hold_bars()
+            if config.effective_exit_optimization_enabled():
+                from modules.exit_management import get_time_based_exit, record_exit_event
+
+                if get_time_based_exit(held, max_hold=max_hold):
+                    record_exit_event("time", pos.get("pair_key", ""), sleeve="stat_arb")
+                    return True, "max_hold", True
+            elif held >= max_hold:
                 return True, "max_hold", True
 
     return False, "", False
@@ -463,6 +546,8 @@ def _equity_exit_decision(
 
 def _sleeve_crowding_scale(executor) -> float:
     """Shrink leg size when stat-arb cap is crowded or its own no_room rejects are high."""
+    if config.paper_deploy_aggressive():
+        return 1.0
     if not config.effective_stat_arb_sleeve_cap_enabled():
         att = getattr(executor, "_attribution", None)
         if att is None:
@@ -510,6 +595,10 @@ def pair_leg_notional(
     *,
     sleeve_attempted: bool = False,
     is_crypto: bool = False,
+    long_symbol: str | None = None,
+    data=None,
+    z_score: float | None = None,
+    regime: str | None = None,
 ) -> tuple[float | None, float | None]:
     """Half notional per leg, scaled by dynamic risk."""
     equity_fn = getattr(executor, "_get_account", None)
@@ -540,15 +629,10 @@ def pair_leg_notional(
             if total_notional < config.effective_crypto_min_notional(equity) * 2:
                 return None, None
     leg = round(float(total_notional) / 2, 2)
-    min_n = (
-        config.effective_crypto_min_notional(equity)
-        if is_crypto
-        else config.MIN_NOTIONAL
-    )
-    if equity is not None and not is_crypto:
-        min_n = config.effective_min_notional(equity)
-    elif equity is not None and is_crypto:
+    if is_crypto:
         min_n = config.effective_crypto_min_notional(equity)
+    else:
+        min_n = config.effective_min_notional(equity)
     if leg < min_n:
         return None, None
     pod_scale = float(getattr(executor, "pod_risk_scale", lambda _p: 1.0)("stat_arb"))
@@ -562,7 +646,43 @@ def pair_leg_notional(
         crowd = _sleeve_crowding_scale(executor)
         if crowd < 0.999:
             leg = round(leg * crowd, 2)
-    if leg < min_n:
+        sizing_data = data if data is not None else getattr(executor, "_sizing_data", None)
+        if long_symbol and equity is not None:
+            from modules.risk_management import atr_adjust_notional
+
+            leg = atr_adjust_notional(leg, equity, long_symbol, sizing_data, sleeve_key="stat_arb")
+    if leg is not None and config.effective_conviction_sizing_enabled() and equity is not None:
+        from modules.risk_management import compute_conviction_score, scale_notional_by_conviction
+
+        sleeve = "stat_arb_crypto" if is_crypto else "stat_arb_equity"
+        conviction = compute_conviction_score(
+            long_symbol,
+            sizing_data if sizing_data is not None else data,
+            regime or getattr(executor, "_last_regime", None),
+            sleeve=sleeve,
+            z_score=z_score,
+        )
+        leg = scale_notional_by_conviction(
+            leg,
+            equity,
+            conviction,
+            symbol=long_symbol,
+            data=sizing_data if sizing_data is not None else data,
+            scale_band=(
+                None if is_crypto else config.effective_stat_arb_conviction_scale_band()
+            ),
+        )
+    if leg is not None and config.effective_correlation_guard_enabled() and equity is not None:
+        from modules.risk_management import apply_correlation_guard_notional
+
+        leg = apply_correlation_guard_notional(
+            leg,
+            equity,
+            executor,
+            sizing_data if sizing_data is not None else data,
+            symbol=long_symbol,
+        )
+    if leg is None or leg < min_n:
         return None, None
     return leg, leg
 
@@ -589,6 +709,10 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int 
         intent.get("notional"),
         sleeve_attempted="notional" in intent,
         is_crypto=intent.get("phase") == "stat_arb_crypto",
+        long_symbol=long_sym,
+        data=getattr(executor, "_sizing_data", None),
+        z_score=intent.get("z_score"),
+        regime=regime,
     )
     if leg_n is None:
         if intent.get("phase") == "stat_arb_crypto":
@@ -623,7 +747,7 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int 
         "long_filled_notional": long_fill_n or leg_n,
         "short_filled_notional": short_fill_n or leg_n,
         "entry_z": z,
-        "entry_bar": intent.get("entry_bar", now),
+        "entry_bar": _coerce_bar_index(intent.get("entry_bar", now)),
         "entry_regime": regime,
     }
     _save_book(executor)
@@ -637,6 +761,15 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int 
             att.on_stat_arb_pair_entry(
                 pair_key, long_sym, short_sym, entry_z=float(z)
             )
+    if config.effective_insider_signal_boost_enabled():
+        try:
+            from modules.insider_signal_handler import get_boost_snapshot, record_insider_boost_trade
+
+            snap = get_boost_snapshot()
+            if float((snap.get("stat_arb_boosts") or {}).get(long_sym, 1.0)) > 1.0:
+                record_insider_boost_trade("stat_arb")
+        except Exception:
+            pass
 
     msg = (
         f"Stat arb: LONG {long_sym} / SHORT {short_sym}, "
@@ -663,6 +796,23 @@ def _close_position(
     long_sym = position["long_symbol"]
     short_sym = position["short_symbol"]
     leg_n = position.get("leg_notional")
+    if (
+        not force
+        and position.get("exit_reason") == "partial_1r"
+        and config.effective_exit_optimization_enabled()
+    ):
+        from modules.exit_management import partial_exit_fraction
+
+        reduce = round(float(leg_n or 0) * partial_exit_fraction(), 2)
+        if reduce > 0:
+            executor.execute_reduce_notional(
+                long_sym, reduce, reason="partial_1r", sleeve="stat_arb"
+            )
+            executor.execute_reduce_notional(
+                short_sym, reduce, reason="partial_1r", sleeve="stat_arb"
+            )
+            position["leg_notional"] = round(max(0.0, float(leg_n or 0) - reduce), 2)
+        return 1
     att = getattr(executor, "_attribution", None)
     mark_pnl = None
     is_crypto = _is_crypto_pair_position(position)
@@ -712,6 +862,15 @@ def _close_position(
                 pair_key,
                 leg_notional=float(leg_n or 0),
                 regime=position.get("entry_regime") or regime,
+                entry_bar=position.get("entry_bar"),
+                exit_bar=now,
+            )
+        elif not is_crypto and force and mark_pnl is None:
+            att.record_stat_arb_realized(
+                0.0,
+                pair_key,
+                leg_notional=float(leg_n or 0),
+                exit_reason=position.get("exit_reason", "force_close"),
                 entry_bar=position.get("entry_bar"),
                 exit_bar=now,
             )
@@ -810,7 +969,7 @@ def process_exits(
             if not should_exit and now is not None:
                 entry_bar = pos.get("entry_bar")
                 if entry_bar is not None:
-                    held = int(now) - int(entry_bar)
+                    held = _coerce_bar_index(now) - _coerce_bar_index(entry_bar)
                     if held >= config.effective_crypto_max_hold_bars():
                         should_exit = True
                         exit_reason = "max_hold"
@@ -834,11 +993,17 @@ def process_exits(
     return exits
 
 
-def force_close_all_pairs(executor, data, *, regime: str = "", now: int | None = None) -> int:
-    """Close every open pair in the book (end-of-backtest cleanup)."""
+def force_close_all_pairs(executor, *, regime: str = "", now: int | None = None) -> int:
+    """Close every open pair in the book (end-of-backtest cleanup).
+
+    Positions are closed at the executor's current ``prices``; no price frame is
+    needed here (the caller sets ``executor.prices`` before invoking).
+    """
     book = _open_book(executor)
     closed = 0
     for pair_key, pos in list(book.items()):
+        if not pos.get("exit_reason"):
+            pos["exit_reason"] = "force_close"
         closed += _close_position(
             executor,
             pair_key,
@@ -916,10 +1081,11 @@ def _equity_exclude_symbols(executor, data=None, regime=None, yield_gated: bool 
             block_n = config.effective_stat_arb_max_trades()
             if config.effective_stat_arb_sleeve_cap_enabled():
                 block_n = max(1, min(block_n, 2))
-            for sym in ranked[: block_n * 2]:
+            overlap_mult = max(1, int(getattr(config, "STAT_ARB_NYSE_OVERLAP_BLOCK_MULT", 2)))
+            for sym in ranked[: block_n * overlap_mult]:
                 blocked.add(config.normalize_symbol(sym))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("NYSE overlap exclude scan failed: %s", exc)
     return blocked
 
 
@@ -948,22 +1114,47 @@ def _scan_pair_candidates(
     momentum_pick: bool = False,
     exclude_symbols: set[str] | None = None,
     regime: str = "",
+    max_leg_vol: float = 0.0,
+    reject_counter: dict[str, int] | None = None,
+    near_miss: list[tuple] | None = None,
 ) -> list[tuple[float, float, str, str, float, str, str, float]]:
-    """Return sorted (score, z, long, short, beta, y_sym, x_sym, corr) candidates."""
+    """Return sorted (score, z, long, short, beta, y_sym, x_sym, corr) candidates.
+
+    When ``reject_counter`` is provided it is populated with per-reason drop
+    counts (illiquid/blocked/short_history/low_corr/coint_fail/low_z/pairs_seen)
+    for funnel diagnostics. ``near_miss`` collects sample pairs that passed
+    correlation but failed cointegration/z so we can inspect what is close.
+    """
+
+    def _bump(reason: str) -> None:
+        if reject_counter is not None:
+            reject_counter[reason] = reject_counter.get(reason, 0) + 1
+
     blocked = exclude_symbols or set()
     out: list[tuple[float, float, str, str, float, str, str, float]] = []
     for i in range(len(symbols)):
         for j in range(i + 1, len(symbols)):
             t1, t2 = symbols[i], symbols[j]
+            _bump("pairs_seen")
             if not _symbol_liquidity_ok(t1, data) or not _symbol_liquidity_ok(t2, data):
+                _bump("illiquid")
                 continue
             if config.normalize_symbol(t1) in blocked or config.normalize_symbol(t2) in blocked:
+                _bump("blocked")
+                continue
+            if max_leg_vol > 0 and (
+                not _leg_volatility_ok(t1, data, lookback=lookback, max_vol=max_leg_vol)
+                or not _leg_volatility_ok(t2, data, lookback=lookback, max_vol=max_leg_vol)
+            ):
+                _bump("high_vol")
                 continue
             pair = data[[t1, t2]].dropna().tail(lookback)
             if len(pair) < 30:
+                _bump("short_history")
                 continue
             corr = float(pair[t1].corr(pair[t2]))
             if corr < min_corr:
+                _bump("low_corr")
                 continue
             ok, beta = cointegration_test(
                 data[t1], data[t2], min_corr=min_corr, lookback=lookback
@@ -973,12 +1164,18 @@ def _scan_pair_candidates(
                     data[t2], data[t1], min_corr=min_corr, lookback=lookback
                 )
                 if not ok:
+                    _bump("coint_fail")
+                    if near_miss is not None and len(near_miss) < 8:
+                        near_miss.append((round(corr, 3), t1, t2, "coint_fail"))
                     continue
                 y_sym, x_sym = t2, t1
             else:
                 y_sym, x_sym = t1, t2
             z = spread_zscore(data[y_sym], data[x_sym], beta, lookback=lookback)
             if abs(z) < z_entry:
+                _bump("low_z")
+                if near_miss is not None and len(near_miss) < 8:
+                    near_miss.append((round(corr, 3), y_sym, x_sym, f"z={round(z, 2)}"))
                 continue
             if momentum_pick:
                 mom1 = _momentum_score(data, t1)
@@ -994,12 +1191,35 @@ def _scan_pair_candidates(
             if config.normalize_symbol(long_sym) in blocked or config.normalize_symbol(
                 short_sym
             ) in blocked:
+                _bump("blocked_dir")
                 continue
+            _bump("kept")
             score = abs(z) * corr
             if regime:
                 from modules.opportunistic_short_sleeve import stat_arb_short_bias_score_boost
 
                 score = stat_arb_short_bias_score_boost(data, regime, short_sym, score)
+            if config.effective_insider_monitor_enabled():
+                try:
+                    from modules.insider_monitor import stat_arb_long_boost
+
+                    score *= stat_arb_long_boost(long_sym)
+                except Exception as exc:
+                    logger.debug("insider stat-arb boost skipped for %s: %s", long_sym, exc)
+            if config.effective_rvol_scanner_enabled():
+                try:
+                    from modules.volume_analysis import stat_arb_long_rvol_mult
+
+                    score *= stat_arb_long_rvol_mult(long_sym, data)
+                except Exception as exc:
+                    logger.debug("RVOL stat-arb boost skipped for %s: %s", long_sym, exc)
+            if config.effective_catalyst_scoring_enabled():
+                try:
+                    from modules.catalyst_scoring import catalyst_stat_arb_long_mult
+
+                    score *= catalyst_stat_arb_long_mult(long_sym, data)
+                except Exception as exc:
+                    logger.debug("catalyst stat-arb boost skipped for %s: %s", long_sym, exc)
             if config.PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF:
                 try:
                     from modules.dynamic_universe import sector_for_symbol
@@ -1008,8 +1228,8 @@ def _scan_pair_candidates(
                     s2 = sector_for_symbol(t2)
                     if s1 and s2 and s1 != s2 and s1 != "Other" and s2 != "Other":
                         score *= float(config.PAPER_STAT_ARB_SECTOR_NEUTRAL_BOOST)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("sector-neutral boost skipped: %s", exc)
             out.append((score, z, long_sym, short_sym, beta, y_sym, x_sym, corr))
     out.sort(reverse=True)
     return out
@@ -1097,6 +1317,60 @@ def crypto_stat_arb_intents(
     return intents
 
 
+_stat_arb_universe_logged = False
+
+
+def _nyse_stat_arb_columns(data) -> list[str]:
+    """Pair pool for stat arb: eligible NYSE/dynamic names WITHOUT the RVOL
+    momentum filter.
+
+    Stat arb needs a broad, stable universe to find cointegrated pairs. The
+    momentum sleeve's RVOL screen (``_nyse_equity_columns``) drops any name whose
+    relative volume is below threshold, which in practice collapses the pool to a
+    handful of high-RVOL names (as low as 1) and starves pair discovery. RVOL is
+    still applied later as a per-candidate score boost, not an exclusion.
+
+    Always union the dynamic/screener pool with the full static NYSE eligible
+    columns so pair discovery keeps a liquid core even when screener overlap is
+    thin or screener meta lacks dollar-volume fields.
+    """
+    global _stat_arb_universe_logged
+    data_columns = getattr(data, "columns", [])
+    dynamic = config.nyse_momentum_universe(data_columns)
+    static = [c for c in data_columns if config._nyse_eligible_symbol(c)]
+    # Static core first so liquid UNIVERSE names are never dropped by the scan cap.
+    cols = list(dict.fromkeys([*static, *dynamic]))
+    min_universe = int(getattr(config, "STAT_ARB_MIN_UNIVERSE", 20) or 20)
+    max_scan = int(getattr(config, "STAT_ARB_MAX_SCAN_UNIVERSE", 80) or 80)
+    if max_scan > 0 and len(cols) > max_scan:
+        cols = cols[:max_scan]
+    if len(cols) < min_universe and static:
+        logger.warning(
+            "[STAT_ARB_UNIVERSE] merged pool still below floor: %d < %d "
+            "(dynamic=%d static=%d)",
+            len(cols),
+            min_universe,
+            len(dynamic),
+            len(static),
+        )
+    if len(dynamic) < min_universe or len(dynamic) < len(cols):
+        logger.debug(
+            "[STAT_ARB_UNIVERSE] dynamic=%d + static=%d -> %d names (top: %s)",
+            len(dynamic),
+            len(static),
+            len(cols),
+            ", ".join(cols[:10]),
+        )
+    if not _stat_arb_universe_logged:
+        logger.info(
+            "[STAT_ARB_UNIVERSE] Stat Arb universe: %d names (top: %s)",
+            len(cols),
+            ", ".join(cols[:10]),
+        )
+        _stat_arb_universe_logged = True
+    return cols
+
+
 def equity_stat_arb_intents(
     data,
     regime,
@@ -1115,7 +1389,7 @@ def equity_stat_arb_intents(
     if regime_entries_paused(regime, data) or yield_gated:
         return []
 
-    equity_cols = _nyse_equity_columns(data)
+    equity_cols = _nyse_stat_arb_columns(data)
     if len(equity_cols) < 2:
         return []
 
@@ -1139,6 +1413,7 @@ def equity_stat_arb_intents(
         momentum_pick=True,
         exclude_symbols=exclude,
         regime=regime,
+        max_leg_vol=config.effective_stat_arb_max_leg_vol(),
     )
     slots = _equity_pair_slots(executor) if executor is not None else config.effective_stat_arb_max_pairs()
     trade_cap = max_trades if max_trades is not None else config.effective_stat_arb_max_trades()
@@ -1173,7 +1448,7 @@ def equity_stat_arb_intents(
                 "beta": beta,
                 "notional": pair_notional,
                 "phase": "stat_arb_equity",
-                "entry_bar": now,
+                "entry_bar": _coerce_bar_index(now),
             }
         )
         fired.add(long_sym)
@@ -1265,6 +1540,50 @@ def run_crypto_stat_arb(
     return trades
 
 
+_SCAN_DEBUG_EVERY = 0  # throttle: only log every Nth call (0 = every call)
+_scan_debug_calls = 0
+
+
+def _log_stat_arb_scan_funnel(
+    *,
+    equity_cols: list[str],
+    exclude: set[str],
+    z_entry: float,
+    raw_count: int,
+    reject_counter: dict[str, int] | None,
+    near_miss: list[tuple] | None,
+    now,
+) -> None:
+    """Emit a one-line stat-arb scan funnel + top reject reasons (debug only)."""
+    global _scan_debug_calls
+    _scan_debug_calls += 1
+    if _SCAN_DEBUG_EVERY and (_scan_debug_calls % _SCAN_DEBUG_EVERY):
+        return
+    rc = reject_counter or {}
+    pairs_seen = rc.get("pairs_seen", 0)
+    ordered = sorted(
+        ((k, v) for k, v in rc.items() if k != "pairs_seen" and v),
+        key=lambda kv: kv[1],
+        reverse=True,
+    )
+    reasons = " ".join(f"{k}={v}" for k, v in ordered) or "none"
+    logger.warning(
+        "[STAT_ARB_SCAN] bar=%s universe=%d excluded=%d min_corr=%.2f z_entry=%.2f "
+        "pairs_seen=%d scan_signals=%d | rejects: %s",
+        now,
+        len(equity_cols),
+        len(exclude),
+        float(config.effective_stat_arb_min_correlation()),
+        float(z_entry),
+        pairs_seen,
+        raw_count,
+        reasons,
+    )
+    if near_miss:
+        samples = ", ".join(f"{a}/{b}(corr={c},{d})" for c, a, b, d in near_miss)
+        logger.warning("[STAT_ARB_SCAN] near-miss pairs: %s", samples)
+
+
 def run_equity_stat_arb(
     data,
     executor,
@@ -1311,9 +1630,14 @@ def run_equity_stat_arb(
         executor=executor,
     )
     att = getattr(executor, "_attribution", None)
-    if att:
-        equity_cols = _nyse_equity_columns(data)
+    debug_scan = bool(getattr(config, "STAT_ARB_SCAN_DEBUG", False))
+    if att or debug_scan:
+        equity_cols = _nyse_stat_arb_columns(data)
+        if att:
+            att.record_stat_arb_universe(len(equity_cols))
         if len(equity_cols) >= 2:
+            reject_counter: dict[str, int] = {} if debug_scan else None
+            near_miss: list[tuple] = [] if debug_scan else None
             raw = _scan_pair_candidates(
                 data,
                 equity_cols,
@@ -1322,12 +1646,33 @@ def run_equity_stat_arb(
                 z_entry=z_entry,
                 momentum_pick=True,
                 exclude_symbols=exclude,
+                max_leg_vol=config.effective_stat_arb_max_leg_vol(),
+                reject_counter=reject_counter,
+                near_miss=near_miss,
             )
-            att.record_signals("stat_arb", len(raw))
-        att.record_intents("stat_arb", len(intents))
-        slots = _equity_pair_slots(executor)
-        if att.intents["stat_arb"] > 0 and slots <= 0:
-            att.record_stat_arb_reject("max_pairs")
+            if att:
+                att.record_signals("stat_arb", len(raw))
+            if debug_scan:
+                _log_stat_arb_scan_funnel(
+                    equity_cols=equity_cols,
+                    exclude=exclude,
+                    z_entry=z_entry,
+                    raw_count=len(raw),
+                    reject_counter=reject_counter,
+                    near_miss=near_miss,
+                    now=now,
+                )
+        elif debug_scan:
+            logger.warning(
+                "[STAT_ARB_SCAN] equity_cols<2 (n=%d) — universe too small; "
+                "check nyse_momentum_universe / data columns",
+                len(equity_cols),
+            )
+        if att:
+            att.record_intents("stat_arb", len(intents))
+            slots = _equity_pair_slots(executor)
+            if att.intents["stat_arb"] > 0 and slots <= 0:
+                att.record_stat_arb_reject("max_pairs")
     book = _open_book(executor)
     for intent in intents:
         if intent["pair_key"] in book:

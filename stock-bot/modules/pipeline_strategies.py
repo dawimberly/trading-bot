@@ -1,6 +1,10 @@
 """Crypto pair and equity MA50 strategies shared by run_all.py and backtester.py."""
 
+from __future__ import annotations
+
 import logging
+from datetime import date, datetime, time
+from pathlib import Path
 
 import numpy as np
 
@@ -11,6 +15,235 @@ from modules.crypto_universe import crypto_trading_columns
 logger = logging.getLogger(__name__)
 
 PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline")
+
+# In-session NYSE momentum entries for one-per-day (backtest + live gate).
+_nyse_mom_entries_by_day: dict[str, set[str]] = {}
+
+
+def _et_now_time(now=None) -> time | None:
+    """Return America/New_York clock time for *now* (or wall clock)."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+
+            et = ZoneInfo("America/New_York")
+        except Exception:
+            import pytz
+
+            et = pytz.timezone("America/New_York")
+        if now is None:
+            return datetime.now(et).timetz().replace(tzinfo=None)
+        if isinstance(now, datetime):
+            if now.tzinfo is None:
+                # Assume already ET/local wall time from live loop.
+                return now.time()
+            return now.astimezone(et).time()
+        return None
+    except Exception:
+        return None
+
+
+def _calendar_day_key(now=None, data=None) -> str:
+    """Calendar day for one-entry/day; supports live datetime and backtest bar windows."""
+    if isinstance(now, datetime):
+        return now.date().isoformat()
+    if isinstance(now, date):
+        return now.isoformat()
+    # Backtest passes bar index + truncated window — use last bar date, not wall clock.
+    if data is not None and hasattr(data, "index") and len(data.index) > 0:
+        try:
+            ts = data.index[-1]
+            if hasattr(ts, "date"):
+                return ts.date().isoformat()
+            from pandas import Timestamp
+
+            return Timestamp(ts).date().isoformat()
+        except Exception:
+            pass
+    if isinstance(now, (int, float)) and data is not None and hasattr(data, "index"):
+        try:
+            idx = int(now)
+            if 0 <= idx < len(data.index):
+                ts = data.index[idx]
+                if hasattr(ts, "date"):
+                    return ts.date().isoformat()
+                from pandas import Timestamp
+
+                return Timestamp(ts).date().isoformat()
+        except Exception:
+            pass
+    return datetime.now().date().isoformat()
+
+
+NYSE_PREF_ENTRY_START = time(12, 0)
+NYSE_PREF_ENTRY_END = time(14, 0)
+NYSE_RSI_MAX_OFF_PEAK = 70
+NYSE_RSI_MAX_PREF_WINDOW = 72
+NYSE_PREF_WINDOW_RANK_BOOST = 0.02
+NYSE_RSI_PERIOD = 14
+
+
+def _rsi(series, period: int) -> float | None:
+    if len(series) < period + 2:
+        return None
+    s = series.astype(float)
+    delta = s.diff()
+    gain = delta.clip(lower=0).rolling(period).mean()
+    loss = (-delta.clip(upper=0)).rolling(period).mean()
+    last_loss = float(loss.iloc[-1])
+    if last_loss <= 1e-12:
+        return 100.0
+    rs = float(gain.iloc[-1]) / last_loss
+    return float(100.0 - (100.0 / (1.0 + rs)))
+
+
+def _nyse_symbol_rsi(symbol: str, data) -> float | None:
+    if data is None or not hasattr(data, "columns") or symbol not in data.columns:
+        return None
+    prices = data[symbol].dropna()
+    if len(prices) < NYSE_RSI_PERIOD + 2:
+        return None
+    return _rsi(prices, NYSE_RSI_PERIOD)
+
+
+def _nyse_preferred_entry_window_active(now=None) -> bool:
+    """True during 12:00–14:00 ET preferred entry window (live clock only)."""
+    if isinstance(now, (int, float)):
+        return False
+    t = _et_now_time(now)
+    if t is None:
+        return False
+    return NYSE_PREF_ENTRY_START <= t <= NYSE_PREF_ENTRY_END
+
+
+def _nyse_momentum_rsi_max(now=None) -> int | None:
+    """RSI ceiling under quality fixes; looser in the 12:00–14:00 ET window."""
+    if not config.effective_paper_momentum_quality_fixes():
+        return None
+    if _nyse_preferred_entry_window_active(now):
+        return NYSE_RSI_MAX_PREF_WINDOW
+    return NYSE_RSI_MAX_OFF_PEAK
+
+
+def _nyse_time_of_day_rank_boost(now=None) -> float:
+    """Afternoon scoring boost — prefer entries 12:00–14:00 ET without blocking others."""
+    if not config.effective_paper_momentum_quality_fixes():
+        return 0.0
+    if _nyse_preferred_entry_window_active(now):
+        return NYSE_PREF_WINDOW_RANK_BOOST
+    return 0.0
+
+
+def _nyse_open_cooldown_active(now=None) -> bool:
+    """True during 9:30–10:00 ET (first 30 minutes). Daily backtests (bar index / midnight) skip."""
+    if isinstance(now, (int, float)):
+        return False
+    t = _et_now_time(now)
+    if t is None:
+        return False
+    return time(9, 30) <= t <= time(10, 0)
+
+
+def _overnight_gap_pct(symbol: str, data) -> float | None:
+    """(today_open / prior_close) - 1. Prefers yfinance OHLC; falls back to close/close."""
+    sym = config.normalize_symbol(symbol)
+    # Backtests must stay PIT — no live yfinance gaps.
+    try:
+        use_yf = not config.backtest_paper_sleeves_context()
+    except Exception:
+        use_yf = True
+    if use_yf:
+        try:
+            import yfinance as yf
+
+            hist = yf.Ticker(sym).history(period="10d", auto_adjust=True)
+            if hist is not None and len(hist) >= 2 and "Open" in hist.columns:
+                prior_close = float(hist["Close"].iloc[-2])
+                today_open = float(hist["Open"].iloc[-1])
+                if prior_close > 0 and today_open > 0:
+                    return today_open / prior_close - 1.0
+        except Exception as exc:
+            logger.debug("gap yfinance fallback for %s: %s", sym, exc)
+
+    if data is None or not hasattr(data, "columns") or sym not in data.columns:
+        return None
+    prices = data[sym].dropna()
+    if len(prices) < 2:
+        return None
+    prior = float(prices.iloc[-2])
+    last = float(prices.iloc[-1])
+    if prior <= 0:
+        return None
+    return last / prior - 1.0
+
+
+def _nyse_journal_entered_today(symbol: str, now=None, data=None) -> bool:
+    """True if journal already has a NYSE momentum buy/signal for symbol today."""
+    sym = config.normalize_symbol(symbol)
+    day = _calendar_day_key(now, data=data)
+    cached = _nyse_mom_entries_by_day.get(day) or set()
+    if sym in cached:
+        return True
+    # Backtests only use in-memory marks — avoid live journal dates polluting PIT.
+    try:
+        if config.backtest_paper_sleeves_context():
+            return False
+    except Exception:
+        pass
+    try:
+        import pandas as pd
+        from modules.paper_journal import ENTRY_EVENTS, journal_paths, normalize_journal_df, read_journal
+
+        day_dt = datetime.strptime(day, "%Y-%m-%d").date()
+        for path in journal_paths():
+            try:
+                df = read_journal(path=path)
+            except Exception:
+                continue
+            df = normalize_journal_df(df)
+            if df is None or df.empty:
+                continue
+            ticker = df.get("ticker")
+            if ticker is None:
+                continue
+            mask = ticker.astype(str).str.upper() == sym
+            if "event" in df.columns:
+                mask &= df["event"].isin(ENTRY_EVENTS)
+            if "side" in df.columns:
+                mask &= df["side"].astype(str).str.lower().isin(["buy", ""])
+            if "timestamp" not in df.columns:
+                continue
+            ts = pd.to_datetime(df["timestamp"], errors="coerce")
+            mask &= ts.dt.date == day_dt
+            if mask.any():
+                return True
+    except Exception as exc:
+        logger.debug("journal same-day check skipped for %s: %s", sym, exc)
+    return False
+
+
+def _mark_nyse_entered_today(symbol: str, now=None, data=None) -> None:
+    day = _calendar_day_key(now, data=data)
+    _nyse_mom_entries_by_day.setdefault(day, set()).add(config.normalize_symbol(symbol))
+
+
+def _nyse_momentum_quality_skip(symbol: str, data, now=None) -> str | None:
+    """Return skip reason string when PAPER_MOMENTUM_QUALITY_FIXES blocks entry."""
+    if not config.effective_paper_momentum_quality_fixes():
+        return None
+    if _nyse_open_cooldown_active(now):
+        return "open cooldown (9:30-10:00 ET)"
+    gap = _overnight_gap_pct(symbol, data)
+    if gap is not None and gap > 0.02:
+        return f"overnight gap {gap:.1%} too large"
+    if _nyse_journal_entered_today(symbol, now, data=data):
+        return "already entered this symbol today"
+    rsi_max = _nyse_momentum_rsi_max(now)
+    if rsi_max is not None:
+        rsi = _nyse_symbol_rsi(symbol, data)
+        if rsi is not None and rsi >= rsi_max:
+            return f"RSI {rsi:.0f} overbought (max {rsi_max})"
+    return None
 
 
 def regime_soft_pause_sizing_multiplier(regime, *, wisdom_paused=False) -> float:
@@ -604,8 +837,19 @@ def _nyse_equity_columns(data):
             for c in data.columns
             if c in allowed and config._nyse_eligible_symbol(c)
         ]
-        if not cols:
-            cols = config.nyse_momentum_universe(data.columns)
+        # Guard against a collapsed pool (screener names without price columns):
+        # merge with the full static/dynamic universe so downstream sleeves
+        # always see a workable pool (~20+ names) instead of 0-1.
+        min_cols = int(getattr(config, "STAT_ARB_MIN_UNIVERSE", 20) or 20)
+        if len(cols) < min_cols:
+            fallback = config.nyse_momentum_universe(data.columns)
+            cols = list(dict.fromkeys([*cols, *fallback]))
+            logger.debug(
+                "[UNIVERSE] _nyse_equity_columns below floor — merged to %d "
+                "names (top: %s)",
+                len(cols),
+                ", ".join(cols[:10]),
+            )
     else:
         cols = config.nyse_momentum_universe(data.columns)
     if config.effective_rvol_scanner_enabled():
@@ -618,7 +862,7 @@ def _nyse_equity_columns(data):
     return cols
 
 
-def _equity_momentum_candidates(data, equity_cols, executor=None):
+def _equity_momentum_candidates(data, equity_cols, executor=None, now=None):
     rows = []
     # v1.5.1: allow entries within a small band below MA (flexibility) to reduce drag.
     tol = max(0.0, float(getattr(config, "NYSE_MA_ENTRY_TOLERANCE_PCT", 0.0)))
@@ -696,6 +940,10 @@ def _equity_momentum_candidates(data, equity_cols, executor=None):
             rows.sort(reverse=True)
         except Exception as exc:
             logger.debug("multi-timeframe momentum rank boost skipped: %s", exc)
+    tod_boost = _nyse_time_of_day_rank_boost(now)
+    if tod_boost > 0 and rows:
+        rows = [(score + tod_boost, sym) for score, sym in rows]
+        rows.sort(reverse=True)
     return [s for _, s in rows]
 
 
@@ -800,8 +1048,11 @@ def _equity_momentum_ranked(
     yield_gated=False,
     regime=None,
     executor=None,
+    now=None,
 ):
-    ranked = _equity_momentum_candidates(data, equity_cols, executor=executor)
+    ranked = _equity_momentum_candidates(
+        data, equity_cols, executor=executor, now=now
+    )
     if not ranked:
         return ranked
     if config.effective_paper_dynamic_universe_strict():
@@ -901,7 +1152,7 @@ def _nyse_buy_intent(
         return False
     equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
-        data, equity_cols, yield_gated=yield_gated, regime=regime
+        data, equity_cols, yield_gated=yield_gated, regime=regime, now=now
     )
     if not ranked:
         return False
@@ -1170,7 +1421,12 @@ def run_equity_strategy(
         return 0
     equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
-        data, equity_cols, yield_gated=yield_gated, regime=regime, executor=executor
+        data,
+        equity_cols,
+        yield_gated=yield_gated,
+        regime=regime,
+        executor=executor,
+        now=now,
     )
     if not ranked:
         return 0
@@ -1181,6 +1437,10 @@ def run_equity_strategy(
             break
         if pick_log is not None:
             pick_log.append(symbol)
+        skip = _nyse_momentum_quality_skip(symbol, data, now=now)
+        if skip:
+            logger.info("[NYSE] Skipping %s — %s", symbol, skip)
+            continue
         pair_key = symbol + "/MA50"
         if _on_cooldown(
             pair_cooldown,
@@ -1264,6 +1524,7 @@ def run_equity_strategy(
         )
         if not _count_if_filled(executor, order):
             continue
+        _mark_nyse_entered_today(symbol, now=now, data=data)
         if config.effective_insider_signal_boost_enabled():
             try:
                 from modules.insider_signal_handler import get_boost_snapshot, record_insider_boost_trade
@@ -1381,26 +1642,37 @@ def nyse_mirror_intent(
     *,
     cooldown_seconds=COOLDOWN_SECONDS,
     yield_gated=False,
+    executor=None,
 ) -> dict | None:
     """Top MA50 momentum equity intent for Kraken mirror."""
     if regime_entries_paused(regime, data):
         return None
     equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
-        data, equity_cols, yield_gated=yield_gated, regime=regime, executor=executor
+        data,
+        equity_cols,
+        yield_gated=yield_gated,
+        regime=regime,
+        executor=executor,
+        now=now,
     )
     if not ranked:
         return None
-    symbol = ranked[0]
-    pair_key = symbol + "/MA50"
-    if _on_cooldown(pair_cooldown, pair_key, now, cooldown_seconds=cooldown_seconds):
-        return None
-    return {
-        "symbol": symbol,
-        "side": "buy",
-        "pair_key": pair_key,
-        "phase": "nyse_mirror",
-    }
+    for symbol in ranked:
+        skip = _nyse_momentum_quality_skip(symbol, data, now=now)
+        if skip:
+            logger.info("[NYSE] Skipping %s — %s", symbol, skip)
+            continue
+        pair_key = symbol + "/MA50"
+        if _on_cooldown(pair_cooldown, pair_key, now, cooldown_seconds=cooldown_seconds):
+            continue
+        return {
+            "symbol": symbol,
+            "side": "buy",
+            "pair_key": pair_key,
+            "phase": "nyse_mirror",
+        }
+    return None
 
 
 def run_international_strategy(*_args, **_kwargs) -> int:
@@ -1411,20 +1683,6 @@ def run_international_strategy(*_args, **_kwargs) -> int:
 def run_bond_strategy(*_args, **_kwargs) -> int:
     """Bond sleeve placeholder — disabled on live; full impl in research branch."""
     return 0
-
-
-def _rsi(series, period: int) -> float | None:
-    if len(series) < period + 2:
-        return None
-    s = series.astype(float)
-    delta = s.diff()
-    gain = delta.clip(lower=0).rolling(period).mean()
-    loss = (-delta.clip(upper=0)).rolling(period).mean()
-    last_loss = float(loss.iloc[-1])
-    if last_loss <= 1e-12:
-        return 100.0
-    rs = float(gain.iloc[-1]) / last_loss
-    return float(100.0 - (100.0 / (1.0 + rs)))
 
 
 def _short_spy_extension_above_ma200(data, symbol: str) -> tuple[bool, float]:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from typing import Any
 
 import config
+
+logger = logging.getLogger(__name__)
 
 STRATEGIES = ("spy", "ma50_momentum", "stat_arb", "crypto", "opportunistic_short")
 SLEEVE_REPORT_KEYS = ("spy", "ma50_momentum", "stat_arb", "crypto", "opportunistic_short")
@@ -86,6 +89,7 @@ class BacktestAttribution:
         self.overlap_bars: int = 0
         self.symbol_overlap_bars: int = 0
         self.stat_arb_rejects: dict[str, int] = defaultdict(int)
+        self.stat_arb_universe_size: int = 0
         self.crypto_vol_gate_pass: int = 0
         self.crypto_scan_signals: int = 0
         self.crypto_intents: int = 0
@@ -102,8 +106,28 @@ class BacktestAttribution:
         self.short_trigger_fires: int = 0
         self.short_trigger_rejects: dict[str, int] = defaultdict(int)
         self.short_entry_triggers: dict[str, int] = defaultdict(int)
+        self._bubble_score_samples: list[float] = []
+        self._buffett_ratio_samples: list[float] = []
+        self._short_trade_log: list[dict[str, Any]] = []
+
+    def record_short_entry_detail(self, detail: dict[str, Any]) -> None:
+        if detail:
+            self._short_trade_log.append(dict(detail))
 
     def record_short_trigger(self, trigger: dict, *, opened: bool = False) -> None:
+        bubble = trigger.get("bubble_score")
+        if bubble is not None:
+            try:
+                b = float(bubble)
+                self._bubble_score_samples.append(b * 100.0 if b <= 1.0 else b)
+            except (TypeError, ValueError):
+                pass
+        buff = trigger.get("buffett_ratio_pct")
+        if buff is not None:
+            try:
+                self._buffett_ratio_samples.append(float(buff))
+            except (TypeError, ValueError):
+                pass
         if opened:
             reason = str(trigger.get("trigger_reason") or "allowed")
             self.short_entry_triggers[reason] += 1
@@ -130,6 +154,11 @@ class BacktestAttribution:
     def record_stat_arb_reject(self, reason: str) -> None:
         if reason:
             self.stat_arb_rejects[str(reason)] += 1
+
+    def record_stat_arb_universe(self, size: int) -> None:
+        """Track the largest pair-pool universe seen during the run."""
+        if size > self.stat_arb_universe_size:
+            self.stat_arb_universe_size = int(size)
 
     def record_crypto_vol_gate_pass(self, count: int = 1) -> None:
         if count > 0:
@@ -237,6 +266,10 @@ class BacktestAttribution:
                             "hold_bars": hold_bars,
                             "entry_bar": entry_bar,
                             "exit_bar": exit_bar,
+                            "trigger_reason": meta.get("trigger_reason") or order.get("trigger_reason"),
+                            "entry_z": meta.get("entry_z") or order.get("entry_z"),
+                            "bubble_score": meta.get("bubble_score") or order.get("bubble_score"),
+                            "partial_exit": bool(meta.get("partial_exit") or order.get("partial_exit")),
                         }
                     )
             elif order.get("pair_cover"):
@@ -273,15 +306,30 @@ class BacktestAttribution:
                 )
         elif side == "sell" and order.get("naked_short"):
             self.entry_fills[strategy] += 1
-            self._short_lots[sym].append(
-                {
-                    "qty": qty,
-                    "price": price,
-                    "strategy": strategy,
-                    "pair_key": meta.get("pair_key") or order.get("pair_key"),
-                    "entry_bar": meta.get("entry_bar") or order.get("entry_bar"),
-                }
-            )
+            lot = {
+                "qty": qty,
+                "price": price,
+                "strategy": strategy,
+                "pair_key": meta.get("pair_key") or order.get("pair_key"),
+                "entry_bar": meta.get("entry_bar") or order.get("entry_bar"),
+                "trigger_reason": meta.get("trigger_reason") or order.get("trigger_reason"),
+                "entry_z": meta.get("entry_z") or order.get("entry_z"),
+                "bubble_score": meta.get("bubble_score") or order.get("bubble_score"),
+            }
+            self._short_lots[sym].append(lot)
+            if hasattr(self, "record_short_entry_detail"):
+                self.record_short_entry_detail(
+                    {
+                        "symbol": sym,
+                        "side": "entry",
+                        "notional": round(notional, 2),
+                        "price": round(price, 4),
+                        "trigger_reason": lot.get("trigger_reason") or "",
+                        "entry_z": lot.get("entry_z"),
+                        "bubble_score": lot.get("bubble_score"),
+                        "entry_bar": lot.get("entry_bar"),
+                    }
+                )
         elif side == "sell" and order.get("pair_short"):
             self.entry_fills[strategy] += 1
             if strategy == "crypto":
@@ -630,6 +678,34 @@ class BacktestAttribution:
             crypto_contrib = 0.0
         short_stats = _trade_stats("opportunistic_short")
         short_analytics = self._opportunistic_short_analytics()
+        bubble_samples = self._bubble_score_samples
+        buff_samples = self._buffett_ratio_samples
+        bubble_block: dict[str, Any] = {}
+        if bubble_samples:
+            bubble_block = {
+                "score_avg": round(sum(bubble_samples) / len(bubble_samples), 1),
+                "score_max": round(max(bubble_samples), 1),
+                "score_min": round(min(bubble_samples), 1),
+                "samples": len(bubble_samples),
+            }
+        if buff_samples:
+            bubble_block["buffett_avg_pct"] = round(
+                sum(buff_samples) / len(buff_samples), 1
+            )
+            bubble_block["buffett_max_pct"] = round(max(buff_samples), 1)
+            bubble_block["buffett_min_pct"] = round(min(buff_samples), 1)
+        if not bubble_block:
+            try:
+                from modules.bubble_risk import get_buffett_indicator
+
+                live = get_buffett_indicator()
+                if live.get("ratio_pct") is not None:
+                    bubble_block = {
+                        "buffett_latest_pct": live["ratio_pct"],
+                        "buffett_signal": live.get("signal"),
+                    }
+            except Exception as exc:
+                logger.debug("Buffett indicator unavailable for attribution finalize: %s", exc)
         return {
             "signals": dict(self.signals),
             "intents": dict(self.intents),
@@ -656,6 +732,7 @@ class BacktestAttribution:
             },
             "stat_arb": {
                 **stat,
+                "universe_size": self.stat_arb_universe_size,
                 "signals": self.signals["stat_arb"],
                 "intents": self.intents["stat_arb"],
                 "pair_entries": self.pair_entries["stat_arb"],
@@ -698,6 +775,7 @@ class BacktestAttribution:
             "stat_arb_rejects": dict(self.stat_arb_rejects),
             "crypto_rejects": dict(self.crypto_rejects),
             "round_trips": self.round_trips,
+            "bubble_risk": bubble_block,
         }
 
     def _opportunistic_short_analytics(self) -> dict[str, Any]:
@@ -731,6 +809,19 @@ class BacktestAttribution:
             "worst_shorts": [(sym, round(pnl, 2)) for sym, pnl in worst if pnl < 0],
             "symbol_pnl": {k: round(v, 2) for k, v in sorted(by_symbol.items())},
             "exit_breakdown": exit_breakdown,
+            "trade_details": list(getattr(self, "_short_trade_log", [])),
+            "cover_details": [
+                {
+                    "symbol": t.get("symbol"),
+                    "pnl_usd": t.get("pnl_usd"),
+                    "hold_bars": t.get("hold_bars"),
+                    "exit_reason": t.get("exit_reason"),
+                    "trigger_reason": t.get("trigger_reason"),
+                    "entry_z": t.get("entry_z"),
+                    "partial": t.get("partial_exit"),
+                }
+                for t in trips
+            ],
         }
 
     def _crypto_pair_analytics(self) -> dict[str, Any]:
@@ -866,6 +957,35 @@ def format_short_trigger_summary(os_data: dict) -> str:
     return " | ".join(parts)
 
 
+def format_bubble_risk_banner(attribution: dict | None = None) -> str | None:
+    """Bubble Risk + Buffett Indicator summary for backtest report."""
+    if attribution is None:
+        from modules.bubble_risk import format_bubble_risk_summary
+
+        return format_bubble_risk_summary()
+    br = attribution.get("bubble_risk") or {}
+    if not br:
+        return None
+    parts: list[str] = []
+    if br.get("score_avg") is not None:
+        parts.append(
+            f"Bubble Risk avg {br['score_avg']:.0f}/100 "
+            f"(range {br.get('score_min', 0):.0f}-{br.get('score_max', 0):.0f}, "
+            f"{br.get('samples', 0)} short scans)"
+        )
+    buff = br.get("buffett_avg_pct") or br.get("buffett_latest_pct")
+    if buff is not None:
+        sig = br.get("buffett_signal") or ""
+        from modules.bubble_risk import buffett_indicator_signal
+
+        if not sig:
+            sig = buffett_indicator_signal(float(buff))
+        parts.append(f"Buffett {buff:.1f}% GDP ({sig})")
+    if not parts:
+        return None
+    return " | ".join(parts)
+
+
 def format_opportunistic_short_banner(attribution: dict | None = None) -> str | None:
     """One-line protective short summary for backtest report or startup."""
     if attribution is None:
@@ -877,11 +997,7 @@ def format_opportunistic_short_banner(attribution: dict | None = None) -> str | 
     pnl = float(sleeve.get("total_pnl_usd", 0) or 0)
     if trips == 0 and pnl == 0 and not config.effective_opportunistic_short_enabled():
         return None
-    lo = config.effective_protective_short_min_pct()
-    hi = config.effective_protective_short_max_pct()
-    line = f"Protective Shorts: ON ({lo:.0%}-{hi:.0%}, selective triggers)"
-    if not config.effective_short_rhyme_e_exhaustion_required():
-        line += " | RHYME_E waiver active"
+    line = config.format_opportunistic_short_banner()
     if trips or abs(pnl) > 1e-9:
         line += f" | {trips} trips PnL ${pnl:+.2f}"
     wr = float(os_data.get("win_rate_pct", 0) or sleeve.get("win_rate_pct", 0) or 0)
@@ -931,10 +1047,13 @@ def format_stat_arb_banner(attribution: dict | None) -> str | None:
         contrib = 0.0
     stat_sleeve = sleeves.get("stat_arb") or {}
     line = (
-        f"Stat Arb v1.3: {pairs} pairs ({fill:.0f}% fill, {contrib:.0f}% equity PnL) "
+        f"Stat Arb v1.5.2: {pairs} pairs ({fill:.0f}% fill, {contrib:.0f}% equity PnL) "
         f"PnL ${stat_pnl:+.2f} (real ${realized:+.2f}) | win {stat_sleeve.get('win_rate_pct', 0):.0f}% "
         f"| avg Z {sa.get('avg_entry_z', 0):.2f} | avg hold {sa.get('avg_hold_bars', 0):.0f}b"
     )
+    universe = int(sa.get("universe_size", 0))
+    if universe:
+        line += f" | universe {universe} names"
     if sa.get("dedicated_cap_enabled"):
         line += (
             f" | dedicated cap {sa.get('sleeve_cap_pct', 0):.0%} "
@@ -985,6 +1104,8 @@ def print_attribution_report(attribution: dict | None) -> None:
 
     sa = attribution.get("stat_arb") or {}
     print("Stat arb funnel:")
+    if sa.get("universe_size"):
+        print(f"  Stat Arb universe: {sa.get('universe_size', 0)} names")
     print(
         f"  scan_signals={attribution.get('signals', {}).get('stat_arb', 0)} "
         f"intents={sa.get('intents', 0)} "
@@ -1048,7 +1169,10 @@ def print_attribution_report(attribution: dict | None) -> None:
             )
         reason_parts = []
         for reason, pnls in sorted(by_reason.items()):
-            reason_parts.append(f"{reason}={len(pnls)} (${sum(pnls):+.2f})")
+            wins = sum(1 for p in pnls if p > 0)
+            reason_parts.append(
+                f"{reason}={len(pnls)} (${sum(pnls):+.2f}, {100.0 * wins / len(pnls):.0f}%W)"
+            )
         print(f"  Stat arb exits by reason: {', '.join(reason_parts)}")
         holds = [t["hold_bars"] for t in trips if t.get("hold_bars") is not None]
         if holds:
@@ -1056,6 +1180,20 @@ def print_attribution_report(attribution: dict | None) -> None:
                 f"  Stat arb avg hold: {sum(holds) / len(holds):.1f} bars "
                 f"(max {max(holds)})"
             )
+        by_pair: dict[str, list[float]] = defaultdict(list)
+        for t in trips:
+            by_pair[str(t.get("pair_key") or t.get("symbol") or "?")].append(
+                float(t.get("pnl_usd", 0))
+            )
+        if by_pair:
+            ranked = sorted(by_pair.items(), key=lambda kv: sum(kv[1]), reverse=True)
+            pair_parts = []
+            for pair, pnls in ranked[:6]:
+                wins = sum(1 for p in pnls if p > 0)
+                pair_parts.append(
+                    f"{pair} {len(pnls)}x ${sum(pnls):+.1f} {100.0 * wins / len(pnls):.0f}%W"
+                )
+            print(f"  Stat arb per-pair (top): {', '.join(pair_parts)}")
 
     os_data = attribution.get("opportunistic_short") or {}
     if os_data.get("entry_fills") or os_data.get("round_trips") or os_data.get("cover_exits"):
@@ -1090,6 +1228,25 @@ def print_attribution_report(attribution: dict | None) -> None:
             )
         best = os_data.get("best_shorts") or []
         worst = os_data.get("worst_shorts") or []
+        covers = os_data.get("cover_details") or []
+        if covers:
+            print("  Short trade detail:")
+            print(
+                f"    {'Symbol':<6} {'PnL $':>8} {'Hold':>5} {'Exit':<14} "
+                f"{'Entry Z':>7} {'Partial':>7}"
+            )
+            for row in covers[:12]:
+                print(
+                    f"    {str(row.get('symbol') or ''):<6} "
+                    f"{float(row.get('pnl_usd') or 0):>+8.2f} "
+                    f"{int(row.get('hold_bars') or 0):>5} "
+                    f"{str(row.get('exit_reason') or ''):<14} "
+                    f"{float(row.get('entry_z') or 0):>7.2f} "
+                    f"{'Y' if row.get('partial') else 'N':>7}"
+                )
+                trig = str(row.get("trigger_reason") or "")
+                if trig:
+                    print(f"      trigger: {trig[:90]}")
         if best:
             print(
                 "  Best shorts: "

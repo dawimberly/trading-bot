@@ -56,6 +56,7 @@ from modules.scan_schedule import (
     equity_scan_state,
     format_scan_schedule_line,
 )
+from modules.market_context import cross_asset_vol_score, get_volatility
 
 # yfinance logs "$BTC-USD: possibly delisted; ..." for crypto pairs (false positives).
 _YF_CRYPTO_DELISTED = re.compile(r"possibly delisted", re.IGNORECASE)
@@ -338,6 +339,10 @@ def _write_heartbeat(
     risk_parity=None,
     entry_skip_reason=None,
     entry_skip_daily=None,
+    dynamic_vti=None,
+    heartbeat_data=None,
+    heartbeat_regime=None,
+    insider_state=None,
 ):
     macro_stress = bool(
         wisdom
@@ -348,18 +353,20 @@ def _write_heartbeat(
         "regime": regime,
         "equity": equity,
         "cash": cash,
+        "cash_pct": round(float(cash) / float(equity), 6) if equity and equity > 0 else 0.0,
         "crypto_trades_last_cycle": crypto_trades,
         "equity_trades_last_cycle": equity_trades,
         "spy_trades_last_cycle": spy_trades,
         "sleeve_caps": sleeve_caps
         or {
-            "vti_core": config.get_vti_core_pct(
+            "vti_core": config.effective_vti_core_pct(
                 equity,
                 vol_score=dynamic_vol_score,
                 macro_stress=macro_stress,
-            )
-            if config.paper_aggressive_context()
-            else config.vti_core_allocation_pct(equity=equity),
+                regime=heartbeat_regime or regime,
+                data=heartbeat_data,
+                insider_state=insider_state,
+            ),
             "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
@@ -375,6 +382,16 @@ def _write_heartbeat(
     }
     if dynamic_vol_score is not None:
         payload["dynamic_vol_score"] = round(float(dynamic_vol_score), 6)
+    if dynamic_vti:
+        payload["dynamic_vti"] = dynamic_vti
+    try:
+        from modules.markov_regime import heartbeat_hmm_payload
+
+        hmm_hb = heartbeat_hmm_payload()
+        if hmm_hb is not None:
+            payload["markov_hmm"] = hmm_hb
+    except Exception:
+        pass
     if thinking_engine:
         payload["thinking_engine"] = {
             "model": thinking_engine.get("model"),
@@ -485,8 +502,19 @@ def main():
     account = executor._get_account()
     equity = float(account.equity)
     cash = float(account.cash)
-    config.configure_account_profile(equity)
+    config.configure_account_profile(equity, cash=cash)
     _last_equity = equity
+
+    if config.paper_aggressive_context():
+        try:
+            from modules.deployment_monitor import excess_cash_warning, record_cash_snapshot
+
+            record_cash_snapshot(equity, cash)
+            cash_warn = excess_cash_warning()
+            if cash_warn:
+                print(f"--- {cash_warn} ---")
+        except Exception as exc:
+            _warn_nonfatal("deployment cash monitor", exc)
 
     from modules.trading_safety import (
         daily_loss_circuit_tripped,
@@ -505,7 +533,7 @@ def main():
     set_entry_block_for_cycle(dl_reason if dl_tripped else None)
     if dl_tripped:
         logger.warning(
-            "DAILY LOSS CIRCUIT: %s — no new entries or thinking tilts today",
+            "DAILY LOSS CIRCUIT: %s - no new entries or thinking tilts today",
             dl_reason,
         )
         log_event("daily_loss_circuit", reason=dl_reason, equity=equity)
@@ -657,8 +685,11 @@ def main():
     if hasattr(executor, "set_current_regime"):
         executor.set_current_regime(display_regime)
 
-    vol_label = get_volatility(data)
-    vol_score = cross_asset_vol_score(data)
+    vol_label = get_volatility(data) if "get_volatility" in globals() else "Unknown"
+    try:
+        vol_score = cross_asset_vol_score(data)
+    except NameError:
+        vol_score = 0.0
     sleeve_cap_pcts = None
     if config.DYNAMIC_SLEEVE_CAPS_ENABLED:
         from modules.fund_config import get_dynamic_sleeve_caps
@@ -683,7 +714,8 @@ def main():
         )
         try:
             macro_daily = load_daily_matrix(days=120)
-        except Exception:
+        except Exception as exc:
+            logger.debug("macro daily matrix (120d) load failed, using intraday only: %s", exc)
             macro_daily = None
         macro_regime = evaluate_macro_regime(
             data, daily_macro=macro_daily, wisdom=wisdom
@@ -703,6 +735,23 @@ def main():
     yield_gated = bool(gp_signals.get("yield_gate"))
     if macro_regime_result:
         yield_gated = apply_yield_gate_boost(yield_gated, macro_regime_result)
+    raw_yield_gated = yield_gated
+    yield_gated = config.effective_yield_gate(yield_gated, regime=regime)
+    if (
+        config.PAPER_YIELD_GATE_OVERRIDE
+        and (config.paper_aggressive_context() or config.is_realistic_research_active())
+    ):
+        logger.info(
+            "Paper yield gate override active - allowing more deployment"
+            + (
+                f" (raw={raw_yield_gated} -> effective={yield_gated})"
+                if raw_yield_gated != yield_gated or raw_yield_gated
+                else ""
+            )
+        )
+        print(
+            "--- Paper yield gate override active - allowing more deployment ---"
+        )
     try:
         alerts.maybe_yield_gate_alert(yield_gated)
     except Exception as exc:
@@ -843,35 +892,155 @@ def main():
     risk_parity_meta = None
     pod_risk_meta = None
     thinking_result = None
-    if config.effective_thinking_engine_enabled():
-        from modules.thinking_engine import (
-            log_thinking_result,
-            maybe_apply_thinking_caps,
-            maybe_run_thinking,
-        )
-        from modules.thinking_news import maybe_run_scheduled_news_thinking
+    insider_boost = None
+    if config.effective_insider_signal_boost_enabled():
+        try:
+            from modules.insider_signal_handler import apply_insider_signals_to_strategies
 
-        news_slot = maybe_run_scheduled_news_thinking(data, regime, vol, wisdom)
-        if news_slot:
-            print(f"--- Thinking news scheduled run started ({news_slot}) ---")
+            bubble_100 = None
+            try:
+                from modules.bubble_risk import compute_bubble_risk
 
-        thinking_result = maybe_run_thinking(
-            data,
-            regime,
-            vol,
-            wisdom,
-            top_headline=(spacex_heartbeat or {}).get("top_headline"),
-        )
-        if thinking_result and not thinking_result.get("apply_log"):
-            log_thinking_result(thinking_result)
-        base_caps = sleeve_cap_pcts or config.fund_allocation_pct()
-        sleeve_cap_pcts, thinking_result = maybe_apply_thinking_caps(
-            base_caps,
-            thinking_result,
-            equity=equity,
-        )
-        if sleeve_cap_pcts:
+                bubble_100 = float(compute_bubble_risk(data, regime).get("score_100") or 0.0)
+            except Exception as exc:
+                logger.debug("bubble risk score unavailable for insider gating: %s", exc)
+            insider_boost = apply_insider_signals_to_strategies(
+                bubble_score_100=bubble_100,
+                regime=regime,
+            )
+            summary = insider_boost.get("summary") or ""
+            if summary and summary != "insider signal boost off":
+                print(f"--- Insider signal boost: {summary} ---")
+        except Exception as exc:
+            _warn_nonfatal("Insider signal boost error", exc)
+
+    if config.effective_markov_hmm_enabled():
+        try:
+            from modules.markov_regime import format_markov_hmm_banner, update_markov_hmm
+
+            hmm_bubble = None
+            if insider_boost is not None:
+                hmm_bubble = insider_boost.get("bubble_score_100")
+            if hmm_bubble is None:
+                try:
+                    from modules.bubble_risk import compute_bubble_risk
+
+                    hmm_bubble = float(
+                        compute_bubble_risk(data, display_regime).get("score_100") or 0.0
+                    )
+                except Exception:
+                    hmm_bubble = None
+            hmm_pred = update_markov_hmm(
+                data,
+                regime=display_regime,
+                bubble_score_100=hmm_bubble,
+                insider_state=insider_boost,
+                sentiment=wisdom.get("web_sentiment") or wisdom.get("price_sentiment"),
+            )
+            hmm_banner = format_markov_hmm_banner()
+            if hmm_banner and hmm_pred.get("ok"):
+                print(f"--- {hmm_banner} ---")
+        except Exception as exc:
+            _warn_nonfatal("Markov HMM", exc)
+
+    dynamic_vti_meta = None
+    if config.paper_aggressive_context() and config.PAPER_DYNAMIC_VTI_ENABLED:
+        try:
+            from modules.dynamic_vti_allocator import (
+                build_vti_allocator_context,
+                compute_smart_vti_core_pct,
+                format_dynamic_vti_banner,
+            )
+
+            vti_ctx = build_vti_allocator_context(
+                data=data,
+                regime=display_regime,
+                vol_score=vol_score,
+                volatility=vol_label,
+                macro_stress=macro_stress_flag,
+                insider_state=insider_boost,
+            )
+            vti_decision = compute_smart_vti_core_pct(equity, vti_ctx)
+            dynamic_vti_meta = {
+                "pct": vti_decision.pct,
+                "base_pct": vti_decision.base_pct,
+                "adjustment_pp": vti_decision.adjustment_pp,
+                "drivers": list(vti_decision.drivers),
+                "detail": dict(vti_decision.detail),
+                "banner": format_dynamic_vti_banner(
+                    vti_decision.pct, vti_decision.drivers
+                ),
+            }
+            print(f"--- {dynamic_vti_meta['banner']} ---")
+        except Exception as exc:
+            _warn_nonfatal("Dynamic VTI allocator", exc)
+
+    portfolio_decision_meta = None
+    if config.effective_portfolio_constructor_enabled():
+        try:
+            from modules.portfolio_constructor import (
+                build_portfolio_context,
+                compute_portfolio_decision,
+                format_portfolio_constructor_banner,
+                merge_portfolio_sleeve_caps,
+            )
+
+            pc_ctx = build_portfolio_context(
+                data=data,
+                regime=display_regime,
+                bubble_score_100=(dynamic_vti_meta or {}).get("detail", {}).get(
+                    "bubble_score_100"
+                ),
+                insider_state=insider_boost,
+            )
+            pc_decision = compute_portfolio_decision(pc_ctx)
+            base_caps = sleeve_cap_pcts or config.fund_allocation_pct()
+            sleeve_cap_pcts = merge_portfolio_sleeve_caps(base_caps, pc_decision)
             executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
+            portfolio_decision_meta = {
+                "active_sleeve_mult": pc_decision.active_sleeve_mult,
+                "stat_arb_mult": pc_decision.stat_arb_mult,
+                "short_willingness_mult": pc_decision.short_willingness_mult,
+                "drivers": list(pc_decision.drivers),
+                "detail": dict(pc_decision.detail),
+                "banner": format_portfolio_constructor_banner(pc_decision),
+            }
+            print(f"--- {portfolio_decision_meta['banner']} ---")
+        except Exception as exc:
+            _warn_nonfatal("Portfolio constructor error", exc)
+
+    if config.effective_thinking_engine_enabled():
+        try:
+            from modules.thinking_engine import (
+                log_thinking_result,
+                maybe_apply_thinking_caps,
+                maybe_run_thinking,
+            )
+            from modules.thinking_news import maybe_run_scheduled_news_thinking
+
+            news_slot = maybe_run_scheduled_news_thinking(data, regime, vol, wisdom)
+            if news_slot:
+                print(f"--- Thinking news scheduled run started ({news_slot}) ---")
+
+            thinking_result = maybe_run_thinking(
+                data,
+                regime,
+                vol,
+                wisdom,
+                top_headline=(spacex_heartbeat or {}).get("top_headline"),
+            )
+            if thinking_result and not thinking_result.get("apply_log"):
+                log_thinking_result(thinking_result)
+            base_caps = sleeve_cap_pcts or config.fund_allocation_pct()
+            sleeve_cap_pcts, thinking_result = maybe_apply_thinking_caps(
+                base_caps,
+                thinking_result,
+                equity=equity,
+            )
+            if sleeve_cap_pcts:
+                executor.set_dynamic_sleeve_caps(sleeve_cap_pcts)
+        except Exception as exc:
+            _warn_nonfatal("Thinking engine (deploy continues)", exc)
 
     if config.effective_vol_position_sizing_enabled() or config.effective_loss_cutting_enabled():
         from modules.vol_position_sizing import set_top1_sizing_context
@@ -917,12 +1086,12 @@ def main():
 
         print(f"--- {format_listing_line(listing_snapshot)} ---")
         if listing_snapshot.get("ready_to_buy_alpaca"):
-            print(f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON ALPACA — IPO listing live !!!")
+            print(f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON ALPACA - IPO listing live !!!")
         if listing_snapshot.get("ready_to_buy_kraken"):
             k = listing_snapshot.get("kraken") or {}
             print(
                 f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON KRAKEN "
-                f"({k.get('wsname') or k.get('pair')}) — buy on Kraken Pro !!!"
+                f"({k.get('wsname') or k.get('pair')}) - buy on Kraken Pro !!!"
             )
         spacex_listing_heartbeat = {
             "stage": listing_snapshot.get("stage"),
@@ -1035,18 +1204,49 @@ def main():
         )
 
     social_result = None
-    if config.effective_social_sleeve_enabled() and market_open:
+    bubble_for_social = None
+    try:
+        if dynamic_vti_meta and isinstance(dynamic_vti_meta.get("detail"), dict):
+            bubble_for_social = dynamic_vti_meta["detail"].get("bubble_score_100")
+        elif insider_boost is not None:
+            bubble_for_social = insider_boost.get("bubble_score_100")
+    except Exception:
+        bubble_for_social = None
+    if bubble_for_social is None:
+        try:
+            from modules.bubble_risk import compute_bubble_risk
+
+            bubble_for_social = float(
+                compute_bubble_risk(data, display_regime).get("score_100") or 0.0
+            )
+        except Exception:
+            bubble_for_social = None
+    social_dynamic_ctx = (
+        config.effective_felix_social_dynamic_enabled()
+        or config.felix_social_manual_override()
+        or config.PAPER_SOCIAL_SLEEVE_ENABLED
+    )
+    if social_dynamic_ctx:
+        from modules.social_sleeve import apply_dynamic_social_gate
+
+        apply_dynamic_social_gate(
+            display_regime, bubble_for_social, log=True
+        )
+    if (
+        config.effective_social_sleeve_enabled() or social_dynamic_ctx
+    ) and market_open:
         from modules.social_sleeve import run_social_sleeve_cycle
 
         social_result = run_social_sleeve_cycle(wisdom, executor, market_open=market_open)
-        if social_result.get("enabled"):
+        if social_result.get("enabled") is not False or social_result.get("paper_actions"):
             tgt = social_result.get("target") or "cash"
             score = social_result.get("score")
-            print(
-                f"--- Social sleeve: score {score} -> {tgt} "
-                f"(cap {config.SOCIAL_SLEEVE_CAP_PCT:.0%} paper"
-                f"{'' if social_result.get('paper_ok') else ', paper keys missing'}) ---"
-            )
+            if config.effective_social_sleeve_enabled():
+                print(
+                    f"--- Social sleeve: score {score} -> {tgt} "
+                    f"(cap {config.effective_social_sleeve_cap_pct():.0%} paper"
+                    f"{'' if social_result.get('paper_ok') else ', paper keys missing'}) ---"
+                )
             for act in social_result.get("paper_actions") or []:
                 print(
                     f"  social paper {act['action']} {act['symbol']} "
@@ -1057,6 +1257,112 @@ def main():
                     f"  social live mirror {act['action']} {act['symbol']} "
                     f"${act.get('notional', 0):,.2f}"
                 )
+
+    orb_mom_result = None
+    if config.effective_orb_momentum_enabled() and market_open:
+        try:
+            from modules.orb_momentum_sleeve import run_orb_momentum_cycle
+
+            live_book = bool(
+                not config.PAPER_TRADING and config.orb_momentum_live_sleeve_enabled()
+            )
+            orb_mom_result = run_orb_momentum_cycle(
+                data,
+                executor,
+                regime=display_regime,
+                market_open=market_open,
+                live=live_book,
+                journal=trade_journal,
+                yield_gated=yield_gated,
+            )
+            if orb_mom_result.get("enabled"):
+                n_sig = len(orb_mom_result.get("signals") or [])
+                n_in = len(orb_mom_result.get("entries") or [])
+                n_out = len(orb_mom_result.get("exits") or [])
+                skip = orb_mom_result.get("skipped") or ""
+                print(
+                    f"--- ORB momentum: {n_sig} signal(s), {n_in} entry(ies), "
+                    f"{n_out} exit(s)"
+                    f"{f' ({skip})' if skip else ''} ---"
+                )
+                for act in orb_mom_result.get("entries") or []:
+                    if act.get("ok"):
+                        print(
+                            f"  ORB buy {act['symbol']} ${act.get('notional', 0):,.2f} "
+                            f"stop={act.get('stop')} tgt={act.get('target')}"
+                        )
+        except Exception as exc:
+            _warn_nonfatal("ORB momentum sleeve", exc)
+
+    sector_rot_result = None
+    if config.effective_sector_rotation_enabled() and market_open:
+        try:
+            from modules.sector_rotation import run_sector_rotation_cycle
+
+            live_book = bool(
+                not config.PAPER_TRADING
+                and getattr(config, "SECTOR_ROTATION_LIVE_SLEEVE", False)
+            )
+            sector_rot_result = run_sector_rotation_cycle(
+                data,
+                executor,
+                regime=display_regime,
+                market_open=market_open,
+                live=live_book,
+                journal=trade_journal,
+                yield_gated=yield_gated,
+            )
+            if sector_rot_result.get("enabled"):
+                reason = sector_rot_result.get("rebalance_reason") or ""
+                skip = sector_rot_result.get("skipped") or ""
+                tops = ",".join((sector_rot_result.get("targets") or {}).keys()) or "-"
+                print(
+                    f"--- Sector rotation: {reason or skip} | "
+                    f"cap {float(sector_rot_result.get('cap_pct') or 0):.0%} | "
+                    f"targets {tops} ---"
+                )
+                for act in sector_rot_result.get("actions") or []:
+                    if act.get("ok"):
+                        print(
+                            f"  sector {act['action']} {act['symbol']} "
+                            f"${act.get('notional', 0):,.2f}"
+                        )
+        except Exception as exc:
+            _warn_nonfatal("Sector rotation sleeve", exc)
+
+    vol_bo_result = None
+    if config.effective_vol_breakout_enabled() and market_open and config.PAPER_TRADING:
+        try:
+            from modules.vol_breakout_sleeve import run_vol_breakout_cycle
+
+            vol_bo_result = run_vol_breakout_cycle(
+                data,
+                executor,
+                regime=display_regime,
+                market_open=market_open,
+                live=False,
+                journal=trade_journal,
+                yield_gated=yield_gated,
+            )
+            if vol_bo_result.get("enabled"):
+                n_sig = len(vol_bo_result.get("signals") or [])
+                n_in = len(vol_bo_result.get("entries") or [])
+                n_out = len(vol_bo_result.get("exits") or [])
+                skip = vol_bo_result.get("skipped") or ""
+                print(
+                    f"--- Vol breakout: {n_sig} signal(s), {n_in} entry(ies), "
+                    f"{n_out} exit(s)"
+                    f"{f' ({skip})' if skip else ''} ---"
+                )
+                for act in vol_bo_result.get("entries") or []:
+                    if act.get("ok"):
+                        print(
+                            f"  vol-bo buy {act['symbol']} ${act.get('notional', 0):,.2f} "
+                            f"ATRx{act.get('atr_expand')} stop={act.get('stop')} "
+                            f"tgt={act.get('target')}"
+                        )
+        except Exception as exc:
+            _warn_nonfatal("Vol breakout sleeve", exc)
 
     exits = run_position_exits(
         executor, risk_manager, trade_journal, equity_session_open=market_open
@@ -1120,7 +1426,18 @@ def main():
                 yield_gated=yield_gated,
             )
         else:
-            from modules.pipeline_strategies import run_ipo_safety_trims, run_nyse_momentum_and_stat_arb
+            # IPO trim helper is optional; older stacks may not include it.
+            try:
+                from modules.pipeline_strategies import (  # type: ignore
+                    run_ipo_safety_trims as run_ipo_safety_trims,
+                )
+            except Exception as exc:
+                logger.debug("IPO safety trims unavailable: %s", exc)
+
+                def run_ipo_safety_trims(_data, _executor):  # type: ignore
+                    return 0
+
+            from modules.pipeline_strategies import run_nyse_momentum_and_stat_arb
 
             run_ipo_safety_trims(data, executor)
             nyse_trades = run_nyse_momentum_and_stat_arb(
@@ -1155,7 +1472,8 @@ def main():
                     macro_window = macro_daily
                     macro_eval = evaluate(macro_daily, regime)
                     macro_stress_flag = bool(macro_eval.get("stress"))
-                except Exception:
+                except Exception as exc:
+                    logger.debug("macro daily matrix (450d) load failed, using intraday window: %s", exc)
                     macro_window = data
                     macro_stress_flag = False
                 nyse_trades += run_bond_strategy(
@@ -1171,17 +1489,20 @@ def main():
                     macro_window=macro_window,
                 )
         if config.effective_opportunistic_short_enabled():
-            from modules.opportunistic_short_sleeve import run_opportunistic_short_strategy
+            try:
+                from modules.opportunistic_short_sleeve import run_opportunistic_short_strategy
 
-            run_opportunistic_short_strategy(
-                data,
-                executor,
-                regime,
-                now,
-                pair_cooldown,
-                log_fn=_equity_log,
-                volatility=vol,
-            )
+                run_opportunistic_short_strategy(
+                    data,
+                    executor,
+                    regime,
+                    now,
+                    pair_cooldown,
+                    log_fn=_equity_log,
+                    volatility=vol,
+                )
+            except Exception as exc:
+                _warn_nonfatal("Opportunistic short strategy", exc)
         gp_result = run_game_plan_cycle(
             executor,
             regime,
@@ -1312,7 +1633,7 @@ def main():
     print(
         f"=== CYCLE STATUS: spy={s} nyse={nyse_trades} crypto={c} | "
         f"gates={entry_skip_reason} | today skipped={entry_skip_daily.get('skipped_cycles', 0)} "
-        f"({entry_skip_daily.get('top_skip', '—')}) ==="
+        f"({entry_skip_daily.get('top_skip', '-')}) ==="
     )
     print(
         f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
@@ -1323,7 +1644,8 @@ def main():
     if config.game_plan_active() and gp_result.get("enabled"):
         sig = gp_result.get("signals") or {}
         gp_notes = (
-            f"game_plan stress={sig.get('stress')} gate={sig.get('yield_gate')} "
+            f"game_plan stress={sig.get('stress')} "
+            f"gate_raw={sig.get('yield_gate')} gate={yield_gated} "
             f"metal=${gp_result.get('metal_value', 0)}"
         )
     extra_notes = []
@@ -1344,7 +1666,7 @@ def main():
         nyse_trades,
         notes=(
             f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
-            f"nyse_cap={config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT):.2%}; "
+            f"nyse_cap={config.effective_nyse_sleeve_cap_pct():.2%}; "
             f"entry_gates={entry_skip_reason}; {gp_notes}"
         ),
     )
@@ -1352,6 +1674,40 @@ def main():
         alerts.maybe_daily_summary(equity, cash, regime, False)
     except Exception as exc:
         _warn_nonfatal("Alert error", exc)
+    try:
+        from modules.periodic_summary import send_periodic_summary
+
+        # Paper research: compact 3h pulse. Live uses send_daily_live_summary instead.
+        if config.PAPER_TRADING or config.paper_chase_mode_enabled():
+            send_periodic_summary(
+                float(getattr(config, "TELEGRAM_PERIODIC_SUMMARY_HOURS", 3.0) or 3.0),
+                equity=equity,
+                cash=cash,
+                regime=display_regime,
+                sleeves=sleeves,
+            )
+    except Exception as exc:
+        _warn_nonfatal("Periodic Telegram summary", exc)
+    try:
+        from modules.periodic_summary import send_daily_live_summary
+
+        if not config.PAPER_TRADING and not market_open:
+            send_daily_live_summary(
+                equity=equity,
+                cash=cash,
+                regime=display_regime,
+                sleeves=sleeves,
+                market_open=market_open,
+            )
+    except Exception as exc:
+        _warn_nonfatal("Live daily Telegram summary", exc)
+    try:
+        from modules.sharpe_history import update_sharpe_history
+
+        # EOD Sharpe snapshot (once per ET day; skips while equity session open).
+        update_sharpe_history(equity, market_open=market_open)
+    except Exception as exc:
+        _warn_nonfatal("Sharpe history update", exc)
     try:
         if config.telegram_weekly_summary_enabled():
             from modules.weekly_telegram_summary import send_weekly_telegram_summary
@@ -1366,6 +1722,18 @@ def main():
             )
     except Exception as exc:
         _warn_nonfatal("Weekly Telegram summary", exc)
+    try:
+        from modules.telegram_commands import maybe_poll_telegram_commands
+
+        n = maybe_poll_telegram_commands(
+            equity=equity,
+            cash=cash,
+            regime=display_regime,
+        )
+        if n:
+            print(f"--- Telegram commands handled: {n} ---")
+    except Exception as exc:
+        _warn_nonfatal("Telegram commands", exc)
     try:
         from modules.weekly_report import maybe_generate_weekly_report
 
@@ -1411,6 +1779,10 @@ def main():
         else None,
         entry_skip_reason=entry_skip_reason,
         entry_skip_daily=entry_skip_daily,
+        dynamic_vti=dynamic_vti_meta,
+        heartbeat_data=data,
+        heartbeat_regime=display_regime,
+        insider_state=insider_boost,
     )
 
     wisdom_journal.log_cycle(
@@ -1459,10 +1831,10 @@ def _print_kraken_banner():
     )
     cap = probe_kraken_capabilities()
     if not cap.get("crypto_ok"):
-        print("!!! Kraken crypto API failed — run scripts/account/preflight_kraken.py !!!")
+        print("!!! Kraken crypto API failed - run scripts/account/preflight_kraken.py !!!")
     if not cap.get("xstock_ok"):
         print(
-            "!!! Kraken xStocks API off — SPY/NYSE will not auto-trade "
+            "!!! Kraken xStocks API off - SPY/NYSE will not auto-trade "
             "(enable tokenized permission on API key) !!!"
         )
 
@@ -1480,14 +1852,34 @@ def _alpaca_startup_hint(exc: Exception | None = None) -> str:
     )
 
 
-def _print_account_startup_summary(equity: float) -> None:
+def _print_account_startup_summary(equity: float, cash: float | None = None) -> None:
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
-    config.configure_account_profile(equity)
-    vti = config.vti_core_allocation_pct(equity=equity)
+    config.configure_account_profile(equity, cash=cash)
+    vti = config.effective_vti_core_pct(equity=equity)
+    cash_line = ""
+    if cash is not None and equity > 0:
+        cash_pct = float(cash) / float(equity)
+        cash_line = f" | cash ${cash:,.2f} ({cash_pct:.0%})"
     print(
         f"--- Account summary: ${equity:,.2f} equity | {mode} | "
-        f"VTI target {vti:.0%} | risk {config.effective_risk_per_trade():.0%}/trade ---"
+        f"core target {vti:.0%}{cash_line} | "
+        f"risk {config.effective_risk_per_trade():.0%}/trade | "
+        f"min order ${config.effective_min_notional(equity):.2f} ---"
     )
+    if config.paper_aggressive_context():
+        try:
+            from modules.deployment_monitor import excess_cash_warning, record_cash_snapshot
+
+            if cash is not None:
+                record_cash_snapshot(equity, cash)
+            warn = excess_cash_warning(equity, cash)
+            if warn:
+                print(f"!!! {warn} !!!")
+            deploy_line = config.format_high_cash_deploy_banner(equity=equity, cash=cash)
+            if deploy_line:
+                print(f">>> {deploy_line} <<<")
+        except Exception as exc:
+            _warn_nonfatal("deployment cash startup warning", exc)
     if config.is_small_account(equity):
         if config.live_conservative_profile_active():
             print(f"--- {config.format_live_conservative_banner()} ---")
@@ -1499,7 +1891,7 @@ def _print_account_startup_summary(equity: float) -> None:
             )
 
 
-def _print_startup_banner():
+def _print_startup_banner(startup_equity: float | None = None):
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     endpoint = (
         "paper-api.alpaca.markets"
@@ -1524,7 +1916,7 @@ def _print_startup_banner():
         vti_mode = (
             f"fixed {config.PAPER_VTI_CORE_PCT:.0%} VTI"
             if not config.PAPER_DYNAMIC_VTI_ENABLED
-            else "dynamic VTI 35-75%"
+            else f"Smart Dynamic VTI {config.DYNAMIC_VTI_PAPER_FLOOR:.0%}-{config.DYNAMIC_VTI_PAPER_CEILING:.0%}"
         )
         soft = (
             f" | regime sizing A={config.PAPER_REGIME_A_SIZING_MULT:.1f} "
@@ -1558,32 +1950,61 @@ def _print_startup_banner():
             _banner_regime = current_regime_from_data(_banner_data)
             if _banner_regime:
                 print(f"--- {format_regime_sizing_line(_banner_regime)} ---")
-        except Exception:
-            pass
+        except Exception as exc:
+            _warn_nonfatal("regime sizing startup banner", exc)
         try:
             from modules.positioning_overlay import format_positioning_banner
 
             _cot_line = format_positioning_banner()
             if _cot_line:
                 print(f"--- {_cot_line} ---")
-        except Exception:
-            pass
+        except Exception as exc:
+            _warn_nonfatal("positioning overlay startup banner", exc)
         try:
             from modules.core_allocator import format_core_allocator_banner
 
             _core_line = format_core_allocator_banner()
-            if _core_line:
+            if _core_line and not (
+                config.paper_aggressive_context() and config.PAPER_DYNAMIC_VTI_ENABLED
+            ):
                 print(f"--- {_core_line} ---")
-        except Exception:
-            pass
+        except Exception as exc:
+            _warn_nonfatal("core allocator startup banner", exc)
+        if config.paper_aggressive_context() and config.PAPER_DYNAMIC_VTI_ENABLED:
+            try:
+                from modules.dynamic_vti_allocator import format_startup_smart_vti_banner
+                from modules.pipeline_strategies import load_pipeline_data
+                from modules.market_context import (
+                    cross_asset_vol_score,
+                    current_regime_from_data,
+                    get_volatility,
+                )
+
+                _vti_data = load_pipeline_data()
+                _vti_regime = current_regime_from_data(_vti_data)
+                _vti_vol = get_volatility(_vti_data) if _vti_data is not None else "Low"
+                _vti_line = format_startup_smart_vti_banner(
+                    data=_vti_data,
+                    equity=startup_equity,
+                    regime=_vti_regime,
+                    vol_score=cross_asset_vol_score(_vti_data)
+                    if _vti_data is not None and not getattr(_vti_data, "empty", True)
+                    else None,
+                    volatility=_vti_vol,
+                )
+                if _vti_line:
+                    print(f"--- {_vti_line} ---")
+                print(f"--- {config.format_smart_dynamic_vti_lock_banner()} ---")
+            except Exception as exc:
+                _warn_nonfatal("Smart Dynamic VTI startup banner", exc)
         try:
             from modules.operating_layer import format_operating_layer_banner
 
             _op_line = format_operating_layer_banner()
             if _op_line:
                 print(f"--- {_op_line} ---")
-        except Exception:
-            pass
+        except Exception as exc:
+            _warn_nonfatal("operating layer startup banner", exc)
     ws_line = format_status_line()
     if ws_line:
         print(f"--- {ws_line} ---")
@@ -1593,6 +2014,20 @@ def _print_startup_banner():
         kimi_line = format_kimi_deep_thinker_banner()
         if kimi_line and config.effective_kimi_deep_thinker_enabled():
             print(kimi_line)
+    except ImportError:
+        pass
+    try:
+        from modules.insider_monitor import format_insider_monitor_banner
+
+        insider_line = format_insider_monitor_banner()
+        if insider_line and config.effective_insider_monitor_enabled():
+            print(insider_line)
+        if config.effective_insider_signal_boost_enabled():
+            from modules.insider_signal_handler import format_insider_boost_startup_banner
+
+            boost_line = format_insider_boost_startup_banner()
+            if boost_line:
+                print(f">>> {boost_line} <<<")
     except ImportError:
         pass
     _print_kraken_banner()
@@ -1733,7 +2168,7 @@ def _print_startup_banner():
             )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     if alerts.alerts_configured():
-        print(f"--- Alerts: on — {config.telegram_alert_policy_summary()} ---")
+        print(f"--- Alerts: on - {config.telegram_alert_policy_summary()} ---")
         if config.telegram_weekly_summary_enabled():
             print(
                 f"--- Weekly Telegram: Fridays after {config.TELEGRAM_WEEKLY_SUMMARY_TIME} ET ---"
@@ -1821,10 +2256,13 @@ if __name__ == "__main__":
     if chase_extras:
         print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
     startup_equity = None
+    startup_cash = None
     try:
         _startup_executor = _make_executor()
-        startup_equity = float(_startup_executor._get_account().equity)
-        config.configure_account_profile(startup_equity)
+        _startup_acct = _startup_executor._get_account()
+        startup_equity = float(_startup_acct.equity)
+        startup_cash = float(_startup_acct.cash)
+        config.configure_account_profile(startup_equity, cash=startup_cash)
     except AlpacaAuthError as exc:
         fatal_startup(
             f"Alpaca authentication failed at startup: {exc}\n\n{_alpaca_startup_hint(exc)}"
@@ -1835,9 +2273,9 @@ if __name__ == "__main__":
     if config.effective_real_time_websocket_enabled():
         start_realtime_feed()
         time.sleep(1.5)
-    _print_startup_banner()
+    _print_startup_banner(startup_equity)
     if startup_equity is not None:
-        _print_account_startup_summary(startup_equity)
+        _print_account_startup_summary(startup_equity, cash=startup_cash)
     if startup_equity is not None:
         _confirm_live_trading_startup(startup_equity)
     from modules.dashboard_launcher import maybe_launch_dashboard
@@ -1849,7 +2287,7 @@ if __name__ == "__main__":
     import signal
 
     def _handle_shutdown(signum, _frame):
-        logger.info("Shutdown signal %s — exiting", signum)
+        logger.info("Shutdown signal %s - exiting", signum)
         trade_journal.log_event("shutdown", notes=f"signal {signum}")
         sys.exit(0)
 
@@ -1857,13 +2295,30 @@ if __name__ == "__main__":
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, _handle_shutdown)
 
+    from modules.heartbeat_watchdog import (
+        CycleWatchdog,
+        watchdog_enabled,
+        watchdog_timeout_sec,
+    )
+
+    watchdog = None
+    if watchdog_enabled():
+        watchdog = CycleWatchdog(timeout_sec=watchdog_timeout_sec())
+        watchdog.start()
+        print(
+            f"--- Heartbeat watchdog: ON (auto-restart if a cycle stalls "
+            f">{watchdog.timeout_sec:.0f}s) ---"
+        )
+
     while True:
+        if watchdog is not None:
+            watchdog.begin_cycle("main")
         try:
             main()
         except AlpacaAuthError as e:
             log_event("alpaca_auth_failure", error=str(e))
             logger.critical(
-                "Alpaca authentication failed: %s — verify APCA_API_KEY_ID / "
+                "Alpaca authentication failed: %s - verify APCA_API_KEY_ID / "
                 "APCA_API_SECRET_KEY in .env (paper keys when PAPER_TRADING=true)",
                 e,
             )
@@ -1882,7 +2337,7 @@ if __name__ == "__main__":
             logger.info("Alpaca order validation skipped (cycle continues): %s", e)
             trade_journal.log_event("error", notes=f"Alpaca validation skip: {e}")
         except KeyboardInterrupt:
-            logger.info("KeyboardInterrupt — shutting down")
+            logger.info("KeyboardInterrupt - shutting down")
             trade_journal.log_event("shutdown", notes="keyboard interrupt")
             break
         except Exception as e:
@@ -1894,6 +2349,9 @@ if __name__ == "__main__":
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
+        finally:
+            if watchdog is not None:
+                watchdog.end_cycle()
         cycle_count += 1
         if cli_args.cycles and cycle_count >= cli_args.cycles:
             logger.info("Completed %s cycle(s); exiting (--cycles)", cli_args.cycles)

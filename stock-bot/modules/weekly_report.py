@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -23,6 +24,7 @@ from modules.weekly_summary import (
     _journal_paths,
 )
 
+logger = logging.getLogger(__name__)
 _ET = ZoneInfo("America/New_York")
 _ROOT = Path(__file__).resolve().parents[1]
 _REPORTS_DIR = _ROOT / "reports" / "weekly"
@@ -45,6 +47,8 @@ class WeeklyReportData:
     metrics_30d: dict[str, Any] = field(default_factory=dict)
     metrics_alltime: dict[str, Any] = field(default_factory=dict)
     bubble_score: float | None = None
+    bubble_score_100: float | None = None
+    buffett_indicator: dict[str, Any] = field(default_factory=dict)
     stat_arb_contribution_pct: float | None = None
     bot_health: dict[str, Any] = field(default_factory=dict)
 
@@ -373,27 +377,21 @@ def gather_weekly_report(
         pass
 
     bubble_score: float | None = None
-    regime_str = str(hb.get("regime") or summary.regime or "")
-    if regime_str:
-        score = 0.0
-        if "RHYME_B" in regime_str:
-            score += 0.35
-        elif "RHYME_E" in regime_str:
-            score += 0.20
-        if "RHYME_A" in regime_str:
-            score += 0.15
-        wisdom = hb.get("wisdom") or {}
-        if wisdom.get("governor_stress"):
-            score += 0.15
-        dvs = hb.get("dynamic_vol_score")
-        if dvs is not None:
-            try:
-                ann = float(dvs) * (252**0.5)
-                if ann > float(config.effective_vol_ceiling_pct()):
-                    score += 0.15
-            except (TypeError, ValueError):
-                pass
-        bubble_score = round(min(1.0, max(0.0, score)), 3)
+    bubble_score_100: float | None = None
+    buffett: dict[str, Any] | None = None
+    try:
+        from modules.bubble_risk import compute_bubble_risk_from_live_context
+
+        regime_str = str(hb.get("regime") or summary.regime or "")
+        bubble_ctx = compute_bubble_risk_from_live_context(regime=regime_str, hb=hb)
+        if bubble_ctx:
+            bubble_score_100 = float(bubble_ctx["score_100"])
+            bubble_score = float(bubble_ctx["score_normalized"])
+            buffett = dict(bubble_ctx.get("buffett") or {})
+    except Exception:
+        bubble_score = None
+        bubble_score_100 = None
+        buffett = None
 
     stat_arb_pnl = _stat_arb_week_pnl(df)
     stat_arb_contrib: float | None = None
@@ -404,7 +402,7 @@ def gather_weekly_report(
         hb=hb,
         metrics_30d=m30,
         metrics_alltime=mall,
-        bubble_score=bubble_score,
+        bubble_score=bubble_score_100 if bubble_score_100 is not None else bubble_score,
         stat_arb_pnl_week=stat_arb_pnl,
         short_trade_count=len(_short_week_trades(df)),
         heartbeat_age_min=summary.heartbeat_age_min,
@@ -412,7 +410,7 @@ def gather_weekly_report(
 
     return WeeklyReportData(
         summary=summary,
-        research_version=str(getattr(config, "REALISTIC_RESEARCH_VERSION", "1.4")),
+        research_version=str(getattr(config, "REALISTIC_RESEARCH_VERSION", "1.5")),
         equity_curve=curve,
         equity_sparkline=spark,
         regime_counts=regime_counts,
@@ -425,6 +423,8 @@ def gather_weekly_report(
         metrics_30d=m30,
         metrics_alltime=mall,
         bubble_score=bubble_score,
+        bubble_score_100=bubble_score_100,
+        buffett_indicator=buffett or {},
         stat_arb_contribution_pct=stat_arb_contrib,
         bot_health=health,
     )
@@ -501,7 +501,17 @@ def render_markdown(data: WeeklyReportData) -> str:
             "",
         ]
     )
-    if data.bubble_score is not None:
+    if data.bubble_score_100 is not None:
+        lines.append(f"- **Bubble Risk Score:** {data.bubble_score_100:.0f}/100")
+        if data.buffett_indicator.get("ratio_pct") is not None:
+            bi = data.buffett_indicator
+            lines.append(
+                f"- **Buffett Indicator:** {bi['ratio_pct']:.1f}% of GDP — "
+                f"**{bi.get('signal', 'n/a')}** "
+                f"(threshold {bi.get('overvalued_threshold', config.BUFFETT_OVERVALUED_THRESHOLD):.0f}%)"
+            )
+        lines.append("")
+    elif data.bubble_score is not None:
         lines.append(f"- **Bubble Risk Score:** {data.bubble_score:.3f}")
         lines.append("")
     if data.stat_arb_contribution_pct is not None:
@@ -562,7 +572,29 @@ def render_markdown(data: WeeklyReportData) -> str:
             lines.append(f"- {ch}")
     lines.append("")
 
+    try:
+        from modules.markov_regime import format_weekly_hmm_section
+
+        lines.extend(format_weekly_hmm_section())
+    except Exception:
+        lines.extend(["## Markov HMM regime", "", "- Markov HMM: unavailable", ""])
+
     lines.extend(["## Sector screener", "", f"- {s.sector_activity}", f"- {s.screener_meta}", ""])
+
+    lines.extend(["## Insider & filings", ""])
+    try:
+        from modules.insider_monitor import format_weekly_insider_section
+
+        lines.extend(format_weekly_insider_section())
+    except Exception:
+        lines.append("- Insider monitor: unavailable")
+    try:
+        from modules.insider_signal_handler import get_weekly_impact_summary
+
+        lines.extend(get_weekly_impact_summary())
+    except Exception:
+        pass
+    lines.append("")
 
     lines.extend(["## Stat Arb attribution", ""])
     stat_on = config.PAPER_STAT_ARB_ENABLED or config.effective_stat_arb_enabled()
@@ -641,8 +673,9 @@ def render_markdown(data: WeeklyReportData) -> str:
             f"{config.SECTOR_SHORT_MAX_POSITIONS} slots"
         )
     lines.append(
-        f"- Sizing: {config.effective_protective_short_min_pct():.0%}–"
-        f"{config.effective_protective_short_max_pct():.0%} gross | "
+        f"- Sizing: {config.effective_protective_short_min_pct():.0%}-"
+        f"RHYME_E {config.SHORT_RHYME_E_MAX_PCT:.0%} / RHYME_B {config.SHORT_RHYME_B_MAX_PCT:.0%} gross | "
+        f"partial 50% @ 1:1 | trail arm {config.SHORT_TRAILING_ARM_FRAC:.0%} / pull {config.SHORT_TRAILING_PULLBACK_FRAC:.0%} | "
         f"RR {config.SHORT_PROFIT_TARGET_PCT/config.SHORT_STOP_LOSS_PCT:.1f}:1 + trail | "
         f"max hold {config.SHORT_MAX_HOLD_BARS}b"
     )
@@ -732,6 +765,31 @@ def render_markdown(data: WeeklyReportData) -> str:
 
     if s.sleeve_line:
         lines.extend(["## Sleeve exposure", "", f"- {s.sleeve_line}", ""])
+
+    # Paper research sleeves — sector rotation + ATR vol breakout
+    paper_notes: list[str] = []
+    try:
+        from modules.sector_rotation import format_weekly_sector_rotation_note
+
+        note = format_weekly_sector_rotation_note()
+        if note:
+            paper_notes.append(note)
+    except Exception:
+        pass
+    try:
+        from modules.vol_breakout_sleeve import format_weekly_vol_breakout_note
+
+        note = format_weekly_vol_breakout_note()
+        if note:
+            paper_notes.append(note)
+    except Exception:
+        pass
+    if paper_notes:
+        lines.extend(["## Paper research sleeves", ""])
+        for note in paper_notes:
+            lines.append(f"- {note}")
+        lines.append("")
+
     if s.heartbeat_age_min is not None:
         lines.append(f"_Heartbeat age: {s.heartbeat_age_min:.0f} min_")
     return "\n".join(lines)
@@ -891,11 +949,100 @@ def format_telegram_research_addon(data: WeeklyReportData) -> str:
         lines.append(
             f"All-time: {fmt_pct(mall.get('return_pct'))} | Sharpe {float(mall['sharpe']):.2f}"
         )
-    if data.bubble_score is not None:
+    if data.bubble_score_100 is not None:
+        lines.append(f"Bubble Risk: {data.bubble_score_100:.0f}/100")
+        bi = data.buffett_indicator or {}
+        if bi.get("ratio_pct") is not None:
+            lines.append(
+                f"Buffett: {bi['ratio_pct']:.1f}% GDP ({bi.get('signal', 'n/a')})"
+            )
+    elif data.bubble_score is not None:
         lines.append(f"Bubble Risk: {data.bubble_score:.2f}")
     short_n = len(data.short_trades or [])
-    lines.append(f"Short activity: {short_n} trade(s) this week")
-    lines.append(config.format_opportunistic_short_banner())
+    try:
+        from modules.short_activity import format_weekly_shorts_telegram_block
+
+        lines.append(
+            format_weekly_shorts_telegram_block(short_trades=data.short_trades)
+        )
+    except Exception:
+        lines.append(f"Short activity: {short_n} trade(s) this week")
+        lines.append(config.format_opportunistic_short_banner())
+    try:
+        from modules.risk_management import format_weekly_atr_sizing_note
+
+        atr_note = format_weekly_atr_sizing_note()
+        if atr_note:
+            lines.append(atr_note)
+    except Exception:
+        pass
+    try:
+        from modules.vol_breakout_sleeve import format_weekly_vol_breakout_note
+
+        vol_bo_note = format_weekly_vol_breakout_note()
+        if vol_bo_note:
+            lines.append(vol_bo_note)
+    except Exception:
+        pass
+    try:
+        from modules.risk_management import format_weekly_conviction_note
+
+        conv_note = format_weekly_conviction_note()
+        if conv_note:
+            lines.append(conv_note)
+    except Exception:
+        pass
+    try:
+        from modules.strategy_performance import format_weekly_strategy_contribution_note
+
+        contrib_note = format_weekly_strategy_contribution_note()
+        if contrib_note:
+            lines.append(contrib_note)
+    except Exception:
+        pass
+    try:
+        from modules.multi_timeframe import format_weekly_multi_timeframe_note
+
+        mtf_note = format_weekly_multi_timeframe_note()
+        if mtf_note:
+            lines.append(mtf_note)
+    except Exception:
+        pass
+    try:
+        from modules.exit_management import format_weekly_exit_note
+
+        exit_note = format_weekly_exit_note()
+        if exit_note:
+            lines.append(exit_note)
+    except Exception:
+        pass
+    try:
+        from modules.risk_management import format_weekly_correlation_note
+
+        corr_note = format_weekly_correlation_note()
+        if corr_note:
+            lines.append(corr_note)
+    except Exception:
+        pass
+    if config.effective_thinking_engine_enabled():
+        try:
+            from modules.thinking_engine import weekly_strategy_review
+
+            review = weekly_strategy_review(
+                {
+                    "regime": data.regime or "",
+                    "return_30d_pct": (data.metrics_30d or {}).get("return_pct"),
+                    "sharpe_30d": (data.metrics_30d or {}).get("sharpe"),
+                    "health_score": (data.bot_health or {}).get("score"),
+                    "bubble_score_100": data.bubble_score_100,
+                },
+                fast_model=True,
+            )
+            headline = str(review.get("headline") or "").strip()
+            if headline and review.get("source") == "llm":
+                lines.append(f"AI weekly: {headline[:120]}")
+        except Exception:
+            pass
     return "\n".join(lines)
 
 
@@ -910,6 +1057,12 @@ def maybe_generate_weekly_report(
     force: bool = False,
 ) -> tuple[Path, Path] | None:
     """Called from run_all.py after the weekly Telegram hook."""
+    try:
+        from modules.sharpe_history import update_sharpe_history
+
+        update_sharpe_history(equity, force=force, market_open=market_open)
+    except Exception as exc:
+        logger.debug("sharpe history update from weekly report skipped: %s", exc)
     return generate_weekly_report(
         test_mode=force,
         equity=equity,

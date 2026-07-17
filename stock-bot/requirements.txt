@@ -5,6 +5,7 @@ tavily-python
 yfinance
 pandas
 statsmodels>=0.14.0
+hmmlearn>=0.3.0
 ccxt
 
 # (backtesting lib was for removed modules/backtest_engine.py; main backtester uses native pandas/yf sim)

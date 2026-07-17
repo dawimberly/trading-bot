@@ -100,12 +100,13 @@ from modules.portal_bot import (  # noqa: E402
     bot_running,
     bot_status_label,
     read_bot_log_tail,
+    refresh_bot,
     restart_bot,
     start_bot,
     stop_bot,
 )
 
-REFRESH_SECONDS = 60
+REFRESH_SECONDS = 45
 _BOOK_ENV_LOCK = threading.Lock()
 CRYPTO_VOL_HEARTBEAT_FILE = "crypto_vol_heartbeat.json"
 TRADES_LIMIT = 50
@@ -519,6 +520,42 @@ def _fetch_book_equity(username: str, book_id: str, *, retries: int = 2) -> tupl
         )
 
 
+def _format_position_opened(opened: datetime | None) -> str:
+    if opened is None:
+        return "—"
+    try:
+        if opened.tzinfo is not None:
+            opened = opened.astimezone(timezone.utc).replace(tzinfo=None)
+        return opened.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(opened)[:16]
+
+
+def _position_opened_at(pos, client, journal_df, sym: str) -> datetime | None:
+    """Best-effort open time: Alpaca position created_at, then journal, then order history."""
+    created = getattr(pos, "created_at", None) or getattr(pos, "createdAt", None)
+    if created is not None:
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except ValueError:
+                created = None
+        if isinstance(created, datetime):
+            return created.replace(tzinfo=None) if created.tzinfo else created
+
+    try:
+        from modules.paper_journal import _first_alpaca_buy_time, journal_opened_at
+
+        opened = journal_opened_at(journal_df, sym) if journal_df is not None else None
+        if opened is None:
+            opened = _first_alpaca_buy_time(client, sym)
+        if opened is not None and isinstance(opened, datetime):
+            return opened.replace(tzinfo=None) if opened.tzinfo else opened
+    except Exception:
+        pass
+    return None
+
+
 def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, str | None]:
     try:
         client = _book_trading_client(username, book_id)
@@ -528,82 +565,509 @@ def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, 
     except Exception as exc:  # noqa: BLE001
         return None, str(exc)
 
-    cols = ["Ticker", "Qty", "Entry", "Current", "P&L $", "P&L %"]
+    cols = ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %"]
+    if config.effective_atr_sizing_enabled() and _book_is_paper(book_id):
+        cols.append("ATR Stop")
     if not positions:
         return pd.DataFrame(columns=cols), None
+
+    journal_df = None
+    try:
+        from modules.paper_journal import read_journal
+
+        journal_df = read_journal(path=book_journal_path(username, book_id))
+    except Exception:
+        journal_df = None
 
     rows = []
     for pos in positions:
         sym = config.normalize_symbol(pos.symbol)
+        try:
+            qty = float(pos.qty or 0)
+        except (TypeError, ValueError):
+            qty = 0.0
+        try:
+            entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+        except (TypeError, ValueError):
+            entry = 0.0
+        current_raw = getattr(pos, "current_price", None)
+        try:
+            current = float(current_raw) if current_raw is not None else 0.0
+        except (TypeError, ValueError):
+            current = 0.0
+        if current != current:  # NaN
+            current = 0.0
+        market_value = qty * current if qty else 0.0
+        opened = _position_opened_at(pos, client, journal_df, sym)
         rows.append(
             {
                 "Ticker": sym,
                 "Sleeve": _infer_sleeve(sym),
-                "Qty": float(pos.qty),
-                "Entry": float(getattr(pos, "avg_entry_price", 0) or 0),
-                "Current": float(getattr(pos, "current_price", 0) or 0),
+                "Opened": _format_position_opened(opened),
+                "_opened": opened,
+                "Qty": qty,
+                "Entry": entry,
+                "Current": current,
+                "Value $": market_value,
                 "P&L $": float(getattr(pos, "unrealized_pl", 0) or 0),
                 "P&L %": float(getattr(pos, "unrealized_plpc", 0) or 0) * 100,
-                "_mv": float(pos.qty) * float(getattr(pos, "current_price", 0) or 0),
             }
         )
     df = pd.DataFrame(rows)
     if not df.empty:
-        df = df.sort_values("_mv", ascending=False).drop(columns=["_mv"])
+        df = df.sort_values("Value $", ascending=False)
+    if "ATR Stop" in cols and not df.empty:
+        try:
+            from modules.pipeline_strategies import load_pipeline_data
+            from modules.risk_management import atr_stop_price
+
+            atr_data = load_pipeline_data()
+            stops: list[str] = []
+            for _, row in df.iterrows():
+                sym = str(row["Ticker"])
+                qty = float(row.get("Qty") or 0)
+                side = "short" if qty < 0 else "long"
+                stop_px = atr_stop_price(atr_data, sym, side=side)
+                stops.append(f"${stop_px:,.2f}" if stop_px is not None else "—")
+            df["ATR Stop"] = stops
+        except Exception:
+            df["ATR Stop"] = "—"
     return df, None
 
 
-def _collect_refresh_snapshot(username: str, book_id: str) -> dict:
+def _fetch_insider_signals_snapshot() -> tuple[list[dict], str | None]:
+    """Top insider signals for dashboard (paper monitor)."""
+    try:
+        if not config.effective_insider_monitor_enabled():
+            return [], "Insider monitor off (paper / research only)"
+        from modules.insider_monitor import _sig_type, get_recent_insider_signals
+
+        rows: list[dict] = []
+        for sig in get_recent_insider_signals(days=7, min_score=60)[:5]:
+            st = _sig_type(sig)
+            if st == "executive_sell":
+                display_type = "exec_sell"
+            elif st == "insider_sell":
+                display_type = "insider_sell"
+            else:
+                display_type = st
+            ticker = sig.get("ticker") or sig.get("company") or "?"
+            desc = str(sig.get("description") or "").replace("\n", " ")
+            if len(desc) > 56:
+                desc = desc[:53] + "..."
+            fdate = str(sig.get("filing_date") or "")[:10] or "—"
+            score = int(sig.get("score") or 0)
+            row_tag = ""
+            if display_type == "cluster_buy":
+                row_tag = "cluster_buy"
+            elif display_type in ("exec_sell", "insider_sell"):
+                row_tag = "exec_sell"
+            rows.append(
+                {
+                    "Ticker": ticker,
+                    "Type": display_type,
+                    "Score": score,
+                    "Description": desc,
+                    "Filing Date": fdate,
+                    "_score": score,
+                    "_tag": row_tag,
+                }
+            )
+        rows.sort(key=lambda r: int(r.get("_score") or 0), reverse=True)
+        if not rows:
+            return [], None
+        return rows, None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _fetch_short_activity_snapshot(
+    *,
+    positions_df,
+    journal_df,
+    heartbeat: dict | None,
+    book_paper: bool,
+) -> tuple[list[dict], str | None, dict | None]:
+    """Short sleeve activity for paper book dashboard panel."""
+    if not book_paper:
+        return [], "Short activity — paper book only", None
+    try:
+        if not config.effective_opportunistic_short_enabled():
+            return [], "Protective shorts off", None
+        from modules.short_activity import (
+            gather_short_activity,
+            short_activity_dashboard_rows,
+        )
+
+        regime = str((heartbeat or {}).get("regime") or "")
+        snap = gather_short_activity(
+            positions_df=positions_df,
+            journal_df=journal_df,
+            regime=regime,
+        )
+        rows, err = short_activity_dashboard_rows(snap)
+        return rows, err, snap
+    except Exception as exc:
+        return [], str(exc), None
+
+
+def _fetch_rvol_snapshot() -> tuple[list[dict], str | None]:
+    """Top RVOL / ORB setups for dashboard (paper scanner)."""
+    try:
+        if not config.effective_rvol_scanner_enabled() and not config.effective_orb_enabled() and not config.effective_catalyst_scoring_enabled():
+            return [], "RVOL/ORB scanner off (paper / research only)"
+        from modules.pipeline_strategies import load_pipeline_data
+        from modules.volume_analysis import rvol_dashboard_rows
+
+        data = load_pipeline_data()
+        return rvol_dashboard_rows(data, limit=10), None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _fetch_orb_momentum_snapshot() -> tuple[list[dict], str | None]:
+    """ORB+RVOL momentum sleeve signals and open positions."""
+    try:
+        if not config.effective_orb_momentum_enabled():
+            return [], "ORB momentum sleeve off"
+        from modules.orb_momentum_sleeve import orb_momentum_dashboard_rows
+        from modules.pipeline_strategies import load_pipeline_data
+
+        data = load_pipeline_data()
+        return orb_momentum_dashboard_rows(data, limit=10), None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _fetch_sector_rotation_snapshot() -> tuple[list[dict], str | None]:
+    """Sector rotation leaders + target weights."""
+    try:
+        if not config.effective_sector_rotation_enabled():
+            return [], "Sector rotation off"
+        from modules.pipeline_strategies import load_pipeline_data
+        from modules.sector_rotation import sector_rotation_dashboard_rows
+
+        data = load_pipeline_data()
+        return sector_rotation_dashboard_rows(data, limit=11), None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _fetch_vol_breakout_snapshot() -> tuple[list[dict], str | None]:
+    """ATR volatility-breakout signals and open positions."""
+    try:
+        if not config.effective_vol_breakout_enabled():
+            return [], "Vol breakout off"
+        from modules.pipeline_strategies import load_pipeline_data
+        from modules.vol_breakout_sleeve import vol_breakout_dashboard_rows
+
+        data = load_pipeline_data()
+        return vol_breakout_dashboard_rows(data, limit=10), None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _fetch_thinking_snapshot() -> tuple[dict | None, str | None]:
+    """Ollama thinking engine status for dashboard pill / overview."""
+    try:
+        from modules.thinking_engine import thinking_dashboard_snapshot
+
+        return thinking_dashboard_snapshot(), None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _fetch_strategy_performance_snapshot() -> tuple[list[dict], str | None, str | None]:
+    """Per-strategy rolling ratings + MTF / exit summaries (paper research)."""
+    mtf_summary = ""
+    try:
+        if config.effective_multi_timeframe_enabled():
+            from modules.multi_timeframe import multi_timeframe_dashboard_summary
+
+            mtf_summary = multi_timeframe_dashboard_summary()
+    except Exception:
+        mtf_summary = ""
+    try:
+        if config.effective_exit_optimization_enabled():
+            from modules.exit_management import exit_dashboard_status
+
+            exit_note = exit_dashboard_status(days=7)
+            if exit_note:
+                mtf_summary = f"{mtf_summary} · {exit_note}" if mtf_summary else exit_note
+    except Exception:
+        pass
+    try:
+        if config.effective_correlation_guard_enabled():
+            from modules.risk_management import correlation_dashboard_status
+
+            corr_note = correlation_dashboard_status()
+            if corr_note:
+                mtf_summary = f"{mtf_summary} · {corr_note}" if mtf_summary else corr_note
+    except Exception:
+        pass
+    try:
+        if not config.PAPER_TRADING and not config.paper_aggressive_context():
+            return [], "Strategy performance tracking (paper / research only)", mtf_summary
+        from modules.strategy_performance import dashboard_rows
+
+        return dashboard_rows(days=30), None, mtf_summary
+    except Exception as exc:
+        return [], str(exc), mtf_summary
+
+
+def _fetch_sharpe_history_snapshot() -> tuple[dict | None, str | None]:
+    """All-time / since-update Sharpe + version markers for the dashboard."""
+    try:
+        from modules.sharpe_history import dashboard_sharpe_payload
+
+        return dashboard_sharpe_payload(), None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _fetch_conviction_snapshot() -> tuple[dict | None, str | None]:
+    """Rolling conviction sizing metrics (paper)."""
+    try:
+        if not config.effective_conviction_sizing_enabled():
+            return None, "Conviction sizing off (paper / research only)"
+        from modules.risk_management import conviction_dashboard_snapshot
+
+        return conviction_dashboard_snapshot(), None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _fetch_exit_events_snapshot() -> tuple[list[dict], str | None]:
+    try:
+        if not config.effective_exit_optimization_enabled():
+            return [], "Exit optimization off (paper / research only)"
+        from modules.exit_management import exit_dashboard_rows
+
+        return exit_dashboard_rows(days=7), None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _collect_refresh_snapshot(
+    username: str, book_id: str, *, fast: bool = False
+) -> dict:
     """Network / disk work for dashboard refresh (safe off UI thread)."""
-    with _BOOK_ENV_LOCK:
-        _apply_user_paths(username, book_id)
-        _reset_equity_cache()
-        heartbeat, heartbeat_path = _load_active_heartbeat(username, book_id)
-        scorecard, scorecard_src = _load_scorecard(username, book_id)
-        acct_eq, acct_cash, acct_err = _fetch_account_summary(
-            username=username, book_id=book_id, retries=2
-        )
-        positions_df, pos_err = _fetch_positions(username, book_id)
-        journal_df = _load_trade_history(username, book_id)
-        recent_orders_df = _fetch_alpaca_fills(username, book_id, limit=12)
-        running = _book_running_status(username, book_id)
-        other_book = _other_book_id(book_id)
-        other_book_running = _book_running_status(username, other_book)
-        heartbeat_stale = _heartbeat_is_stale(heartbeat, running=running)
-        heartbeat_mismatch = _heartbeat_on_disk_mismatch(username, book_id)
-        equity, cash, acct_err = _resolve_equity_cash(
-            acct_eq,
-            acct_cash,
-            acct_err,
-            heartbeat,
-            username=username,
-            book_id=book_id,
-        )
-    return {
+
+    snap: dict = {
         "book_id": book_id,
         "book_label": book_label(book_id),
         "book_paper": _book_is_paper(book_id),
-        "other_book": other_book,
-        "other_book_running": other_book_running,
-        "heartbeat": heartbeat,
-        "heartbeat_stale": heartbeat_stale,
-        "heartbeat_mismatch": heartbeat_mismatch,
-        "heartbeat_path": str(heartbeat_path),
-        "scorecard": scorecard,
-        "scorecard_src": scorecard_src,
-        "acct_eq": acct_eq,
-        "acct_cash": acct_cash,
-        "acct_err": acct_err,
-        "positions_df": positions_df,
-        "pos_err": pos_err,
-        "journal_df": journal_df,
-        "recent_orders_df": recent_orders_df,
-        "running": running,
-        "equity": equity,
-        "cash": cash,
-        "runtime_layout": runtime_layout_label(PROJECT_ROOT),
-        "bot_exe": str(resolve_bot_executable(PROJECT_ROOT) or ""),
+        "fast": fast,
+        "partial_errors": [],
     }
+
+    with _BOOK_ENV_LOCK:
+        _apply_user_paths(username, book_id)
+        _reset_equity_cache()
+
+        heartbeat, heartbeat_path = None, book_heartbeat_path(username, book_id)
+        hb_exc: str | None = None
+        try:
+            heartbeat, heartbeat_path = _load_active_heartbeat(username, book_id)
+        except Exception as exc:  # noqa: BLE001
+            hb_exc = str(exc)
+
+        scorecard, scorecard_src = None, ""
+        if not fast:
+            try:
+                scorecard, scorecard_src = _load_scorecard(username, book_id)
+            except Exception as exc:  # noqa: BLE001
+                snap["partial_errors"].append(f"scorecard: {exc}")
+
+        acct_eq, acct_cash, acct_err = 0.0, 0.0, hb_exc
+        try:
+            acct_eq, acct_cash, acct_err = _fetch_account_summary(
+                username=username, book_id=book_id, retries=1 if fast else 2
+            )
+        except Exception as exc:  # noqa: BLE001
+            acct_err = str(exc)
+
+        positions_df, pos_err = None, None
+        try:
+            positions_df, pos_err = _fetch_positions(username, book_id)
+        except Exception as exc:  # noqa: BLE001
+            pos_err = str(exc)
+
+        journal_df = None
+        try:
+            journal_df = _load_trade_history(username, book_id)
+        except Exception as exc:  # noqa: BLE001
+            snap["partial_errors"].append(f"journal: {exc}")
+
+        recent_orders_df = None
+        if not fast:
+            try:
+                recent_orders_df = _fetch_alpaca_fills(username, book_id, limit=12)
+            except Exception as exc:  # noqa: BLE001
+                snap["partial_errors"].append(f"fills: {exc}")
+
+        try:
+            running = _book_running_status(username, book_id)
+        except Exception:
+            running = False
+
+        other_book = _other_book_id(book_id)
+        try:
+            other_book_running = _book_running_status(username, other_book)
+        except Exception:
+            other_book_running = False
+
+        try:
+            heartbeat_stale = _heartbeat_is_stale(heartbeat, running=running)
+        except Exception:
+            heartbeat_stale = False
+        try:
+            heartbeat_mismatch = _heartbeat_on_disk_mismatch(username, book_id)
+        except Exception:
+            heartbeat_mismatch = False
+
+        try:
+            equity, cash, acct_err = _resolve_equity_cash(
+                acct_eq,
+                acct_cash,
+                acct_err,
+                heartbeat,
+                username=username,
+                book_id=book_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            equity, cash = float(acct_eq or 0), float(acct_cash or 0)
+            acct_err = str(exc)
+
+        insider_rows, insider_err = [], None
+        short_rows, short_err, short_snap = [], None, None
+        rvol_rows, rvol_err = [], None
+        orb_mom_rows, orb_mom_err = [], None
+        sector_rot_rows, sector_rot_err = [], None
+        vol_bo_rows, vol_bo_err = [], None
+        strategy_rows, strategy_err, strategy_mtf = [], None, None
+        exit_rows, exit_err = [], None
+        conviction_snap, conviction_err = None, None
+        sharpe_hist, sharpe_hist_err = None, None
+        thinking_snap, thinking_err = None, None
+        bot_health = None
+
+        if not fast:
+            try:
+                insider_rows, insider_err = _fetch_insider_signals_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                insider_err = str(exc)
+            try:
+                short_rows, short_err, short_snap = _fetch_short_activity_snapshot(
+                    positions_df=positions_df,
+                    journal_df=journal_df,
+                    heartbeat=heartbeat,
+                    book_paper=_book_is_paper(book_id),
+                )
+            except Exception as exc:  # noqa: BLE001
+                short_err = str(exc)
+            try:
+                rvol_rows, rvol_err = _fetch_rvol_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                rvol_err = str(exc)
+            try:
+                orb_mom_rows, orb_mom_err = _fetch_orb_momentum_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                orb_mom_err = str(exc)
+            try:
+                sector_rot_rows, sector_rot_err = _fetch_sector_rotation_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                sector_rot_err = str(exc)
+            try:
+                vol_bo_rows, vol_bo_err = _fetch_vol_breakout_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                vol_bo_err = str(exc)
+            try:
+                strategy_rows, strategy_err, strategy_mtf = (
+                    _fetch_strategy_performance_snapshot()
+                )
+            except Exception as exc:  # noqa: BLE001
+                strategy_err = str(exc)
+            try:
+                exit_rows, exit_err = _fetch_exit_events_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                exit_err = str(exc)
+            try:
+                conviction_snap, conviction_err = _fetch_conviction_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                conviction_err = str(exc)
+            try:
+                sharpe_hist, sharpe_hist_err = _fetch_sharpe_history_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                sharpe_hist_err = str(exc)
+            try:
+                thinking_snap, thinking_err = _fetch_thinking_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                thinking_err = str(exc)
+            if _book_is_paper(book_id) or config.effective_thinking_engine_enabled():
+                try:
+                    from modules.bot_health import (
+                        calculate_health_score,
+                        gather_health_context,
+                    )
+
+                    hctx = gather_health_context(
+                        heartbeat, journal_df=journal_df, short_snap=short_snap
+                    )
+                    bot_health = calculate_health_score(**hctx)
+                except Exception:
+                    bot_health = None
+
+    snap.update(
+        {
+            "other_book": other_book,
+            "other_book_running": other_book_running,
+            "heartbeat": heartbeat,
+            "heartbeat_stale": heartbeat_stale,
+            "heartbeat_mismatch": heartbeat_mismatch,
+            "heartbeat_path": str(heartbeat_path),
+            "scorecard": scorecard,
+            "scorecard_src": scorecard_src,
+            "acct_eq": acct_eq,
+            "acct_cash": acct_cash,
+            "acct_err": acct_err,
+            "positions_df": positions_df,
+            "pos_err": pos_err,
+            "journal_df": journal_df,
+            "recent_orders_df": recent_orders_df,
+            "running": running,
+            "equity": equity,
+            "cash": cash,
+            "runtime_layout": runtime_layout_label(PROJECT_ROOT),
+            "bot_exe": str(resolve_bot_executable(PROJECT_ROOT) or ""),
+            "insider_rows": insider_rows,
+            "insider_err": insider_err,
+            "short_rows": short_rows,
+            "short_err": short_err,
+            "short_snap": short_snap,
+            "rvol_rows": rvol_rows,
+            "rvol_err": rvol_err,
+            "orb_mom_rows": orb_mom_rows,
+            "orb_mom_err": orb_mom_err,
+            "sector_rot_rows": sector_rot_rows,
+            "sector_rot_err": sector_rot_err,
+            "vol_bo_rows": vol_bo_rows,
+            "vol_bo_err": vol_bo_err,
+            "strategy_rows": strategy_rows,
+            "strategy_err": strategy_err,
+            "strategy_mtf": strategy_mtf,
+            "exit_rows": exit_rows,
+            "exit_err": exit_err,
+            "conviction_snap": conviction_snap,
+            "conviction_err": conviction_err,
+            "sharpe_hist": sharpe_hist,
+            "sharpe_hist_err": sharpe_hist_err,
+            "thinking_snap": thinking_snap,
+            "thinking_err": thinking_err,
+            "bot_health": bot_health,
+        }
+    )
+    return snap
 
 
 def _journal_search_paths(username: str, book_id: str) -> list[Path]:
@@ -790,9 +1254,7 @@ def _closed_trades_from_fills(
             pnl = (exit_price - entry_px) * match_qty
             buy_px, sell_px = entry_px, exit_price
             buy_ts, sell_ts = entry["ts"], exit_ts
-        pnl_pct = (
-            100.0 * (pnl / (entry_px * match_qty)) if entry_px > 0 and match_qty > 0 else 0.0
-        )
+        pnl_pct = 100.0 * (pnl / (entry_px * match_qty)) if entry_px > 0 and match_qty > 0 else 0.0
         sleeve = str(entry.get("sleeve") or _infer_sleeve(sym))
         closed.append(
             {
@@ -810,6 +1272,7 @@ def _closed_trades_from_fills(
                 "_exit": sell_px,
                 "_pnl": pnl,
                 "_pnl_pct": pnl_pct,
+                # Compatibility fields for status / short-activity consumers
                 "timestamp": sell_ts,
                 "event": "fill",
                 "symbol": sym,
@@ -1076,6 +1539,18 @@ def _expected_actions(heartbeat: dict | None) -> list[str]:
     if not heartbeat:
         return ["Start Bot to begin trading cycles (first heartbeat ~60s)."]
     lines: list[str] = []
+    gates = heartbeat.get("entry_skip_reason")
+    if gates and gates != "traded":
+        lines.append(f"Last cycle — no entries: {gates}")
+    elif gates == "traded":
+        lines.append("Last cycle — entries placed (traded).")
+    daily = heartbeat.get("entry_skip_daily") or {}
+    if daily.get("cycles"):
+        lines.append(
+            f"Today: {daily.get('traded_cycles', 0)} traded / "
+            f"{daily.get('skipped_cycles', 0)} skipped "
+            f"(top: {daily.get('top_skip', '—')})"
+        )
     if heartbeat.get("halted"):
         lines.append("Risk halt — no new entries.")
     wisdom = heartbeat.get("wisdom") or {}
@@ -1111,20 +1586,19 @@ def _find_run_all_pids() -> list[int]:
 
 
 def _bot_python() -> str:
-    """Interpreter for run_all.py (venv or PATH python when dashboard is frozen)."""
+    """Interpreter for run_all.py — reuse portal resolver (prefers working venv)."""
+    try:
+        from modules.portal_bot import _python as resolve_bot_python
+
+        return resolve_bot_python()
+    except Exception:
+        pass
     for venv_py in (
-        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
         PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
     ):
         if venv_py.is_file():
             return str(venv_py)
-    if getattr(sys, "frozen", False):
-        import shutil
-
-        for name in ("python", "python3", "python.exe"):
-            found = shutil.which(name)
-            if found:
-                return found
     return sys.executable
 
 
@@ -1308,6 +1782,23 @@ class DataTable(ctk.CTkFrame):
         style.map(style_name, background=[("selected", COLORS["accent"])])
 
         self._columns = columns
+        self._rows: list[dict] = []
+        self._pnl_col: str | None = None
+        self._tag_col: str | None = None
+        self._sort_col: str | None = None
+        self._sort_reverse = False
+        self._sort_keys = {
+            "Qty": "_qty",
+            "Entry": "_entry",
+            "Exit": "_exit",
+            "Current": "_current",
+            "Value $": "_value",
+            "P&L $": "_pnl",
+            "P&L %": "_pnl_pct",
+            "Bought": "Bought",
+            "Sold": "Sold",
+            "Score": "_score",
+        }
         self._tree = ttk.Treeview(
             self,
             columns=columns,
@@ -1317,7 +1808,11 @@ class DataTable(ctk.CTkFrame):
             selectmode="browse",
         )
         for col in columns:
-            self._tree.heading(col, text=col)
+            self._tree.heading(
+                col,
+                text=col,
+                command=lambda c=col: self._sort_by_column(c),
+            )
             if large:
                 widths = {
                     "Ticker": 96,
@@ -1328,6 +1823,7 @@ class DataTable(ctk.CTkFrame):
                     "Entry": 88,
                     "Exit": 88,
                     "Current": 92,
+                    "Value $": 100,
                     "P&L $": 88,
                     "P&L %": 72,
                     "Bought": 118,
@@ -1335,12 +1831,35 @@ class DataTable(ctk.CTkFrame):
                     "Time": 118,
                     "Side": 56,
                     "Notional": 88,
+                    "Type": 92,
+                    "Score": 56,
+                    "Description": 280,
+                    "Filing Date": 96,
                 }
                 width = widths.get(col, 80)
             else:
                 width = 88 if col in ("Ticker", "symbol", "event", "sleeve") else 72
-            left_cols = ("Ticker", "symbol", "Time", "timestamp", "Bought", "Sold", "Sleeve", "sleeve")
-            right_cols = ("Qty", "Entry", "Exit", "Current", "P&L $", "P&L %", "Notional")
+            left_cols = (
+                "Ticker",
+                "symbol",
+                "Time",
+                "timestamp",
+                "event",
+                "Sleeve",
+                "sleeve",
+                "Bought",
+                "Sold",
+            )
+            right_cols = (
+                "Qty",
+                "Entry",
+                "Exit",
+                "Current",
+                "Value $",
+                "P&L $",
+                "P&L %",
+                "Notional",
+            )
             if col in left_cols:
                 anchor = "w"
             elif col in right_cols:
@@ -1350,6 +1869,13 @@ class DataTable(ctk.CTkFrame):
             self._tree.column(col, width=width, anchor=anchor, stretch=col in ("Ticker", "symbol"))
         self._tree.tag_configure("profit", foreground=COLORS["green"])
         self._tree.tag_configure("loss", foreground=COLORS["red"])
+        self._tree.tag_configure("cluster_buy", foreground=COLORS["green"])
+        self._tree.tag_configure("exec_sell", foreground=COLORS["red"])
+        self._tree.tag_configure("insider_sell", foreground=COLORS["red"])
+        self._tree.tag_configure("rvol_high", foreground=COLORS["accent"])
+        self._tree.tag_configure("rvol_strong", foreground=COLORS["green"])
+        self._tree.tag_configure("orb_up", foreground=COLORS["green"])
+        self._tree.tag_configure("catalyst_high", foreground=COLORS["green"])
         scroll = ctk.CTkScrollbar(self, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scroll.set)
         self._tree.pack(side="left", fill="both", expand=True)
@@ -1359,14 +1885,62 @@ class DataTable(ctk.CTkFrame):
         for item in self._tree.get_children():
             self._tree.delete(item)
 
-    def set_rows(self, rows: list[dict], *, pnl_col: str | None = None) -> None:
+    def set_rows(self, rows: list[dict], *, pnl_col: str | None = None, tag_col: str | None = None) -> None:
+        self._rows = list(rows)
+        self._pnl_col = pnl_col
+        self._tag_col = tag_col
+        if self._sort_col:
+            self._apply_sort(self._sort_col, self._sort_reverse)
+        else:
+            self._render_rows()
+
+    def _sort_by_column(self, col: str) -> None:
+        if not self._rows:
+            return
+        if self._sort_col == col:
+            self._sort_reverse = not self._sort_reverse
+        else:
+            self._sort_col = col
+            self._sort_reverse = col in self._sort_keys
+        self._apply_sort(col, self._sort_reverse)
+
+    def _row_sort_key(self, row: dict, col: str) -> tuple:
+        sort_key = self._sort_keys.get(col)
+        if sort_key and sort_key in row:
+            try:
+                return (0, float(row[sort_key]))
+            except (TypeError, ValueError):
+                return (1, str(row.get(col, "")).lower())
+        raw = row.get(col, "")
+        try:
+            cleaned = (
+                str(raw)
+                .replace("$", "")
+                .replace(",", "")
+                .replace("%", "")
+                .replace("+", "")
+                .strip()
+            )
+            return (0, float(cleaned))
+        except ValueError:
+            return (1, str(raw).lower())
+
+    def _apply_sort(self, col: str, reverse: bool) -> None:
+        self._rows.sort(key=lambda r: self._row_sort_key(r, col), reverse=reverse)
+        self._render_rows()
+
+    def _render_rows(self) -> None:
         self.clear()
-        for row in rows:
+        for row in self._rows:
             values = [row.get(c, "") for c in self._columns]
             tag = ""
-            if pnl_col and pnl_col in row:
+            if self._tag_col and self._tag_col in row:
+                tag = str(row.get(self._tag_col) or "")
+            elif row.get("_tag"):
+                tag = str(row.get("_tag") or "")
+            if not tag and self._pnl_col and self._pnl_col in row:
                 try:
-                    tag = "profit" if float(row[pnl_col]) >= 0 else "loss"
+                    tag = "profit" if float(row[self._pnl_col]) >= 0 else "loss"
                 except (TypeError, ValueError):
                     tag = ""
             self._tree.insert("", "end", values=values, tags=(tag,) if tag else ())
@@ -1866,6 +2440,8 @@ class TradingDashboardApp(ctk.CTk):
         self._refresh_busy = False
         self._refresh_pending = False
         self._refresh_seq = 0
+        self._refresh_auto_cycles = 0
+        self._status_restore_job: str | None = None
         self._last_positions_df: pd.DataFrame | None = None
 
         if ICON_PATH.is_file():
@@ -2023,6 +2599,17 @@ class TradingDashboardApp(ctk.CTk):
             **_header_btn_style,
         )
         self._refresh_btn.grid(row=0, column=1, padx=3, pady=2, sticky="e")
+        self._refresh_bot_btn = ctk.CTkButton(
+            controls_row,
+            text="Refresh Bot",
+            width=98,
+            fg_color=COLORS["card"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["blue"],
+            command=self._on_refresh_bot,
+            **_header_btn_style,
+        )
+        self._refresh_bot_btn.grid(row=0, column=2, padx=3, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
             text="Start",
@@ -2032,7 +2619,7 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["green"],
             command=self._on_start_bot,
             **_header_btn_style,
-        ).grid(row=0, column=2, padx=3, pady=2, sticky="e")
+        ).grid(row=0, column=3, padx=3, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
             text="Stop",
@@ -2042,7 +2629,7 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["red"],
             command=self._on_stop_bot,
             **_header_btn_style,
-        ).grid(row=0, column=3, padx=3, pady=2, sticky="e")
+        ).grid(row=0, column=4, padx=3, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
             text="Restart Bot",
@@ -2052,7 +2639,7 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["amber"],
             command=self._on_restart_bot,
             **_header_btn_style,
-        ).grid(row=0, column=4, padx=(3, 0), pady=2, sticky="e")
+        ).grid(row=0, column=5, padx=(3, 0), pady=2, sticky="e")
 
         def _resize_header_labels(_event=None) -> None:
             avail = max(240, header_left.winfo_width() - 56)
@@ -2108,7 +2695,18 @@ class TradingDashboardApp(ctk.CTk):
         self._pill_small = _pill(status_inner, "SMALL ACCOUNT", COLORS["small_bg"], COLORS["amber"])
         self._pill_small.pack_forget()
         self._pill_regime = _pill(status_inner, "Regime: —", COLORS["surface2"], COLORS["text_dim"])
+        self._pill_entry_gates = _pill(
+            status_inner, "Gates: —", COLORS["surface2"], COLORS["amber"]
+        )
+        self._pill_health = _pill(status_inner, "Health: —", COLORS["surface2"], COLORS["muted"])
+        self._pill_thinking = _pill(
+            status_inner, "Think: —", COLORS["surface2"], COLORS["muted"]
+        )
         self._pill_bot = _pill(status_inner, "Bot: —", COLORS["surface2"], COLORS["muted"])
+        self._pill_hb = _pill(status_inner, "Heartbeat: —", COLORS["surface2"], COLORS["muted"])
+        self._pill_conviction = _pill(
+            status_inner, "Conviction: —", COLORS["surface2"], COLORS["muted"]
+        )
 
         stats_banner = ctk.CTkFrame(
             top_stack,
@@ -2261,17 +2859,419 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left")
         self._positions_table = DataTable(
             self._tab_positions,
-            ["Ticker", "Sleeve", "Qty", "Entry", "Current", "P&L $", "P&L %"],
-            height=14,
+            ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %", "ATR Stop"],
+            height=11,
             large=True,
         )
-        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self._positions_empty_label = ctk.CTkLabel(
             self._tab_positions,
             text="No open positions\nCash idle until the next rebalance cycle.",
             font=_ctk_font("body"),
             text_color=COLORS["muted"],
             justify="center",
+        )
+
+        self._insider_expanded = True
+        self._insider_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._insider_section.pack(fill="x", padx=10, pady=(0, 10))
+        insider_head = ctk.CTkFrame(self._insider_section, fg_color="transparent")
+        insider_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._insider_toggle_btn = ctk.CTkButton(
+            insider_head,
+            text="▼ Insider Signals",
+            width=160,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["blue"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_insider_section,
+        )
+        self._insider_toggle_btn.pack(side="left")
+        self._insider_status = ctk.CTkLabel(
+            insider_head,
+            text="SEC Form 4 / 13D — top 5 (score >= 60)",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._insider_status.pack(side="left", padx=(10, 0))
+        self._insider_body = ctk.CTkFrame(self._insider_section, fg_color="transparent")
+        self._insider_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._insider_table = DataTable(
+            self._insider_body,
+            ["Ticker", "Type", "Score", "Description", "Filing Date"],
+            height=5,
+            large=True,
+        )
+        self._insider_table.pack(fill="both", expand=True)
+        self._insider_empty_label = ctk.CTkLabel(
+            self._insider_body,
+            text="No insider signals loaded",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._rvol_expanded = True
+        self._rvol_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._rvol_section.pack(fill="x", padx=10, pady=(0, 10))
+        rvol_head = ctk.CTkFrame(self._rvol_section, fg_color="transparent")
+        rvol_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._rvol_toggle_btn = ctk.CTkButton(
+            rvol_head,
+            text="▼ RVOL & ORB",
+            width=180,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["accent"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_rvol_section,
+        )
+        self._rvol_toggle_btn.pack(side="left")
+        self._rvol_status = ctk.CTkLabel(
+            rvol_head,
+            text="RVOL + opening-range breakouts (paper)",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._rvol_status.pack(side="left", padx=(10, 0))
+        self._rvol_body = ctk.CTkFrame(self._rvol_section, fg_color="transparent")
+        self._rvol_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._rvol_table = DataTable(
+            self._rvol_body,
+            ["Symbol", "RVOL", "ORB", "Signal"],
+            height=5,
+            large=True,
+        )
+        self._rvol_table.pack(fill="both", expand=True)
+        self._rvol_empty_label = ctk.CTkLabel(
+            self._rvol_body,
+            text="No high-RVOL names loaded",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._orb_mom_expanded = True
+        self._orb_mom_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 10))
+        orb_mom_head = ctk.CTkFrame(self._orb_mom_section, fg_color="transparent")
+        orb_mom_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._orb_mom_toggle_btn = ctk.CTkButton(
+            orb_mom_head,
+            text="▼ ORB Momentum",
+            width=160,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["green"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_orb_mom_section,
+        )
+        self._orb_mom_toggle_btn.pack(side="left")
+        self._orb_mom_status = ctk.CTkLabel(
+            orb_mom_head,
+            text="30m OR break + RVOL>=2 · ATR stop · 1.5R target",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._orb_mom_status.pack(side="left", padx=(10, 0))
+        self._orb_mom_body = ctk.CTkFrame(self._orb_mom_section, fg_color="transparent")
+        self._orb_mom_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._orb_mom_table = DataTable(
+            self._orb_mom_body,
+            ["Symbol", "Status", "RVOL", "Stop", "Target", "Conv"],
+            height=5,
+            large=True,
+        )
+        self._orb_mom_table.pack(fill="both", expand=True)
+        self._orb_mom_empty_label = ctk.CTkLabel(
+            self._orb_mom_body,
+            text="No ORB momentum signals",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._sector_rot_expanded = True
+        self._sector_rot_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 10))
+        sector_rot_head = ctk.CTkFrame(self._sector_rot_section, fg_color="transparent")
+        sector_rot_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._sector_rot_toggle_btn = ctk.CTkButton(
+            sector_rot_head,
+            text="▼ Sector Rotation",
+            width=160,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["green"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_sector_rot_section,
+        )
+        self._sector_rot_toggle_btn.pack(side="left")
+        self._sector_rot_status = ctk.CTkLabel(
+            sector_rot_head,
+            text="Momentum + RS vs SPY · monthly/regime rebalance",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._sector_rot_status.pack(side="left", padx=(10, 0))
+        self._sector_rot_body = ctk.CTkFrame(self._sector_rot_section, fg_color="transparent")
+        self._sector_rot_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._sector_rot_table = DataTable(
+            self._sector_rot_body,
+            ["Sector", "ETF", "Score", "RS vs SPY", "Target", "Status"],
+            height=6,
+            large=True,
+        )
+        self._sector_rot_table.pack(fill="both", expand=True)
+        self._sector_rot_empty_label = ctk.CTkLabel(
+            self._sector_rot_body,
+            text="No sector rotation targets",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._vol_bo_expanded = True
+        self._vol_bo_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 10))
+        vol_bo_head = ctk.CTkFrame(self._vol_bo_section, fg_color="transparent")
+        vol_bo_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._vol_bo_toggle_btn = ctk.CTkButton(
+            vol_bo_head,
+            text="▼ Vol Breakout",
+            width=150,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["green"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_vol_bo_section,
+        )
+        self._vol_bo_toggle_btn.pack(side="left")
+        self._vol_bo_status = ctk.CTkLabel(
+            vol_bo_head,
+            text="ATR expansion + RVOL + MTF · risk ≤1%",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._vol_bo_status.pack(side="left", padx=(10, 0))
+        self._vol_bo_body = ctk.CTkFrame(self._vol_bo_section, fg_color="transparent")
+        self._vol_bo_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._vol_bo_table = DataTable(
+            self._vol_bo_body,
+            ["Symbol", "Status", "ATR×", "RVOL", "Stop", "Target", "Conv"],
+            height=5,
+            large=True,
+        )
+        self._vol_bo_table.pack(fill="both", expand=True)
+        self._vol_bo_empty_label = ctk.CTkLabel(
+            self._vol_bo_body,
+            text="No vol breakout signals",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._strategy_expanded = True
+        self._strategy_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._strategy_section.pack(fill="x", padx=10, pady=(0, 10))
+        strategy_head = ctk.CTkFrame(self._strategy_section, fg_color="transparent")
+        strategy_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._strategy_toggle_btn = ctk.CTkButton(
+            strategy_head,
+            text="▼ Strategy Performance",
+            width=200,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["green"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_strategy_section,
+        )
+        self._strategy_toggle_btn.pack(side="left")
+        self._strategy_status = ctk.CTkLabel(
+            strategy_head,
+            text="Rolling 30d ratings per strategy (paper)",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._strategy_status.pack(side="left", padx=(10, 0))
+        self._strategy_body = ctk.CTkFrame(self._strategy_section, fg_color="transparent")
+        self._strategy_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._strategy_table = DataTable(
+            self._strategy_body,
+            ["Strategy", "Rating", "Score", "Return%", "Sharpe", "Win%", "Trades", "PnL", "AvgHold"],
+            height=6,
+            large=True,
+        )
+        self._strategy_table.pack(fill="both", expand=True)
+        self._strategy_empty_label = ctk.CTkLabel(
+            self._strategy_body,
+            text="No strategy metrics yet",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._sharpe_expanded = True
+        self._sharpe_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 10))
+        sharpe_head = ctk.CTkFrame(self._sharpe_section, fg_color="transparent")
+        sharpe_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._sharpe_toggle_btn = ctk.CTkButton(
+            sharpe_head,
+            text="▼ Sharpe History",
+            width=160,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["green"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_sharpe_section,
+        )
+        self._sharpe_toggle_btn.pack(side="left")
+        self._sharpe_status = ctk.CTkLabel(
+            sharpe_head,
+            text="All-time · since major update · version markers",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._sharpe_status.pack(side="left", padx=(10, 0))
+        self._sharpe_body = ctk.CTkFrame(self._sharpe_section, fg_color="transparent")
+        self._sharpe_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._sharpe_summary = ctk.CTkLabel(
+            self._sharpe_body,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+            justify="left",
+        )
+        self._sharpe_summary.pack(fill="x", pady=(0, 4))
+        self._sharpe_table = DataTable(
+            self._sharpe_body,
+            ["Date", "From", "To", "Type", "Sharpe30d", "SharpeAll"],
+            height=4,
+            large=True,
+        )
+        self._sharpe_table.pack(fill="both", expand=True)
+        self._sharpe_empty_label = ctk.CTkLabel(
+            self._sharpe_body,
+            text="No Sharpe history yet — updates at EOD",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+
+        self._short_expanded = True
+        self._short_section = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self._short_section.pack(fill="x", padx=10, pady=(0, 10))
+        short_head = ctk.CTkFrame(self._short_section, fg_color="transparent")
+        short_head.pack(fill="x", padx=10, pady=(8, 4))
+        self._short_toggle_btn = ctk.CTkButton(
+            short_head,
+            text="▼ Short Activity",
+            width=160,
+            height=28,
+            corner_radius=8,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["amber"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_short_section,
+        )
+        self._short_toggle_btn.pack(side="left")
+        self._short_status = ctk.CTkLabel(
+            short_head,
+            text="Protective + sector shorts (paper)",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._short_status.pack(side="left", padx=(10, 0))
+        self._short_body = ctk.CTkFrame(self._short_section, fg_color="transparent")
+        self._short_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        self._short_table = DataTable(
+            self._short_body,
+            ["Type", "Symbol", "Detail", "Notional", "Trigger"],
+            height=5,
+            large=True,
+        )
+        self._short_table.pack(fill="both", expand=True)
+        self._short_summary = ctk.CTkLabel(
+            self._short_body,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+            justify="left",
+        )
+        self._short_summary.pack(fill="x", pady=(4, 0))
+        self._short_empty_label = ctk.CTkLabel(
+            self._short_body,
+            text="No short activity this week",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
         )
 
         self._tab_overview = self._tabs.add("Overview")
@@ -2345,6 +3345,7 @@ class TradingDashboardApp(ctk.CTk):
         self._start_clock()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.bind("<F5>", self._on_f5_refresh)
         if _needs_setup(username, self._book_id):
             self.after(200, self._show_setup_wizard)
         else:
@@ -2434,6 +3435,57 @@ class TradingDashboardApp(ctk.CTk):
             self.after(0, _finish)
 
         threading.Thread(target=_worker, daemon=True, name="dashboard-book-restart").start()
+
+    def _set_bot_action_buttons_busy(self, busy: bool, *, status: str | None = None) -> None:
+        state = "disabled" if busy else "normal"
+        refresh_bot_text = "…" if busy else "Refresh Bot"
+        try:
+            self._refresh_btn.configure(state=state)
+            self._refresh_bot_btn.configure(text=refresh_bot_text, state=state)
+        except Exception:
+            pass
+        if status:
+            self._status_label.configure(text=status)
+            self._bot_badge.configure(text="Bot: working…", text_color=COLORS["amber"])
+            self._pill_bot.configure(
+                text="Bot: working…",
+                fg_color=COLORS["small_bg"],
+                text_color=COLORS["amber"],
+            )
+
+    def _refresh_bot_async(self, book_id: str) -> None:
+        self._set_bot_action_buttons_busy(
+            True,
+            status=f"Refresh Bot: {book_label(book_id)}…",
+        )
+        progress_msgs: list[str] = []
+
+        def _progress(msg: str) -> None:
+            progress_msgs.append(msg)
+
+            def _ui() -> None:
+                self._status_label.configure(text=f"Refresh Bot: {msg}")
+
+            self.after(0, _ui)
+
+        def _worker() -> None:
+            ok, msg = refresh_bot(
+                self._username,
+                book_id,
+                progress=_progress,
+            )
+
+            def _finish() -> None:
+                self._set_bot_action_buttons_busy(False)
+                if ok:
+                    messagebox.showinfo("Refresh Bot", msg)
+                else:
+                    messagebox.showwarning("Refresh Bot", msg)
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(target=_worker, daemon=True, name="dashboard-refresh-bot").start()
 
     def _switch_book(self, book_id: str) -> None:
         if book_id == self._book_id:
@@ -2673,6 +3725,413 @@ class TradingDashboardApp(ctk.CTk):
         if self._auto_start_bot:
             self.after(400, lambda: self._maybe_auto_start_bot(quiet=True))
 
+    def _toggle_rvol_section(self) -> None:
+        self._rvol_expanded = not self._rvol_expanded
+        arrow = "▼" if self._rvol_expanded else "▶"
+        self._rvol_toggle_btn.configure(text=f"{arrow} RVOL & ORB")
+        if self._rvol_expanded:
+            self._rvol_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._rvol_body.pack_forget()
+
+    def _toggle_orb_mom_section(self) -> None:
+        self._orb_mom_expanded = not self._orb_mom_expanded
+        arrow = "▼" if self._orb_mom_expanded else "▶"
+        self._orb_mom_toggle_btn.configure(text=f"{arrow} ORB Momentum")
+        if self._orb_mom_expanded:
+            self._orb_mom_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._orb_mom_body.pack_forget()
+
+    def _toggle_sector_rot_section(self) -> None:
+        self._sector_rot_expanded = not self._sector_rot_expanded
+        arrow = "▼" if self._sector_rot_expanded else "▶"
+        self._sector_rot_toggle_btn.configure(text=f"{arrow} Sector Rotation")
+        if self._sector_rot_expanded:
+            self._sector_rot_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._sector_rot_body.pack_forget()
+
+    def _toggle_vol_bo_section(self) -> None:
+        self._vol_bo_expanded = not self._vol_bo_expanded
+        arrow = "▼" if self._vol_bo_expanded else "▶"
+        self._vol_bo_toggle_btn.configure(text=f"{arrow} Vol Breakout")
+        if self._vol_bo_expanded:
+            self._vol_bo_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._vol_bo_body.pack_forget()
+
+    def _toggle_strategy_section(self) -> None:
+        self._strategy_expanded = not self._strategy_expanded
+        arrow = "▼" if self._strategy_expanded else "▶"
+        self._strategy_toggle_btn.configure(text=f"{arrow} Strategy Performance")
+        if self._strategy_expanded:
+            self._strategy_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._strategy_body.pack_forget()
+
+    def _toggle_sharpe_section(self) -> None:
+        self._sharpe_expanded = not self._sharpe_expanded
+        arrow = "▼" if self._sharpe_expanded else "▶"
+        self._sharpe_toggle_btn.configure(text=f"{arrow} Sharpe History")
+        if self._sharpe_expanded:
+            self._sharpe_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._sharpe_body.pack_forget()
+
+    def _fill_rvol_stocks(
+        self,
+        rows: list[dict] | None,
+        err: str | None,
+        *,
+        book_paper: bool,
+    ) -> None:
+        self._rvol_empty_label.place_forget()
+        if not book_paper:
+            self._rvol_section.pack_forget()
+            return
+        self._rvol_section.pack(fill="x", padx=10, pady=(0, 10))
+        if err:
+            self._rvol_table.clear()
+            self._rvol_status.configure(text=err[:120], text_color=COLORS["amber"])
+            self._rvol_empty_label.configure(text=err)
+            self._rvol_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        if not (
+            config.effective_rvol_scanner_enabled()
+            or config.effective_orb_enabled()
+            or config.effective_catalyst_scoring_enabled()
+        ):
+            self._rvol_section.pack_forget()
+            return
+        self._rvol_status.configure(
+            text=(
+                f"RVOL min {config.RVOL_MIN_THRESHOLD:.1f}x · "
+                f"ORB {config.ORB_BREAKOUT_MINUTES}m · "
+                f"Catalyst min {int(config.CATALYST_MIN_SCORE)}"
+            ),
+            text_color=COLORS["muted"],
+        )
+        if not rows:
+            self._rvol_table.clear()
+            self._rvol_empty_label.configure(text="No RVOL / ORB / catalyst setups")
+            self._rvol_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._rvol_table._sort_col = "RVOL"
+        self._rvol_table._sort_reverse = True
+        self._rvol_table.set_rows(rows, tag_col="_tag")
+
+    def _fill_orb_momentum(
+        self,
+        rows: list[dict] | None,
+        err: str | None,
+        *,
+        book_paper: bool,
+    ) -> None:
+        self._orb_mom_empty_label.place_forget()
+        show = config.effective_orb_momentum_enabled() or book_paper
+        if not show:
+            self._orb_mom_section.pack_forget()
+            return
+        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 10))
+        live = " · LIVE opt-in" if config.orb_momentum_live_sleeve_enabled() else " · paper"
+        if err:
+            self._orb_mom_table.clear()
+            self._orb_mom_status.configure(text=err[:140], text_color=COLORS["amber"])
+            self._orb_mom_empty_label.configure(text=err)
+            self._orb_mom_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._orb_mom_status.configure(
+            text=(
+                f"{int(config.ORB_BREAKOUT_MINUTES)}m OR · RVOL>={config.ORB_RVOL_MIN:.1f}x · "
+                f"risk {config.ORB_MOMENTUM_RISK_PCT:.0%} · "
+                f"max {config.ORB_MOMENTUM_MAX_SIZE_PCT:.0%} · "
+                f"RR {config.ORB_MOMENTUM_RR:.1f}:1{live}"
+            ),
+            text_color=COLORS["muted"],
+        )
+        if not rows:
+            self._orb_mom_table.clear()
+            self._orb_mom_empty_label.configure(text="No ORB momentum signals / opens")
+            self._orb_mom_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._orb_mom_table.set_rows(rows, tag_col="_tag")
+
+    def _fill_sector_rotation(
+        self,
+        rows: list[dict] | None,
+        err: str | None,
+        *,
+        book_paper: bool,
+    ) -> None:
+        self._sector_rot_empty_label.place_forget()
+        show = config.effective_sector_rotation_enabled() or book_paper
+        if not show:
+            self._sector_rot_section.pack_forget()
+            return
+        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 10))
+        live = (
+            " · LIVE opt-in"
+            if config.sector_rotation_live_sleeve_enabled()
+            else " · paper"
+        )
+        if err:
+            self._sector_rot_table.clear()
+            self._sector_rot_status.configure(text=err[:140], text_color=COLORS["amber"])
+            self._sector_rot_empty_label.configure(text=err)
+            self._sector_rot_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._sector_rot_status.configure(
+            text=(
+                f"top {int(config.SECTOR_ROTATION_TOP_N)} · "
+                f"max/sector {config.SECTOR_ROTATION_MAX_SECTOR_PCT:.0%} · "
+                f"sleeve {config.SECTOR_ROTATION_CAP_PCT:.0%} · "
+                f"monthly/regime{live}"
+            ),
+            text_color=COLORS["muted"],
+        )
+        if not rows:
+            self._sector_rot_table.clear()
+            self._sector_rot_empty_label.configure(text="No sector rotation targets")
+            self._sector_rot_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._sector_rot_table.set_rows(rows, tag_col="_tag")
+
+    def _fill_vol_breakout(
+        self,
+        rows: list[dict] | None,
+        err: str | None,
+        *,
+        book_paper: bool,
+    ) -> None:
+        self._vol_bo_empty_label.place_forget()
+        show = config.effective_vol_breakout_enabled() or book_paper
+        if not show:
+            self._vol_bo_section.pack_forget()
+            return
+        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 10))
+        if err:
+            self._vol_bo_table.clear()
+            self._vol_bo_status.configure(text=err[:140], text_color=COLORS["amber"])
+            self._vol_bo_empty_label.configure(text=err)
+            self._vol_bo_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._vol_bo_status.configure(
+            text=(
+                f"ATR expand>={config.VOL_BREAKOUT_ATR_EXPAND_MULT:.1f}x · "
+                f"RVOL>={config.VOL_BREAKOUT_RVOL_MIN:.1f} · "
+                f"risk≤{config.VOL_BREAKOUT_RISK_PCT:.0%} · "
+                f"RR {config.VOL_BREAKOUT_RR:.1f}:1 · paper"
+            ),
+            text_color=COLORS["muted"],
+        )
+        if not rows:
+            self._vol_bo_table.clear()
+            self._vol_bo_empty_label.configure(text="No vol breakout signals / opens")
+            self._vol_bo_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._vol_bo_table.set_rows(rows, tag_col="_tag")
+
+    def _fill_strategy_performance(
+        self,
+        rows: list[dict] | None,
+        err: str | None,
+        *,
+        book_paper: bool,
+        mtf_summary: str | None = None,
+        exit_rows: list[dict] | None = None,
+    ) -> None:
+        self._strategy_empty_label.place_forget()
+        if not book_paper:
+            self._strategy_section.pack_forget()
+            return
+        self._strategy_section.pack(fill="x", padx=10, pady=(0, 10))
+        status_base = "Rolling 30d · Excellent/Good/Fair/Weak ratings"
+        if mtf_summary:
+            status_base = f"{status_base} · {mtf_summary}"
+        if err:
+            self._strategy_table.clear()
+            self._strategy_status.configure(text=err[:160], text_color=COLORS["amber"])
+            self._strategy_empty_label.configure(text=err)
+            self._strategy_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._strategy_status.configure(
+            text=status_base[:200],
+            text_color=COLORS["muted"],
+        )
+        if not rows:
+            self._strategy_table.clear()
+            self._strategy_empty_label.configure(text="No closed trades — metrics populate after exits")
+            self._strategy_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._strategy_table._sort_col = "Score"
+        self._strategy_table._sort_reverse = True
+        display_rows = list(rows)
+        for er in exit_rows or []:
+            display_rows.append(
+                {
+                    "Strategy": f"EXIT · {er.get('Reason', '?')}",
+                    "Rating": str(er.get("Symbol", "")),
+                    "Score": str(er.get("Time", ""))[-5:],
+                    "Return%": "—",
+                    "Sharpe": "—",
+                    "Win%": er.get("Partial", "—"),
+                    "Trades": er.get("Sleeve", "—"),
+                    "PnL": "—",
+                    "AvgHold": "—",
+                }
+            )
+        self._strategy_table.set_rows(display_rows)
+
+    def _fill_sharpe_history(
+        self,
+        payload: dict | None,
+        err: str | None,
+    ) -> None:
+        self._sharpe_empty_label.place_forget()
+        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 10))
+        if err:
+            self._sharpe_table.clear()
+            self._sharpe_summary.configure(text="")
+            self._sharpe_status.configure(text=err[:160], text_color=COLORS["amber"])
+            self._sharpe_empty_label.configure(text=err)
+            self._sharpe_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        snap = (payload or {}).get("snapshot") or {}
+        versions = (payload or {}).get("versions") or []
+
+        def _fmt(v: object) -> str:
+            try:
+                return f"{float(v):.2f}" if v is not None else "n/a"
+            except (TypeError, ValueError):
+                return "n/a"
+
+        all_s = _fmt(snap.get("sharpe_all"))
+        since_s = _fmt(snap.get("sharpe_since_update"))
+        proj_s = _fmt(snap.get("projected_sharpe"))
+        d30 = _fmt(snap.get("sharpe_30d"))
+        d90 = _fmt(snap.get("sharpe_90d"))
+        deploy = snap.get("deployment_date") or "n/a"
+        major = snap.get("last_major_update_date") or "n/a"
+        ver = snap.get("version") or "?"
+        conf = snap.get("projected_confidence") or "n/a"
+        horizon = snap.get("projected_horizon_days") or 30
+        self._sharpe_status.configure(
+            text=f"RR v{ver} · all-time {all_s} · projected {proj_s} · since major {since_s}",
+            text_color=COLORS["muted"],
+        )
+        self._sharpe_summary.configure(
+            text=(
+                f"All-time Sharpe: {all_s} (since {deploy})\n"
+                f"Projected Sharpe: {proj_s} (next {horizon}d, {conf})\n"
+                f"Since last major update: {since_s} ({major})  ·  "
+                f"30d / 90d: {d30} / {d90}"
+            )
+        )
+        if not versions:
+            self._sharpe_table.clear()
+            self._sharpe_empty_label.configure(
+                text="No version markers yet — first EOD will seed history"
+            )
+            self._sharpe_empty_label.place(relx=0.5, rely=0.55, anchor="center")
+            return
+        rows = []
+        for m in versions:
+            rows.append(
+                {
+                    "Date": str(m.get("date") or "")[:10],
+                    "From": str(m.get("from") or "—"),
+                    "To": str(m.get("to") or "—"),
+                    "Type": "major" if m.get("major") else "patch",
+                    "Sharpe30d": _fmt(m.get("sharpe_30d")),
+                    "SharpeAll": _fmt(m.get("sharpe_all")),
+                }
+            )
+        self._sharpe_table.set_rows(rows)
+
+    def _toggle_short_section(self) -> None:
+        self._short_expanded = not self._short_expanded
+        arrow = "▼" if self._short_expanded else "▶"
+        self._short_toggle_btn.configure(text=f"{arrow} Short Activity")
+        if self._short_expanded:
+            self._short_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._short_body.pack_forget()
+
+    def _fill_short_activity(
+        self,
+        rows: list[dict] | None,
+        err: str | None,
+        snap: dict | None,
+        *,
+        book_paper: bool,
+    ) -> None:
+        self._short_empty_label.place_forget()
+        if not book_paper:
+            self._short_section.pack_forget()
+            return
+        self._short_section.pack(fill="x", padx=10, pady=(0, 10))
+        if err:
+            self._short_table.clear()
+            self._short_status.configure(text=err[:120], text_color=COLORS["amber"])
+            self._short_summary.configure(text="")
+            self._short_empty_label.configure(text=err)
+            self._short_empty_label.place(relx=0.5, rely=0.45, anchor="center")
+            return
+        from modules.short_activity import format_short_activity_status
+
+        status = format_short_activity_status(snap or {})
+        self._short_status.configure(text=status, text_color=COLORS["muted"])
+        summary_parts: list[str] = []
+        if snap:
+            banner = snap.get("banner") or ""
+            if banner:
+                summary_parts.append(banner)
+            n_week = len(snap.get("week_trades") or [])
+            if n_week:
+                summary_parts.append(f"{n_week} journal event(s) this week")
+        self._short_summary.configure(text=" · ".join(summary_parts))
+        if not rows:
+            self._short_table.clear()
+            self._short_empty_label.configure(text="No open shorts or recent fires")
+            self._short_empty_label.place(relx=0.5, rely=0.45, anchor="center")
+            return
+        self._short_table.set_rows(rows, tag_col="_tag")
+
+    def _toggle_insider_section(self) -> None:
+        self._insider_expanded = not self._insider_expanded
+        arrow = "▼" if self._insider_expanded else "▶"
+        self._insider_toggle_btn.configure(text=f"{arrow} Insider Signals")
+        if self._insider_expanded:
+            self._insider_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
+        else:
+            self._insider_body.pack_forget()
+
+    def _fill_insider_signals(self, rows: list[dict] | None, err: str | None) -> None:
+        self._insider_empty_label.place_forget()
+        if err:
+            self._insider_table.clear()
+            self._insider_status.configure(text=err[:120], text_color=COLORS["amber"])
+            self._insider_empty_label.configure(text=err)
+            self._insider_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        if not rows:
+            self._insider_table.clear()
+            self._insider_status.configure(
+                text="No high-quality signals",
+                text_color=COLORS["muted"],
+            )
+            self._insider_empty_label.configure(text="No high-quality signals")
+            self._insider_empty_label.place(relx=0.5, rely=0.5, anchor="center")
+            return
+        self._insider_status.configure(
+            text=f"{len(rows)} signal(s) — sorted by score — refresh {REFRESH_SECONDS}s",
+            text_color=COLORS["muted"],
+        )
+        self._insider_table._sort_col = "Score"
+        self._insider_table._sort_reverse = True
+        self._insider_table.set_rows(rows, tag_col="_tag")
+
     def _on_tab_changed(self) -> None:
         self._active_tab = self._tabs.get()
         if self._active_tab == "Charts":
@@ -2800,8 +4259,17 @@ class TradingDashboardApp(ctk.CTk):
             self._pill_small.pack_forget()
 
         regime_short = regime.split(":")[-1].strip() if ":" in regime else regime
+        hmm = (heartbeat or {}).get("markov_hmm") or {}
+        if hmm.get("ok") and hmm.get("predicted"):
+            conf = hmm.get("confidence")
+            conf_s = f" {float(conf):.0%}" if conf is not None else ""
+            regime_text = (
+                f"Regime: {regime_short} → HMM {hmm.get('predicted')}{conf_s}"
+            )
+        else:
+            regime_text = f"Regime: {regime_short}"
         self._pill_regime.configure(
-            text=f"Regime: {regime_short}",
+            text=regime_text,
             fg_color=COLORS["surface2"],
             text_color=_regime_color(regime),
         )
@@ -2813,6 +4281,139 @@ class TradingDashboardApp(ctk.CTk):
         else:
             bot_text, bot_fg, bot_tc = "Bot: Stopped", COLORS["surface2"], COLORS["amber"]
         self._pill_bot.configure(text=bot_text, fg_color=bot_fg, text_color=bot_tc)
+
+    def _update_health_pill(self, health: dict | None, *, book_paper: bool) -> None:
+        if not hasattr(self, "_pill_health"):
+            return
+        # Show health for paper always; for live when thinking is enabled (system-wide).
+        show = book_paper or config.effective_thinking_engine_enabled()
+        if not show:
+            self._pill_health.pack_forget()
+            return
+        self._pill_health.pack(side="left", padx=(0, 8), before=self._pill_bot)
+        if not health:
+            self._pill_health.configure(
+                text="Health: —",
+                fg_color=COLORS["surface2"],
+                text_color=COLORS["muted"],
+            )
+            return
+        score = int(health.get("score") or 0)
+        grade = str(health.get("grade") or "")
+        color_key = str(health.get("color") or "yellow")
+        band = {"green": "Green", "yellow": "Yellow", "red": "Red"}.get(color_key, "")
+        if color_key == "green":
+            fg, tc = COLORS["paper_ok_bg"], COLORS["green"]
+        elif color_key == "red":
+            fg, tc = COLORS["live_bg"], COLORS["red"]
+        else:
+            fg, tc = COLORS["small_bg"], COLORS["amber"]
+        self._pill_health.configure(
+            text=f"Health: {score}/100 ({grade}{f' · {band}' if band else ''})",
+            fg_color=fg,
+            text_color=tc,
+        )
+
+    def _update_thinking_pill(self, snap: dict | None, err: str | None = None) -> None:
+        if not hasattr(self, "_pill_thinking"):
+            return
+        self._pill_thinking.pack(side="left", padx=(0, 8), before=self._pill_bot)
+        if err and not snap:
+            self._pill_thinking.configure(
+                text="Think: err",
+                fg_color=COLORS["surface2"],
+                text_color=COLORS["amber"],
+            )
+            return
+        snap = snap or {}
+        status = str(snap.get("status") or "OFF").upper()
+        detail = str(snap.get("detail") or "")[:36]
+        if status == "ON":
+            fg, tc = COLORS["paper_ok_bg"], COLORS["green"]
+        elif status == "FALLBACK":
+            fg, tc = COLORS["small_bg"], COLORS["amber"]
+        else:
+            fg, tc = COLORS["surface2"], COLORS["muted"]
+        text = f"Think: {status}"
+        if detail and status != "OFF":
+            text = f"Think: {status} · {detail}"
+        self._pill_thinking.configure(text=text[:48], fg_color=fg, text_color=tc)
+
+    def _update_heartbeat_pill(
+        self, heartbeat: dict | None, *, running: bool, stale: bool
+    ) -> None:
+        if not hasattr(self, "_pill_hb"):
+            return
+        self._pill_hb.pack(side="left", padx=(0, 8), before=self._pill_bot)
+        age_min = _heartbeat_age_minutes(heartbeat)
+        if age_min is None:
+            self._pill_hb.configure(
+                text="Heartbeat: none",
+                fg_color=COLORS["surface2"],
+                text_color=COLORS["muted"],
+            )
+            return
+
+        if age_min < 1:
+            age_txt = "just now"
+        elif age_min < 60:
+            age_txt = f"{age_min:.0f}m ago"
+        else:
+            age_txt = f"{age_min / 60:.1f}h ago"
+
+        if not running:
+            status, fg, tc = "Stopped", COLORS["surface2"], COLORS["amber"]
+        elif stale:
+            status, fg, tc = "Stalled", COLORS["live_bg"], COLORS["red"]
+        else:
+            status, fg, tc = "Responding", COLORS["paper_ok_bg"], COLORS["green"]
+        self._pill_hb.configure(
+            text=f"Bot: {status} · hb {age_txt}",
+            fg_color=fg,
+            text_color=tc,
+        )
+
+    def _update_conviction_pill(self, conviction: dict | None, *, book_paper: bool) -> None:
+        if not hasattr(self, "_pill_conviction"):
+            return
+        if not book_paper or not conviction or not conviction.get("enabled"):
+            self._pill_conviction.pack_forget()
+            return
+        self._pill_conviction.pack(side="left", padx=(0, 8), before=self._pill_bot)
+        avg = conviction.get("avg_7d", "—")
+        level = conviction.get("level", "—")
+        if isinstance(avg, float):
+            text = f"Conviction: {avg:.2f} ({level})"
+        else:
+            text = f"Conviction: {avg} ({level})"
+        if level == "High":
+            fg, tc = COLORS["paper_ok_bg"], COLORS["green"]
+        elif level in ("Low", "Weak"):
+            fg, tc = COLORS["small_bg"], COLORS["amber"]
+        else:
+            fg, tc = COLORS["surface2"], COLORS["blue"]
+        self._pill_conviction.configure(text=text, fg_color=fg, text_color=tc)
+
+    def _update_entry_gates_pill(self, heartbeat: dict | None) -> None:
+        if not hasattr(self, "_pill_entry_gates"):
+            return
+        gates = (heartbeat or {}).get("entry_skip_reason") or "—"
+        if gates == "traded":
+            label = "Gates: traded"
+            color = COLORS["green"]
+        elif gates == "—":
+            label = "Gates: —"
+            color = COLORS["text_dim"]
+        else:
+            short = gates if len(gates) <= 42 else gates[:39] + "…"
+            label = f"Gates: {short}"
+            color = COLORS["amber"]
+        self._pill_entry_gates.configure(
+            text=label,
+            fg_color=COLORS["surface2"],
+            text_color=color,
+        )
+        self._pill_entry_gates.pack(side="left", padx=(0, 8), before=self._pill_bot)
 
     def _tick_clock(self) -> None:
         now = datetime.now()
@@ -2955,27 +4556,84 @@ class TradingDashboardApp(ctk.CTk):
                 text_color=COLORS["muted"],
             )
 
-    def refresh_data(self) -> None:
+    def _on_f5_refresh(self, _event=None) -> str:
+        self.refresh_data()
+        return "break"
+
+    def _set_refresh_buttons_busy(self, busy: bool) -> None:
+        state = "disabled" if busy else "normal"
+        refresh_text = "…" if busy else "Refresh"
+        try:
+            self._refresh_btn.configure(text=refresh_text, state=state)
+        except Exception:
+            pass
+        try:
+            self._refresh_bot_btn.configure(state=state)
+        except Exception:
+            pass
+
+    def _set_refresh_status_message(
+        self, text: str, *, restore_text: str | None = None, restore_ms: int = 4000
+    ) -> None:
+        self._status_label.configure(text=text)
+        if self._status_restore_job:
+            try:
+                self.after_cancel(self._status_restore_job)
+            except Exception:
+                pass
+            self._status_restore_job = None
+        if restore_text:
+
+            def _restore() -> None:
+                self._status_restore_job = None
+                self._status_label.configure(text=restore_text)
+
+            self._status_restore_job = self.after(restore_ms, _restore)
+
+    def _footer_status_line(self, snap: dict, heartbeat: dict | None, running: bool) -> str:
+        mode = "LIVE" if not snap.get("book_paper", _book_is_paper(self._book_id)) else "Paper"
+        ts = datetime.now().strftime("%H:%M:%S")
+        mem = _process_rss_mb()
+        hb_age = _heartbeat_age_minutes(heartbeat)
+        heartbeat_stale = bool(snap.get("heartbeat_stale"))
+        parts = [mode, ts, f"every {REFRESH_SECONDS}s"]
+        if snap.get("fast"):
+            parts.append("fast refresh")
+        if mem:
+            parts.append(mem)
+        if running and heartbeat_stale and hb_age is not None:
+            parts.append(f"hb stale {hb_age:.0f}m")
+        errs = snap.get("partial_errors") or []
+        if errs:
+            parts.append(f"{len(errs)} partial error(s)")
+        return " · ".join(parts)
+
+    def refresh_data(self, *, full: bool | None = None) -> None:
         if self._refresh_busy:
             self._refresh_pending = True
             return
+        if full is None:
+            full = False
+        fast = not full
+        include_charts = bool(
+            getattr(self, "_charts_var", None) and self._charts_var.get()
+        )
         self._refresh_busy = True
         self._refresh_seq += 1
         seq = self._refresh_seq
         username = self._username
         book_id = self._book_id
-        try:
-            self._refresh_btn.configure(text="…", state="disabled")
-        except Exception:
-            pass
-        self._status_label.configure(text="Refreshing…")
+        self._set_refresh_buttons_busy(True)
+        self._set_refresh_status_message("Refreshing data…")
 
         def _worker() -> None:
             try:
-                snap = _collect_refresh_snapshot(username, book_id)
+                snap = _collect_refresh_snapshot(username, book_id, fast=fast)
             except Exception as exc:  # noqa: BLE001
                 snap = {
                     "book_id": book_id,
+                    "book_paper": _book_is_paper(book_id),
+                    "fast": fast,
                     "equity": 0.0,
                     "cash": 0.0,
                     "acct_err": str(exc),
@@ -2986,40 +4644,41 @@ class TradingDashboardApp(ctk.CTk):
                     "pos_err": str(exc),
                     "journal_df": None,
                     "running": False,
+                    "partial_errors": [str(exc)],
                 }
 
             def _apply() -> None:
                 if seq != self._refresh_seq or book_id != self._book_id:
                     self._refresh_busy = False
-                    try:
-                        self._refresh_btn.configure(text="Refresh", state="normal")
-                    except Exception:
-                        pass
+                    self._set_refresh_buttons_busy(False)
                     return
                 try:
-                    self._apply_refresh_snapshot(snap)
+                    self._apply_refresh_snapshot(snap, include_charts=include_charts)
+                    refreshed_at = datetime.now().strftime("%H:%M")
+                    footer = self._footer_status_line(
+                        snap, snap.get("heartbeat"), bool(snap.get("running"))
+                    )
+                    self._set_refresh_status_message(
+                        f"Refreshed at {refreshed_at}",
+                        restore_text=footer,
+                    )
                 finally:
                     self._refresh_busy = False
-                    try:
-                        self._refresh_btn.configure(text="Refresh", state="normal")
-                    except Exception:
-                        pass
+                    self._set_refresh_buttons_busy(False)
                     if self._refresh_pending:
                         self._refresh_pending = False
-                        self.after(150, self.refresh_data)
+                        self.after(150, lambda: self.refresh_data(full=False))
 
             self.after(0, _apply)
 
         threading.Thread(target=_worker, daemon=True, name="dashboard-refresh").start()
 
-    def _apply_refresh_snapshot(self, snap: dict) -> None:
+    def _apply_refresh_core(self, snap: dict) -> None:
+        """Fast UI path: equity, small-account banner, sparkline, positions."""
         heartbeat = snap.get("heartbeat")
-        scorecard = snap.get("scorecard")
-        scorecard_src = snap.get("scorecard_src") or ""
         acct_err = snap.get("acct_err")
         positions_df = snap.get("positions_df")
         pos_err = snap.get("pos_err")
-        journal_df = snap.get("journal_df")
         equity = float(snap.get("equity") or 0)
         cash = float(snap.get("cash") or 0)
         running = bool(snap.get("running"))
@@ -3048,6 +4707,19 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
 
+        small_acct = equity > 0 and config.is_small_account(equity)
+        regime = "—"
+        if heartbeat:
+            regime = str(heartbeat.get("regime") or heartbeat.get("wisdom_regime") or "—")
+        self._update_status_row(
+            equity,
+            small_acct,
+            regime=regime,
+            halted=bool((heartbeat or {}).get("halted")),
+            bot_running_flag=running,
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+
         self._bot_badge.configure(
             text=(
                 bot_status_label(self._username, self._book_id)
@@ -3063,29 +4735,98 @@ class TradingDashboardApp(ctk.CTk):
         )
 
         self._update_live_status_panel(snap, heartbeat, running=running)
-        self._fill_overview(heartbeat, equity, acct_err, snap=snap)
-        self._fill_crypto_vol_panel()
         self._fill_positions(positions_df, pos_err, upl)
-        self._fill_trades(journal_df)
-        self._fill_wisdom(scorecard, scorecard_src, heartbeat)
+        self._fill_trades(snap.get("journal_df"))
+
         if ENABLE_SPARKLINE:
             self._draw_sparkline()
 
-        if self._charts_var.get() or (self._active_tab == "Charts" and self._charts_dirty):
+    def _apply_refresh_extended(self, snap: dict) -> None:
+        """Slower panels: overview extras, wisdom, scanners, health."""
+        heartbeat = snap.get("heartbeat")
+        scorecard = snap.get("scorecard")
+        scorecard_src = snap.get("scorecard_src") or ""
+        acct_err = snap.get("acct_err")
+        equity = float(snap.get("equity") or 0)
+        running = bool(snap.get("running"))
+
+        self._fill_overview(heartbeat, equity, acct_err, snap=snap)
+        self._update_health_pill(
+            snap.get("bot_health"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._update_thinking_pill(snap.get("thinking_snap"), snap.get("thinking_err"))
+        self._update_heartbeat_pill(
+            heartbeat,
+            running=running,
+            stale=bool(snap.get("heartbeat_stale")),
+        )
+        self._update_conviction_pill(
+            snap.get("conviction_snap"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._fill_crypto_vol_panel()
+        self._fill_insider_signals(snap.get("insider_rows"), snap.get("insider_err"))
+        self._fill_rvol_stocks(
+            snap.get("rvol_rows"),
+            snap.get("rvol_err"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._fill_orb_momentum(
+            snap.get("orb_mom_rows"),
+            snap.get("orb_mom_err"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._fill_sector_rotation(
+            snap.get("sector_rot_rows"),
+            snap.get("sector_rot_err"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._fill_vol_breakout(
+            snap.get("vol_bo_rows"),
+            snap.get("vol_bo_err"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._fill_strategy_performance(
+            snap.get("strategy_rows"),
+            snap.get("strategy_err"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+            mtf_summary=snap.get("strategy_mtf"),
+            exit_rows=snap.get("exit_rows"),
+        )
+        self._fill_sharpe_history(
+            snap.get("sharpe_hist"),
+            snap.get("sharpe_hist_err"),
+        )
+        self._fill_short_activity(
+            snap.get("short_rows"),
+            snap.get("short_err"),
+            snap.get("short_snap"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._fill_wisdom(scorecard, scorecard_src, heartbeat)
+
+    def _apply_refresh_snapshot(self, snap: dict, *, include_charts: bool = False) -> None:
+        self._apply_refresh_core(snap)
+        if not snap.get("fast"):
+            self._apply_refresh_extended(snap)
+        else:
+            equity = float(snap.get("equity") or 0)
+            heartbeat = snap.get("heartbeat")
+            acct_err = snap.get("acct_err")
+            running = bool(snap.get("running"))
+            self._fill_overview(heartbeat, equity, acct_err, snap=snap)
+            self._update_heartbeat_pill(
+                heartbeat,
+                running=running,
+                stale=bool(snap.get("heartbeat_stale")),
+            )
+
+        if include_charts:
             self._draw_charts()
             self._charts_dirty = False
-
-        mode = "LIVE" if not snap.get("book_paper", _book_is_paper(self._book_id)) else "Paper"
-        ts = datetime.now().strftime("%H:%M:%S")
-        mem = _process_rss_mb()
-        hb_age = _heartbeat_age_minutes(heartbeat)
-        heartbeat_stale = bool(snap.get("heartbeat_stale"))
-        parts = [mode, ts, f"every {REFRESH_SECONDS}s"]
-        if mem:
-            parts.append(mem)
-        if running and heartbeat_stale and hb_age is not None:
-            parts.append(f"hb stale {hb_age:.0f}m")
-        self._status_label.configure(text=" · ".join(parts))
+        elif getattr(self, "_active_tab", "") == "Charts":
+            self._charts_dirty = True
 
     def _fill_crypto_vol_panel(self) -> None:
         hb = _load_json(_resolve_path(CRYPTO_VOL_HEARTBEAT_FILE))
@@ -3228,6 +4969,7 @@ class TradingDashboardApp(ctk.CTk):
             bot_running_flag=_book_running_status(self._username, self._book_id),
             book_paper=_book_is_paper(self._book_id),
         )
+        self._update_entry_gates_pill(heartbeat)
 
         self._clear_frame(self._actions_scroll)
         cycle_err = heartbeat.get("last_cycle_error")
@@ -3271,16 +5013,52 @@ class TradingDashboardApp(ctk.CTk):
     ) -> list[dict]:
         rows = []
         for _, r in positions_df.iterrows():
+            try:
+                qty = float(r["Qty"])
+            except (TypeError, ValueError):
+                qty = 0.0
+            try:
+                entry = float(r["Entry"])
+            except (TypeError, ValueError):
+                entry = 0.0
+            try:
+                current = float(r["Current"])
+            except (TypeError, ValueError):
+                current = 0.0
+            if current != current:
+                current = 0.0
+            try:
+                market_value = float(r.get("Value $", qty * current))
+            except (TypeError, ValueError):
+                market_value = qty * current if qty and current else 0.0
+            if market_value != market_value:
+                market_value = 0.0
+            try:
+                pnl = float(r["P&L $"])
+            except (TypeError, ValueError):
+                pnl = 0.0
+            try:
+                pnl_pct = float(r["P&L %"])
+            except (TypeError, ValueError):
+                pnl_pct = 0.0
             rows.append(
                 {
                     "Ticker": r["Ticker"],
                     "Sleeve": r.get("Sleeve", ""),
-                    "Qty": f"{r['Qty']:.4f}",
-                    "Entry": f"${r['Entry']:,.2f}",
-                    "Current": f"${r['Current']:,.2f}",
-                    "P&L $": f"${r['P&L $']:+,.2f}",
-                    "P&L %": f"{r['P&L %']:+.2f}%",
-                    "_pnl": r["P&L $"],
+                    "Opened": r.get("Opened", "—"),
+                    "Qty": f"{qty:.4f}",
+                    "Entry": f"${entry:,.2f}",
+                    "Current": f"${current:,.2f}" if current else "—",
+                    "Value $": f"${market_value:,.2f}",
+                    "P&L $": f"${pnl:+,.2f}",
+                    "P&L %": f"{pnl_pct:+.2f}%",
+                    "ATR Stop": r.get("ATR Stop", "—"),
+                    "_qty": qty,
+                    "_entry": entry,
+                    "_current": current,
+                    "_value": market_value,
+                    "_pnl": pnl,
+                    "_pnl_pct": pnl_pct,
                 }
             )
         return rows
@@ -3765,13 +5543,36 @@ class TradingDashboardApp(ctk.CTk):
             return
         self._restart_book_async(self._book_id)
 
+    def _on_refresh_bot(self) -> None:
+        if not has_alpaca_config(self._username, self._book_id):
+            messagebox.showwarning(
+                "API keys",
+                f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
+            )
+            return
+        if not messagebox.askyesno(
+            "Refresh Bot",
+            f"Refresh Bot for {book_label(self._book_id)}?\n\n"
+            "This will:\n"
+            "  1. Stop the trading loop (open positions stay open)\n"
+            "  2. Download fresh daily bars (fetch_data.py --daily)\n"
+            "  3. Restart the bot in the correct paper/live mode\n\n"
+            "May take several minutes while market data downloads.\n\n"
+            "Continue?",
+            icon="warning",
+        ):
+            return
+        self._refresh_bot_async(self._book_id)
+
     def _schedule_refresh(self) -> None:
         if self._refresh_job:
             self.after_cancel(self._refresh_job)
         self._refresh_job = self.after(REFRESH_SECONDS * 1000, self._auto_refresh_tick)
 
     def _auto_refresh_tick(self) -> None:
-        self.refresh_data()
+        self._refresh_auto_cycles += 1
+        full = self._refresh_auto_cycles % 6 == 0
+        self.refresh_data(full=full)
         self._schedule_refresh()
 
     def _show_window(self) -> None:

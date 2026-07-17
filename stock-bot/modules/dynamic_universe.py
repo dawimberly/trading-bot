@@ -302,11 +302,25 @@ def equity_sleeve_universe(data_columns) -> list[str]:
     screener_set = frozenset(screener)
     dynamic = [c for c in cols if c in screener_set and config._nyse_eligible_symbol(c)]
     # Screener tickers often lack price history after a refresh — fall back / merge
-    # so the NYSE sleeve is not stuck on a 0–1 name book with idle cash.
-    min_cover = int(getattr(config, "PAPER_DYNAMIC_UNIVERSE_MIN_COVER", 8) or 8)
+    # with the full static NYSE universe so the equity sleeves are never stuck on
+    # a 0-1 name pool (scan_signals=0, 0 pairs).
+    min_cover = int(getattr(config, "PAPER_DYNAMIC_UNIVERSE_MIN_COVER", 10) or 10)
     if len(dynamic) < min_cover:
         merged = list(dict.fromkeys([*dynamic, *static]))
+        logger.debug(
+            "[UNIVERSE] dynamic overlap %d < %d — merged with static NYSE "
+            "universe: %d names (top: %s)",
+            len(dynamic),
+            min_cover,
+            len(merged),
+            ", ".join(merged[:10]),
+        )
         return merged
+    logger.debug(
+        "[UNIVERSE] dynamic screener universe: %d names (top: %s)",
+        len(dynamic),
+        ", ".join(dynamic[:10]),
+    )
     return dynamic or static
 
 

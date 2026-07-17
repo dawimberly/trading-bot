@@ -19,6 +19,8 @@ copy .env.example .env
 python scripts\account\preflight.py
 ```
 
+**Python 3.11 venv (owner):** from `stock-bot/`, run `scripts\setup_venv.bat` once → `C:\Users\Owner\PythonTrading\venv311`; daily `scripts\activate_venv.bat`. Details: [stock-bot/README — First-time setup](stock-bot/README.md#first-time-setup).
+
 **Do not use for daily ops:** `start.bat`, `launch.bat`, `launch_both.bat`, or `Weinstein-Trading-Bot.exe` — they start a single bot with the wrong heartbeat paths for the portal dashboard.
 
 Build frozen EXEs (optional): `stock-bot\build_all.bat`

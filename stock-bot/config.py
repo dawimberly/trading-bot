@@ -442,6 +442,7 @@ REALISTIC_RESEARCH_FEATURE_DETAIL = (
     "Smart Dynamic VTI (35-75%) + Sector Rotation (top 2-3 SPDRs) + "
     "ATR Vol Breakout (RVOL+MTF, <=1% risk) + "
     "Sector-Aware Portfolio Constructor + "
+    "Dynamic Felix/social (RHYME_E / bubble>=65) + "
     "RVOL/ORB/Catalyst/ATR + Conviction + MTF + Exits + Corr Guard + Shorts + "
     "Stat Arb v1.5.2 + Enriched Thinking"
 )
@@ -457,10 +458,12 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "Portfolio correlation guard (max 0.65)",
     "Insider monitor + boosts",
     "Protective shorts (8-18%) + sector shorts",
-    "Stat arb (12-16 pairs, corr 0.69, RR 1.6, v1.5.2 quality filters)",
+    "Stat arb (8-12 pairs, corr 0.68, RR 1.6, trail 50/35, v1.5.2 fill-rate)",
     "Smart Dynamic VTI core (35-75%: NYSE/metals, insider, bubble, regime)",
     "Sector rotation (top 2-3 SPDRs, max 25%/sector, monthly/regime)",
     "ATR vol breakout (expand>=1.5x + RVOL/MTF, <=1% risk, paper-only)",
+    "Dynamic Felix/social (ON: RHYME_E or bubble>=65; OFF: RHYME_C/D)",
+    "Markov HMM regime (5 states, next-day soft-signal → VTI/sizing/shorts)",
     "Enriched thinking engine (Ollama context + heuristic backtest tilts)",
     "Tail risk controls",
     "Bot Health + strategy performance tracking",
@@ -660,6 +663,19 @@ PAPER_DYNAMIC_UNIVERSE_ENABLED = _paper_dyn_univ.lower() in ("1", "true", "yes")
 PAPER_DYNAMIC_UNIVERSE_STRICT = os.getenv(
     "PAPER_DYNAMIC_UNIVERSE_STRICT", "false"
 ).lower() in ("1", "true", "yes")
+# Universe floors: fall back / merge with static NYSE names when the dynamic
+# screener overlap with loaded price columns collapses (fixes scan_signals=0).
+PAPER_DYNAMIC_UNIVERSE_MIN_COVER = int(
+    os.getenv("PAPER_DYNAMIC_UNIVERSE_MIN_COVER", "10")
+)
+STAT_ARB_MIN_UNIVERSE = int(os.getenv("STAT_ARB_MIN_UNIVERSE", "20"))
+# Cap pair-scan pool size (O(n^2) cointegration). Static NYSE core is kept first.
+STAT_ARB_MAX_SCAN_UNIVERSE = int(os.getenv("STAT_ARB_MAX_SCAN_UNIVERSE", "80"))
+# NYSE momentum entry quality (open cooldown, gap filter, 1 entry/day, exit_reason logs).
+# Paper only — default off to preserve prior behavior until explicitly enabled.
+PAPER_MOMENTUM_QUALITY_FIXES = _parse_env_bool(
+    "PAPER_MOMENTUM_QUALITY_FIXES", default="false"
+)
 # Dynamic sector screener — expand momentum/stat-arb pools in strong sectors (paper only).
 DYNAMIC_SECTOR_SCREENER_ENABLED = _env_bool_first(
     "DYNAMIC_SECTOR_SCREENER_ENABLED", default="true"
@@ -748,6 +764,13 @@ PAPER_HALT_RECOVERY_RISK_MULT = float(os.getenv("PAPER_HALT_RECOVERY_RISK_MULT",
 PAPER_HALT_RECOVERY_CLEAR_PCT = float(os.getenv("PAPER_HALT_RECOVERY_CLEAR_PCT", "0.03"))
 DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.35"))
 DYNAMIC_VTI_PAPER_CEILING = float(os.getenv("DYNAMIC_VTI_PAPER_CEILING", "0.75"))
+# Paper aggressive dynamic VTI tiers (fund_config.get_vti_core_pct; live unchanged)
+DYNAMIC_VTI_STRESS_PCT = float(os.getenv("DYNAMIC_VTI_STRESS_PCT", "0.75"))
+DYNAMIC_VTI_DEFAULT_PCT = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.60"))
+DYNAMIC_VTI_CALM_PCT = float(os.getenv("DYNAMIC_VTI_CALM_PCT", "0.45"))
+DYNAMIC_VTI_VOL_STRESS = float(os.getenv("DYNAMIC_VTI_VOL_STRESS", "0.025"))
+DYNAMIC_VTI_VOL_CALM = float(os.getenv("DYNAMIC_VTI_VOL_CALM", "0.015"))
+PAPER_SMALL_ACCOUNT_VTI_PCT = float(os.getenv("PAPER_SMALL_ACCOUNT_VTI_PCT", "0.90"))
 # Advanced sleeve features — paper aggressive only (live Profile A stays off)
 PAPER_NYSE_OVERLAP_FILTER_ENABLED = os.getenv(
     "PAPER_NYSE_OVERLAP_FILTER_ENABLED", "true"
@@ -793,14 +816,12 @@ PAPER_PAIR_Z_CALM = float(os.getenv("PAPER_PAIR_Z_CALM", "1.8"))
 PAPER_PAIR_Z_STRESS = float(os.getenv("PAPER_PAIR_Z_STRESS", "2.4"))
 PAPER_PAIR_COINT_SLOPE = float(os.getenv("PAPER_PAIR_COINT_SLOPE", "-0.01"))
 PAPER_STAT_ARB_MAX_TRADES = int(os.getenv("PAPER_STAT_ARB_MAX_TRADES", "2"))
-# Stat arb v1.1 (Realistic Research) — cointegration, tighter corr, overlap guard, RR exits.
-# v1.5.1 tune: corr 0.72->0.68, pairs 10/12/14 -> 12/14/16 to lift activity when room exists.
-# v1.5.2 quality tune: corr 0.68->0.70, liquidity 25M->40M, hold 35->25 (equity), stronger
-# reversion (0.55->0.60), tighter trail, vol filter + conviction sizing to cut drag.
-PAPER_STAT_ARB_MIN_CORR = float(os.getenv("PAPER_STAT_ARB_MIN_CORR", "0.69"))
-PAPER_STAT_ARB_MAX_PAIRS = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS", "12"))
-PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_EXPANDED", "14"))
-PAPER_STAT_ARB_MAX_PAIRS_CEILING = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_CEILING", "16"))
+# Stat arb v1.5.2 fill-rate tune (paper): corr 0.68, dynamic 8→12 pairs when room,
+# Z 2.0–2.6 + vol filter, RR 1.6:1, trail 50% arm / 35% pullback, 35-bar hold.
+PAPER_STAT_ARB_MIN_CORR = float(os.getenv("PAPER_STAT_ARB_MIN_CORR", "0.68"))
+PAPER_STAT_ARB_MAX_PAIRS = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS", "8"))
+PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_EXPANDED", "12"))
+PAPER_STAT_ARB_MAX_PAIRS_CEILING = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_CEILING", "12"))
 # Overlap guard: block top N*mult NYSE momentum names from stat-arb legs (avoid double exposure).
 STAT_ARB_NYSE_OVERLAP_BLOCK_MULT = int(os.getenv("STAT_ARB_NYSE_OVERLAP_BLOCK_MULT", "2"))
 PAPER_STAT_ARB_MAX_HOLD_BARS = int(os.getenv("PAPER_STAT_ARB_MAX_HOLD_BARS", "35"))
@@ -809,35 +830,26 @@ PAPER_STAT_ARB_Z_ENTRY_MAX = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_MAX", "2.6"
 PAPER_STAT_ARB_RISK_REWARD = float(os.getenv("PAPER_STAT_ARB_RISK_REWARD", "1.6"))
 PAPER_STAT_ARB_COINT_PVALUE = float(os.getenv("PAPER_STAT_ARB_COINT_PVALUE", "0.12"))
 PAPER_STAT_ARB_Z_EXIT = float(os.getenv("PAPER_STAT_ARB_Z_EXIT", "0.5"))
-# v1.5.2: require reversion >=55% of profit target before mean-revert exit (unchanged from v1.5.1).
 PAPER_STAT_ARB_MIN_REVERT_FRAC = float(os.getenv("PAPER_STAT_ARB_MIN_REVERT_FRAC", "0.55"))
-# v1.5.2: raise liquidity floor 25M->40M to favor tighter, cleaner pairs.
 PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = float(
     os.getenv("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME", "35000000")
 )
-# v1.5.2: tighter trail on profitable pairs — arm sooner (0.40) and lock on smaller pullback (0.25).
 PAPER_STAT_ARB_TRAILING_ARM_FRAC = float(
-    os.getenv("PAPER_STAT_ARB_TRAILING_ARM_FRAC", "0.40")
+    os.getenv("PAPER_STAT_ARB_TRAILING_ARM_FRAC", "0.50")
 )
 PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = float(
-    os.getenv("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC", "0.25")
+    os.getenv("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC", "0.35")
 )
-# v1.5.2: only arm the tighter trailing stop after this fraction of profit target
-# is achieved (prevents noise exits on pairs that haven't meaningfully reverted).
 PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC = float(
     os.getenv("PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC", "0.50")
 )
-# v1.5.2: disable partial exits on stat-arb pairs (leg asymmetry bleeds PnL).
 PAPER_STAT_ARB_PARTIAL_EXIT = _env_bool_first(
     "PAPER_STAT_ARB_PARTIAL_EXIT", default="false"
 )
-# v1.5.2: dedicated equity-pair max hold (bars); shorter than the shared 35-bar cap.
 PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS = int(
-    os.getenv("PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS", "25")
+    os.getenv("PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS", "35")
 )
-# v1.5.2: skip pairs where either leg's recent daily-return std exceeds this (high-vol filter).
 PAPER_STAT_ARB_MAX_LEG_VOL = float(os.getenv("PAPER_STAT_ARB_MAX_LEG_VOL", "0.065"))
-# v1.5.2: stat-arb-specific conviction sizing band (tighter than global 0.4x-2.0x).
 PAPER_STAT_ARB_CONVICTION_MIN_SCALE = float(
     os.getenv("PAPER_STAT_ARB_CONVICTION_MIN_SCALE", "0.65")
 )
@@ -1588,6 +1600,7 @@ SOCIAL_FELIX_WEIGHT = float(os.getenv("SOCIAL_FELIX_WEIGHT", "0.65"))
 SOCIAL_HEADLINE_WEIGHT = float(os.getenv("SOCIAL_HEADLINE_WEIGHT", "0.35"))
 # Score thresholds → GLD / XLE / SPY (Felix: gold + energy when macro bearish)
 SOCIAL_BEAR_GLD_THRESHOLD = float(os.getenv("SOCIAL_BEAR_GLD_THRESHOLD", "-0.12"))
+SOCIAL_BEARISH_GLD_THRESHOLD = float(os.getenv("SOCIAL_BEARISH_GLD_THRESHOLD", "-0.6"))
 SOCIAL_BEAR_ENERGY_THRESHOLD = float(os.getenv("SOCIAL_BEAR_ENERGY_THRESHOLD", "-0.04"))
 SOCIAL_BULL_SPY_THRESHOLD = float(os.getenv("SOCIAL_BULL_SPY_THRESHOLD", "0.08"))
 SOCIAL_MACRO_BEAR_OVERRIDE_SCORE = float(
@@ -1626,6 +1639,28 @@ SOCIAL_MACRO_OVERRIDES_ENABLED = os.getenv("SOCIAL_MACRO_OVERRIDES_ENABLED", "tr
 PAPER_SOCIAL_MACRO_BOOST_ENABLED = os.getenv(
     "PAPER_SOCIAL_MACRO_BOOST_ENABLED", "false"
 ).lower() in ("1", "true", "yes")
+# Dynamic Felix/social — paper default ON; live stays off via effective_* gates.
+FELIX_SOCIAL_DYNAMIC_ENABLED = _parse_env_bool(
+    "FELIX_SOCIAL_DYNAMIC_ENABLED", default="true"
+)
+FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD = float(
+    os.getenv("FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD", "65")
+)
+# Force sleeve ON regardless of regime/bubble (paper only; live ignores).
+FELIX_SOCIAL_MANUAL_OVERRIDE = _parse_env_bool(
+    "FELIX_SOCIAL_MANUAL_OVERRIDE", default="false"
+)
+# Runtime latch updated by update_felix_social_dynamic(regime, bubble).
+_felix_social_dynamic_on: bool = False
+
+# --- Markov HMM regime prediction (paper default ON; soft-signal only) ---
+MARKOV_HMM_ENABLED = _parse_env_bool("MARKOV_HMM_ENABLED", default="true")
+HMM_N_STATES = int(os.getenv("HMM_N_STATES", "5"))
+HMM_TRAIN_WINDOW_DAYS = int(os.getenv("HMM_TRAIN_WINDOW_DAYS", "252"))
+HMM_PREDICTION_HORIZON = int(os.getenv("HMM_PREDICTION_HORIZON", "1"))
+HMM_RETRAIN_EVERY_BARS = int(os.getenv("HMM_RETRAIN_EVERY_BARS", "5"))
+# Live stays off unless MARKOV_HMM_LIVE_ENABLED=true.
+MARKOV_HMM_LIVE_ENABLED = _parse_env_bool("MARKOV_HMM_LIVE_ENABLED", default="false")
 
 # --- SpaceX IPO ↔ crypto monitor (headline watch; S-1 BTC treasury narrative) ---
 SPACEX_IPO_MONITOR_ENABLED = os.getenv("SPACEX_IPO_MONITOR_ENABLED", "true").lower() in (
@@ -3582,6 +3617,7 @@ def enforce_best_paper_stack() -> None:
     global PAPER_CRYPTO_V2_ENABLED
     PAPER_RISK_PARITY_ENABLED = False
     PAPER_MACRO_REGIME_ADAPTOR_ENABLED = False
+    # Static social stays off; FELIX_SOCIAL_DYNAMIC_ENABLED gates via regime/bubble.
     PAPER_SOCIAL_SLEEVE_ENABLED = False
     PAPER_EQUITY_PAIRS = False
     PAPER_SPY_EXIT_ON_MA_BREAK = False
@@ -3761,6 +3797,15 @@ def enforce_realistic_research_profile() -> None:
     global ATR_PERIOD
     global ATR_RISK_MULTIPLE
     global ATR_MAX_SIZE_PCT
+    global FELIX_SOCIAL_DYNAMIC_ENABLED
+    global MARKOV_HMM_ENABLED
+    global HMM_N_STATES
+    global HMM_TRAIN_WINDOW_DAYS
+    global HMM_PREDICTION_HORIZON
+    global HMM_RETRAIN_EVERY_BARS
+    global FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD
+    global FELIX_SENTIMENT_ENABLED
+    global PAPER_SOCIAL_SLEEVE_ENABLED
 
     if not _env_explicit("DYNAMIC_CORE_ENABLED"):
         DYNAMIC_CORE_ENABLED = True
@@ -3879,13 +3924,13 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("PAPER_STAT_ARB_LEG_MIN_MULT"):
         PAPER_STAT_ARB_LEG_MIN_MULT = 1.0
     if not _env_explicit("PAPER_STAT_ARB_MIN_CORR"):
-        PAPER_STAT_ARB_MIN_CORR = 0.69
+        PAPER_STAT_ARB_MIN_CORR = 0.68
     if not _env_explicit("PAPER_STAT_ARB_MAX_PAIRS"):
-        PAPER_STAT_ARB_MAX_PAIRS = 12
+        PAPER_STAT_ARB_MAX_PAIRS = 8
     if not _env_explicit("PAPER_STAT_ARB_MAX_PAIRS_EXPANDED"):
-        PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = 14
+        PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = 12
     if not _env_explicit("PAPER_STAT_ARB_MAX_PAIRS_CEILING"):
-        PAPER_STAT_ARB_MAX_PAIRS_CEILING = 16
+        PAPER_STAT_ARB_MAX_PAIRS_CEILING = 12
     if not _env_explicit("STAT_ARB_NYSE_OVERLAP_BLOCK_MULT"):
         STAT_ARB_NYSE_OVERLAP_BLOCK_MULT = 2
     if not _env_explicit("PAPER_STAT_ARB_MAX_HOLD_BARS"):
@@ -3899,13 +3944,13 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME"):
         PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = 35_000_000
     if not _env_explicit("PAPER_STAT_ARB_TRAILING_ARM_FRAC"):
-        PAPER_STAT_ARB_TRAILING_ARM_FRAC = 0.40
+        PAPER_STAT_ARB_TRAILING_ARM_FRAC = 0.50
     if not _env_explicit("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC"):
-        PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = 0.25
+        PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = 0.35
     if not _env_explicit("PAPER_STAT_ARB_MIN_REVERT_FRAC"):
         PAPER_STAT_ARB_MIN_REVERT_FRAC = 0.55
     if not _env_explicit("PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS"):
-        PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS = 25
+        PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS = 35
     if not _env_explicit("PAPER_STAT_ARB_MAX_LEG_VOL"):
         PAPER_STAT_ARB_MAX_LEG_VOL = 0.065
     if not _env_explicit("PAPER_STAT_ARB_CONVICTION_MIN_SCALE"):
@@ -4128,6 +4173,34 @@ def enforce_realistic_research_profile() -> None:
         THINKING_ENGINE_ENABLED = False
     if not _env_explicit("LIVE_THINKING_ENGINE_ENABLED"):
         LIVE_THINKING_ENGINE_ENABLED = False
+    if not _env_explicit("FELIX_SOCIAL_DYNAMIC_ENABLED"):
+        FELIX_SOCIAL_DYNAMIC_ENABLED = True
+    if not _env_explicit("FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD"):
+        FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD = 65.0
+    if not _env_explicit("MARKOV_HMM_ENABLED"):
+        MARKOV_HMM_ENABLED = True
+    if not _env_explicit("HMM_N_STATES"):
+        HMM_N_STATES = 5
+    if not _env_explicit("HMM_TRAIN_WINDOW_DAYS"):
+        HMM_TRAIN_WINDOW_DAYS = 252
+    if not _env_explicit("HMM_PREDICTION_HORIZON"):
+        HMM_PREDICTION_HORIZON = 1
+    if not _env_explicit("HMM_RETRAIN_EVERY_BARS"):
+        HMM_RETRAIN_EVERY_BARS = 5
+    # Sentiment scoring needed when dynamic sleeve may turn on mid-session.
+    if (
+        FELIX_SOCIAL_DYNAMIC_ENABLED
+        and not _env_explicit("FELIX_SENTIMENT_ENABLED")
+    ):
+        FELIX_SENTIMENT_ENABLED = True
+    # Static sleeve remains off unless operator sets PAPER_SOCIAL_SLEEVE_ENABLED /
+    # FELIX_SOCIAL_MANUAL_OVERRIDE — dynamic path controls effective enablement.
+    if (
+        FELIX_SOCIAL_DYNAMIC_ENABLED
+        and not _env_explicit("PAPER_SOCIAL_SLEEVE_ENABLED")
+        and not FELIX_SOCIAL_MANUAL_OVERRIDE
+    ):
+        PAPER_SOCIAL_SLEEVE_ENABLED = False
     if effective_core_allocator_locked():
         try:
             from modules.core_allocator import lock_core_allocator
@@ -4183,13 +4256,13 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "POSITIONING_OVERLAY_ENABLED": "false",
     "STAT_ARB_ENABLED": "true",
     "PAPER_STAT_ARB_ENABLED": "true",
-    "PAPER_STAT_ARB_MIN_CORR": "0.69",
-    "PAPER_STAT_ARB_MAX_PAIRS": "12",
-    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": "14",
-    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": "16",
+    "PAPER_STAT_ARB_MIN_CORR": "0.68",
+    "PAPER_STAT_ARB_MAX_PAIRS": "8",
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": "12",
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": "12",
     "STAT_ARB_NYSE_OVERLAP_BLOCK_MULT": "2",
     "PAPER_STAT_ARB_MAX_HOLD_BARS": "35",
-    "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": "25",
+    "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": "35",
     "PAPER_STAT_ARB_Z_ENTRY_BASE": "2.0",
     "PAPER_STAT_ARB_Z_ENTRY_MAX": "2.6",
     "PAPER_STAT_ARB_RISK_REWARD": "1.6",
@@ -4199,8 +4272,8 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_STAT_ARB_CONVICTION_MIN_SCALE": "0.65",
     "PAPER_STAT_ARB_CONVICTION_MAX_SCALE": "1.50",
     "PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC": "0.50",
-    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": "0.40",
-    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": "0.25",
+    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": "0.50",
+    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": "0.35",
     "PAPER_STAT_ARB_COINT_PVALUE": "0.12",
     "PAPER_STAT_ARB_USE_COINT": "true",
     "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF": "true",
@@ -4349,6 +4422,15 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "SECTOR_FALLBACK_MOMENTUM_COUNT": "18",
     "EMAIL_WEEKLY_SUMMARY_ENABLED": "false",
     "TELEGRAM_WEEKLY_SUMMARY_ENABLED": "true",
+    "FELIX_SOCIAL_DYNAMIC_ENABLED": "true",
+    "FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD": "65",
+    "FELIX_SENTIMENT_ENABLED": "true",
+    "PAPER_SOCIAL_SLEEVE_ENABLED": "false",
+    "SOCIAL_SLEEVE_ENABLED": "false",
+    "MARKOV_HMM_ENABLED": "true",
+    "HMM_N_STATES": "5",
+    "HMM_TRAIN_WINDOW_DAYS": "252",
+    "HMM_PREDICTION_HORIZON": "1",
 }
 
 
@@ -4398,7 +4480,7 @@ def format_realistic_research_headline() -> str:
     """Prominent version line for paper bot startup."""
     features = (
         "RVOL + ORB + Catalyst + ATR | Tuned Shorts 8-18% | Sector Shorts | "
-        "Dynamic Core 63d | Insider Boosts | Stat Arb 12-16p v1.5.2 | Thinking ON"
+        "Dynamic Core 63d | Insider Boosts | Stat Arb 8-12p v1.5.2 | Thinking ON"
     )
     return (
         f">>> REALISTIC RESEARCH v{REALISTIC_RESEARCH_VERSION} (LOCKED) - "
@@ -4547,6 +4629,40 @@ def format_realistic_research_startup_lines() -> list[str]:
         ollama_line = format_ollama_status_line()
         if ollama_line:
             lines.append(ollama_line)
+    except Exception:
+        pass
+    try:
+        from modules.markov_regime import format_markov_hmm_banner
+
+        hmm_line = format_markov_hmm_banner()
+        if hmm_line:
+            lines.append(f">>> {hmm_line} <<<")
+    except Exception:
+        pass
+    try:
+        if effective_felix_social_dynamic_enabled() or felix_social_manual_override():
+            _reg = None
+            _bubble = None
+            try:
+                from modules.pipeline_strategies import load_pipeline_data
+                from modules.market_context import current_regime_from_data
+
+                _pdata = load_pipeline_data()
+                _reg = current_regime_from_data(_pdata)
+                try:
+                    from modules.bubble_risk import compute_bubble_risk
+
+                    _bubble = float(
+                        compute_bubble_risk(_pdata, _reg).get("score_100") or 0.0
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            update_felix_social_dynamic(_reg, _bubble)
+        felix_line = format_felix_social_dynamic_banner()
+        if felix_line:
+            lines.append(f">>> {felix_line} <<<")
     except Exception:
         pass
     lines.append(format_realistic_research_banner())
@@ -5225,6 +5341,14 @@ def effective_paper_dynamic_universe() -> bool:
     return bool(paper_only_sleeves_active() and PAPER_DYNAMIC_UNIVERSE_ENABLED)
 
 
+def effective_paper_momentum_quality_fixes() -> bool:
+    """NYSE momentum open cooldown / gap / 1-entry/day / exit_reason — paper only."""
+    return bool(
+        PAPER_MOMENTUM_QUALITY_FIXES
+        and (paper_aggressive_context() or paper_chase_mode_enabled() or paper_only_sleeves_active())
+    )
+
+
 def effective_paper_dynamic_universe_strict() -> bool:
     """Strict quality screener (8–12 names, 30d momentum) — paper aggressive only."""
     return bool(
@@ -5593,14 +5717,23 @@ def format_stat_arb_research_line() -> str | None:
     if mv > 0:
         vol_note = f" | vol<{mv * 100:.1f}%"
     hold_b = effective_stat_arb_equity_max_hold_bars()
+    trail_note = (
+        f"trail {effective_stat_arb_trailing_arm_frac():.0%}/"
+        f"{effective_stat_arb_trailing_pullback_frac():.0%}"
+    )
+    try:
+        uni_n = len(get_nyse_universe())
+    except Exception:
+        uni_n = 0
+    uni_note = f" | Stat Arb universe: {uni_n} names" if uni_n else ""
     return (
         f">>> STAT ARB v{REALISTIC_RESEARCH_VERSION}: cointegration p<{PAPER_STAT_ARB_COINT_PVALUE:.2f} | "
         f"corr>={effective_stat_arb_min_correlation():.2f} | "
         f"liquidity>${effective_stat_arb_min_dollar_volume()/1e6:.0f}M{vol_note} | "
         f"{format_stat_arb_pairs_label()} | "
         f"hold={hold_b}b | revert>={PAPER_STAT_ARB_MIN_REVERT_FRAC:.0%} | "
-        f"RR {effective_stat_arb_risk_reward():.1f}:1 + profit-gated trail"
-        f"{conv_note}{sector_note} | partial OFF | NYSE overlap blocked{cap_line}"
+        f"RR {effective_stat_arb_risk_reward():.1f}:1 + {trail_note}"
+        f"{conv_note}{sector_note} | partial OFF | NYSE overlap blocked{cap_line}{uni_note}"
     )
 
 
@@ -5744,10 +5877,125 @@ def effective_crypto_vol_only() -> bool:
 
 
 def effective_social_sleeve_enabled() -> bool:
-    """Felix/Social sleeve — off by default; opt-in via env (legacy)."""
-    if paper_only_sleeves_active():
+    """Felix/Social sleeve — live off by default; paper uses dynamic or static flag."""
+    if paper_only_sleeves_active() or paper_aggressive_context() or is_realistic_research_active():
+        if felix_social_manual_override():
+            return True
+        if effective_felix_social_dynamic_enabled():
+            return bool(_felix_social_dynamic_on)
         return PAPER_SOCIAL_SLEEVE_ENABLED
     return SOCIAL_SLEEVE_ENABLED
+
+
+def effective_felix_social_dynamic_enabled() -> bool:
+    """Paper-only dynamic Felix/social gate (live always False)."""
+    if not FELIX_SOCIAL_DYNAMIC_ENABLED:
+        return False
+    return bool(
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or is_realistic_research_active()
+    )
+
+
+def effective_markov_hmm_enabled() -> bool:
+    """Gaussian HMM regime soft-signals — paper default; live opt-in."""
+    if not MARKOV_HMM_ENABLED:
+        return False
+    if paper_only_sleeves_active() or paper_aggressive_context() or is_realistic_research_active():
+        return True
+    return bool(MARKOV_HMM_LIVE_ENABLED)
+
+
+def felix_social_manual_override() -> bool:
+    """Force social sleeve ON on paper (ignores regime/bubble)."""
+    if not (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or is_realistic_research_active()
+    ):
+        return False
+    if FELIX_SOCIAL_MANUAL_OVERRIDE:
+        return True
+    return bool(
+        PAPER_SOCIAL_SLEEVE_ENABLED
+        and _env_explicit("PAPER_SOCIAL_SLEEVE_ENABLED")
+    )
+
+
+def should_felix_social_be_active(
+    regime: str | None,
+    bubble_score_100: float | None = None,
+) -> bool:
+    """
+    Dynamic ON when RHYME_E or bubble_score_100 >= threshold.
+    Dynamic OFF in RHYME_C/D unless manual override.
+    """
+    if felix_social_manual_override():
+        return True
+    if not effective_felix_social_dynamic_enabled():
+        return bool(PAPER_SOCIAL_SLEEVE_ENABLED)
+    reg = str(regime or "")
+    if "RHYME_C" in reg or "RHYME_D" in reg:
+        return False
+    if "RHYME_E" in reg:
+        return True
+    try:
+        bub = float(bubble_score_100) if bubble_score_100 is not None else None
+    except (TypeError, ValueError):
+        bub = None
+    if bub is not None and bub >= FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD:
+        return True
+    return False
+
+
+def update_felix_social_dynamic(
+    regime: str | None,
+    bubble_score_100: float | None = None,
+) -> bool:
+    """Latch runtime social enablement from regime + bubble; returns active state."""
+    global _felix_social_dynamic_on
+    active = should_felix_social_be_active(regime, bubble_score_100)
+    _felix_social_dynamic_on = bool(active)
+    return _felix_social_dynamic_on
+
+
+def felix_social_dynamic_active() -> bool:
+    """Current latch (after update_felix_social_dynamic)."""
+    return bool(_felix_social_dynamic_on)
+
+
+def set_felix_social_dynamic_latch(active: bool) -> None:
+    """Test / backtest restore of the runtime latch."""
+    global _felix_social_dynamic_on
+    _felix_social_dynamic_on = bool(active)
+
+
+def format_felix_social_dynamic_banner(
+    regime: str | None = None,
+    bubble_score_100: float | None = None,
+) -> str:
+    """Startup / cycle line for dynamic Felix/social."""
+    if not effective_felix_social_dynamic_enabled() and not felix_social_manual_override():
+        if PAPER_SOCIAL_SLEEVE_ENABLED:
+            return "Felix/social: static ON"
+        return "Felix/social: off"
+    if felix_social_manual_override():
+        return "Felix/social: manual override ON"
+    if regime is not None or bubble_score_100 is not None:
+        active = should_felix_social_be_active(regime, bubble_score_100)
+    else:
+        active = _felix_social_dynamic_on
+    state = "ON" if active else "OFF"
+    extra = ""
+    if regime:
+        extra = f" | {regime}"
+        if bubble_score_100 is not None:
+            try:
+                extra += f" | bubble {float(bubble_score_100):.0f}"
+            except (TypeError, ValueError):
+                pass
+    return f"Felix/social: dynamic ({state} based on regime){extra}"
 
 
 def effective_macro_regime_adaptor_enabled() -> bool:
@@ -5777,6 +6025,21 @@ def effective_social_sleeve_cap_pct() -> float:
     return SOCIAL_SLEEVE_CAP_PCT
 
 
+def paper_social_bearish_tuning_enabled() -> bool:
+    """Enhanced Felix macro GLD tilt — paper aggressive book only."""
+    social_on = bool(
+        PAPER_SOCIAL_SLEEVE_ENABLED
+        or _felix_social_dynamic_on
+        or felix_social_manual_override()
+    )
+    return bool(
+        paper_aggressive_context()
+        and social_on
+        and FELIX_SENTIMENT_ENABLED
+        and PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    )
+
+
 def effective_vti_rebalance_drift_pct() -> float:
     if paper_only_sleeves_active():
         return PAPER_VTI_REBALANCE_DRIFT_PCT
@@ -5795,7 +6058,7 @@ def get_vti_core_pct(
     bubble_score_100: float | None = None,
     insider_state: dict | None = None,
 ) -> float:
-    """Dynamic VTI target (paper aggressive) or static live/small-account pct."""
+    """Dynamic VTI target (paper aggressive vol tiers) or static live/small-account pct."""
     from modules.fund_config import get_vti_core_pct as _get_vti_core_pct
 
     if is_paper_aggressive is None:
@@ -5897,7 +6160,7 @@ def vti_core_allocation_pct(
                 insider_state=insider_state,
             )
         else:
-            pct = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
+            pct = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.60"))
         pct = clamp_paper_vti_core(pct)
         return round(min(0.95, pct), 6)
 
@@ -5925,7 +6188,7 @@ def vti_core_allocation_pct(
                 insider_state=insider_state,
             )
         elif PAPER_DYNAMIC_VTI_ENABLED:
-            pct = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
+            pct = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.60"))
         else:
             pct = PAPER_VTI_CORE_PCT
     elif is_small_account(equity):

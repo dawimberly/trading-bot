@@ -1041,6 +1041,7 @@ def run_backtest(
     paper_dynamic_vti: bool | None = None,
     paper_sleeve_features: bool | None = None,
     paper_social_enhanced: bool | None = None,
+    felix_social_dynamic: bool | None = None,
     paper_macro_regime: bool | None = None,
     paper_options_sleeve: bool | None = None,
     paper_dynamic_risk: bool | None = None,
@@ -1097,6 +1098,10 @@ def run_backtest(
     saved_paper_sleeve_flags = config.snapshot_paper_sleeve_flags()
     saved_macro_overrides = config.SOCIAL_MACRO_OVERRIDES_ENABLED
     saved_macro_boost = config.PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    saved_felix_dynamic = config.FELIX_SOCIAL_DYNAMIC_ENABLED
+    saved_paper_social = config.PAPER_SOCIAL_SLEEVE_ENABLED
+    saved_felix_sentiment = config.FELIX_SENTIMENT_ENABLED
+    saved_felix_dynamic_on = config.felix_social_dynamic_active()
     saved_paper_macro = config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED
     saved_paper_options = config.PAPER_OPTIONS_SLEEVE_ENABLED
     saved_paper_dynamic_risk = config.PAPER_DYNAMIC_RISK_ENABLED
@@ -1146,6 +1151,11 @@ def run_backtest(
     if paper_social_enhanced is not None:
         config.SOCIAL_MACRO_OVERRIDES_ENABLED = bool(paper_social_enhanced)
         config.PAPER_SOCIAL_MACRO_BOOST_ENABLED = bool(paper_social_enhanced)
+    if felix_social_dynamic is not None:
+        config.FELIX_SOCIAL_DYNAMIC_ENABLED = bool(felix_social_dynamic)
+        if felix_social_dynamic:
+            config.FELIX_SENTIMENT_ENABLED = True
+            config.PAPER_SOCIAL_SLEEVE_ENABLED = False
     if paper_macro_regime is not None:
         config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = bool(paper_macro_regime)
     if paper_options_sleeve is not None:
@@ -1253,6 +1263,12 @@ def run_backtest(
     from modules.market_context import reset_regime_hysteresis
 
     reset_regime_hysteresis()
+    try:
+        from modules.markov_regime import reset_markov_hmm_state
+
+        reset_markov_hmm_state()
+    except Exception:
+        pass
     if paper_aggressive and config.effective_dynamic_core_enabled():
         from modules.core_allocator import maybe_refresh_core_allocation
 
@@ -1293,6 +1309,7 @@ def run_backtest(
     total_social = 0
     gld_target_days = 0
     social_sim_days = 0
+    social_active_days = 0
     social_portfolio = None
     social_curve = []
     macro_portfolio = None
@@ -1334,7 +1351,11 @@ def run_backtest(
         from modules.macro_regime_adaptor import run_macro_regime_backtest_day
 
         macro_portfolio = BacktestPortfolio(initial_capital=initial_capital)
-    elif config.effective_social_sleeve_enabled():
+    elif (
+        config.effective_felix_social_dynamic_enabled()
+        or config.effective_social_sleeve_enabled()
+        or config.PAPER_SOCIAL_SLEEVE_ENABLED
+    ):
         from modules.social_sleeve_backtest import (
             run_social_backtest_day,
             social_score_for_backtest,
@@ -1601,6 +1622,27 @@ def run_backtest(
                     insider_state_bt = apply_insider_signals_to_strategies(regime=regime)
                 except Exception:
                     insider_state_bt = None
+            if config.effective_markov_hmm_enabled():
+                try:
+                    from modules.markov_regime import update_markov_hmm
+                    from modules.bubble_risk import compute_bubble_risk
+
+                    bub = None
+                    try:
+                        bub = float(
+                            compute_bubble_risk(window, regime).get("score_100") or 0.0
+                        )
+                    except Exception:
+                        bub = None
+                    update_markov_hmm(
+                        window,
+                        regime=regime,
+                        bubble_score_100=bub,
+                        insider_state=insider_state_bt,
+                        sentiment=float(sentiment) if sentiment is not None else None,
+                    )
+                except Exception:
+                    pass
             vti_core_pct = _resolve_backtest_vti_pct(
                 eq,
                 vol_score=vol_score,
@@ -2013,6 +2055,29 @@ def run_backtest(
                 macro_energy_days += 1
             macro_curve.append(macro_portfolio.equity(prices))
         elif social_portfolio is not None:
+            bubble_bt = None
+            try:
+                from modules.dynamic_vti_allocator import get_last_vti_allocation_decision
+
+                bubble_bt = (
+                    (get_last_vti_allocation_decision() or {}).get("detail") or {}
+                ).get("bubble_score_100")
+            except Exception:
+                bubble_bt = None
+            if bubble_bt is None:
+                try:
+                    from modules.bubble_risk import compute_bubble_risk
+
+                    bubble_bt = float(
+                        compute_bubble_risk(window, regime).get("score_100") or 0.0
+                    )
+                except Exception:
+                    bubble_bt = None
+            from modules.social_sleeve import apply_dynamic_social_gate
+
+            apply_dynamic_social_gate(regime, bubble_bt, log=False)
+            if config.effective_social_sleeve_enabled():
+                social_active_days += 1
             agg = social_score_for_backtest(data.index[i], window, monthly_web)
             social_actions, social_meta = run_social_backtest_day(
                 social_portfolio, prices, agg, market_open=True
@@ -2252,6 +2317,11 @@ def run_backtest(
             if social_sim_days
             else 0.0,
             "gld_target_days": gld_target_days,
+            "active_days": social_active_days,
+            "active_pct": round(100 * social_active_days / social_sim_days, 1)
+            if social_sim_days
+            else 0.0,
+            "dynamic": bool(config.effective_felix_social_dynamic_enabled()),
         }
     if paper_aggressive and risk_samples:
         result["dynamic_risk"] = {
@@ -2395,6 +2465,10 @@ def run_backtest(
     config.apply_paper_sleeve_flags(saved_paper_sleeve_flags)
     config.SOCIAL_MACRO_OVERRIDES_ENABLED = saved_macro_overrides
     config.PAPER_SOCIAL_MACRO_BOOST_ENABLED = saved_macro_boost
+    config.FELIX_SOCIAL_DYNAMIC_ENABLED = saved_felix_dynamic
+    config.PAPER_SOCIAL_SLEEVE_ENABLED = saved_paper_social
+    config.FELIX_SENTIMENT_ENABLED = saved_felix_sentiment
+    config.set_felix_social_dynamic_latch(saved_felix_dynamic_on)
     config.PAPER_MACRO_REGIME_ADAPTOR_ENABLED = saved_paper_macro
     config.PAPER_OPTIONS_SLEEVE_ENABLED = saved_paper_options
     config.PAPER_DYNAMIC_RISK_ENABLED = saved_paper_dynamic_risk
@@ -3386,6 +3460,165 @@ def run_stat_arb_v13_push_compare(days=None, refresh=False, use_max=False) -> No
             f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
             f"no_room {m1['sa_no_room'] - m0['sa_no_room']:+d}"
         )
+
+
+# Prior locked defaults (corr 0.69, 12-16 pairs, trail 40/25, equity hold 25).
+_LEGACY_V152_STAT_ARB_BEFORE = {
+    "PAPER_STAT_ARB_MIN_CORR": 0.69,
+    "PAPER_STAT_ARB_MAX_PAIRS": 12,
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 14,
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 16,
+    "PAPER_STAT_ARB_COINT_PVALUE": 0.12,
+    "PAPER_STAT_ARB_Z_ENTRY_BASE": 2.0,
+    "PAPER_STAT_ARB_Z_ENTRY_MAX": 2.6,
+    "PAPER_STAT_ARB_RISK_REWARD": 1.6,
+    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": 0.40,
+    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": 0.25,
+    "PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC": 0.50,
+    "PAPER_STAT_ARB_MAX_HOLD_BARS": 35,
+    "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": 25,
+    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": 35_000_000,
+    "PAPER_STAT_ARB_MAX_LEG_VOL": 0.065,
+    "STAT_ARB_SLEEVE_CAP_ENABLED": True,
+    "STAT_ARB_SLEEVE_CAP_PCT": 0.07,
+    "STAT_ARB_VOL_SCALING_ENABLED": True,
+}
+
+
+def _stat_arb_v152_config_snapshot() -> dict[str, float | int | bool]:
+    return {
+        "PAPER_STAT_ARB_MIN_CORR": float(config.PAPER_STAT_ARB_MIN_CORR),
+        "PAPER_STAT_ARB_MAX_PAIRS": int(config.PAPER_STAT_ARB_MAX_PAIRS),
+        "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": int(config.PAPER_STAT_ARB_MAX_PAIRS_EXPANDED),
+        "PAPER_STAT_ARB_MAX_PAIRS_CEILING": int(config.PAPER_STAT_ARB_MAX_PAIRS_CEILING),
+        "PAPER_STAT_ARB_COINT_PVALUE": float(config.PAPER_STAT_ARB_COINT_PVALUE),
+        "PAPER_STAT_ARB_Z_ENTRY_BASE": float(config.PAPER_STAT_ARB_Z_ENTRY_BASE),
+        "PAPER_STAT_ARB_Z_ENTRY_MAX": float(config.PAPER_STAT_ARB_Z_ENTRY_MAX),
+        "PAPER_STAT_ARB_RISK_REWARD": float(config.PAPER_STAT_ARB_RISK_REWARD),
+        "PAPER_STAT_ARB_TRAILING_ARM_FRAC": float(config.PAPER_STAT_ARB_TRAILING_ARM_FRAC),
+        "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": float(
+            config.PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC
+        ),
+        "PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC": float(
+            config.PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC
+        ),
+        "PAPER_STAT_ARB_MAX_HOLD_BARS": int(config.PAPER_STAT_ARB_MAX_HOLD_BARS),
+        "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": int(
+            config.PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS
+        ),
+        "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": float(config.PAPER_STAT_ARB_MIN_DOLLAR_VOLUME),
+        "PAPER_STAT_ARB_MAX_LEG_VOL": float(config.PAPER_STAT_ARB_MAX_LEG_VOL),
+        "STAT_ARB_SLEEVE_CAP_ENABLED": bool(config.STAT_ARB_SLEEVE_CAP_ENABLED),
+        "STAT_ARB_SLEEVE_CAP_PCT": float(config.STAT_ARB_SLEEVE_CAP_PCT),
+        "STAT_ARB_VOL_SCALING_ENABLED": bool(config.STAT_ARB_VOL_SCALING_ENABLED),
+    }
+
+
+def run_stat_arb_v152_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare prior locked stat-arb vs v1.5.2 fill-rate tune (8-12p, corr 0.68, trail 50/35)."""
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    config.PAPER_DEPLOY_DEBUG = False
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    try:
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        after = _stat_arb_v152_config_snapshot()
+        # Ensure "after" reflects the fill-rate targets even if env overrode module load.
+        after.update(
+            {
+                "PAPER_STAT_ARB_MIN_CORR": 0.68,
+                "PAPER_STAT_ARB_MAX_PAIRS": 8,
+                "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 12,
+                "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 12,
+                "PAPER_STAT_ARB_TRAILING_ARM_FRAC": 0.50,
+                "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": 0.35,
+                "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": 35,
+            }
+        )
+        base_kwargs = {
+            "paper_aggressive": True,
+            "paper_sleeve_features": True,
+            "stat_arb_report": True,
+        }
+        configs = [
+            ("v1.5.2 before (12-16p corr.69)", _LEGACY_V152_STAT_ARB_BEFORE),
+            ("v1.5.2 fill-rate (8-12p corr.68)", after),
+        ]
+        print("--- STAT ARB v1.5.2 FILL-RATE (before vs after) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            "After: corr>=0.68 | pairs 8->12 (low no_room) | Z 2.0-2.6 + vol filter | "
+            "RR 1.6 | trail 50%/35% | hold 35b | 7% cap + vol scale"
+        )
+        print(
+            f"{'Config':<34} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'SA PnL':>9} {'Fill%':>6} {'Pairs':>6} {'SA nr':>6}"
+        )
+        print("-" * 94)
+
+        saved = _stat_arb_v152_config_snapshot()
+        original_enforce = config.enforce_realistic_research_profile
+        results: list[tuple[str, dict]] = []
+
+        def _skip_profile_enforce() -> None:
+            return None
+
+        try:
+            config.enforce_realistic_research_profile = _skip_profile_enforce
+            for label, cfg in configs:
+                _apply_stat_arb_config(cfg)
+                result = run_backtest(data, track_metrics=True, **base_kwargs)
+                m = _stat_arb_validation_metrics(result)
+                sa = (result.get("attribution") or {}).get("stat_arb") or {}
+                m["fill_rate"] = float(sa.get("fill_rate_pct", 0) or 0)
+                signals = ((result.get("attribution") or {}).get("signals") or {}).get(
+                    "stat_arb", 0
+                )
+                m["signals"] = int(signals or 0)
+                results.append((label, m))
+                print(
+                    f"{label:<34} "
+                    f"{m['return_pct']:>+7.2f}% "
+                    f"{m['sharpe']:>7.2f} "
+                    f"{m['max_dd']:>7.2f}% "
+                    f"{m['stat_arb_pnl']:>+9.2f} "
+                    f"{m['fill_rate']:>5.1f}% "
+                    f"{m['stat_arb_pairs']:>6} "
+                    f"{m['sa_no_room']:>6}"
+                )
+        finally:
+            config.enforce_realistic_research_profile = original_enforce
+            _apply_stat_arb_config(saved)
+
+        print("-" * 94)
+        if len(results) == 2:
+            _, m0 = results[0]
+            _, m1 = results[1]
+            print(
+                f"Delta (after - before): "
+                f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+                f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+                f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+                f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+                f"fill {m1['fill_rate'] - m0['fill_rate']:+.1f}pp | "
+                f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
+                f"no_room {m1['sa_no_room'] - m0['sa_no_room']:+d}"
+            )
+    finally:
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
 
 
 _LEGACY_STAT_ARB_CONFIG = {
@@ -5060,65 +5293,363 @@ def run_regime_shift_compare(days=None, refresh=False, use_max=False) -> None:
 
 
 def run_felix_social_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare paper aggressive social sleeve: legacy vs enhanced Felix macro detection."""
-    if use_max:
-        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
-    else:
-        days = days or config.BACKTEST_DAYS
-        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
-    if len(data) < 20:
-        print(f"Need at least 20 daily bars; got {len(data)}.")
-        return
-
-    bench = _benchmark_return(data, MIN_HISTORY)
-    configs = [
-        (
-            "Paper social (legacy)",
-            {
-                "paper_aggressive": True,
-                "paper_sleeve_features": True,
-                "paper_dynamic_vti": True,
-                "paper_social_enhanced": False,
-            },
-        ),
-        (
-            "Paper social (enhanced Felix)",
-            {
-                "paper_aggressive": True,
-                "paper_sleeve_features": True,
-                "paper_dynamic_vti": True,
-                "paper_social_enhanced": True,
-            },
-        ),
-    ]
-    print("--- FELIX / SOCIAL SLEEVE A/B (paper aggressive, dynamic VTI + sleeve flags) ---")
-    print(
-        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
-        f"({len(data) - MIN_HISTORY} sim bars)"
+    """Compare paper aggressive social sleeve: off vs legacy vs enhanced Felix macro."""
+    saved = (
+        config.PAPER_SOCIAL_SLEEVE_ENABLED,
+        config.FELIX_SENTIMENT_ENABLED,
+        config.SOCIAL_MACRO_OVERRIDES_ENABLED,
+        config.PAPER_SOCIAL_MACRO_BOOST_ENABLED,
+        config.SOCIAL_BEARISH_GLD_THRESHOLD,
     )
-    if bench is not None:
-        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
-    print(
-        f"{'Config':<30} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
-        f"{'AvgAct':>7} {'GLD%':>6} {'Social':>8}"
-    )
-    print("-" * 82)
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    config.PAPER_DEPLOY_DEBUG = False
+    config.PAPER_SOCIAL_SLEEVE_ENABLED = True
+    config.FELIX_SENTIMENT_ENABLED = True
+    try:
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            days = days or config.BACKTEST_DAYS
+            data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
 
-    for label, kwargs in configs:
-        result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kwargs)
-        social = result.get("social_sleeve") or {}
-        social_ret = f"{social.get('return_pct', 0):+.1f}%" if social else "—"
-        gld_pct = social.get("gld_target_pct", 0.0)
+        bench = _benchmark_return(data, MIN_HISTORY)
+        configs = [
+            (
+                "Paper aggressive (social off)",
+                {
+                    "paper_aggressive": True,
+                    "paper_sleeve_features": True,
+                    "paper_dynamic_vti": True,
+                    "paper_social_enhanced": False,
+                    "_social_off": True,
+                },
+            ),
+            (
+                "Paper social (legacy tuning)",
+                {
+                    "paper_aggressive": True,
+                    "paper_sleeve_features": True,
+                    "paper_dynamic_vti": True,
+                    "paper_social_enhanced": False,
+                },
+            ),
+            (
+                "Paper social (enhanced Felix)",
+                {
+                    "paper_aggressive": True,
+                    "paper_sleeve_features": True,
+                    "paper_dynamic_vti": True,
+                    "paper_social_enhanced": True,
+                },
+            ),
+        ]
+        print("--- FELIX / SOCIAL SLEEVE A/B (paper aggressive, dynamic VTI + sleeve flags) ---")
         print(
-            f"{label:<30} "
-            f"{result['total_return_pct']:>+7.2f}% "
-            f"{result['sharpe']:>7.2f} "
-            f"{result['max_drawdown_pct']:>7.2f}% "
-            f"{result['avg_active_exposure_pct']:>6.1f}% "
-            f"{gld_pct:>5.1f}% "
-            f"{social_ret:>8}"
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
         )
-    print("-" * 82)
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            f"Strong GLD: score < {config.SOCIAL_BEARISH_GLD_THRESHOLD} + macro keywords "
+            f"(paper-only)"
+        )
+        print(
+            f"{'Config':<30} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'AvgAct':>7} {'GLD%':>6} {'Social':>8}"
+        )
+        print("-" * 82)
+
+        results: list[dict] = []
+        for label, kwargs in configs:
+            kw = dict(kwargs)
+            social_off = bool(kw.pop("_social_off", False))
+            prev_social = config.PAPER_SOCIAL_SLEEVE_ENABLED
+            if social_off:
+                config.PAPER_SOCIAL_SLEEVE_ENABLED = False
+            result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kw)
+            config.PAPER_SOCIAL_SLEEVE_ENABLED = prev_social
+            social = result.get("social_sleeve") or {}
+            social_ret = f"{social.get('return_pct', 0):+.1f}%" if social else "—"
+            gld_pct = social.get("gld_target_pct", 0.0)
+            row = {
+                "label": label,
+                "return_pct": result["total_return_pct"],
+                "sharpe": result["sharpe"],
+                "max_dd_pct": result["max_drawdown_pct"],
+                "gld_pct": gld_pct,
+                "social_ret": social.get("return_pct"),
+            }
+            results.append(row)
+            print(
+                f"{label:<30} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{result['avg_active_exposure_pct']:>6.1f}% "
+                f"{gld_pct:>5.1f}% "
+                f"{social_ret:>8}"
+            )
+        print("-" * 82)
+        return results
+    finally:
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        (
+            config.PAPER_SOCIAL_SLEEVE_ENABLED,
+            config.FELIX_SENTIMENT_ENABLED,
+            config.SOCIAL_MACRO_OVERRIDES_ENABLED,
+            config.PAPER_SOCIAL_MACRO_BOOST_ENABLED,
+            config.SOCIAL_BEARISH_GLD_THRESHOLD,
+        ) = saved
+
+
+def run_felix_dynamic_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare social off vs always-on vs regime/bubble dynamic gate (paper)."""
+    saved = (
+        config.PAPER_SOCIAL_SLEEVE_ENABLED,
+        config.FELIX_SENTIMENT_ENABLED,
+        config.FELIX_SOCIAL_DYNAMIC_ENABLED,
+        config.FELIX_SOCIAL_MANUAL_OVERRIDE,
+        config.PAPER_SOCIAL_MACRO_BOOST_ENABLED,
+    )
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    config.PAPER_DEPLOY_DEBUG = False
+    config.FELIX_SENTIMENT_ENABLED = True
+    try:
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            days = days or config.BACKTEST_DAYS
+            data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        configs = [
+            (
+                "Social off",
+                {
+                    "paper_aggressive": True,
+                    "paper_sleeve_features": True,
+                    "paper_dynamic_vti": True,
+                    "felix_social_dynamic": False,
+                    "_social_mode": "off",
+                },
+            ),
+            (
+                "Social always on",
+                {
+                    "paper_aggressive": True,
+                    "paper_sleeve_features": True,
+                    "paper_dynamic_vti": True,
+                    "felix_social_dynamic": False,
+                    "_social_mode": "always",
+                },
+            ),
+            (
+                "Felix/social dynamic",
+                {
+                    "paper_aggressive": True,
+                    "paper_sleeve_features": True,
+                    "paper_dynamic_vti": True,
+                    "felix_social_dynamic": True,
+                    "_social_mode": "dynamic",
+                },
+            ),
+        ]
+        thr = config.FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD
+        print("--- FELIX / SOCIAL DYNAMIC A/B (paper aggressive) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            f"Dynamic ON: RHYME_E OR bubble>={thr:.0f} | "
+            f"OFF: RHYME_C/D (unless FELIX_SOCIAL_MANUAL_OVERRIDE)"
+        )
+        print(
+            f"{'Config':<24} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'Active%':>7} {'GLD%':>6} {'Social':>8}"
+        )
+        print("-" * 78)
+
+        results: list[dict] = []
+        for label, kwargs in configs:
+            kw = dict(kwargs)
+            mode = kw.pop("_social_mode", "off")
+            prev = (
+                config.PAPER_SOCIAL_SLEEVE_ENABLED,
+                config.FELIX_SOCIAL_DYNAMIC_ENABLED,
+                config.FELIX_SOCIAL_MANUAL_OVERRIDE,
+            )
+            if mode == "off":
+                config.PAPER_SOCIAL_SLEEVE_ENABLED = False
+                config.FELIX_SOCIAL_DYNAMIC_ENABLED = False
+                config.FELIX_SOCIAL_MANUAL_OVERRIDE = False
+                config.set_felix_social_dynamic_latch(False)
+            elif mode == "always":
+                config.PAPER_SOCIAL_SLEEVE_ENABLED = True
+                config.FELIX_SOCIAL_DYNAMIC_ENABLED = False
+                config.FELIX_SOCIAL_MANUAL_OVERRIDE = True
+                config.set_felix_social_dynamic_latch(True)
+            else:
+                config.PAPER_SOCIAL_SLEEVE_ENABLED = False
+                config.FELIX_SOCIAL_DYNAMIC_ENABLED = True
+                config.FELIX_SOCIAL_MANUAL_OVERRIDE = False
+                config.set_felix_social_dynamic_latch(False)
+            result = run_backtest(data, track_active_exposure=True, track_metrics=True, **kw)
+            (
+                config.PAPER_SOCIAL_SLEEVE_ENABLED,
+                config.FELIX_SOCIAL_DYNAMIC_ENABLED,
+                config.FELIX_SOCIAL_MANUAL_OVERRIDE,
+            ) = prev
+            social = result.get("social_sleeve") or {}
+            social_ret = f"{social.get('return_pct', 0):+.1f}%" if social else "—"
+            gld_pct = social.get("gld_target_pct", 0.0) if social else 0.0
+            active_pct = social.get("active_pct", 0.0) if social else 0.0
+            if mode == "off":
+                active_pct = 0.0
+            elif mode == "always" and not social:
+                active_pct = 100.0
+            row = {
+                "label": label,
+                "return_pct": result["total_return_pct"],
+                "sharpe": result["sharpe"],
+                "max_dd_pct": result["max_drawdown_pct"],
+                "active_pct": active_pct,
+                "gld_pct": gld_pct,
+                "social_ret": social.get("return_pct") if social else None,
+            }
+            results.append(row)
+            print(
+                f"{label:<24} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{active_pct:>6.1f}% "
+                f"{gld_pct:>5.1f}% "
+                f"{social_ret:>8}"
+            )
+        print("-" * 78)
+        return results
+    finally:
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        (
+            config.PAPER_SOCIAL_SLEEVE_ENABLED,
+            config.FELIX_SENTIMENT_ENABLED,
+            config.FELIX_SOCIAL_DYNAMIC_ENABLED,
+            config.FELIX_SOCIAL_MANUAL_OVERRIDE,
+            config.PAPER_SOCIAL_MACRO_BOOST_ENABLED,
+        ) = saved
+
+
+def run_markov_hmm_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with Markov HMM soft-signals ON vs OFF."""
+    saved_hmm = bool(config.MARKOV_HMM_ENABLED)
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    config.PAPER_DEPLOY_DEBUG = False
+    try:
+        from modules.markov_regime import reset_markov_hmm_state
+
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            days = days or config.BACKTEST_DAYS
+            data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        configs = [
+            (
+                "HMM OFF (RHYME only)",
+                False,
+            ),
+            (
+                "HMM ON (5-state soft)",
+                True,
+            ),
+        ]
+        print("--- MARKOV HMM A/B (paper aggressive, soft-signal VTI/sizing/shorts) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            f"HMM: n_states={config.HMM_N_STATES} | "
+            f"train_window={config.HMM_TRAIN_WINDOW_DAYS}d | "
+            f"horizon={config.HMM_PREDICTION_HORIZON}d | fallback=RHYME"
+        )
+        print(
+            f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'AvgVTI':>7} {'Trades':>7}"
+        )
+        print("-" * 72)
+
+        results: list[dict] = []
+        for label, enabled in configs:
+            reset_markov_hmm_state()
+            config.MARKOV_HMM_ENABLED = bool(enabled)
+            result = run_backtest(
+                data,
+                paper_aggressive=True,
+                paper_sleeve_features=True,
+                paper_dynamic_vti=True,
+                paper_dynamic_risk=True,
+                paper_stat_arb=True,
+                track_active_exposure=True,
+                track_metrics=True,
+            )
+            avg_vti = float(result.get("vti_core_pct") or 0.0)
+            if 0.0 < avg_vti <= 1.5:
+                avg_vti = avg_vti * 100.0
+            trades = int(result.get("total_orders") or 0)
+            row = {
+                "label": label,
+                "return_pct": result["total_return_pct"],
+                "sharpe": result["sharpe"],
+                "max_dd_pct": result["max_drawdown_pct"],
+                "avg_vti": avg_vti,
+                "trades": trades,
+            }
+            results.append(row)
+            print(
+                f"{label:<28} "
+                f"{result['total_return_pct']:>+7.2f}% "
+                f"{result['sharpe']:>7.2f} "
+                f"{result['max_drawdown_pct']:>7.2f}% "
+                f"{avg_vti:>6.1f}% "
+                f"{trades:>7}"
+            )
+        print("-" * 72)
+        if len(results) == 2:
+            a, b = results[0], results[1]
+            print(
+                f"Delta (ON - OFF): return {b['return_pct'] - a['return_pct']:+.2f}pp | "
+                f"Sharpe {b['sharpe'] - a['sharpe']:+.2f} | "
+                f"MaxDD {b['max_dd_pct'] - a['max_dd_pct']:+.2f}pp | "
+                f"AvgVTI {b['avg_vti'] - a['avg_vti']:+.1f}pp"
+            )
+        print("-" * 72)
+        return results
+    finally:
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        config.MARKOV_HMM_ENABLED = saved_hmm
+        try:
+            from modules.markov_regime import reset_markov_hmm_state
+
+            reset_markov_hmm_state()
+        except Exception:
+            pass
 
 
 def run_paper_sleeve_features_compare(days=None, refresh=False, use_max=False) -> None:
@@ -6712,6 +7243,16 @@ if __name__ == "__main__":
         help="Compare legacy vs enhanced Felix/social macro sleeve (paper aggressive)",
     )
     parser.add_argument(
+        "--compare-felix-dynamic",
+        action="store_true",
+        help="Compare social off vs always-on vs regime/bubble dynamic gate (paper)",
+    )
+    parser.add_argument(
+        "--compare-markov-hmm",
+        action="store_true",
+        help="Compare paper aggressive with Markov HMM soft-signals ON vs OFF",
+    )
+    parser.add_argument(
         "--compare-macro-regime",
         action="store_true",
         help="Compare paper aggressive with vs without Regime Shift Detector",
@@ -6785,6 +7326,11 @@ if __name__ == "__main__":
         "--compare-stat-arb-v13-push",
         action="store_true",
         help="Compare Stat Arb v1.3 before (10-12p RR1.5) vs pushed (10-14p RR1.6 Z2.6)",
+    )
+    parser.add_argument(
+        "--compare-stat-arb-v152",
+        action="store_true",
+        help="Compare prior locked stat-arb vs v1.5.2 fill-rate tune (8-12p, corr 0.68)",
     )
     parser.add_argument(
         "--compare-stat-arb-v12",
@@ -7044,6 +7590,17 @@ if __name__ == "__main__":
         run_felix_social_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
+    elif args.compare_felix_dynamic:
+        run_felix_dynamic_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_markov_hmm:
+        if not args.paper_aggressive:
+            print("--compare-markov-hmm requires --paper-aggressive")
+            sys.exit(1)
+        run_markov_hmm_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
     elif args.compare_macro_regime or args.compare_regime:
         run_regime_shift_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
@@ -7125,6 +7682,13 @@ if __name__ == "__main__":
             print("--compare-stat-arb-v13-push requires --paper-aggressive")
             sys.exit(1)
         run_stat_arb_v13_push_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_stat_arb_v152:
+        if not args.paper_aggressive:
+            print("--compare-stat-arb-v152 requires --paper-aggressive")
+            sys.exit(1)
+        run_stat_arb_v152_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_stat_arb_v12:

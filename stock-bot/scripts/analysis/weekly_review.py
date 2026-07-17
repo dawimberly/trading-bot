@@ -58,6 +58,18 @@ EQUITY_JUMP_RATIO = float(os.getenv("WEEKLY_REVIEW_EQUITY_JUMP_RATIO", "5.0"))
 SHARPE_SCALE = math.sqrt(252)
 
 PAPER_BOOK = ROOT / "data" / "portal" / "users" / "dawimberly" / "books" / "alpaca_paper"
+LIVE_BOOK = PAPER_BOOK.parent / "alpaca_live"
+NYSE_REVIEW_MD = ROOT / "scripts" / "analysis" / "nyse_entry_quality_review.md"
+
+Decision = Literal["APPROVE", "REJECT", "HOLD"]
+
+
+def _env_bool(key: str, default: str = "false") -> bool:
+    return os.getenv(key, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _nyse_quality_section_enabled() -> bool:
+    return _env_bool("WEEKLY_REVIEW_NYSE_QUALITY_SECTION", "true")
 
 # sleeve -> (env var, default, direction when weak)
 SLEEVE_PARAM: dict[str, tuple[str, str, str]] = {
@@ -214,6 +226,36 @@ class BacktestMetrics:
 
 
 @dataclass
+class NyseEntryQuality:
+    fixes_enabled: bool = False
+    journal_exits: int = 0
+    with_entry_hour: int = 0
+    open_chase_trades: int = 0
+    midday_trades: int = 0
+    open_chase_win_rate: float | None = None
+    midday_win_rate: float | None = None
+    open_chase_avg_pnl: float | None = None
+    midday_avg_pnl: float | None = None
+    sim_365_return_delta_pp: float | None = None
+    sim_365_sharpe_delta: float | None = None
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class LivePaperDelta:
+    paper_return_pct: float | None = None
+    live_return_pct: float | None = None
+    delta_pp: float | None = None
+    paper_equity: float | None = None
+    live_equity: float | None = None
+    paper_sharpe: float | None = None
+    live_sharpe: float | None = None
+    paper_source: str = "none"
+    live_source: str = "none"
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class GoalsStatus:
     target_sharpe: float
     max_dd_pct: float
@@ -279,6 +321,15 @@ def _paper_journal_candidates() -> list[Path]:
         Path(os.getenv("PAPER_JOURNAL_CSV", "")),
         ROOT / "paper_journal.csv",
     ]
+
+
+def _load_book_journal(book_dir: Path) -> tuple[pd.DataFrame, str]:
+    """Load journal for a specific portal book (no root fallback — avoids live/paper collision)."""
+    path = book_dir / "paper_journal.csv"
+    df = _load_csv(path)
+    if df.empty or "equity" not in df.columns:
+        return pd.DataFrame(), "none"
+    return df, path.name
 
 
 def _load_best_paper_journal() -> tuple[pd.DataFrame, str]:
@@ -541,6 +592,155 @@ def _grade_quality(
         q.grade = "C"
         q.notes.append("Sparse/noisy sample — mandate scoring and sleeve trade stats unreliable.")
     return q
+
+
+def _period_return_from_journal(book_dir: Path, days: int) -> tuple[RiskMetrics, str]:
+    journal, source = _load_book_journal(book_dir)
+    if journal.empty:
+        return RiskMetrics(), source
+    cycles = journal
+    if "event" in journal.columns:
+        cyc = journal[journal["event"].astype(str).str.lower() == "cycle"]
+        if not cyc.empty:
+            cycles = cyc
+    cutoff = datetime.now() - timedelta(days=days)
+    recent = cycles[cycles["timestamp"] >= cutoff]
+    if recent.empty:
+        recent = cycles.tail(500)
+    daily_raw = recent.groupby(recent["timestamp"].dt.date)["equity"].last().dropna()
+    daily, _, _ = _clean_daily_equity(daily_raw)
+    if not daily.empty:
+        keep_from = daily.index[-1] - timedelta(days=days)
+        try:
+            daily = daily[daily.index >= keep_from]
+        except Exception:
+            daily = daily.tail(days)
+    return _risk_from_curve(daily), source
+
+
+def _collect_live_paper_delta() -> LivePaperDelta:
+    delta = LivePaperDelta()
+    paper_risk, paper_src = _period_return_from_journal(PAPER_BOOK, LOOKBACK_DAYS)
+    live_risk, live_src = _period_return_from_journal(LIVE_BOOK, LOOKBACK_DAYS)
+    delta.paper_return_pct = paper_risk.period_return_pct
+    delta.live_return_pct = live_risk.period_return_pct
+    delta.paper_sharpe = paper_risk.sharpe
+    delta.live_sharpe = live_risk.sharpe
+    delta.paper_equity = paper_risk.end_equity
+    delta.live_equity = live_risk.end_equity
+    delta.paper_source = paper_src
+    delta.live_source = live_src
+    if delta.paper_return_pct is not None and delta.live_return_pct is not None:
+        delta.delta_pp = delta.paper_return_pct - delta.live_return_pct
+    if live_src == "none":
+        delta.notes.append("Live book journal missing — delta is paper-only.")
+    elif paper_src == "none":
+        delta.notes.append("Paper book journal missing.")
+    else:
+        delta.notes.append(
+            "Read-only comparison; live Profile A is never modified by this review."
+        )
+    return delta
+
+
+def _hour_from_entry_hour(raw: str) -> int | None:
+    if not raw or str(raw).lower() in ("nan", "none", ""):
+        return None
+    s = str(raw).strip()
+    if ":" in s:
+        try:
+            return int(s.split(":")[0])
+        except ValueError:
+            return None
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+def _parse_nyse_sim_highlights() -> tuple[float | None, float | None]:
+    """Pull 365d intraday sim deltas from research memo if present."""
+    if not NYSE_REVIEW_MD.is_file():
+        return None, None
+    try:
+        text = NYSE_REVIEW_MD.read_text(encoding="utf-8")
+    except Exception:
+        return None, None
+    ret_delta = sharpe_delta = None
+    m = re.search(
+        r"\|\s*Total return\s*\|\s*([\d.]+)\s*\|\s*\*\*([\d.]+)\*\*\s*\|\s*([+-]?[\d.]+)\s*pp",
+        text,
+    )
+    if m:
+        try:
+            ret_delta = float(m.group(3))
+        except ValueError:
+            pass
+    m = re.search(
+        r"\|\s*Sharpe \(daily equity\)\s*\|\s*[\d.]+\s*\|\s*\*\*[\d.]+\*\*\s*\|\s*([+-]?[\d.]+)",
+        text,
+    )
+    if m:
+        try:
+            sharpe_delta = float(m.group(1))
+        except ValueError:
+            pass
+    return ret_delta, sharpe_delta
+
+
+def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> NyseEntryQuality:
+    nq = NyseEntryQuality(
+        fixes_enabled=_env_bool("PAPER_MOMENTUM_QUALITY_FIXES", "false"),
+    )
+    nq.sim_365_return_delta_pp, nq.sim_365_sharpe_delta = _parse_nyse_sim_highlights()
+
+    if journal.empty or "event" not in journal.columns:
+        nq.notes.append("No journal — NYSE hour stats unavailable; see intraday research memo.")
+        return nq
+
+    df = journal[journal["timestamp"] >= cutoff].copy()
+    ev = df["event"].astype(str).str.lower()
+    exits = df[ev.isin(TRADE_EVENTS)]
+    if "sleeve" in exits.columns:
+        nyse = exits[exits["sleeve"].astype(str).str.lower() == "nyse"]
+    else:
+        nyse = exits.iloc[0:0]
+    nq.journal_exits = int(len(nyse))
+    if nq.journal_exits == 0:
+        nq.notes.append("No NYSE closed trades in 7d window.")
+        nq.notes.append(
+            "`entry_hour` populates on exits after quality-fixes deploy — journal may be sparse."
+        )
+        return nq
+
+    open_pnls: list[float] = []
+    midday_pnls: list[float] = []
+    for _, row in nyse.iterrows():
+        eh = row.get("entry_hour", "")
+        if pd.notna(eh) and str(eh).strip():
+            nq.with_entry_hour += 1
+        hour = _hour_from_entry_hour(str(eh) if pd.notna(eh) else "")
+        pnl = _extract_pnl(str(row.get("notes") or ""))
+        if hour is not None and 9 <= hour < 10:
+            nq.open_chase_trades += 1
+            if pnl is not None:
+                open_pnls.append(pnl)
+        elif hour is not None and 12 <= hour < 14:
+            nq.midday_trades += 1
+            if pnl is not None:
+                midday_pnls.append(pnl)
+
+    if open_pnls:
+        nq.open_chase_avg_pnl = float(np.mean(open_pnls))
+        nq.open_chase_win_rate = 100.0 * sum(1 for p in open_pnls if p > 0) / len(open_pnls)
+    if midday_pnls:
+        nq.midday_avg_pnl = float(np.mean(midday_pnls))
+        nq.midday_win_rate = 100.0 * sum(1 for p in midday_pnls if p > 0) / len(midday_pnls)
+    if nq.with_entry_hour == 0:
+        nq.notes.append(
+            "No `entry_hour` on NYSE exits yet — hour buckets empty until post-deploy closes."
+        )
+    return nq
 
 
 def collect_performance() -> tuple[PerfSummary, list[dict], dict | None]:
@@ -831,57 +1031,61 @@ def decide_recommendation(
     baseline: BacktestMetrics,
     proposed: BacktestMetrics,
     goals: GoalsStatus,
-) -> tuple[str, str]:
+    hypothesis: Hypothesis,
+) -> tuple[Decision, str, str]:
+    """Return (decision, detail_reasoning, one_sentence_rationale)."""
     if not baseline.ok or not proposed.ok:
+        detail = (
+            f"Controlled experiment incomplete (baseline_ok={baseline.ok}, "
+            f"proposed_ok={proposed.ok}; {baseline.error or '—'} | {proposed.error or '—'})."
+        )
         return (
-            "NEEDS MORE DATA",
-            "Controlled experiment incomplete — one or both 90d backtests failed to parse "
-            f"(baseline_ok={baseline.ok}, proposed_ok={proposed.ok}; "
-            f"{baseline.error or '—'} | {proposed.error or '—'}). "
-            "No parameter change without a valid A/B table.",
+            "HOLD",
+            detail,
+            "90d A/B incomplete; no paper parameter change without a valid experiment.",
         )
 
     ret_delta = (proposed.return_pct or 0) - (baseline.return_pct or 0)
     sharpe_delta = (proposed.sharpe or 0) - (baseline.sharpe or 0)
     base_dd = baseline.dd_magnitude or 0.0
     prop_dd = proposed.dd_magnitude or 0.0
-    dd_mag_delta = prop_dd - base_dd  # positive = worse drawdown
+    dd_mag_delta = prop_dd - base_dd
 
     improved = sharpe_delta > 0.05 and ret_delta >= -0.5 and dd_mag_delta <= 0.5
     worsened = sharpe_delta < -0.05 or (ret_delta < -1.0 and dd_mag_delta > 0.25)
 
     caveats = []
     if summary.quality.grade == "C":
-        caveats.append("live 7d data grade C — lean on A/B, not mandate score")
+        caveats.append("data grade C")
     if summary.closed_trades < MIN_TRADES_GOAL:
-        caveats.append("thin closed-trade sample in live window")
+        caveats.append("thin closed-trade sample")
     if goals.label.startswith("UNRELIABLE"):
-        caveats.append("mandate score unreliable this week")
+        caveats.append("mandate unreliable")
     caveat_txt = (" Caveats: " + "; ".join(caveats) + ".") if caveats else ""
+
+    detail_base = (
+        f"ΔReturn={ret_delta:+.2f}pp, ΔSharpe={sharpe_delta:+.2f}, Δ|DD|={dd_mag_delta:+.2f}pp."
+    )
 
     if improved:
         return (
             "APPROVE",
-            "Investment Committee decision support: proposed single-factor change improves "
-            f"{BACKTEST_DAYS}d Sharpe with non-worse return/|DD| "
-            f"(ΔReturn={ret_delta:+.2f}pp, ΔSharpe={sharpe_delta:+.2f}, Δ|DD|={dd_mag_delta:+.2f}pp). "
-            "Paper-only promotion; owner must edit .env manually. Never auto-apply."
+            f"90d A/B supports single-factor change ({detail_base}) Paper-only; owner edits `.env`."
             + caveat_txt,
+            f"90d A/B supports `{hypothesis.env_line}` ({detail_base})",
         )
     if worsened:
         return (
             "REJECT",
-            "Falsified vs success criteria on controlled backtest "
-            f"(ΔReturn={ret_delta:+.2f}pp, ΔSharpe={sharpe_delta:+.2f}, Δ|DD|={dd_mag_delta:+.2f}pp). "
-            "Retain current baseline."
+            f"90d A/B falsifies `{hypothesis.env_key}` change ({detail_base}) Retain current paper config."
             + caveat_txt,
+            f"90d A/B falsifies `{hypothesis.env_line}`; keep current paper config.",
         )
     return (
-        "NEEDS MORE DATA",
-        "Effect size within noise / mixed "
-        f"(ΔReturn={ret_delta:+.2f}pp, ΔSharpe={sharpe_delta:+.2f}, Δ|DD|={dd_mag_delta:+.2f}pp). "
-        "Hold parameters; gather another week of clean closed trades."
+        "HOLD",
+        f"Effect size mixed / within noise ({detail_base}) Gather another week of clean data."
         + caveat_txt,
+        f"Mixed 90d A/B for `{hypothesis.env_key}`; no paper change this week.",
     )
 
 
@@ -897,138 +1101,341 @@ def _fmt_num(val: float | None, digits: int = 2) -> str:
     return f"{val:.{digits}f}"
 
 
+def _is_sparse_week(summary: PerfSummary) -> bool:
+    return summary.quality.grade == "C" or summary.closed_trades < MIN_TRADES_GOAL
+
+
+def _wisdom_tone(wisdom_scores: list[dict], regime: str) -> str | None:
+    reg = (regime or "").lower()
+    if "defensive" in reg or "stress" in reg or "bear" in reg:
+        return "defensive"
+    if not wisdom_scores:
+        return None
+    rets = [
+        float(r["return_pct"])
+        for r in wisdom_scores
+        if r.get("return_pct") is not None and not math.isnan(float(r["return_pct"]))
+    ]
+    if len(rets) >= 3 and sum(rets) / len(rets) < 0:
+        return "defensive"
+    if len(rets) >= 3 and sum(rets) / len(rets) > 0.15:
+        return "supportive"
+    return "neutral"
+
+
+def _key_observations(
+    summary: PerfSummary,
+    nyse_quality: NyseEntryQuality | None,
+    wisdom_scores: list[dict],
+    hb: dict | None,
+    goals: GoalsStatus,
+) -> list[str]:
+    obs: list[str] = []
+    if _is_sparse_week(summary):
+        obs.append(
+            f"Insufficient closed trades for strong mandate "
+            f"({summary.closed_trades} closes, grade {summary.quality.grade})."
+        )
+    if summary.closed_trades == 0:
+        obs.append("No closed trades in 7d — sleeve ranks use mark-to-market only.")
+    if nyse_quality is not None and nyse_quality.journal_exits == 0:
+        obs.append("No NYSE closed trades in 7d window.")
+    elif nyse_quality is not None and nyse_quality.fixes_enabled:
+        obs.append(
+            f"NYSE quality fixes on; {nyse_quality.journal_exits} exit(s) logged "
+            f"({nyse_quality.with_entry_hour} with entry_hour)."
+        )
+    for name, st in sorted(summary.sleeves.items(), key=lambda kv: abs(kv[1].contribution), reverse=True):
+        if name == "unknown" or abs(st.contribution) < 1:
+            continue
+        if st.realized_trades == 0 and st.unrealized_pnl != 0:
+            obs.append(f"{name.title()} unrealized {st.unrealized_pnl:+.0f} (MTM).")
+        elif st.realized_trades > 0:
+            obs.append(
+                f"{name.title()} realized {st.realized_pnl:+.0f} "
+                f"({st.realized_trades} closes, WR {_fmt_pct(st.win_rate, 0)})."
+            )
+        if len([o for o in obs if "unrealized" in o or "realized" in o]) >= 3:
+            break
+    tone = _wisdom_tone(wisdom_scores, summary.regime)
+    if tone == "defensive":
+        obs.append(f"Wisdom/regime tone defensive (`{summary.regime}`).")
+    elif tone == "supportive":
+        obs.append("Wisdom daily returns supportive this week.")
+    if summary.risk.period_return_pct is not None:
+        if summary.risk.period_return_pct < goals.target_return_pct:
+            obs.append(
+                f"7d return {_fmt_pct(summary.risk.period_return_pct)} below "
+                f"{goals.target_return_pct}% target."
+            )
+    if hb and hb.get("halted"):
+        obs.append("Bot halted per heartbeat — investigate before any param change.")
+    if not obs:
+        obs.append(f"Regime `{summary.regime}`; {summary.closed_trades} closed trades; grade {summary.quality.grade}.")
+    return obs[:6]
+
+
+def _sparse_monitor_rationale(hypothesis: Hypothesis, summary: PerfSummary) -> str:
+    return (
+        f"Monitor only — data too sparse (grade {summary.quality.grade}, "
+        f"{summary.closed_trades} closes); track `{hypothesis.env_line}` until grade B+ and 90d A/B."
+    )
+
+
+def _grade_criteria_lines() -> list[str]:
+    return [
+        "| Grade | Criteria | Mandate usable? |",
+        "|-------|----------|-----------------|",
+        (
+            f"| **A** | ≥{MIN_DAILY_OBS} clean days, 0 equity jumps, "
+            f"≥{MIN_TRADES_GOAL} closed trades | Yes |"
+        ),
+        (
+            f"| **B** | ≥{MIN_DAILY_OBS} days, ≤2 jumps after filter, "
+            f"trades may be sparse | Yes (cautious) |"
+        ),
+        "| **C** | Missing equity, <2 days, or noisy/unfiltered | **No** |",
+    ]
+    return [
+        "| Grade | Criteria | Mandate usable? |",
+        "|-------|----------|-----------------|",
+        (
+            f"| **A** | ≥{MIN_DAILY_OBS} clean days, 0 equity jumps, "
+            f"≥{MIN_TRADES_GOAL} closed trades | Yes |"
+        ),
+        (
+            f"| **B** | ≥{MIN_DAILY_OBS} days, ≤2 jumps after filter, "
+            f"trades may be sparse | Yes (cautious) |"
+        ),
+        "| **C** | Missing equity, <2 days, or noisy/unfiltered | **No** |",
+    ]
+
+
 def build_markdown(
     review_date: date,
     summary: PerfSummary,
     hypothesis: Hypothesis,
     baseline: BacktestMetrics,
     proposed: BacktestMetrics,
-    recommendation: str,
-    reasoning: str,
+    decision: Decision,
+    rationale: str,
+    detail: str,
     wisdom_scores: list[dict],
     hb: dict | None,
     goals: GoalsStatus,
+    nyse_quality: NyseEntryQuality | None,
+    live_paper: LivePaperDelta,
+    *,
+    monitor_only: bool = False,
 ) -> str:
+    sparse = _is_sparse_week(summary)
+    observations = _key_observations(summary, nyse_quality, wisdom_scores, hb, goals)
     r = summary.risk
     q = summary.quality
     lines: list[str] = [
-        f"# Paper Book Weekly Research Note — {review_date.isoformat()}",
+        f"# Paper Weekly Research — {review_date.isoformat()}",
         "",
-        "> Classification: Internal research / decision support. **Not** an order. "
-        "Parameter changes require owner approval. This artifact never mutates `.env` or live books.",
+        "_Paper book only. Never auto-applies `.env`. Live Profile A is read-only here._",
         "",
-        "## 0. Executive Decision",
-        f"**Recommendation: {recommendation}**",
-        f"{reasoning}",
+        "## Executive Decision",
+        f"**{decision}** — {rationale}",
         "",
-        f"Proposed line (manual only): `{hypothesis.env_line}`",
+        f"Treatment under review: `{hypothesis.env_line}`"
+        + (" · _monitor only_" if monitor_only else ""),
         "",
-        "## 1. Mandate & Success Criteria",
-        (
-            f"| Metric | Success | Failure / risk bound |\n"
-            f"|--------|---------|----------------------|\n"
-            f"| Ann. Sharpe (7d daily) | ≥ {goals.target_sharpe} | < {goals.target_sharpe} |\n"
-            f"| Max DD magnitude (7d) | ≤ {goals.max_dd_pct}% | > {goals.max_dd_pct}% |\n"
-            f"| 7d total return | ≥ {goals.target_return_pct}% | < {goals.target_return_pct}% |\n"
-            f"| Closed trades (7d) | ≥ {goals.min_trades} | < {goals.min_trades} (underpowered) |"
-        ),
-        "",
-        f"**Mandate score: {goals.label}**",
+        "## Mandate",
+        f"**Score: {goals.label}** · lookback {LOOKBACK_DAYS}d · regime `{summary.regime}`",
     ]
-    for item in goals.toward_success:
-        lines.append(f"- Toward success: {item}")
-    for item in goals.toward_failure:
-        lines.append(f"- Toward failure: {item}")
+    if sparse:
+        lines.append(
+            f"_Insufficient closed trades for strong mandate "
+            f"({summary.closed_trades}/{MIN_TRADES_GOAL} closes, grade {q.grade}) — "
+            f"use mark-to-market attribution below._"
+        )
+    lines.append("")
+    lines.append(
+        (
+            f"| Target | Threshold | Actual |\n"
+            f"|--------|-----------|--------|\n"
+            f"| Ann. Sharpe | ≥ {goals.target_sharpe} | {_fmt_num(r.sharpe)} |\n"
+            f"| Max DD | ≤ {goals.max_dd_pct}% | {_fmt_pct(r.max_dd_pct)} |\n"
+            f"| 7d return | ≥ {goals.target_return_pct}% | {_fmt_pct(r.period_return_pct)} |\n"
+            f"| Closed trades | ≥ {goals.min_trades} | {summary.closed_trades} |"
+        )
+    )
+    hits = goals.toward_success[:3]
+    misses = goals.toward_failure[:3]
+    if hits:
+        lines.append("")
+        lines.append("Pass: " + "; ".join(hits))
+    if misses:
+        lines.append("Miss: " + "; ".join(misses))
 
+    lines.extend(["", "## Data Quality", f"**Grade {q.grade}** · source `{q.equity_source}`"])
+    lines.extend(_grade_criteria_lines())
     lines.extend(
         [
             "",
-            "## 2. Data Quality & Methodology",
-            f"- Grade: **{q.grade}** | Equity source: `{q.equity_source}`",
-            f"- Clean daily obs: {q.rows_clean} (raw daily points considered: {q.rows_raw})",
-            f"- Discontinuities removed: {q.jumps_removed} "
-            f"(threshold jump≥{EQUITY_JUMP_PCT:.0%} or ratio≥{EQUITY_JUMP_RATIO:g})",
-            "- Returns: end-of-day equity from cycle marks; rf≈0 for short-horizon Sharpe",
-            f"- Sharpe scale: √252; lookback: {LOOKBACK_DAYS}d live / {BACKTEST_DAYS}d experiment",
-            "- Scientific rule: **one** exogenous parameter change per review",
+            (
+                f"Observations: {q.rows_clean} clean / {q.rows_raw} raw · "
+                f"jumps removed: {q.jumps_removed} · "
+                f"method: EOD equity, √252 Sharpe, single-factor rule"
+            ),
         ]
     )
-    for n in q.notes:
-        lines.append(f"- QC: {n}")
+    for n in q.notes[:3]:
+        lines.append(f"- {n}")
 
     lines.extend(
         [
             "",
-            "## 3. Performance (cleaned 7d)",
+            "## Performance (7d, cleaned)",
             (
-                f"| Metric | Value |\n|--------|-------|\n"
-                f"| Start equity | {_fmt_num(r.start_equity, 2)} |\n"
-                f"| End equity | {_fmt_num(r.end_equity, 2)} |\n"
-                f"| Period return | {_fmt_pct(r.period_return_pct)} |\n"
-                f"| Ann. volatility | {_fmt_pct(r.ann_vol_pct)} |\n"
-                f"| Sharpe (ann.) | {_fmt_num(r.sharpe)} |\n"
-                f"| Sortino (ann.) | {_fmt_num(r.sortino)} |\n"
-                f"| Calmar (period ret / |DD|) | {_fmt_num(r.calmar)} |\n"
-                f"| Max DD (magnitude) | {_fmt_pct(r.max_dd_pct)} |\n"
-                f"| Daily hit rate | {_fmt_pct(r.daily_win_rate_pct, 1)} |\n"
-                f"| Profit factor (daily) | {_fmt_num(r.profit_factor)} |\n"
-                f"| Skew / excess kurtosis | {_fmt_num(r.skew)} / {_fmt_num(r.kurtosis)} |\n"
+                f"| | |\n|--|--|\n"
+                f"| Equity | {_fmt_num(r.start_equity, 0)} → {_fmt_num(r.end_equity, 0)} |\n"
+                f"| Return | {_fmt_pct(r.period_return_pct)} |\n"
+                f"| Sharpe / Sortino | {_fmt_num(r.sharpe)} / {_fmt_num(r.sortino)} |\n"
+                f"| Max DD | {_fmt_pct(r.max_dd_pct)} |\n"
                 f"| Closed trades | {summary.closed_trades} "
-                f"(WR {_fmt_pct(summary.closed_win_rate, 1)}, "
-                f"expectancy {_fmt_num(summary.expectancy)}, "
-                f"PF {_fmt_num(summary.profit_factor_trades)}) |\n"
-                f"| Trades / day | {summary.trades_per_day:.2f} |\n"
-                f"| Regime | {summary.regime} |"
+                f"(WR {_fmt_pct(summary.closed_win_rate, 0)}, exp {_fmt_num(summary.expectancy)}) |\n"
+                f"| Daily hit rate | {_fmt_pct(r.daily_win_rate_pct, 0)} |"
             ),
         ]
     )
-    if hb:
-        lines.append(
-            f"- Heartbeat: equity={hb.get('equity')} halted={hb.get('halted')} "
-            f"crypto_vol_only={hb.get('crypto_vol_only')}"
+    lines.append("")
+    lines.append("**Key Observations**")
+    for ob in observations:
+        lines.append(f"- {ob}")
+
+    try:
+        from modules.markov_regime import format_weekly_hmm_section
+
+        lines.append("")
+        lines.extend(format_weekly_hmm_section())
+    except Exception:
+        pass
+
+    if sparse:
+        lines.extend(
+            [
+                "",
+                "## Sleeve Attribution (mark-to-market)",
+                "_Realized closes sparse — contrib = realized + unrealized from heartbeat._",
+                f"Best **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.0f}) · "
+                f"Worst **{summary.worst_sleeve}** ({summary.worst_sleeve_pnl:+.0f})",
+                "",
+                "| Sleeve | Realized | Unrealized | Contrib | Cls | Src |",
+                "|--------|----------|------------|---------|-----|-----|",
+            ]
         )
+        for name, st in sorted(summary.sleeves.items(), key=lambda kv: kv[1].contribution, reverse=True):
+            if name == "unknown" and st.contribution == 0:
+                continue
+            lines.append(
+                f"| {name} | {st.realized_pnl:+.0f} | {st.unrealized_pnl:+.0f} | "
+                f"{st.contribution:+.0f} | {st.realized_trades} | {st.source} |"
+            )
+    else:
+        lines.extend(
+            [
+                "",
+                "## Sleeve Attribution",
+                f"Best **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.0f}) · "
+                f"Worst **{summary.worst_sleeve}** ({summary.worst_sleeve_pnl:+.0f})",
+                "",
+                "| Sleeve | Cls | Win% | Contrib | Src |",
+                "|--------|-----|------|---------|-----|",
+            ]
+        )
+        for name, st in sorted(summary.sleeves.items(), key=lambda kv: kv[1].contribution, reverse=True):
+            if name == "unknown" and st.contribution == 0:
+                continue
+            lines.append(
+                f"| {name} | {st.realized_trades} | {_fmt_pct(st.win_rate, 0)} | "
+                f"{st.contribution:+.0f} | {st.source} |"
+            )
+
+    if _nyse_quality_section_enabled() and nyse_quality is not None:
+        nq = nyse_quality
+        lines.extend(
+            [
+                "",
+                "## NYSE Entry Quality",
+                (
+                    f"`PAPER_MOMENTUM_QUALITY_FIXES`="
+                    f"{'**on**' if nq.fixes_enabled else 'off'} · "
+                    f"7d NYSE exits: {nq.journal_exits} "
+                    f"({nq.with_entry_hour} with `entry_hour`)"
+                ),
+                "",
+                "| Window (ET) | Trades | Win% | Avg PnL |",
+                "|-------------|--------|------|---------|",
+                (
+                    f"| 9:30–10:00 open-chase | {nq.open_chase_trades} | "
+                    f"{_fmt_pct(nq.open_chase_win_rate, 0)} | {_fmt_num(nq.open_chase_avg_pnl)} |"
+                ),
+                (
+                    f"| 12:00–14:00 midday | {nq.midday_trades} | "
+                    f"{_fmt_pct(nq.midday_win_rate, 0)} | {_fmt_num(nq.midday_avg_pnl)} |"
+                ),
+            ]
+        )
+        if nq.sim_365_return_delta_pp is not None or nq.sim_365_sharpe_delta is not None:
+            lines.append(
+                f"365d intraday sim (memo): Δreturn {_fmt_num(nq.sim_365_return_delta_pp)} pp · "
+                f"ΔSharpe {_fmt_num(nq.sim_365_sharpe_delta)}"
+            )
+        for n in nq.notes[:2]:
+            lines.append(f"- {n}")
 
     lines.extend(
         [
             "",
-            "## 4. Sleeve Attribution",
+            "## Live vs Paper Delta",
+            "_Read-only. Does not modify live._",
+            "",
             (
-                f"Best: **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.2f}) | "
-                f"Worst: **{summary.worst_sleeve}** ({summary.worst_sleeve_pnl:+.2f})"
+                f"| Book | 7d return | Sharpe | Equity | Source |\n"
+                f"|------|-----------|--------|--------|--------|\n"
+                f"| Paper | {_fmt_pct(live_paper.paper_return_pct)} | "
+                f"{_fmt_num(live_paper.paper_sharpe)} | "
+                f"{_fmt_num(live_paper.paper_equity, 0)} | {live_paper.paper_source} |\n"
+                f"| Live | {_fmt_pct(live_paper.live_return_pct)} | "
+                f"{_fmt_num(live_paper.live_sharpe)} | "
+                f"{_fmt_num(live_paper.live_equity, 0)} | {live_paper.live_source} |"
             ),
-            "",
-            "| Sleeve | Source | Closed | Win% | Realized | Unrealized | Positions | Contrib |",
-            "|--------|--------|--------|------|----------|------------|-----------|---------|",
         ]
     )
-    for name, st in sorted(summary.sleeves.items(), key=lambda kv: kv[1].contribution):
+    if live_paper.delta_pp is not None:
+        lines.append(f"**Paper − Live return:** {live_paper.delta_pp:+.2f} pp")
+    for n in live_paper.notes[:2]:
+        lines.append(f"- {n}")
+
+    lines.extend(
+        [
+            "",
+            "## Hypothesis (single factor)",
+            f"**Proposed change:** `{hypothesis.env_key}={hypothesis.proposed_value}` "
+            f"(current `{hypothesis.current_value}`)",
+            f"**Rationale:** {hypothesis.what}",
+            f"**Mechanism:** {hypothesis.mechanism}",
+        ]
+    )
+    if monitor_only:
         lines.append(
-            f"| {name} | {st.source} | {st.realized_trades} | "
-            f"{_fmt_pct(st.win_rate, 1)} | {st.realized_pnl:+.2f} | "
-            f"{st.unrealized_pnl:+.2f} | {st.positions} | {st.contribution:+.2f} |"
+            "**Status: Data too sparse — monitor only.** "
+            "Do not apply without grade B+ data and a passing 90d A/B."
         )
+    else:
+        lines.append(f"**Pass (90d A/B):** {hypothesis.expected_outcome}")
+        lines.append(f"**Fail:** {hypothesis.falsification}")
 
     lines.extend(
         [
             "",
-            "## 5. Single-Factor Hypothesis (Scientific Method)",
-            f"**H1 (what):** {hypothesis.what}",
-            f"**Rationale (why):** {hypothesis.why}",
-            f"**Mechanism (treatment):** {hypothesis.mechanism}",
-            f"**Success definition:** {hypothesis.expected_outcome}",
-            f"**Falsification:** {hypothesis.falsification}",
-            "**Confounders / threats to validity:**",
-        ]
-    )
-    for c in hypothesis.confounders:
-        lines.append(f"- {c}")
-
-    lines.extend(
-        [
-            "",
-            "## 6. Controlled Experiment (90d paper-aggressive A/B)",
-            "| Metric | Baseline (current) | Treatment (proposed) | Δ |",
-            "|--------|--------------------|----------------------|---|",
+            f"## Controlled Experiment ({BACKTEST_DAYS}d paper-aggressive A/B)",
+            "| Metric | Baseline | Treatment | Δ |",
+            "|--------|----------|-----------|---|",
             (
                 f"| Return | {_fmt_pct(baseline.return_pct)} | {_fmt_pct(proposed.return_pct)} | "
                 f"{_fmt_num((proposed.return_pct or 0) - (baseline.return_pct or 0) if baseline.ok and proposed.ok else None)} pp |"
@@ -1038,59 +1445,60 @@ def build_markdown(
                 f"{_fmt_num((proposed.sharpe or 0) - (baseline.sharpe or 0) if baseline.ok and proposed.ok else None)} |"
             ),
             (
-                f"| Sortino | {_fmt_num(baseline.sortino)} | {_fmt_num(proposed.sortino)} | "
-                f"{_fmt_num((proposed.sortino or 0) - (baseline.sortino or 0) if baseline.sortino is not None and proposed.sortino is not None else None)} |"
-            ),
-            (
-                f"| Calmar | {_fmt_num(baseline.calmar)} | {_fmt_num(proposed.calmar)} | "
-                f"{_fmt_num((proposed.calmar or 0) - (baseline.calmar or 0) if baseline.calmar is not None and proposed.calmar is not None else None)} |"
-            ),
-            (
                 f"| Max DD | {_fmt_pct(baseline.max_dd_pct)} | {_fmt_pct(proposed.max_dd_pct)} | "
-                f"|DD| Δ {_fmt_num((proposed.dd_magnitude or 0) - (baseline.dd_magnitude or 0) if baseline.ok and proposed.ok else None)} pp |"
-            ),
-            (
-                f"| Daily win rate | {_fmt_pct(baseline.win_rate_pct, 1)} | "
-                f"{_fmt_pct(proposed.win_rate_pct, 1)} | — |"
+                f"{_fmt_num((proposed.dd_magnitude or 0) - (baseline.dd_magnitude or 0) if baseline.ok and proposed.ok else None)} pp |"
             ),
         ]
     )
     if not baseline.ok:
-        lines.append(f"- Baseline error: {baseline.error}")
+        lines.append(f"_Baseline: {baseline.error}_")
     if not proposed.ok:
-        lines.append(f"- Treatment error: {proposed.error}")
+        lines.append(f"_Treatment: {proposed.error}_")
 
     lines.extend(
         [
             "",
-            "## 7. Investment Committee Recommendation",
-            f"**{recommendation}**",
-            reasoning,
+            "## Recommendation",
+            f"**{decision}** — {detail}",
             "",
-            "## 8. Implementation (owner-only)",
-            "If APPROVE, add/change **paper** `.env` only:",
-            f"```",
-            f"{hypothesis.env_line}",
-            f"```",
-            "Do **not** apply to live. Restart paper bot after edit. Re-evaluate next Saturday.",
-            "",
-            "## Appendix",
+            "## Implementation (paper only)",
         ]
     )
-    if wisdom_scores:
-        lines.append("### Wisdom corroboration")
-        for row in wisdom_scores[-5:]:
-            lines.append(
-                f"- {row.get('date')}: ret={row.get('return_pct')} "
-                f"sharpe={row.get('sharpe')} src={row.get('source')}"
-            )
-    if summary.notes:
-        lines.append("### Notes")
-        for n in summary.notes:
-            lines.append(f"- {n}")
-    lines.append("")
-    lines.append("<!-- advisory only; never auto-apply -->")
-    lines.append("")
+    if monitor_only:
+        lines.extend(
+            [
+                "**Monitor only** — no `.env` change this week.",
+                f"- Watch: `{hypothesis.env_line}`",
+                "- Promote only after grade B+, ≥5 closed trades, and 90d A/B APPROVE.",
+                "- Do **not** copy to live.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "Apply **only** to the paper book `.env` if APPROVE:",
+                "```",
+                hypothesis.env_line,
+                "```",
+                "Do **not** copy to live. Restart paper bot. Re-check next Saturday.",
+            ]
+        )
+
+    if wisdom_scores or summary.notes:
+        lines.extend(["", "## Appendix"])
+        if wisdom_scores:
+            lines.append("**Wisdom (last 3):**")
+            for row in wisdom_scores[-3:]:
+                lines.append(
+                    f"- {row.get('date')}: ret={row.get('return_pct')} "
+                    f"sharpe={row.get('sharpe')}"
+                )
+        if summary.notes:
+            lines.append("**Notes:**")
+            for n in summary.notes[:4]:
+                lines.append(f"- {n}")
+
+    lines.extend(["", "<!-- advisory only; never auto-apply -->", ""])
     return "\n".join(lines)
 
 
@@ -1123,7 +1531,7 @@ def notify_owner(subject: str, body: str, out_path: Path | None = None) -> bool:
 
         path_line = f"\nFile: {out_path}" if out_path else ""
         # Telegram length cap — executive section only.
-        exec_end = body.find("## 1. Mandate")
+        exec_end = body.find("## Mandate")
         snippet = body[: exec_end if exec_end > 0 else 2800]
         if len(snippet) > 3200:
             snippet = snippet[:3000] + "\n…(truncated)"
@@ -1181,6 +1589,15 @@ def main(argv: list[str] | None = None) -> int:
     print("[weekly_review] 1/5 collect + QC", flush=True)
     summary, wisdom_scores, hb = collect_performance()
     goals = score_goals(summary)
+    cutoff = datetime.now() - timedelta(days=LOOKBACK_DAYS)
+    journal, _ = _load_best_paper_journal()
+    nyse_quality = _collect_nyse_entry_quality(journal, cutoff) if _nyse_quality_section_enabled() else None
+    live_paper = _collect_live_paper_delta()
+    live_paper.paper_return_pct = summary.risk.period_return_pct
+    live_paper.paper_sharpe = summary.risk.sharpe
+    live_paper.paper_equity = summary.risk.end_equity
+    if summary.quality.equity_source != "none":
+        live_paper.paper_source = summary.quality.equity_source
     print(
         f"[weekly_review] Data grade {summary.quality.grade} | Mandate {goals.label}",
         flush=True,
@@ -1190,15 +1607,19 @@ def main(argv: list[str] | None = None) -> int:
     hypothesis = form_hypothesis(summary, hb)
     print(f"[weekly_review] Treatment: {hypothesis.env_line}", flush=True)
 
+    monitor_only = _is_sparse_week(summary)
+
     if args.skip_backtest:
         print("[weekly_review] 3/5 backtest SKIPPED", flush=True)
         baseline = BacktestMetrics(ok=False, error="skipped")
         proposed = BacktestMetrics(ok=False, error="skipped")
-        recommendation = "NEEDS MORE DATA"
-        reasoning = (
-            "Backtests skipped (--skip-backtest). This is a data/methodology preview only; "
-            "no IC approval without a completed 90d A/B table."
-        )
+        decision = "HOLD"
+        if monitor_only:
+            rationale = _sparse_monitor_rationale(hypothesis, summary)
+            detail = "Backtest skipped; sparse week — monitor proposed lever, no promotion."
+        else:
+            detail = "Backtests skipped (--skip-backtest); format preview only."
+            rationale = "No 90d A/B run; wait for full Saturday pipeline before any paper change."
     else:
         print("[weekly_review] 3/5 controlled 90d A/B", flush=True)
         baseline = run_backtest("baseline")
@@ -1206,7 +1627,17 @@ def main(argv: list[str] | None = None) -> int:
             "treatment",
             env_overrides={hypothesis.env_key: hypothesis.proposed_value},
         )
-        recommendation, reasoning = decide_recommendation(summary, baseline, proposed, goals)
+        decision, detail, rationale = decide_recommendation(
+            summary, baseline, proposed, goals, hypothesis
+        )
+        if monitor_only:
+            if decision == "APPROVE":
+                decision = "HOLD"
+                detail = (
+                    f"90d A/B positive but week sparse (grade {summary.quality.grade}, "
+                    f"{summary.closed_trades} closes) — monitor only."
+                )
+            rationale = _sparse_monitor_rationale(hypothesis, summary)
 
     md = build_markdown(
         review_date,
@@ -1214,11 +1645,15 @@ def main(argv: list[str] | None = None) -> int:
         hypothesis,
         baseline,
         proposed,
-        recommendation,
-        reasoning,
+        decision,
+        rationale,
+        detail,
         wisdom_scores,
         hb,
         goals,
+        nyse_quality,
+        live_paper,
+        monitor_only=monitor_only,
     )
 
     print(f"[weekly_review] 4/5 write {out_path.name}", flush=True)
@@ -1234,8 +1669,11 @@ def main(argv: list[str] | None = None) -> int:
     if want_open:
         _open_report(out_path)
 
-    print(f"[weekly_review] Done → {recommendation}", flush=True)
-    print(md)
+    print(f"[weekly_review] Done -> {decision}", flush=True)
+    try:
+        print(md)
+    except UnicodeEncodeError:
+        sys.stdout.buffer.write((md + "\n").encode("utf-8", errors="replace"))
     return 0
 
 

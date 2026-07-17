@@ -54,6 +54,8 @@ python -m venv .venv
 python scripts\account\preflight.py
 ```
 
+**Owner PC (Python 3.11, recommended):** shared venv at repo root — one-time `scripts\setup_venv.bat` creates `C:\Users\Owner\PythonTrading\venv311` and installs `requirements.txt`. Daily: `scripts\activate_venv.bat` (activate + `cd stock-bot`).
+
 ### Daily usage (recommended)
 
 **Double-click once each morning** (before market open):
@@ -109,8 +111,12 @@ Portal heartbeats and PID files live under `data/portal/users/<username>/books/a
 
 ```powershell
 cd C:\Users\Owner\PythonTrading\stock-bot
-# Manual reset (same as daily launcher):
+# Monday prep (lock v1.5, verify stack, restart both books + dashboard):
+Lock_v15.bat
 python scripts\owner_reset.py
+# Or: python scripts\full_system_verify.py  then  Start_Bot_and_Dashboard.bat
+# Overnight autonomous (paper restart + 9:00 AM ET Telegram):
+#   Start_Autonomous.bat
 ```
 
 **Config:** edit **`stock-bot/.env`** and per-book portal `.env` files under `data/portal/users/`. `dist/.env` is only a fallback copy.
@@ -149,7 +155,61 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 **Two profiles (do not mix on the same book without intent):**
 
 - **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
-- **Profile B — paper v1.4** (`paper_aggressive` / Realistic Research): **locked default** — dynamic core 30–50%, **NYSE momentum + stat arb** (10–14 pairs, RR 1.6), **protective + sector shorts** (8–15%, RHYME_E waiver), tail risk; vol overlay + options; overlap/chunk/co-fire **on**; weekly Telegram + Bot Health Score. See [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
+- **Profile B — paper v1.5** (`paper_aggressive` / Realistic Research): **locked default** — see [What's New in v1.5](#whats-new-in-v15) and [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
+
+---
+
+## What's New in v1.5
+
+**Realistic Research v1.5.3** is the official locked paper default (`REALISTIC_RESEARCH_VERSION = "1.5.3"`). Startup banners show **`v1.5.3 — Smart Dynamic VTI Locked`**; run **`Lock_v15.bat`** for the Monday-ready sign-off banner.
+
+| Layer | v1.5 default |
+|-------|----------------|
+| **RVOL scanner** | Min **2.0×** relative volume; momentum boost @ **2.5×** |
+| **ORB scanner** | **30m** opening range; RVOL ≥ **2.0×** for upside breakouts |
+| **Catalyst scoring** | Composite news/insider/RVOL/ORB score; min **65**, boost @ **70** |
+| **ATR sizing** | **14d** ATR, **2.0×** stop, **4%** per-trade cap |
+| **Conviction sizing** | **0.4×–1.8×** notional by signal strength (rolling metrics) |
+| **Multi-timeframe** | 5m / daily / weekly alignment ≥ **0.65** boosts entries |
+| **Exit optimization** | Partial @ **1R**, dynamic trail (**50%** arm / **35%** pullback), max **35** bars |
+| **Correlation guard** | Scale down when portfolio corr > **0.65** (floor **0.60×**) |
+| **Insider boosts** | SEC Form 4 clusters → NYSE momentum / stat arb / short context |
+| **Tuned shorts** | Protective **8–18%** gross, RR **1.6:1**, RHYME_E waiver, sector ETF shorts |
+| **Stat arb** | **8–12** pairs (expand when low no_room), corr ≥ **0.68**, coint **p &lt; 0.12**, RR **1.6:1**, trail **50%/35%**, hold 35b, 7% cap |
+| **Dynamic core** | **Smart Dynamic VTI 35–75%** (NYSE/metals, insider, bubble, regime) |
+| **Tail risk** | Vol ceiling, DD tiers, RHYME_B sizing cuts, per-name **8%** cap |
+| **Bot Health Score** | 0–100 dashboard pill; strong strategies boost score |
+| **Strategy performance** | Per-strategy ratings (30d/90d/all-time) in dashboard + weekly Telegram |
+| **Historical news** | Backtest headline proxy (`modules/historical_news.py`) |
+| **Full verify** | `Lock_v15.bat` or `python scripts/full_system_verify.py` — 12 sections, Monday-ready banner |
+
+**Carried from v1.4:** overlap/chunk/co-fire, vol overlay, options income, weekly MD/HTML + Friday Telegram, insider monitor.
+
+---
+
+## Monday Ready (daily routine)
+
+Use this sequence before market open (or Sunday night for autonomous overnight):
+
+| Step | Command | Purpose |
+|------|---------|---------|
+| 0 | `Lock_v15.bat` | Cancel stray backtests + verify v1.5 lock |
+| 1 | `python scripts\full_system_verify.py` | 12-section PASS/WARN/FAIL + v1.5 lock banner |
+| 2 | `python scripts\owner_reset.py` | Stop orphans, restart live + paper + dashboard |
+| 3 | `python status.py` | Equity, regime, heartbeat age, stack flags |
+
+**Recommended overnight (paper):** double-click **`Start_Autonomous.bat`** — restarts paper bot, runs verify, saves pre-market report, sends **9:00 AM ET** Telegram (`logs\autostart_paper.log`).
+
+**Morning manual alternative:** `Start_Bot_and_Dashboard.bat` (both books + dashboard).
+
+```powershell
+cd C:\Users\Owner\PythonTrading\stock-bot
+python scripts\full_system_verify.py
+python scripts\owner_reset.py
+python status.py
+# Overnight autonomous (recommended for paper):
+Start_Autonomous.bat
+```
 
 ---
 
@@ -180,8 +240,10 @@ Operational hardening for 24/7 live + paper on one PC (no strategy changes on Pr
 | **Daily breaker false trips** | `modules/trading_safety.py` | Detects **anchor contamination** (live ~$300 vs paper ~$98k in `trading_safety_state.json`), resets stale anchors, auto-clears trips when loss is below limit; live session re-primes on startup |
 | **Stat-arb reconcile** | `modules/stat_arb_sleeve.py` | Startup reconcile ignores VTI/SPY/NYSE longs and crypto when sleeves disabled; purges stale book rows; resolves orphan pair registries — no spurious orphan warnings on Profile A |
 | **Dashboard restart** | `dashboard_app.py`, `modules/portal_bot.py` | **Restart Bot** stops cleanly, clears orphan processes, restarts live + paper when keys configured (positions not closed) |
+| **Dashboard refresh bot** | `dashboard_app.py`, `modules/portal_bot.py` | **Refresh Bot** — confirm → stop book → `fetch_data.py --daily` → restart (progress in status bar) |
 | **Heartbeat reporting** | `run_all.py`, `status.py`, `status_metrics.py` | Heartbeats include `last_cycle_error`; `status.py` shows age, **STARTING** / **WARMING UP** / **STALE**, scan phase; prefers fresh Alpaca equity over stale heartbeat |
 | **Crypto vol gate** | `modules/crypto_vol_gate.py` | Centralized allow/deny with regime pause + vol-only check; optional SpaceX narrative override; status surfaces gate reason |
+| **Crypto vol sleeve (paper)** | `modules/crypto_vol_sleeve.py` | Mean-reversion on **RENDER + SOL** only (was 5-coin); backtest: `python backtest_crypto_vol.py --render-only` |
 | **Anchor contamination guard** | `modules/trading_safety.py` | Live open-equity anchor capped vs current equity; paper anchor rejects live-scale values on paper book |
 
 ### Verify / test commands
@@ -252,9 +314,82 @@ These are informational warnings or optional paths — **no action required** fo
 | **Kraken xStocks API off** | Startup banner: SPY/NYSE will not auto-trade on Kraken | Alpaca-only live is fine; set `KRAKEN_AUTOPILOT_ENABLED=false` to silence Kraken paths |
 | **Kraken autopilot vs Alpaca** | Preflight warns when both live | Recommended: Alpaca-only for ~$300 live; Kraken is separate `scripts/exchange/` stack |
 | **Thinking engine calibration** | Heuristic fallback common on first cycles | Keep off on live; use `--simulate-live-thinking` before enabling |
-| **Universe screener age** | `status.py` universe line &gt; 7 days | Run `python scripts/analysis/universe_screener.py` on paper book |
+| **Universe screener age** | `status.py` universe line &gt; 7 days | Run `python scripts/analysis/universe_screener.py --force` on paper book — see [Dynamic universe](#dynamic-nyse-universe-paper-only) |
 | **Legacy Streamlit dashboard** | `dashboard.py` still works | CustomTkinter `dashboard_app.py` is primary; Streamlit is backup |
 | **Log file lock on Windows** | `PermissionError` rotating `run_all.log` | Duplicate bot process — use **Restart Bot** to dedupe |
+
+---
+
+## Dynamic NYSE universe (paper only)
+
+**Live Profile A** always uses the **fixed** NYSE candidate list (~28 tickers). **Paper** can union that list with the weekly screener for a larger momentum pool.
+
+| Mode | Env | NYSE candidates | Where |
+|------|-----|-----------------|-------|
+| **Fixed only** | `USE_DYNAMIC_UNIVERSE=false` (default) | Config `UNIVERSE` minus ETFs/crypto | Live + paper |
+| **Combined** | `USE_DYNAMIC_UNIVERSE=true` | Fixed ∪ screener **top 75** (~**103** tickers) | **Paper only** — live ignores screener |
+
+Paper startup prints universe size, e.g. `NYSE universe: 103 tickers (dynamic+fixed)` (`run_paper_bot.py`).
+
+### Universe screener
+
+`scripts/analysis/universe_screener.py` ranks NYSE/NASDAQ names and writes `data/screener_universe.json`. Filters: **$5B** market cap, **$100M** revenue (when fundamentals fetch is on), **smoothed momentum** (avg 20d + 60d returns), **sector cap** (max 15 per GICS sector in top 75), plus liquidity/ATR gates. yfinance **rate limiting**: 45s backoff + retry; skipped tickers logged to `data/screener_skipped.txt`.
+
+```powershell
+python scripts/analysis/universe_screener.py --force          # refresh JSON + prefetch bars
+python scripts/analysis/universe_screener.py --compare        # vs fixed get_nyse_universe()
+python scripts/analysis/universe_screener.py --force --compare
+```
+
+`PAPER_DYNAMIC_UNIVERSE_ENABLED=true` (default on paper chase) enables the weekly screener path; **`USE_DYNAMIC_UNIVERSE=true`** is the separate switch for the **combined** fixed+screener pool.
+
+### Backtest A/B
+
+```powershell
+python backtester.py --days 365 --compare-universe   # Fixed vs Screener vs Combined (Profile A stack)
+```
+
+### Research only (not wired to bot)
+
+```powershell
+python scripts/research/backtest_sector_rotation.py --days 730   # weekly sector-ETF rotation vs VTI
+```
+
+### NYSE momentum entry quality (paper only)
+
+Gated by **`PAPER_MOMENTUM_QUALITY_FIXES=true`** in the paper book `.env` (default `false` in repo template). **Live Profile A is unchanged.** Implemented in `modules/pipeline_strategies.py` + exit logging in `modules/position_exits.py`.
+
+| Filter | Behavior |
+|--------|----------|
+| **Open cooldown** | No new NYSE momentum entries **9:30–10:00 ET** (blocks open chase / fade setups) |
+| **Gap filter** | Skip entry if today’s open is **>2%** above prior close |
+| **One entry / day** | At most one NYSE momentum buy per symbol per calendar day (journal + in-memory) |
+| **Time-of-day bias** | **Prefer 12:00–14:00 ET**: +momentum rank boost; RSI allowed up to **72** in window vs **70** outside (does not block other hours) |
+| **Exit journal** | NYSE exits log **`exit_reason`** (`stop_loss`, `take_profit`, `max_hold`, `atr_stop`, …) and **`entry_hour`** (ET bucket) to `paper_journal.csv` / `paper_chase_journal.csv` |
+
+```powershell
+# Paper book .env (portal user) — not live
+PAPER_MOMENTUM_QUALITY_FIXES=true
+```
+
+Restart `run_paper_bot.py` or portal **Restart Bot** after enabling.
+
+**Daily `backtester.py` cannot replay intraday rules** (open cooldown, hour-of-day). Use the intraday research script below to validate those filters.
+
+### Intraday NYSE backtest (research only)
+
+`scripts/research/backtest_intraday.py` — standalone **5-minute** simulator (does **not** modify `backtester.py`). Fetches Alpaca paper market data (`PAPER_APCA_*`), caches bars under `data/intraday_cache/`, uses `config.get_nyse_universe()` (set **`USE_DYNAMIC_UNIVERSE=true`** via paper `.env` for ~103 tickers).
+
+```powershell
+# Point at paper book keys + combined universe
+$env:PYTHONTRADING_ENV_FILE="data\portal\users\<you>\books\alpaca_paper\.env"
+
+python scripts/research/backtest_intraday.py --days 90 --quality-fixes   # smoke test + with/without table
+python scripts/research/backtest_intraday.py --quality-fixes             # up to 2y (cached after first run)
+python scripts/research/backtest_intraday.py --refresh --quality-fixes # force re-download
+```
+
+Output: comparison table (`--quality-fixes`), hour-of-day stats, trade log → `scripts/research/intraday_backtest_results.csv`. First full download can take **20–40 minutes**; reruns are fast from cache.
 
 ---
 
@@ -281,31 +416,36 @@ The repo supports **three deployment targets**. Live defaults stay conservative;
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
-### Profile B: Best Paper Bot v2.2 (`paper_aggressive`)
+### Profile B: Realistic Research v1.5.3 (`paper_aggressive`)
 
 **Use for:** paper book, `run_paper_bot.py`, `backtester.py --paper-aggressive`, portal paper user — **not** default live.
 
-**Config source:** `config/best_paper_config.py` + `config.enforce_best_paper_stack()` + `apply_best_paper_config()` (auto on paper chase).
+**Config source:** `config.py` → `enforce_realistic_research_profile()` (locked on paper chase). Legacy alias: `config/best_paper_config.py`.
 
-**Goal:** Beat typical mutual-fund **risk-adjusted** returns (Sharpe) with a stable, simplified stack.
+**Tagline:** `v1.5.3 — Smart Dynamic VTI Locked`
+
+**Goal:** Research velocity with full scanner stack, attribution, and risk-adjusted monitoring on the ~$98k paper book.
 
 #### ON (default)
 
 | Layer | Default | Env flag |
 |-------|---------|----------|
-| **VTI core** | Dynamic **40–75%** | `PAPER_DYNAMIC_VTI=true` |
+| **VTI core** | **Smart Dynamic 35–75%** (default ON) | `PAPER_DYNAMIC_VTI=true` |
 | **Risk per trade** | Dynamic **1.1–2.2%** (calm cap 2.2%) | `PAPER_DYNAMIC_RISK_ENABLED=true` |
 | **SPY / NYSE MAs** | **MA150 / MA70** (tuned 365d grid) | `PAPER_SPY_MA_WINDOW`, `PAPER_NYSE_MA_WINDOW` |
 | **RHYME_E sizing** | **1.60×** | `PAPER_REGIME_E_SIZING_MULT` |
 | **NYSE max hold** | **60 bars** | `PAPER_POSITION_MAX_HOLD_BARS` |
-| **Stat arb** | v1.4: corr≥0.72, coint p&lt;0.12, **10–14 pairs**, Z 2.0–2.6, RR **1.6:1** + trail + 35b max, $25M liquidity, sector-neutral pref | `PAPER_STAT_ARB_*` in `.env.example` |
-| **Protective shorts** | v1.4: **8–15%** gross, RR **1.6:1**, RHYME_E exhaustion waiver, **sector ETF shorts** (≤8%/name) | `PROTECTIVE_SHORT_*`, `SECTOR_SHORT_*` |
-| **Monitoring** | Weekly MD/HTML report + **Friday Telegram** (Health Score, 30d/all-time Sharpe, bubble, short activity) | `TELEGRAM_WEEKLY_SUMMARY_ENABLED` |
+| **Stat arb** | v1.5.2 fill-rate: corr≥0.68, coint p&lt;0.12, **8–12 pairs**, Z 2.0–2.6 + vol filter, RR **1.6:1**, trail **50%/35%**, 35b hold, 7% dedicated cap + vol scaling | `PAPER_STAT_ARB_*` in `.env.example` |
+| **RVOL / ORB / Catalyst / ATR** | v1.5: RVOL min **2.0×**, ORB **30m**, Catalyst min **65**, ATR **14d / 2.0× / 4%** cap | `RVOL_*`, `ORB_*`, `CATALYST_*`, `ATR_*` |
+| **Conviction / MTF / Exits / Corr** | Conviction **0.4–1.8×**, MTF align ≥ **0.65**, partial @ **1R** + trail, corr guard **0.65** | `CONVICTION_*`, `MULTI_TIMEFRAME_*`, `EXIT_*`, `CORRELATION_*` |
+| **Protective shorts** | v1.5: **8–18%** gross, RR **1.6:1**, RHYME_E exhaustion waiver, **sector ETF shorts** (≤8%/name) | `PROTECTIVE_SHORT_*`, `SECTOR_SHORT_*` |
+| **Monitoring** | Weekly MD/HTML + **Friday Telegram**; **Bot Health Score**; **Strategy Performance** table | `TELEGRAM_WEEKLY_SUMMARY_ENABLED`, `STRATEGY_METRICS_DB` |
 | **Vol overlay** | VIX regime hedge/income | `PAPER_VOL_TRADING_ENABLED=true` |
 | **Options income** | Covered calls VTI/SPY | `PAPER_OPTIONS_SLEEVE_ENABLED=true` |
 | **Thinking engine** | **Off** (opt-in Ollama PM) | `PAPER_THINKING_ENGINE_ENABLED=true` |
 | **Overlap / chunk / co-fire** | **On** | `PAPER_NYSE_OVERLAP_*`, `PAPER_ADAPTIVE_CHUNK`, `PAPER_COFIRE_BUDGET` |
-| **Dynamic universe** | Weekly screener refresh | `PAPER_DYNAMIC_UNIVERSE=true` |
+| **Dynamic universe** | Screener refresh + optional combined pool | `PAPER_DYNAMIC_UNIVERSE_ENABLED=true`; **`USE_DYNAMIC_UNIVERSE=true`** for fixed ∪ screener (~103) — [paper only](#dynamic-nyse-universe-paper-only) |
+| **NYSE entry quality** | Opt-in: open cooldown, gap filter, 1-entry/day, 12–14 ET bias, exit `entry_hour` | `PAPER_MOMENTUM_QUALITY_FIXES=true` — [paper only](#nyse-momentum-entry-quality-paper-only) |
 | **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
 
 Enable thinking in `.env`, then restart `run_paper_bot.py`. LLM runs in a **background thread** (main loop never blocks on Ollama). First cycle uses cached/heuristic tilt until refresh completes. Audit: `logs/thinking_engine.log`, snapshot: `thinking_engine_last.json`.
@@ -331,20 +471,35 @@ python scripts/account/preflight.py   # paper chase context
 
 Restart paper bot after changing thinking env: `python run_paper_bot.py`
 
-#### Research velocity profile (Realistic Research v1.4 — locked)
+#### Research velocity profile (Realistic Research v1.5.4 — locked)
 
-For **research velocity** (order flow, stat arb funnels, attribution), use **[`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md)** — **Realistic Research v1.4** is the **official locked default** for `alpaca_paper`:
+For **research velocity** (order flow, stat arb funnels, attribution), use **[`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md)** — **Realistic Research v1.5.4** is the **official locked default** for `alpaca_paper`:
 
-- **Tagline:** `v1.4 — improved shorts + Stat Arb`
-- **Dynamic core** VTI/SPY 30–50% (40% SPY fallback)
-- **Stat arb** 10–14 pairs, RR 1.6, trailing exits, $25M liquidity filter
-- **Protective + sector shorts** 8–15% gross, RHYME_E waiver (bubble≥60, no exhaustion)
+- **Tagline:** `v1.5.4 — Sector-Aware Portfolio Constructor`
+- **Feature detail:** Smart Dynamic VTI (35-75%) + RVOL + ORB + Catalyst + ATR + Conviction + MTF + Exits + Corr Guard + Shorts + Stat Arb + Markov HMM
+- **v1.5 scanners:** RVOL (min 2.0×), ORB (30m + RVOL confirm), Catalyst (min 65), ATR sizing (14d, 2.0× stop, 4% cap)
+- **v1.5 sizing/exits:** conviction 0.4–1.8×, multi-timeframe confirmation, partial exits + dynamic trail, correlation guard
+- **Smart Dynamic VTI core** 35–75% (NYSE/metals momentum, insider clusters, bubble/Buffett, regime)
+- **Markov HMM regime** 5-state `GaussianHMM` next-day probabilities, soft-signaling Dynamic VTI, sizing, shorts, and conviction (paper default; live opt-in)
+- **Stat arb** 8–12 pairs (dynamic), corr≥0.68, RR 1.6, trail 50%/35%, 35b hold, 7% cap, universe floor + static fallback
+- **Protective + sector shorts** 8–18% gross, RHYME_E waiver (bubble≥60, no exhaustion)
+- **Insider boosts** cluster buys → momentum / stat arb / shorts
+- **Strategy performance** per-strategy ratings (dashboard + weekly Telegram top/bottom 3)
 - **Weekly monitoring:** Bot Health Score, 30d/all-time Sharpe, bubble score, short activity (MD/HTML + Telegram)
 
 Startup prints:
 ```
->>> REALISTIC RESEARCH v1.4 (LOCKED) - Stat Arb 10-14p | Dynamic Core 30-50% | Protective + Sector Shorts | RHYME_E waiver | v1.4 — improved shorts + Stat Arb | Paper Bot Default <<<
->>> STAT ARB v1.4: ... RR 1.6:1 + trail ...
+>>> REALISTIC RESEARCH v1.5.4 (LOCKED) — v1.5.4 — Sector-Aware Portfolio Constructor | Smart Dynamic VTI + RVOL/ORB/Catalyst/ATR + ... | Paper Bot Default <<<
+>>> Smart Dynamic VTI 52% — strong NYSE momentum + gold strength   # example; actual % from live signals
+>>> SMART DYNAMIC VTI DEFAULT — 35%-75% VTI | drivers: NYSE/metals momentum, insider clusters, bubble/Buffett, regime, VTI vs SPY
+>>> RVOL + ORB + Catalyst + ATR + Conviction + MTF + Exits + Corr Guard + Shorts + Stat Arb + Markov HMM <<<
+>>> RVOL Scanner: ON
+>>> ORB Scanner: ON (30min)
+>>> Catalyst Scanner: ON (min 65)
+>>> ATR Sizing: ON (2.0x)
+>>> Markov HMM: ON (5 states, next-regime prob)
+>>> Strategy Health: ... (after closed trades)
+>>> STAT ARB v1.5.4: ... RR 1.6:1 + trail ... | Stat Arb universe: X names
 ```
 
 **1000-day validation** (`python backtester.py --days 1000 --paper-aggressive --no-thinking` → `backtest_v14_1000day.txt`):
@@ -364,7 +519,10 @@ v1.4 improved short sleeve economics vs v1.3 on the 365d window (+$123 short PnL
 
 ```powershell
 python backtester.py --paper-aggressive --compare-stat-arb-v13-push --days 365 --no-thinking
+python backtester.py --days 365 --paper-aggressive --compare-stat-arb-v152
 ```
+
+Latest Stat Arb scan fix validation (100d, paper aggressive): universe **80 names**, `scan_signals=676`, **21 pairs opened**, **84% fill rate**. The earlier 365d `--compare-stat-arb-v152` completed before the universe/liquidity/cointegration fallback fixes, so both legs showed 0 pairs and should be re-run for a meaningful Stat Arb PnL comparison.
 
 **Weekly Telegram summary (Fridays 16:30 ET after close):**
 
@@ -440,7 +598,7 @@ Every decision is persisted to `thinking_engine_last.json` (timestamp, full reas
 | Thinking audit | `thinking_engine_last.json` | Review before `scripts/approve_thinking_tilt.py` on live |
 | Risk events | `risk_events.log` | Check halt / resume / liquidations |
 | Paper heartbeat | `paper_chase_heartbeat.json` | Stale timestamp → restart paper bot |
-| Universe age | `status.py` universe line | >7d → `python scripts/analysis/universe_screener.py` |
+| Universe age | `status.py` universe line | >7d → `python scripts/analysis/universe_screener.py --force` |
 | Monthly scorecard | `wisdom_scorecard.json` | Review regime accuracy |
 
 ---
@@ -607,7 +765,7 @@ Sharpe phase backtests selected **current_dynamic** as the **live** baseline. Pa
 | Book | Profile | Stack |
 |------|---------|-------|
 | **Live ~$300** | Profile A (`current_dynamic`) | **90% VTI**, crypto **OFF**, thinking **OFF**, yield-gate-only, 1% / $10 caps, overlap/chunk/co-fire off |
-| **Paper ~$98k** | Profile B v2.2 (`paper_aggressive`) | Dynamic VTI 40–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking opt-in; macro/social off |
+| **Paper ~$98k** | Profile B v2.2 (`paper_aggressive`) | Smart Dynamic VTI 35–75%, stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking opt-in; macro/social off |
 
 Confirm anytime: `python status.py` (Profile A vs v2.2 locked lines) · `python scripts/account/preflight.py`
 
@@ -750,7 +908,7 @@ Stack: stat arb + vol overlay + options + overlap/chunk/co-fire + **upgraded Thi
 |--------|------------|-----|
 | **$300–$499** | **90%** | Matches small-account guardrails; best MaxDD in test; active stack still adds +28 pp vs passive VTI |
 | **$500–$1000** | **80%** | Step down at $500 threshold; best Sharpe/return balance with full stat-arb/vol/options stack on paper |
-| **Paper research** | **Dynamic 40–75%** | `PAPER_DYNAMIC_VTI=true` — do not use fixed 70% live; paper can hunt alpha, live stays anchored |
+| **Paper research** | **Smart Dynamic 35–75%** | `PAPER_DYNAMIC_VTI=true` (default) — multi-signal allocator; live stays anchored |
 
 **Thinking Engine (paper):** opt-in via `PAPER_THINKING_ENGINE_ENABLED=true`. Tuned prompt focuses on **beating VTI on Sharpe**, avoiding crowded AI/tech chase, and coordinating **stat arb** (crypto pairs) + **vol overlay** (trim beta when VIX elevated). Live: thinking stays **off by default**; if enabled later, tilts are ±6% on active sleeves only — keep **90%/80% VTI anchor**.
 
@@ -769,23 +927,29 @@ python backtester.py --days 365 --compare-vti-core
 python scripts/analysis/print_thinking_demo_samples.py   # sample PM outputs
 ```
 
-## Social / Felix sleeve (legacy — off by default)
+## Social / Felix sleeve (dynamic on paper, off on live)
 
-Creator-macro sleeve driven by **YouTube transcripts** (Felix & Friends + **Andrei Jikh**) blended with headline web sentiment. **Disabled by default** on both live and paper; code kept for future opt-in. When enabled, runs on the **paper research book** (`PAPER_APCA_*`); optional **live mirror** on the main account.
+Creator-macro sleeve driven by **YouTube transcripts** (Felix & Friends + **Andrei Jikh**) blended with headline web sentiment.
+
+**Paper (Realistic Research):** `FELIX_SOCIAL_DYNAMIC_ENABLED=true` by default — auto **ON** in `RHYME_E` or when `bubble_score_100 >= 65`; auto **OFF** in `RHYME_C` / `RHYME_D` unless `FELIX_SOCIAL_MANUAL_OVERRIDE=true`. Startup shows `Felix/social: dynamic (ON/OFF based on regime)`. See [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
+
+**Live:** stays **off** (`SOCIAL_SLEEVE_ENABLED=false`); dynamic gate is paper-only.
 
 | Setting | Default | Meaning |
 |---------|---------|---------|
-| `SOCIAL_SLEEVE_ENABLED` | `false` (opt-in) | Turn on Felix + social rotation |
-| `SOCIAL_SLEEVE_CAP_PCT` | `0.10` | Paper social book cap (% of that account) |
-| `SOCIAL_MIRROR_TO_LIVE_PCT` | `0.15` | Live reserve = social cap × this (e.g. 1.5% of live equity) |
-| `FELIX_SENTIMENT_ENABLED` | `false` (opt-in; auto-on with paper chase) | Score latest synced transcript |
-| `SPACEX_IPO_AUTO_BUY` | `false` on live | IPO auto-buy disabled |
+| `FELIX_SOCIAL_DYNAMIC_ENABLED` | `true` (paper) | Regime/bubble auto gate |
+| `FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD` | `65` | Bubble score to turn sleeve ON |
+| `FELIX_SOCIAL_MANUAL_OVERRIDE` | `false` | Force ON even in RHYME_C/D |
+| `SOCIAL_SLEEVE_ENABLED` | `false` | Live static opt-in |
+| `PAPER_SOCIAL_SLEEVE_ENABLED` | `false` | Static paper always-on (usually leave off; use dynamic) |
+| `SOCIAL_SLEEVE_CAP_PCT` / `PAPER_SOCIAL_SLEEVE_CAP_PCT` | `0.10` / `0.20` | Cap % of book |
+| `FELIX_SENTIMENT_ENABLED` | auto-on with paper chase / dynamic | Score latest synced transcript |
 
 Targets: **GLD** (bearish macro), **XLE** (bullish energy), **SPY** (neutral). Live mirror skips SPY when the main fund already runs the SPY sleeve.
 
-Sync creator transcripts:
-
 ```powershell
+python backtester.py --days 90 --paper-aggressive --compare-felix-dynamic
+python backtester.py --days 365 --paper-aggressive --compare-markov-hmm
 python scripts/maintenance/sync_felix_transcripts.py --max 30 --backfill-dates
 python scripts/maintenance/sync_felix_transcripts.py --channel andrei_jikh --max 15
 ```
@@ -803,11 +967,11 @@ The **paper book** can run a profit-seeking profile **without changing live ~$10
 
 `PAPER_CHASE_MODE=1` enables the aggressive profile inside `run_all.py` (portal sets this automatically when your saved keys are paper).
 
-**Hardware / WiFi:** the bot is idle **most of the time** (45–60s sleep between cycles; price refresh every 10–15m). You are **not** maxing out a modern PC or home broadband. Paper chase auto-enables overlap/chunk/co-fire, Felix sync (sentiment only), NYSE beta scaling, and faster refresh — **not** social sleeve or macro adaptor. Still light load.
+**Hardware / WiFi:** the bot is idle **most of the time** (45–60s sleep between cycles; price refresh every 10–15m). You are **not** maxing out a modern PC or home broadband. Paper chase auto-enables overlap/chunk/co-fire, Felix sentiment (for dynamic social), NYSE beta scaling, and faster refresh. Macro adaptor stays off. Still light load.
 
 | Setting | Live (~$100, equity &lt; $500) | Live (≥ $500) | Paper aggressive |
 |---------|-------------------------------|---------------|------------------|
-| VTI core | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) | **80%** (`VTI_CORE_PCT`) | **Dynamic 40–75%** (`PAPER_DYNAMIC_VTI=true`) |
+| VTI core | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) | **80%** (`VTI_CORE_PCT`) | **Smart Dynamic 35–75%** (`PAPER_DYNAMIC_VTI=true`, default) |
 | Active sleeves | ~10% total | ~20% total | **~31% avg** with dynamic VTI; 1.40× boost on base caps |
 | Social / macro | **off** | **off** | **off** (opt-in via `.env`) |
 | Crypto vol gate | High vol only | High vol only | **Off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
@@ -1053,7 +1217,7 @@ python dashboard_app.py
 python dashboard_app.py --launch-bot   # also start run_all.py
 ```
 
-Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate update; **Restart Bot** for clean stop + relaunch; **Stop Bot** ends `run_all.py` without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
+Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate UI update; **Refresh Bot** to stop → refresh daily bars → restart the active book; **Restart Bot** for clean stop + relaunch without a data download; **Stop Bot** ends `run_all.py` without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
 
 Auto-refresh every **60 seconds**. Data sources: per-user `bot_heartbeat.json` (portal path or `data/fund/<slot>/`), Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
 
@@ -1245,9 +1409,11 @@ Directional backtests remain useful for strategy design; the performance review 
 
 | Mode | Command | Notes |
 |------|---------|--------|
+| **Best overnight test** | `python backtester.py --best-test --days 1000` | v1.5.2 stack + thinking + news + MC 30 (multi-hour) |
 | **Quick smoke test** | `python backtester.py --days 365 --paper-aggressive --fast-mode` | ~22 tickers; stat-arb/vol off — ~2–5× faster |
 | **Realistic costs** | Default 5 bps equity + 10 bps crypto slippage | `--no-realistic-costs` to disable |
 | **Full accuracy** | `python backtester.py --days 365 --paper-aggressive` | Full universe + all sleeves |
+| **Universe A/B** | `python backtester.py --days 365 --compare-universe` | Fixed vs screener vs combined NYSE pool (Profile A) |
 | **Final compare** | `python backtester.py --days 365 --paper-aggressive --compare-final` | Parallel arms; Profit Factor, Win%, Avg Trade, vs VTI |
 | **Fast compare** | `python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode` | Quick A/B table (~minutes vs ~hours) |
 | **Purged walk-forward** | `python backtester.py --days 365 --paper-aggressive --walk-forward 3` | 3-fold purged CV with embargo gap |
@@ -1263,6 +1429,7 @@ python backtester.py --days 365 --paper-aggressive --no-thinking
 python backtester.py --days 365 --equity-slippage-bps 5   # 5 bps equity slippage
 python backtester.py --days 365 --crypto-slippage-bps 10  # +10 bps crypto slippage
 python backtester.py --days 365 --fast-mode
+python backtester.py --days 365 --compare-universe
 python backtester.py --days 365 --paper-aggressive --compare-final --fast-mode
 python backtester.py --days 365 --paper-aggressive --compare-final --no-parallel
 python backtester.py --days 365 --paper-aggressive --walk-forward 3
@@ -1280,10 +1447,16 @@ python backtester.py --days 500
 python backtester.py --max              # full history with halt
 python backtester.py --max --no-halt    # validate crypto sleeve path
 
-# Paper aggressive (dynamic VTI, overlap/chunk/co-fire; social/macro off)
+# Paper aggressive (dynamic VTI, overlap/chunk/co-fire; Felix/social dynamic by regime)
 python backtester.py --days 365 --paper-aggressive
+python backtester.py --days 90 --paper-aggressive --compare-felix-dynamic
+python backtester.py --days 365 --paper-aggressive --compare-markov-hmm
+python backtester.py --days 365 --paper-aggressive --compare-stat-arb-v152
 python backtester.py --days 365 --paper-aggressive --compare-final
 python backtester.py --days 365 --paper-aggressive --compare-thinking
+
+# Best overnight thorough test (v1.5.2 + thinking + news + Monte Carlo 30)
+python -u backtester.py --best-test --days 1000 > backtest_best_1000.txt 2>&1
 
 # Live small-account + thinking what-if (90% VTI, ±8% tilt cap; not for production live)
 python backtester.py --days 365 --simulate-live-thinking
@@ -1296,6 +1469,9 @@ python backtester.py --days 365 --vti-core 0.8
 python backtester.py --days 365 --paper-aggressive
 python backtester.py --days 365 --compare-dynamic-vti
 python backtester.py --days 365 --compare-paper-sleeve-features
+
+# Intraday NYSE momentum quality filters (5-min bars; not backtester.py)
+python scripts/research/backtest_intraday.py --days 90 --quality-fixes
 
 # Game plan A/B grid (yield_gate_only vs full blend)
 python scripts/analysis/game_plan_ab_test.py
@@ -1322,7 +1498,10 @@ python fetch_data.py --daily --days 500
 
 | Script | What it tests |
 |--------|----------------|
-| `backtester.py` | **Hub** — integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-final`, `--fast-mode`, `--walk-forward`, `--report-html`, `--export-json`, `--export-csv`, `--slippage-sensitivity`, `--no-parallel` |
+| `backtester.py` | **Hub** — integrated fund + sleeve-aware executor; `--paper-aggressive`, `--compare-universe`, `--compare-final`, `--fast-mode`, `--walk-forward`, `--report-html`, `--export-json`, `--export-csv`, `--slippage-sensitivity`, `--no-parallel` |
+| `backtest_crypto_vol.py` | Crypto vol sleeve backtest; `--render-only` compares 5-coin v4 vs RENDER-only |
+| `scripts/research/backtest_sector_rotation.py` | Sector-ETF rotation research (not wired to live bot) |
+| `scripts/research/backtest_intraday.py` | **5-min** NYSE MA50 momentum research backtest; `--quality-fixes` compares filters; Alpaca `PAPER_APCA_*` + `data/intraday_cache/` |
 | `modules/backtester_core.py` | Memory + disk cache, indicator precompute, parallel compare, purged walk-forward, slippage sweep, HTML/CSV/JSON export |
 | `modules/backtest_common.py` | Shared year slicing + yfinance normalize for satellite backtest scripts |
 | `scripts/research/run_paper_piece.py` | Isolated paper book pieces: `status`, `alloc`, `vti_core`, `social`, `spy`, `crypto`, `nyse`, `all-active` |
@@ -1341,7 +1520,7 @@ python fetch_data.py --daily --days 500
 | `scripts/analysis/live_vs_backtest_snapshot.py` | Aligned live vs sim |
 | `scripts/maintenance/evaluate_wisdom.py` | Manual wisdom evaluation |
 
-Live bot uses **5-minute** bars; backtests and wisdom sims use **daily** bars. Results are directional — use the performance review section for aligned live tracking.
+Live bot uses **5-minute** bars for signals; **`backtester.py`** and wisdom sims use **daily** bars — so daily backtests are directional for stack tuning but **do not** validate intraday entry rules (open cooldown, gap filter, hour-of-day). Use [`scripts/research/backtest_intraday.py`](#intraday-nyse-backtest-research-only) for those. Use the performance review section for aligned live tracking.
 
 ## Optional: standalone SPY bot
 
@@ -1390,6 +1569,15 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 **Gmail setup:** Use an [app password](https://myaccount.google.com/apppasswords) with `SMTP_HOST=smtp.gmail.com`, port `587` (optional — weekly summary uses Telegram only).
 
 **Friday weekly summary:** With Telegram configured, the bot sends a weekly message after **4:30 PM ET on Fridays** once the market is closed. Manual test: `python scripts/weekly_telegram_summary.py --test`. Live book: `TELEGRAM_WEEKLY_LIVE_ENABLED=true`. Disable: `TELEGRAM_WEEKLY_SUMMARY_ENABLED=false`.
+
+**Saturday weekly review (paper research):** Advisory IC-style report with controlled 90d A/B backtest — **never** auto-applies `.env` changes. Enable on paper: `WEEKLY_REVIEW_ENABLED=true` (spawned from `run_paper_bot.py` on Saturdays, or Task Scheduler via `scripts/analysis/install_weekly_review_task.ps1`). Immediate test email any day:
+
+```powershell
+python scripts/analysis/weekly_review.py --test
+python scripts/analysis/weekly_review.py --skip-backtest   # smoke only
+```
+
+Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
 
 ## Environment variables
 
@@ -1451,6 +1639,9 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 | `PAPER_STAT_ARB_RISK_REWARD` | No | Z-space profit:stop ratio (default `1.6`) |
 | `PAPER_STAT_ARB_Z_ENTRY_MAX` | No | High-vol Z entry ceiling (default `2.6`) |
 | `TELEGRAM_WEEKLY_LIVE_ENABLED` | No | Weekly summary on live book (default `false`) |
+| `USE_DYNAMIC_UNIVERSE` | No | Paper only: union fixed NYSE list + screener top 75 (~103 tickers); live stays fixed |
+| `PAPER_MOMENTUM_QUALITY_FIXES` | No | Paper only: NYSE open cooldown (9:30–10:00 ET), >2% gap skip, 1 entry/symbol/day, 12–14 ET bias, `exit_reason` + `entry_hour` on exits — default `false` |
+| `WEEKLY_REVIEW_ENABLED` | No | Saturday paper research report + email (default `false`); test: `weekly_review.py --test` |
 
 Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 
@@ -1478,6 +1669,7 @@ stock-bot/
 ├── assets/dashboard.ico    # Shortcut / exe icon
 ├── data/
 │   ├── portal/             # users.db, fund_pair.json, users/<name>/
+│   ├── intraday_cache/     # 5-min bars per ticker (backtest_intraday.py)
 │   └── fund/               # @root bot slots (e.g. paper/ heartbeat, journal)
 ├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
 ├── status.py               # One-line live + paper equity, regime, flags
@@ -1592,34 +1784,74 @@ python fetch_data.py --daily --days 500 # longer history (free via yfinance)
 | `spy_bot_heartbeat.json` | Standalone SPY bot heartbeat |
 | `alert_state.json` | Alert dedupe state (halt notified, last daily summary) |
 
-## Cloud VPS (Profile C — 24/7 paper)
+## Cloud / VPS Migration (Realistic Research v1.5.3)
 
-Run **Best Paper Bot v2.1** on a Linux VPS without duplicating strategy code. The cloud bot supervises parent `run_all.py` with forced paper-only safety.
+Run the bots 24/7 on a Linux VPS (Ubuntu 24.04) with **separate paper and live services**, secure per-user secrets, systemd supervision, and Telegram health alerting. Full step-by-step migration guide (Hetzner spec, cost, rollback): **[`PAPER_RESEARCH_PROFILE.md` → Cloud / VPS Migration](PAPER_RESEARCH_PROFILE.md#cloud--vps-migration-v153)**.
 
-**Full guide:** [`cloud_bot/README_CLOUD.md`](cloud_bot/README_CLOUD.md)
+### Recommended spec (Hetzner, Ubuntu 24.04 LTS)
+
+| Role | Plan | Spec | ~Cost/mo |
+|------|------|------|----------|
+| **Trading VPS** | Hetzner **CPX41** (US Ashburn) | 8 vCPU, **16 GB RAM**, 240 GB NVMe | ~$18 |
+| **GPU inference** (optional, Ollama) | Vultr A5000 / RunPod | 24 GB VRAM, 32 GB RAM | ~$80–120 |
+| Kimi / NVIDIA NIM (daily deep-think) | API | — | ~$20–40 |
+| Backups (snapshots + off-site) | — | daily | ~$5 |
+
+**API-only thinking (no GPU box):** ~$35–60/mo total. **Full GPU stack:** ~$125–180/mo.
+
+### Deployment layout
+
+| Service | Unit | User | Entry | Secrets |
+|---------|------|------|-------|---------|
+| **Paper** (aggressive research) | `paper-bot.service` | `trader-paper` | `run_paper_bot.py` | `/etc/pythontrading/paper.env` |
+| **Live** (conservative small acct) | `live-bot.service` | `trader-live` | `run_all.py` | `/etc/pythontrading/live.env` |
+
+Separation is enforced: different Linux users, different env files (chmod 600), and **different Alpaca key pairs**. Paper is `PAPER_TRADING=true`/`ALLOW_LIVE_TRADING=false`; live requires both `PAPER_TRADING=false` and `ALLOW_LIVE_TRADING=yes`.
+
+### Repo assets for the VPS
+
+| Asset | Path |
+|-------|------|
+| Paper systemd unit | [`cloud_bot/deploy/systemd/paper-bot.service`](cloud_bot/deploy/systemd/paper-bot.service) |
+| Live systemd unit | [`cloud_bot/deploy/systemd/live-bot.service`](cloud_bot/deploy/systemd/live-bot.service) |
+| Cloud supervisor unit | [`cloud_bot/deploy/systemd/cloud-bot.service`](cloud_bot/deploy/systemd/cloud-bot.service) |
+| Healthcheck + alert | [`scripts/cloud_healthcheck.sh`](scripts/cloud_healthcheck.sh) |
+| Deploy script | [`scripts/deploy_to_vps.sh`](scripts/deploy_to_vps.sh) |
+| Cloud profile (v1.5.3) | [`cloud_bot/config/profile.py`](cloud_bot/config/profile.py) |
+| Legacy supervisor guide | [`cloud_bot/README_CLOUD.md`](cloud_bot/README_CLOUD.md) |
+
+### Quick commands
 
 ```bash
-cd cloud_bot
-python runtime/main.py --dry-run      # validate config + keys
-python runtime/main.py --backtest --days 365 --compare
-python runtime/main.py --run          # 24/7 supervisor (or systemd)
-python runtime/main.py --status       # health check
-python runtime/main.py --stop         # graceful stop
+# One-time: install units + cron (see PAPER_RESEARCH_PROFILE.md for full steps)
+sudo cp cloud_bot/deploy/systemd/paper-bot.service /etc/systemd/system/
+sudo cp cloud_bot/deploy/systemd/live-bot.service  /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now paper-bot
+
+# Deploy a tagged release (paper only by default; live needs --restart-live)
+./scripts/deploy_to_vps.sh v1.5.3
+./scripts/deploy_to_vps.sh v1.5.3 --restart-live
+
+# Health (cron every 5 min → Telegram on stale heartbeat / crash)
+./scripts/cloud_healthcheck.sh paper
+./scripts/cloud_healthcheck.sh live
+journalctl -u paper-bot -f
 ```
 
 | Item | Path |
 |------|------|
-| Supervisor log | `cloud_bot/data/logs/cloud_bot.log` (daily rotation) |
-| Heartbeat | `cloud_bot/data/cloud_bot_heartbeat.json` |
+| Paper heartbeat | `paper_chase_heartbeat.json` |
+| Live heartbeat | `bot_heartbeat.json` |
 | Parent bot log | `logs/run_all.log` + `logs/events.log` (daily rotation) |
+| Service logs | `journalctl -u paper-bot` / `-u live-bot` |
 
-Forced on cloud: `PAPER_TRADING=true`, `ALLOW_LIVE_TRADING=false`, paper API endpoint only.
+The single-process cloud supervisor (`cloud_bot/runtime/main.py --run`, forced paper-only) remains available for a minimal one-box paper deploy — see [`cloud_bot/README_CLOUD.md`](cloud_bot/README_CLOUD.md).
 
 ## Notes
 
 - **Manifest files:** [`PROJECT_MANIFEST.md`](PROJECT_MANIFEST.md) (human architecture summary) · [`data/bot_manifest.txt`](data/bot_manifest.txt) (compact for LLMs — regenerate: `python scripts/mcp/export_bot_manifest.py`).
 - **Background health:** `python scripts/background_runner.py --mode auto --trigger manual` for on-demand heartbeat/safety check; see [Long-running stability](#long-running-stability).
-- **Single virtualenv:** Use `.venv` only. Reinstall with `pip install -r requirements.txt` after pulling changes.
+- **Virtualenv:** Per-project `.venv` in `stock-bot/`, or owner shared **`venv311`** at repo root (`scripts/setup_venv.bat` / `scripts/activate_venv.bat`). Reinstall with `pip install -r requirements.txt` after pulling changes.
 - **`write_bot.py`:** Regenerates `fetch_data.py` only. Does **not** overwrite `run_all.py`.
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
 - **Desktop launch:** `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) → sign in → `--launch-bot`. Shortcut **Start in** must be the project root.
