@@ -23,7 +23,12 @@ class RefreshScheduler:
     def _equity_symbols(self):
         if self.equity_tickers is not None:
             return list(self.equity_tickers)
-        symbols = list(config.equity_universe())
+        try:
+            from modules.dynamic_universe import live_equity_refresh_symbols
+
+            symbols = list(live_equity_refresh_symbols())
+        except Exception:
+            symbols = list(config.equity_universe())
         if config.GAME_PLAN_ENABLED:
             for sym in config.live_metal_universe():
                 if sym not in symbols:

@@ -392,6 +392,11 @@ def format_premarket_telegram(snap: dict) -> str:
     return "\n".join(lines)
 
 
+def _past_premarket_time() -> bool:
+    now = datetime.now(_ET)
+    return (now.hour, now.minute) >= (_PREMARKET_HOUR, _PREMARKET_MINUTE)
+
+
 def _seconds_until_premarket_send() -> float:
     now = datetime.now(_ET)
     target = now.replace(
@@ -405,17 +410,42 @@ def _seconds_until_premarket_send() -> float:
     return (target - now).total_seconds()
 
 
-def wait_until_premarket_send() -> None:
-    delay = _seconds_until_premarket_send()
+def _seconds_until_next_premarket_send() -> float:
+    """Next calendar 9:00 AM ET (tomorrow if already past today's window)."""
+    from datetime import timedelta
+
+    now = datetime.now(_ET)
+    target = now.replace(
+        hour=_PREMARKET_HOUR,
+        minute=_PREMARKET_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if now >= target:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def wait_until_premarket_send(*, next_day: bool = False) -> None:
+    delay = (
+        _seconds_until_next_premarket_send()
+        if next_day
+        else _seconds_until_premarket_send()
+    )
     if delay <= 0:
         _log("Past 9:00 AM ET — sending pre-market Telegram now.")
         return
+    label = "next " if next_day else ""
     mins = delay / 60.0
-    _log(f"Waiting until 9:00 AM ET ({mins:.0f} min)...")
+    _log(f"Waiting until {label}9:00 AM ET ({mins:.0f} min)...")
     while delay > 0:
         chunk = min(delay, 300.0)
         time.sleep(chunk)
-        delay = _seconds_until_premarket_send()
+        delay = (
+            _seconds_until_next_premarket_send()
+            if next_day
+            else _seconds_until_premarket_send()
+        )
 
 
 def send_premarket_telegram(message: str) -> bool:
@@ -513,14 +543,21 @@ def main() -> int:
         _log("Telegram disabled (--no-telegram). Done.")
         return 0 if verify_rc == 0 else 2
 
-    if telegram_already_sent_today() and not args.send_now:
-        _log("Pre-market Telegram already sent today — skipping.")
+    if args.send_now:
+        hb_fresh = _load_heartbeat(username) or hb
+        snap_send = build_premarket_snapshot(hb_fresh)
+        tg_msg = format_premarket_telegram(snap_send)
+        send_premarket_telegram(tg_msg)
+        _log("=== Autostart complete ===")
         return 0 if verify_rc == 0 else 2
 
-    if not args.send_now:
-        wait_until_premarket_send()
+    if telegram_already_sent_today() and _past_premarket_time():
+        _log("Today's 9:00 AM Telegram already sent — scheduling tomorrow.")
+        wait_until_premarket_send(next_day=True)
+    else:
+        wait_until_premarket_send(next_day=False)
 
-    if telegram_already_sent_today() and not args.send_now:
+    if telegram_already_sent_today():
         _log("Pre-market Telegram already sent today (after wait) — skipping.")
         return 0 if verify_rc == 0 else 2
 

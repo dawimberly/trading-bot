@@ -43,9 +43,21 @@ def _load_daily_column(col: str) -> pd.Series:
     target = next((c for c in df.columns if "close" in c.lower()), None)
     if target is None:
         return pd.Series(dtype=float)
-    date_col = "Date" if "Date" in df.columns else "index" if "index" in df.columns else None
+    # robust date col detect (support Date/date/timestamp etc)
+    date_col = None
+    for c in df.columns:
+        lc = str(c).lower()
+        if lc in ("date", "timestamp", "datetime", "time", "dt") or "date" in lc:
+            date_col = c
+            break
     if date_col is None:
-        return pd.Series(dtype=float)
+        # fallback to first non-close col
+        for c in df.columns:
+            if "close" not in str(c).lower():
+                date_col = c
+                break
+    if date_col is None:
+        date_col = df.columns[0]
     s = pd.to_numeric(df.set_index(date_col)[target], errors="coerce")
     s.index = pd.to_datetime(s.index, errors="coerce")
     return s.sort_index()
@@ -169,4 +181,4 @@ def regime_from_daily(daily: pd.DataFrame) -> tuple[str, str]:
     window = daily[fund_cols] if fund_cols else daily
     sentiment = get_price_sentiment(window)
     vol = get_volatility(window)
-    return get_market_regime(sentiment, vol), vol
+    return get_market_regime(sentiment, vol, apply_hysteresis=False), vol

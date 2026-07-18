@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 import config
+
+logger = logging.getLogger(__name__)
 from modules.cost_basis import sleeve_for_symbol
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +31,8 @@ JOURNAL_COLUMNS = (
     "qty",
     "price",
     "sleeve",
+    "exit_reason",
+    "entry_hour",
     "notes",
 )
 
@@ -130,6 +135,8 @@ def normalize_journal_df(df) -> Any:
 def read_journal(*, path: Path | str | None = None, tail: int | None = None):
     import pandas as pd
 
+    from modules.csv_utils import read_csv_file, read_csv_tail
+
     if path is not None:
         paths = [Path(path)]
     else:
@@ -141,10 +148,11 @@ def read_journal(*, path: Path | str | None = None, tail: int | None = None):
             continue
         try:
             if tail and tail > 0:
-                parts.append(_read_csv_tail(p, tail))
+                parts.append(read_csv_tail(p, tail))
             else:
-                parts.append(pd.read_csv(p, low_memory=False))
-        except Exception:
+                parts.append(read_csv_file(p))
+        except Exception as exc:
+            logger.warning("journal CSV read failed for %s: %s", p, exc)
             continue
     if not parts:
         return normalize_journal_df(pd.DataFrame())
@@ -156,22 +164,6 @@ def read_journal(*, path: Path | str | None = None, tail: int | None = None):
             keep="last",
         ).sort_values("timestamp")
     return merged
-
-
-def _read_csv_tail(path: Path, max_rows: int):
-    import csv
-
-    import pandas as pd
-
-    with open(path, encoding="utf-8", newline="") as f:
-        reader = csv.reader(f)
-        header = next(reader, None)
-        if not header:
-            return pd.DataFrame()
-        from collections import deque
-
-        rows = deque(reader, maxlen=max_rows)
-    return pd.DataFrame(list(rows), columns=header)
 
 
 def filter_ticker(df, ticker: str):
@@ -241,7 +233,8 @@ def _first_alpaca_buy_time(client, ticker: str) -> datetime | None:
     try:
         req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=500, nested=True)
         orders = list(client.get_orders(filter=req))
-    except Exception:
+    except Exception as exc:
+        logger.debug("Alpaca closed-order lookup failed for %s: %s", t, exc)
         return None
 
     times: list[datetime] = []

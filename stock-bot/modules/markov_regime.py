@@ -237,7 +237,11 @@ def build_hmm_features(
     insider_intensity: float | None = None,
     sentiment: float | None = None,
 ) -> tuple[pd.DataFrame, list[str]] | tuple[None, list[str]]:
-    """Build a daily feature matrix aligned to SPY closes."""
+    """Build a daily feature matrix aligned to SPY closes.
+
+    Observation set (Realistic Research): returns, vol, sentiment, bubble,
+    insider, sector_corr proxy, tod_bucket (session bias), overnight_gap.
+    """
     spy = _spy_series(data)
     if spy is None:
         return None, []
@@ -272,6 +276,15 @@ def build_hmm_features(
     bubble_s = pd.Series(bubble, index=spy.index)
     insider_s = pd.Series(insider, index=spy.index)
 
+    # Overnight gap: close-to-close vs lagged (proxy when open unavailable)
+    overnight_gap = ret_1.clip(-0.05, 0.05).fillna(0.0)
+
+    # Sector correlation proxy: rolling corr of SPY vs equal-weight sector cols when present
+    sector_corr = _sector_corr_proxy(data, spy)
+
+    # Time-of-day bucket code from cached edge preference (daily series = best-entry bias)
+    tod_code = _tod_feature_series(spy.index)
+
     frame = pd.DataFrame(
         {
             "ret_1": ret_1,
@@ -284,11 +297,92 @@ def build_hmm_features(
             "sentiment": sent,
             "bubble": bubble_s,
             "insider": insider_s,
+            "sector_corr": sector_corr,
+            "tod_bucket": tod_code,
+            "overnight_gap": overnight_gap,
         },
         index=spy.index,
     ).replace([np.inf, -np.inf], np.nan).dropna()
+
+    # Optional observation filter from config.HMM_OBSERVATIONS
+    obs = [str(x).strip().lower() for x in (getattr(config, "HMM_OBSERVATIONS", None) or [])]
+    if obs:
+        keep = set(frame.columns)
+        # Map logical names → columns
+        logical = {
+            "returns": {"ret_1", "ret_5", "mom_20"},
+            "vol": {"vol_20", "vol_z", "vix_lvl", "vix_chg"},
+            "sentiment": {"sentiment"},
+            "bubble": {"bubble", "insider"},
+            "sector_corr": {"sector_corr"},
+            "tod_bucket": {"tod_bucket"},
+            "overnight_gap": {"overnight_gap"},
+        }
+        selected: set[str] = set()
+        for key in obs:
+            selected |= logical.get(key, set())
+        # Always keep core return/vol for labeling
+        selected |= {"ret_1", "vol_20"}
+        frame = frame[[c for c in frame.columns if c in selected and c in keep]]
+
     names = list(frame.columns)
     return frame, names
+
+
+def _sector_corr_proxy(data, spy: pd.Series) -> pd.Series:
+    """Mean rolling 20d correlation of SPY vs available sector/ETF columns."""
+    if data is None or getattr(data, "empty", True):
+        return pd.Series(0.5, index=spy.index)
+    sector_syms = (
+        "XLK",
+        "XLF",
+        "XLE",
+        "XLV",
+        "XLI",
+        "XLY",
+        "XLP",
+        "XLU",
+        "XLRE",
+        "XLB",
+        "GLD",
+    )
+    corrs = []
+    for col in sector_syms:
+        if col not in getattr(data, "columns", []):
+            continue
+        s = pd.to_numeric(data[col], errors="coerce").reindex(spy.index)
+        r_spy = spy.pct_change()
+        r_sec = s.pct_change()
+        corrs.append(r_spy.rolling(20, min_periods=10).corr(r_sec))
+    if not corrs:
+        # Dispersion proxy from SPY vol when sectors missing
+        vol = spy.pct_change().rolling(20, min_periods=10).std()
+        return (vol / 0.012).clip(0.0, 1.5).fillna(0.5) / 1.5
+    stacked = pd.concat(corrs, axis=1)
+    return stacked.mean(axis=1).clip(-1.0, 1.0).fillna(0.5)
+
+
+def _tod_feature_series(index: pd.Index) -> pd.Series:
+    """Daily TOD feature: preferred entry-bucket code from analysis cache (static bias)."""
+    code = 0.5
+    try:
+        from modules.time_of_day import (
+            TOD_BUCKETS,
+            get_last_tod_summary,
+            load_tod_cache,
+            tod_bucket_code,
+        )
+
+        summary = get_last_tod_summary() or load_tod_cache()
+        if summary:
+            best = (summary.get("recommendation") or {}).get("best_entry_bucket")
+            if isinstance(best, str) and "@" in best:
+                best = best.split("@", 1)[0]
+            if best in TOD_BUCKETS:
+                code = float(tod_bucket_code(bucket=best))
+    except Exception:
+        code = 0.5
+    return pd.Series(code, index=index)
 
 
 def _label_states_by_emissions(
@@ -465,12 +559,42 @@ def _signal_from_probs(probs: dict[str, float]) -> dict[str, float]:
     short_boost = float(np.clip(short_boost, 0.70, 1.55))
     # Conviction 0–1 (bullish = high for long sleeves)
     conviction = float(np.clip(0.35 + 0.45 * p_bull - 0.35 * p_bear - 0.25 * p_panic, 0.05, 0.95))
+
+    # Blend time-of-day edge when analysis is active
+    tod_edge = _tod_soft_edge()
+    vti_adj = float(vti_adj + tod_edge.get("vti_adj_pp", 0.0))
+    sizing = float(np.clip(sizing * tod_edge.get("entry_mult", 1.0), 0.50, 1.30))
     return {
         "vti_adj_pp": round(float(vti_adj), 2),
         "sizing_mult": round(sizing, 4),
         "short_boost": round(short_boost, 4),
         "conviction": round(conviction, 4),
+        "tod_bucket": tod_edge.get("bucket"),
+        "tod_sa_boost": round(float(tod_edge.get("sa_boost", 1.0)), 4),
+        "tod_entry_mult": round(float(tod_edge.get("entry_mult", 1.0)), 4),
     }
+
+
+def _tod_soft_edge() -> dict[str, Any]:
+    """Current-session TOD soft signals (no-op when analysis off / no cache)."""
+    try:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        from modules.time_of_day import (
+            classify_tod_bucket,
+            effective_time_of_day_analysis,
+            tod_edge_for_bucket,
+        )
+
+        if not effective_time_of_day_analysis():
+            return {"entry_mult": 1.0, "sa_boost": 1.0, "vti_adj_pp": 0.0, "bucket": None}
+        bucket = classify_tod_bucket(datetime.now(ZoneInfo("America/New_York")))
+        edge = tod_edge_for_bucket(bucket)
+        edge["bucket"] = bucket
+        return edge
+    except Exception:
+        return {"entry_mult": 1.0, "sa_boost": 1.0, "vti_adj_pp": 0.0, "bucket": None}
 
 
 def _insider_intensity(insider_state: dict | None) -> float:
@@ -486,6 +610,27 @@ def _insider_intensity(insider_state: dict | None) -> float:
         return float(np.clip((buys - sells) / 5.0, -1.0, 1.0))
     except Exception:
         return 0.0
+
+
+def apply_hmm_primary_regime(rhyme_regime: str | None) -> str:
+    """Optionally replace RHYME with HMM predicted state; else return *rhyme_regime*.
+
+    Requires a prior ``update_markov_hmm`` call this bar. Falls back to RHYME when
+    the model is not ok or confidence is below ``MARKOV_HMM_PRIMARY_MIN_CONFIDENCE``.
+    """
+    base = str(rhyme_regime or "RHYME_D: Range_Bound_Neutral")
+    if not config.effective_markov_hmm_primary_regime():
+        return base
+    pred = get_last_hmm_prediction() or {}
+    if not pred.get("ok"):
+        return base
+    min_conf = float(getattr(config, "MARKOV_HMM_PRIMARY_MIN_CONFIDENCE", 0.40) or 0.40)
+    if float(pred.get("confidence") or 0.0) < min_conf:
+        return base
+    mapped = pred.get("predicted_rhyme") or HMM_STATE_TO_RHYME.get(
+        str(pred.get("predicted_next") or ""), ""
+    )
+    return str(mapped or base)
 
 
 def update_markov_hmm(
@@ -634,14 +779,54 @@ def format_markov_hmm_banner() -> str | None:
         return None
     n = int(getattr(config, "HMM_N_STATES", 5) or 5)
     pred = _last_prediction
+    tod_note = ""
+    if pred and pred.get("tod_bucket"):
+        tod_note = f" | TOD={pred.get('tod_bucket')} x{pred.get('tod_entry_mult', 1):.2f}"
+    # Soft-signal (default) vs optional primary replacement of RHYME.
+    if config.effective_markov_hmm_primary_regime():
+        mode_label = "HMM PRIMARY REGIME"
+    else:
+        mode_label = "HMM soft-signal ON"
     if pred and pred.get("ok"):
         return (
-            f"Markov HMM: ON ({n} states, next={pred.get('predicted_next')} "
+            f"Markov {mode_label} ({n} states, next={pred.get('predicted_next')} "
             f"p={pred.get('confidence', 0):.0%} | "
             f"bull={pred.get('p_bull_tomorrow', 0):.0%} "
-            f"bear={pred.get('p_bear_tomorrow', 0):.0%})"
+            f"bear={pred.get('p_bear_tomorrow', 0):.0%}{tod_note})"
         )
-    return f"Markov HMM: ON ({n} states, next-regime prob)"
+    return f"Markov {mode_label} ({n} states, fallback=RHYME{tod_note})"
+
+
+def hmm_stat_arb_boost() -> float:
+    """Stat Arb pair/size boost from Markov × TOD (1.0 when idle)."""
+    if not config.effective_markov_hmm_enabled():
+        # Still allow pure TOD boost when HMM off but TOD on
+        try:
+            from modules.time_of_day import effective_time_of_day_analysis, tod_edge_for_bucket
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            if effective_time_of_day_analysis():
+                b = None
+                try:
+                    from modules.time_of_day import classify_tod_bucket
+
+                    b = classify_tod_bucket(datetime.now(ZoneInfo("America/New_York")))
+                except Exception:
+                    b = None
+                return float(tod_edge_for_bucket(b).get("sa_boost", 1.0))
+        except Exception:
+            return 1.0
+        return 1.0
+    pred = _last_prediction
+    if not pred or not pred.get("ok"):
+        return 1.0
+    # Favor SA when range/sideways predicted + TOD boost
+    p_range = float((pred.get("next_probs") or {}).get("D", 0.0))
+    p_bull = float(pred.get("p_bull_tomorrow") or 0.0)
+    base = 1.0 + 0.20 * p_range - 0.10 * p_bull
+    tod = float(pred.get("tod_sa_boost") or 1.0)
+    return float(np.clip(base * tod, 0.70, 1.40))
 
 
 def format_weekly_hmm_section() -> list[str]:
@@ -676,6 +861,12 @@ def format_weekly_hmm_section() -> list[str]:
         f"sizing x{pred.get('sizing_mult', 1):.2f} | "
         f"short x{pred.get('short_boost', 1):.2f}"
     )
+    if pred.get("tod_bucket"):
+        lines.append(
+            f"- Time-of-day: **{pred.get('tod_bucket')}** "
+            f"(entry x{pred.get('tod_entry_mult', 1):.2f}, "
+            f"Stat Arb x{pred.get('tod_sa_boost', 1):.2f})"
+        )
     tm = pred.get("transmat") or _model_cache.get("transmat_labeled")
     if tm is not None:
         arr = np.asarray(tm, dtype=float)
@@ -711,5 +902,8 @@ def heartbeat_hmm_payload() -> dict[str, Any] | None:
         "vti_adj_pp": pred.get("vti_adj_pp"),
         "sizing_mult": pred.get("sizing_mult"),
         "short_boost": pred.get("short_boost"),
+        "tod_bucket": pred.get("tod_bucket"),
+        "tod_entry_mult": pred.get("tod_entry_mult"),
+        "tod_sa_boost": pred.get("tod_sa_boost"),
         "reason": pred.get("reason"),
     }

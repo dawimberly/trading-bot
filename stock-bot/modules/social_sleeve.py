@@ -10,6 +10,28 @@ import config
 from modules.felix_sentiment import latest_felix_sentiment
 from modules.sentiment_keywords import score_text_sentiment
 
+def apply_dynamic_social_gate(
+    regime: str | None,
+    bubble_score_100: float | None = None,
+    *,
+    log: bool = False,
+) -> bool:
+    """
+    Auto-enable Felix/social on paper when RHYME_E or bubble >= threshold;
+    force off in RHYME_C/D unless manual override. Live is never dynamic.
+    """
+    prev = config.felix_social_dynamic_active()
+    active = config.update_felix_social_dynamic(regime, bubble_score_100)
+    if log and (
+        config.effective_felix_social_dynamic_enabled()
+        or config.felix_social_manual_override()
+    ):
+        line = config.format_felix_social_dynamic_banner(regime, bubble_score_100)
+        if active != prev or log:
+            print(f"--- {line} ---")
+    return active
+
+
 ROOT = Path(__file__).resolve().parents[1]
 SOCIAL_SYMBOLS = frozenset({"SPY", "GLD", "XLE"})
 JOURNAL_PATH = ROOT / "sentiment" / "social_sleeve_journal.csv"
@@ -65,6 +87,12 @@ def aggregate_social_score(
     wsum = sum(weights) or 1.0
     score = round(sum(p * w for p, w in zip(parts, weights)) / wsum, 4)
     macro_hits = int((felix or {}).get("macro_bearish_hits") or 0)
+    if (
+        config.paper_social_bearish_tuning_enabled()
+        and macro_hits > 0
+        and score < 0
+    ):
+        score = max(-1.0, round(score - min(0.12, 0.03 * macro_hits), 4))
     return {
         "score": score,
         "felix": felix,
@@ -78,6 +106,7 @@ def target_symbol_for_score(
     score: float | None,
     *,
     live_mirror: bool = False,
+    macro_hits: int = 0,
 ) -> str | None:
     """
     Felix-aligned macro tilt (single ETF, rotate on score change).
@@ -86,6 +115,12 @@ def target_symbol_for_score(
     """
     if score is None:
         return None
+    if (
+        config.paper_social_bearish_tuning_enabled()
+        and macro_hits > 0
+        and float(score) < config.SOCIAL_BEARISH_GLD_THRESHOLD
+    ):
+        return "GLD"
     if score <= config.SOCIAL_BEAR_GLD_THRESHOLD:
         return "GLD"
     if score <= config.SOCIAL_BEAR_ENERGY_THRESHOLD:
@@ -109,8 +144,23 @@ def resolve_social_target(
     macro_hits = int(agg.get("macro_bearish_hits") or 0)
 
     if (
+        config.paper_social_bearish_tuning_enabled()
+        and score is not None
+        and macro_hits > 0
+        and float(score) < config.SOCIAL_BEARISH_GLD_THRESHOLD
+    ):
+        if log:
+            print(
+                f"--- Strong Felix/Andrei macro bear (score={float(score):.2f}, "
+                f"hits={macro_hits}) -> GLD + cash bias ---"
+            )
+        return "GLD", "strong_macro_bear_gld"
+
+    if (
         config.SOCIAL_MACRO_OVERRIDES_ENABLED
         and config.paper_aggressive_context()
+        and config.effective_social_sleeve_enabled()
+        and config.FELIX_SENTIMENT_ENABLED
         and score is not None
         and float(score) < config.SOCIAL_MACRO_BEAR_OVERRIDE_SCORE
         and macro_hits > 0
@@ -122,6 +172,8 @@ def resolve_social_target(
     if (
         config.SOCIAL_MACRO_OVERRIDES_ENABLED
         and config.paper_aggressive_context()
+        and config.effective_social_sleeve_enabled()
+        and config.FELIX_SENTIMENT_ENABLED
         and score is not None
         and float(score) >= config.SOCIAL_MACRO_BULL_OVERRIDE_SCORE
     ):
@@ -131,7 +183,9 @@ def resolve_social_target(
             print("--- Felix bullish macro detected -> SPY target ---")
         return "SPY", "macro_bull_override"
 
-    target = target_symbol_for_score(score, live_mirror=live_mirror)
+    target = target_symbol_for_score(
+        score, live_mirror=live_mirror, macro_hits=macro_hits
+    )
     return target, "threshold"
 
 
@@ -296,13 +350,22 @@ def run_social_sleeve_cycle(
     """
     Paper social sleeve (full cap) + optional live mirror (fraction of cap).
     Does not buy IPOs; rotates GLD / XLE / SPY / cash from shared social mood.
+    When dynamic gate is off, flattens paper social inventory to cash.
     """
-    if not config.effective_social_sleeve_enabled():
+    dynamic_ctx = (
+        config.effective_felix_social_dynamic_enabled()
+        or config.felix_social_manual_override()
+    )
+    if not config.effective_social_sleeve_enabled() and not dynamic_ctx:
         return {"enabled": False}
 
     agg = aggregate_social_score(wisdom)
-    target, target_reason = resolve_social_target(agg)
-    mirror_target, mirror_reason = resolve_social_target(agg, live_mirror=True)
+    if not config.effective_social_sleeve_enabled():
+        target, target_reason = None, "dynamic_off_flatten"
+        mirror_target, mirror_reason = None, "dynamic_off"
+    else:
+        target, target_reason = resolve_social_target(agg)
+        mirror_target, mirror_reason = resolve_social_target(agg, live_mirror=True)
     result = {
         "enabled": True,
         "score": agg.get("score"),

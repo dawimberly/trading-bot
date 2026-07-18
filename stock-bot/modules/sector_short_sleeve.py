@@ -53,6 +53,28 @@ def run_sector_shorts(
     if not short_regime_active(regime):
         return 0
 
+    min_bub = config.effective_sector_short_min_bubble()
+    bub = float(bubble_score)
+    bub_norm = bub if bub <= 1.0 else bub / 100.0
+    if bub_norm < min_bub:
+        logger.debug(
+            "Sector shorts skipped: bubble %.2f < %.2f",
+            bub_norm,
+            min_bub,
+        )
+        return 0
+
+    from modules.pipeline_strategies import _spy_bear_streak
+
+    streak_ok, streak = _spy_bear_streak(data, config.SPY_BOT_SYMBOL)
+    if not streak_ok:
+        logger.debug(
+            "Sector shorts skipped: SPY bear streak %s < %s bars",
+            streak,
+            config.SHORT_RHYME_E_BEAR_STREAK_BARS,
+        )
+        return 0
+
     candidates = weak_sector_candidates(data)
     if not candidates:
         return 0

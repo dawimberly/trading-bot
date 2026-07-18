@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +12,8 @@ import numpy as np
 import pandas as pd
 
 import config
+
+logger = logging.getLogger(__name__)
 
 VTI_SYMBOL = config.VTI_CORE_SYMBOL
 SPY_SYMBOL = config.SPY_BOT_SYMBOL
@@ -35,7 +38,8 @@ def _load_vix_daily() -> pd.Series:
         conn = sqlite3.connect(config.DB_PATH)
         df = pd.read_sql(f'SELECT * FROM "{table}"', conn)
         conn.close()
-    except Exception:
+    except Exception as exc:
+        logger.debug("VIX daily series read failed: %s", exc)
         return pd.Series(dtype=float)
     if df.empty:
         return pd.Series(dtype=float)
@@ -70,8 +74,8 @@ def ensure_vix_daily() -> None:
         conn = sqlite3.connect(config.DB_PATH)
         df[["Date", "Close"]].to_sql("VIX_daily", conn, if_exists="replace", index=False)
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("VIX daily series persist failed: %s", exc)
 
 
 def current_vix_level() -> float | None:

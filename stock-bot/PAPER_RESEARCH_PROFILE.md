@@ -36,7 +36,7 @@
 | **Insider boosts** | ON — momentum / stat arb / shorts + VTI allocator tilt | `INSIDER_SIGNAL_BOOST_ENABLED` |
 | **Protective shorts** | **8–18%** gross, RR **1.6:1** | `PROTECTIVE_SHORT_MIN_PCT`, `PROTECTIVE_SHORT_MAX_PCT` |
 | **Sector shorts** | weak sectors + bubble≥55, ≤8%/name | `SECTOR_SHORT_ENABLED`, `SECTOR_SHORT_MAX_PCT` |
-| **Stat arb** | **8–12** pairs (expand when low no_room), corr≥**0.68**, coint p&lt;0.12, Z 2.0–2.6, RR 1.6:1, trail 50%/35%, hold 35b, 7% cap + vol scaling | `PAPER_STAT_ARB_*`, `STAT_ARB_SLEEVE_CAP_*` |
+| **Stat arb** | **8–12** pairs (expand when low no_room), corr≥**0.68**, coint p&lt;0.12, Z **2.1–2.7**, RR **1.7:1**, trail **45%/30%**, partial@**1.2R**, ADV **$50M**, conviction **0.6–1.4×**, hold 35b, 7% cap + vol scaling | `PAPER_STAT_ARB_*`, `STAT_ARB_SLEEVE_CAP_*` |
 | **Thinking engine** | ON (enriched Ollama context + backtest heuristic tilts) | `PAPER_THINKING_ENGINE_ENABLED` |
 | **Tail risk** | vol ceiling 17%, DD tiers, RHYME_B cuts | `TAIL_RISK_CONTROLS_ENABLED`, `PAPER_VOL_CEILING_PCT` |
 | **Bot Health Score** | 0–100, dashboard pill | computed at runtime |
@@ -44,7 +44,11 @@
 | **Heartbeat watchdog** | ON, 90s cycle cap + supervisor auto-restart | `HEARTBEAT_WATCHDOG_*`, `PAPER_SUPERVISOR_AUTORESTART` |
 | **Historical news** | backtest headline proxy | `HISTORICAL_NEWS_ENABLED`, `HISTORICAL_NEWS_CACHE_DIR` |
 | **Dynamic Felix/social** | ON when **RHYME_E** or **bubble ≥ 65**; OFF in **RHYME_C/D** (manual override available). Live off. | `FELIX_SOCIAL_DYNAMIC_ENABLED`, `FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD`, `FELIX_SOCIAL_MANUAL_OVERRIDE` |
-| **Markov HMM regime** | 5-state `GaussianHMM` next-day probs soft-signal Dynamic VTI, sizing, shorts, conviction. Falls back to RHYME if fit fails. Live off. | `MARKOV_HMM_ENABLED`, `HMM_N_STATES`, `HMM_TRAIN_WINDOW_DAYS`, `HMM_PREDICTION_HORIZON` |
+| **Markov HMM regime** | **RHYME primary locked.** 5-state `GaussianHMM` soft-signal only (Dynamic VTI, sizing, shorts, conviction). `MARKOV_HMM_PRIMARY_REGIME=false` by default. Primary replacement is research-only. Falls back to RHYME if fit fails. Live off. | `MARKOV_HMM_ENABLED`, `MARKOV_HMM_PRIMARY_REGIME`, `HMM_N_STATES` |
+| **Time-of-day analysis** | Session buckets (open / first_30m / mid_morning / midday / last_hour / close) — win rate, Sharpe, Stat Arb edges. Feeds Markov soft-signals. Live off. | `TIME_OF_DAY_ANALYSIS`, `TIME_OF_DAY_LIVE_ENABLED` |
+| **Daily Profit Banking** | Bank when day gain ≥**0.8%**; risk **×0.4** + VTI boost for rest of day; reset **30m after open**. Live off. | `DAILY_BANK_ENABLED`, `DAILY_BANK_THRESHOLD_PCT`, `DAILY_BANK_RISK_MULT` |
+| **GARCH vol sizing** | **Locked paper ON / live OFF.** GARCH(1,1) next-day σ → size **×0.55–1.0** + VTI nudge (high vol → smaller; default never sizes up). 365d lock rationale: ON beat OFF (~+1.06pp return, +0.04 Sharpe, MaxDD ≈ flat). | `GARCH_VOL_ENABLED`, `GARCH_VOL_LIVE_ENABLED`, `GARCH_VOL_MULT_*`, `GARCH_VOL_VTI_*` |
+| **Smart ATR Stops** | Default **2.0×** ATR stop; at **−5%** unrealized: high conviction (RVOL>2.5 / catalyst>70 / insider cluster) → tighten **1.0×**, else cut size **50%**; at **−10%** hard full exit. Live off. | `PAPER_SMART_STOPS`, `ATR_STOP_MULTIPLIER`, `ATR_TIGHTEN_MULTIPLIER`, `STOP_LOSS_REEVAL_PCTS` |
 
 ### Dynamic Felix / social sleeve (paper)
 
@@ -61,6 +65,8 @@ Startup banner: `>>> Felix/social: dynamic (ON/OFF based on regime) <<<`
 
 ### Markov HMM regime (paper)
 
+**RHYME is primary regime detection (locked).** HMM is soft-signal only under Realistic Research (`MARKOV_HMM_PRIMARY_REGIME=false`).
+
 5-state `hmmlearn.GaussianHMM` trained on rolling daily features (SPY returns/vol, VIX proxy, volume z, sentiment, bubble, insider). Emits next-day probs over RHYME_A–E and soft-signals:
 
 - **Dynamic VTI** — higher core when bear/panic predicted
@@ -68,9 +74,73 @@ Startup banner: `>>> Felix/social: dynamic (ON/OFF based on regime) <<<`
 - **Shorts** — boost gross/notional when bear/panic predicted
 - **Conviction** — blends into regime conviction component
 
-Falls back to current RHYME if hmmlearn is missing or fit fails. Live off unless `MARKOV_HMM_LIVE_ENABLED=true`.
+Falls back to current RHYME if hmmlearn is missing or fit fails. Live off unless `MARKOV_HMM_LIVE_ENABLED=true`. Optional HMM primary (`MARKOV_HMM_PRIMARY_REGIME=true`) is research-only — enable only after a 365d 3-way compare clearly beats RHYME.
 
-Compare: `python backtester.py --days 365 --paper-aggressive --compare-markov-hmm`
+3-way compare (RHYME | HMM soft | HMM primary):
+
+```powershell
+python backtester.py --days 365 --paper-aggressive --compare-markov-hmm
+```
+
+Startup: `>>> Regime lock: RHYME primary | HMM soft-signal only (MARKOV_HMM_PRIMARY_REGIME=false) <<<`
+
+### Time-of-day predictability (paper)
+
+`modules/time_of_day.py` owns session buckets and metrics. Markov HMM consumes `tod_bucket` as an observation and blends entry/Stat Arb multipliers from the cached 365d edge table.
+
+| Bucket | ET window |
+|--------|-----------|
+| `open` | 9:30–9:45 |
+| `first_30m` | 9:30–10:00 |
+| `mid_morning` | 10:00–11:30 |
+| `midday` | 11:30–14:00 |
+| `last_hour` | 15:00–16:00 |
+| `close` | 15:45–16:00 |
+
+Run analysis (fast — hourly market data + trade journals, not full-stack BT):
+
+```powershell
+python scripts/analysis/run_tod_analysis.py --days 365
+```
+
+Cache: `data/tod_analysis_cache.json`. Startup banner: `>>> Time-of-day: ON | best entry=… <<<`
+
+### Daily Profit Banking (paper)
+
+`modules/daily_profit_banking.py` tracks day-open equity vs current mark. When session gain ≥ **0.8%**, risk per trade is cut to **×0.4** and Dynamic VTI gets a **+10pp** defensive nudge for the rest of the day. Resets **30 minutes after the open** each session.
+
+- Config: `DAILY_BANK_ENABLED`, `DAILY_BANK_THRESHOLD_PCT=0.8`, `DAILY_BANK_RISK_MULT=0.4`, `DAILY_BANK_LIVE_ENABLED=false`
+- Compare: `python backtester.py --days 365 --paper-aggressive --compare-daily-bank`
+- Banner: `>>> Daily Profit Banking: ON (0.8% threshold) <<<`
+- Dashboard pill shows today's locked gain when banked
+
+### GARCH(1,1) volatility sizing (locked paper)
+
+`modules/garch_vol.py` fits a lightweight variance-targeting GARCH(1,1) on daily SPY (configurable) log returns — no `arch` package required. Next-day σ is compared to a rolling realized-vol median (**anchor**). Ratio → size / VTI multiplier:
+
+| Forecast / anchor | Size mult (defaults) |
+|-------------------|----------------------|
+| ≤ **0.85** | **1.00** (cap — never size up vs baseline) |
+| **0.85–1.35** | linear interpolate |
+| ≥ **1.35** | **0.55** floor |
+
+Also nudges Dynamic VTI (+pp when elevated; tiny cut when calm, capped) and soft-trims the conviction regime component (`GARCH_VOL_CONVICTION_BLEND=0.35`).
+
+**Locked for Realistic Research** (same style as RHYME primary / Daily Banking): paper **ON**, live **OFF** unless `GARCH_VOL_LIVE_ENABLED=true`. Enforce keeps `GARCH_VOL_ENABLED=true` when not env-explicit. 365d A/B: ON beat OFF (~+1.06pp return, +0.04 Sharpe, MaxDD ≈ flat); shorter 80d window was slightly negative — lock uses the 365d evidence.
+
+- Config: `GARCH_VOL_ENABLED`, `GARCH_VOL_LIVE_ENABLED=false`, `GARCH_VOL_MULT_MIN=0.55`, `GARCH_VOL_MULT_MAX=1.0`, `GARCH_VOL_LOOKBACK=252`
+- Compare: `python backtester.py --days 365 --paper-aggressive --compare-garch-vol`
+- Quiet runner: `python scripts/analysis/_run_garch_vol_compare.py` (`GARCH_COMPARE_DAYS` env)
+- Banner: `>>> GARCH Vol: ON locked paper (σ̂/anchor … → size x…, VTI …pp) <<<`
+- Lock line: `>>> GARCH vol lock: paper ON | live OFF (GARCH_VOL_LIVE_ENABLED=false) <<<`
+
+### Smart ATR Stops (paper)
+
+`modules/smart_atr_stops.py` sets a default **2.0× ATR** protective stop on new tactical longs. At **−5%** unrealized: high conviction (RVOL > 2.5 OR catalyst > 70 OR insider cluster) tightens to **1.0× ATR**; otherwise size is cut **50%** with the stop kept on the remainder. At **−10%**: hard full exit (no exceptions). Live stays off unless `SMART_STOPS_LIVE_ENABLED`.
+
+- Config: `PAPER_SMART_STOPS`, `ATR_STOP_MULTIPLIER=2.0`, `ATR_TIGHTEN_MULTIPLIER=1.0`, `STOP_LOSS_REEVAL_PCTS=[-5,-10]`
+- Compare: `python backtester.py --days 365 --paper-aggressive --compare-smart-stops --no-thinking`
+- Banner: `>>> Smart ATR Stops: ON (2.0x → tighten 1.0x @ -5% / hard -10%) <<<`
 
 Compare:
 
@@ -131,15 +201,32 @@ flag misconfiguration. Per-cycle banner + heartbeat block in `run_all.py`; per-b
 
 ---
 
-## Monday prep commands
+## Monday prep commands (v1.5.4 locks)
+
+Confirm before open (or Sunday night):
+
+| Lock | Expected |
+|------|----------|
+| Version | `REALISTIC_RESEARCH_VERSION=1.5.4` / banner `v1.5.4 — Sector-Aware Portfolio Constructor` |
+| Regime | **RHYME primary**; `MARKOV_HMM_PRIMARY_REGIME=false` (HMM soft only) |
+| GARCH | Paper **ON** / live **OFF** (`GARCH_VOL_LIVE_ENABLED=false`) |
+| Daily Banking | Paper **ON** (≥0.8% → risk ×0.4); live off |
+| Portfolio constructor | ON (paper aggressive only) |
 
 ```powershell
 cd C:\Users\Owner\PythonTrading\stock-bot
-Lock_v15.bat                           # cancel backtests + verify v1.5 lock
-python scripts\cancel_backtest.py      # stop stray backtester.py only
-python scripts\full_system_verify.py   # 12 sections + v1.5 confirmation banner
-python scripts\owner_reset.py          # restart live + paper + dashboard
-python status.py
+Lock_v15.bat                           # cancel backtests + verify v1.5.4 lock
+.\.venv\Scripts\python.exe scripts\cancel_backtest.py
+.\.venv\Scripts\python.exe scripts\full_system_verify.py   # 12 sections + Monday banner
+.\.venv\Scripts\python.exe scripts\maintenance\cleanup_journal_csv.py --dry-run
+.\.venv\Scripts\python.exe scripts\owner_reset.py          # restart live + paper + dashboard
+.\.venv\Scripts\python.exe status.py
+```
+
+Journal hygiene (optional write with backup):
+
+```powershell
+.\.venv\Scripts\python.exe scripts\maintenance\cleanup_journal_csv.py --all --backup
 ```
 
 Overnight: `Start_Autonomous.bat` → `scripts/autostart_paper_bot.py` (paper restart + 9:00 AM ET Telegram; log: `logs/autostart_paper.log`).
@@ -179,14 +266,19 @@ python -u backtester.py --compare-dynamic-vti --days 365 --no-thinking > backtes
 | `PAPER_POSITION_MAX_HOLD_BARS` | `30` |
 | `PAPER_VOL_CEILING_PCT` | `0.17` |
 | `PAPER_MAX_POSITION_PCT` | `0.08` |
-| `PAPER_STAT_ARB_RISK_REWARD` | `1.6` |
-| `PAPER_STAT_ARB_MAX_PAIRS` | `12` (→ 14 → 16) |
+| `PAPER_STAT_ARB_RISK_REWARD` | `1.7` |
+| `PAPER_STAT_ARB_MAX_PAIRS` | `8` (→ 12 ceiling) |
 | `RVOL_MIN_THRESHOLD` | `2.0` |
 | `ORB_BREAKOUT_MINUTES` | `30` |
 | `CATALYST_MIN_SCORE` | `65` |
 | `ATR_RISK_MULTIPLE` | `2.0` |
 | `PROTECTIVE_SHORT_MIN_PCT` | `0.08` |
 | `PROTECTIVE_SHORT_MAX_PCT` | `0.18` |
+| `MARKOV_HMM_ENABLED` | `true` (soft-signal ON) |
+| `MARKOV_HMM_PRIMARY_REGIME` | `false` (RHYME primary locked) |
+| `GARCH_VOL_ENABLED` | `true` (**locked** paper ON) |
+| `GARCH_VOL_LIVE_ENABLED` | `false` (live OFF unless opt-in) |
+| `GARCH_VOL_MULT_MIN` / `_MAX` | `0.55` / `1.0` |
 
 `.env` overrides win — only set keys you intend to change.
 
@@ -212,6 +304,16 @@ CATALYST_SCORING_ENABLED=true
 CATALYST_MIN_SCORE=65
 ATR_SIZING_ENABLED=true
 ATR_RISK_MULTIPLE=2.0
+PAPER_SMART_STOPS=true
+ATR_STOP_MULTIPLIER=2.0
+ATR_TIGHTEN_MULTIPLIER=1.0
+STOP_LOSS_REEVAL_PCTS=[-5,-10]
+MARKOV_HMM_ENABLED=true
+MARKOV_HMM_PRIMARY_REGIME=false
+GARCH_VOL_ENABLED=true
+GARCH_VOL_LIVE_ENABLED=false
+GARCH_VOL_MULT_MIN=0.55
+GARCH_VOL_MULT_MAX=1.0
 ```
 
 ---

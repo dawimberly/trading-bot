@@ -291,7 +291,8 @@ def _tail_risk_section(hb: dict[str, Any], df) -> tuple[list[str], dict[str, Any
         )
 
     if df is not None and not df.empty and "notes" in df.columns:
-        note_text = " ".join(df["notes"].astype(str).tolist()).lower()
+        note_parts = [str(x) for x in df["notes"].fillna("").tolist() if str(x).lower() != "nan"]
+        note_text = " ".join(note_parts).lower()
         for token in ("rhyme_b", "dd_risk", "vol_ceiling", "soft_pause", "no_room"):
             if token in note_text:
                 events.append(f"Journal mentions `{token}` this week")
@@ -373,8 +374,8 @@ def gather_weekly_report(
                 "sharpe": float(raw_all.get("sharpe") or 0),
                 "max_drawdown_pct": float(raw_all.get("max_drawdown_pct") or 0),
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
 
     bubble_score: float | None = None
     bubble_score_100: float | None = None
@@ -388,7 +389,8 @@ def gather_weekly_report(
             bubble_score_100 = float(bubble_ctx["score_100"])
             bubble_score = float(bubble_ctx["score_normalized"])
             buffett = dict(bubble_ctx.get("buffett") or {})
-    except Exception:
+    except Exception as exc:
+        logger.debug("weekly bubble risk skipped: %s", exc)
         bubble_score = None
         bubble_score_100 = None
         buffett = None
@@ -576,8 +578,17 @@ def render_markdown(data: WeeklyReportData) -> str:
         from modules.markov_regime import format_weekly_hmm_section
 
         lines.extend(format_weekly_hmm_section())
-    except Exception:
+    except Exception as exc:
+        logger.debug("weekly HMM section skipped: %s", exc)
         lines.extend(["## Markov HMM regime", "", "- Markov HMM: unavailable", ""])
+
+    try:
+        from modules.time_of_day import format_weekly_tod_section
+
+        lines.extend(format_weekly_tod_section())
+    except Exception as exc:
+        logger.debug("weekly TOD section skipped: %s", exc)
+        lines.extend(["## Time-of-day performance", "", "- TOD analysis: unavailable", ""])
 
     lines.extend(["## Sector screener", "", f"- {s.sector_activity}", f"- {s.screener_meta}", ""])
 
@@ -586,14 +597,15 @@ def render_markdown(data: WeeklyReportData) -> str:
         from modules.insider_monitor import format_weekly_insider_section
 
         lines.extend(format_weekly_insider_section())
-    except Exception:
+    except Exception as exc:
+        logger.debug("weekly insider section skipped: %s", exc)
         lines.append("- Insider monitor: unavailable")
     try:
         from modules.insider_signal_handler import get_weekly_impact_summary
 
         lines.extend(get_weekly_impact_summary())
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     lines.append("")
 
     lines.extend(["## Stat Arb attribution", ""])
@@ -774,16 +786,16 @@ def render_markdown(data: WeeklyReportData) -> str:
         note = format_weekly_sector_rotation_note()
         if note:
             paper_notes.append(note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.vol_breakout_sleeve import format_weekly_vol_breakout_note
 
         note = format_weekly_vol_breakout_note()
         if note:
             paper_notes.append(note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     if paper_notes:
         lines.extend(["## Paper research sleeves", ""])
         for note in paper_notes:
@@ -974,56 +986,56 @@ def format_telegram_research_addon(data: WeeklyReportData) -> str:
         atr_note = format_weekly_atr_sizing_note()
         if atr_note:
             lines.append(atr_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.vol_breakout_sleeve import format_weekly_vol_breakout_note
 
         vol_bo_note = format_weekly_vol_breakout_note()
         if vol_bo_note:
             lines.append(vol_bo_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.risk_management import format_weekly_conviction_note
 
         conv_note = format_weekly_conviction_note()
         if conv_note:
             lines.append(conv_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.strategy_performance import format_weekly_strategy_contribution_note
 
         contrib_note = format_weekly_strategy_contribution_note()
         if contrib_note:
             lines.append(contrib_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.multi_timeframe import format_weekly_multi_timeframe_note
 
         mtf_note = format_weekly_multi_timeframe_note()
         if mtf_note:
             lines.append(mtf_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.exit_management import format_weekly_exit_note
 
         exit_note = format_weekly_exit_note()
         if exit_note:
             lines.append(exit_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     try:
         from modules.risk_management import format_weekly_correlation_note
 
         corr_note = format_weekly_correlation_note()
         if corr_note:
             lines.append(corr_note)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("weekly report soft-fail: %s", exc)
     if config.effective_thinking_engine_enabled():
         try:
             from modules.thinking_engine import weekly_strategy_review
@@ -1041,8 +1053,8 @@ def format_telegram_research_addon(data: WeeklyReportData) -> str:
             headline = str(review.get("headline") or "").strip()
             if headline and review.get("source") == "llm":
                 lines.append(f"AI weekly: {headline[:120]}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("weekly report soft-fail: %s", exc)
     return "\n".join(lines)
 
 

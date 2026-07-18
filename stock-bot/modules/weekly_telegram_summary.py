@@ -87,6 +87,60 @@ def send_weekly_telegram_summary(
     message = format_weekly_telegram_message(data)
     if config.paper_chase_mode_enabled():
         try:
+            from modules.insider_signal_handler import format_telegram_weekly_insider_block
+
+            message += format_telegram_weekly_insider_block()
+        except Exception as exc:
+            logger.debug("Weekly insider Telegram block skipped: %s", exc)
+        try:
+            from modules.volume_analysis import format_telegram_weekly_rvol_block
+
+            message += format_telegram_weekly_rvol_block()
+        except Exception as exc:
+            logger.debug("Weekly RVOL Telegram block skipped: %s", exc)
+        try:
+            from modules.strategy_performance import format_telegram_weekly_strategy_block
+
+            message += format_telegram_weekly_strategy_block()
+        except Exception as exc:
+            logger.debug("Weekly strategy Telegram block skipped: %s", exc)
+        try:
+            from modules.risk_management import format_telegram_weekly_conviction_block
+
+            message += format_telegram_weekly_conviction_block()
+        except Exception as exc:
+            logger.debug("Weekly conviction Telegram block skipped: %s", exc)
+        try:
+            from modules.multi_timeframe import format_telegram_weekly_mtf_block
+
+            message += format_telegram_weekly_mtf_block()
+        except Exception as exc:
+            logger.debug("Weekly MTF Telegram block skipped: %s", exc)
+        try:
+            from modules.exit_management import format_telegram_weekly_exit_block
+
+            message += format_telegram_weekly_exit_block()
+        except Exception as exc:
+            logger.debug("Weekly exit Telegram block skipped: %s", exc)
+        try:
+            from modules.sector_rotation import format_telegram_weekly_sector_rotation_block
+
+            message += format_telegram_weekly_sector_rotation_block()
+        except Exception as exc:
+            logger.debug("Weekly sector rotation Telegram block skipped: %s", exc)
+        try:
+            from modules.vol_breakout_sleeve import format_telegram_weekly_vol_breakout_block
+
+            message += format_telegram_weekly_vol_breakout_block()
+        except Exception as exc:
+            logger.debug("Weekly vol breakout Telegram block skipped: %s", exc)
+        try:
+            from modules.risk_management import format_telegram_weekly_correlation_block
+
+            message += format_telegram_weekly_correlation_block()
+        except Exception as exc:
+            logger.debug("Weekly correlation Telegram block skipped: %s", exc)
+        try:
             from modules.weekly_report import format_telegram_research_addon, gather_weekly_report
 
             report = gather_weekly_report(

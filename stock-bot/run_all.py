@@ -392,6 +392,22 @@ def _write_heartbeat(
             payload["markov_hmm"] = hmm_hb
     except Exception:
         pass
+    try:
+        from modules.time_of_day import heartbeat_tod_payload
+
+        tod_hb = heartbeat_tod_payload()
+        if tod_hb is not None:
+            payload["time_of_day"] = tod_hb
+    except Exception:
+        pass
+    try:
+        from modules.daily_profit_banking import heartbeat_daily_bank_payload
+
+        bank_hb = heartbeat_daily_bank_payload()
+        if bank_hb is not None:
+            payload["daily_bank"] = bank_hb
+    except Exception:
+        pass
     if thinking_engine:
         payload["thinking_engine"] = {
             "model": thinking_engine.get("model"),
@@ -531,6 +547,34 @@ def main():
         paper=paper_book,
     )
     set_entry_block_for_cycle(dl_reason if dl_tripped else None)
+
+    if config.effective_daily_bank_enabled():
+        try:
+            from modules.daily_profit_banking import (
+                format_daily_bank_banner,
+                update_daily_bank,
+            )
+
+            update_daily_bank(equity)
+            bank_banner = format_daily_bank_banner()
+            if bank_banner and _main_cycle_count <= 2:
+                print(f"--- {bank_banner} ---")
+        except Exception as exc:
+            _warn_nonfatal("Daily profit banking", exc)
+
+    if config.effective_garch_vol_enabled():
+        try:
+            from modules.garch_vol import format_garch_vol_banner, update_garch_vol
+            from modules.pipeline_strategies import load_pipeline_data
+
+            _gdata = load_pipeline_data()
+            update_garch_vol(_gdata)
+            garch_banner = format_garch_vol_banner()
+            if garch_banner and _main_cycle_count <= 2:
+                print(f"--- {garch_banner} ---")
+        except Exception as exc:
+            _warn_nonfatal("GARCH vol forecast", exc)
+
     if dl_tripped:
         logger.warning(
             "DAILY LOSS CIRCUIT: %s - no new entries or thinking tilts today",
@@ -846,6 +890,22 @@ def main():
         ceil = regime_sleeve_exposure_ceiling(display_regime)
         if ceil is not None:
             regime_sz += f" | sleeve cap {ceil:.0%}"
+    if config.effective_daily_bank_enabled():
+        try:
+            from modules.daily_profit_banking import (
+                format_daily_bank_banner,
+                is_banked,
+                update_daily_bank,
+            )
+
+            update_daily_bank(equity)
+            if is_banked():
+                bb = format_daily_bank_banner()
+                if bb:
+                    print(f"--- {bb} ---")
+        except Exception as exc:
+            _warn_nonfatal("Daily profit banking refresh", exc)
+
     print(
         f"--- Regime: {display_regime} | Vol: {vol} | "
         f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{regime_sz}{gp_s}{macro_s}{pnl_s} | "
@@ -937,9 +997,19 @@ def main():
                 insider_state=insider_boost,
                 sentiment=wisdom.get("web_sentiment") or wisdom.get("price_sentiment"),
             )
+            if config.effective_markov_hmm_primary_regime() and hmm_pred.get("ok"):
+                from modules.markov_regime import apply_hmm_primary_regime
+
+                display_regime = apply_hmm_primary_regime(display_regime)
+                regime = display_regime
             hmm_banner = format_markov_hmm_banner()
             if hmm_banner and hmm_pred.get("ok"):
                 print(f"--- {hmm_banner} ---")
+            if config.effective_markov_hmm_primary_regime():
+                print(
+                    f"--- Markov HMM primary regime: "
+                    f"{'ON' if hmm_pred.get('ok') else 'fallback RHYME'} ---"
+                )
         except Exception as exc:
             _warn_nonfatal("Markov HMM", exc)
 

@@ -16,9 +16,11 @@ _VOL_CALM = float(os.getenv("DYNAMIC_VTI_VOL_CALM", "0.015"))
 _SCALE_HIGH = float(os.getenv("DYNAMIC_SLEEVE_SCALE_HIGH", "0.75"))
 _SCALE_ELEVATED = float(os.getenv("DYNAMIC_SLEEVE_SCALE_ELEVATED", "0.90"))
 _VTI_STRESS = float(os.getenv("DYNAMIC_VTI_STRESS_PCT", "0.75"))
-_VTI_DEFAULT_AGGRESSIVE = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
-_VTI_CALM = float(os.getenv("DYNAMIC_VTI_CALM_PCT", "0.50"))
-_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.40"))
+_VTI_DEFAULT_AGGRESSIVE = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.60"))
+_VTI_CALM = float(os.getenv("DYNAMIC_VTI_CALM_PCT", "0.45"))
+_VTI_VOL_STRESS = float(os.getenv("DYNAMIC_VTI_VOL_STRESS", "0.025"))
+_VTI_VOL_CALM = float(os.getenv("DYNAMIC_VTI_VOL_CALM", "0.015"))
+_PAPER_SMALL_VTI = float(os.getenv("PAPER_SMALL_ACCOUNT_VTI_PCT", "0.90"))
 
 
 def _resolve_vol_score(
@@ -39,24 +41,46 @@ def get_vti_core_pct(
     equity: float,
     vol_score: float | None = None,
     macro_stress: bool = False,
+    is_paper_aggressive: bool = False,
     volatility: str | None = None,
+    *,
+    regime: str | None = None,
+    data=None,
+    bubble_score_100: float | None = None,
+    insider_state: dict | None = None,
 ) -> float:
-    """Dynamic VTI percentage. Paper aggressive gets more flexibility."""
+    """Dynamic VTI for paper aggressive; live and locked paths stay conservative.
+
+    Paper aggressive tiers (when PAPER_DYNAMIC_VTI enabled):
+      stress / vol > 2.5%  -> 75% VTI (safety floor)
+      calm vol < 1.5%      -> 45% VTI (widen active sleeves)
+      default              -> 60% VTI
+    Small account (<$500) on paper aggressive -> 90% VTI.
+    Live / non-aggressive -> static VTI_CORE_PCT.
+    """
+    del regime, data, bubble_score_100, insider_state  # reserved; simple tier path only
+
+    paper_agg = bool(is_paper_aggressive) or (
+        config.PAPER_TRADING and config.paper_aggressive_context()
+    )
+
     if equity < config.SMALL_ACCOUNT_EQUITY_THRESHOLD:
+        if paper_agg:
+            return _PAPER_SMALL_VTI
+        if config.live_conservative_profile_active():
+            return config.LIVE_VTI_CORE_PCT
         return config.SMALL_ACCOUNT_VTI_CORE_PCT
 
-    if config.PAPER_TRADING and config.paper_aggressive_context():
+    if paper_agg:
         if not config.PAPER_DYNAMIC_VTI_ENABLED:
             return config.PAPER_VTI_CORE_PCT
 
-        score = _resolve_vol_score(vol_score, volatility)
-        if macro_stress or (score is not None and score > _VOL_HIGH):
-            pct = _VTI_STRESS
-        elif score is not None and score < _VOL_CALM:
-            pct = _VTI_CALM
-        else:
-            pct = _VTI_DEFAULT_AGGRESSIVE
-        return max(pct, _VTI_PAPER_FLOOR)
+        vol = _resolve_vol_score(vol_score, volatility)
+        if macro_stress or (vol is not None and vol > _VTI_VOL_STRESS):
+            return _VTI_STRESS
+        if vol is not None and vol < _VTI_VOL_CALM:
+            return _VTI_CALM
+        return _VTI_DEFAULT_AGGRESSIVE
 
     return config.VTI_CORE_PCT
 
@@ -82,12 +106,12 @@ def get_dynamic_risk_per_trade(
 
     regime_l = (regime or "").lower()
     if vol_score < 0.015 and "bull" in regime_l and not macro_stress:
-        risk = config.PAPER_RISK_CALM_BULL_PCT
+        risk = config.effective_paper_risk_calm_pct()
     elif vol_score < 0.02 and not macro_stress:
         risk = config.PAPER_RISK_MODERATE_PCT
     else:
         risk = config.PAPER_RISK_STRESS_PCT
-    return min(risk, config.PAPER_RISK_CALM_BULL_PCT)
+    return min(risk, config.effective_paper_risk_calm_pct())
 
 
 def get_dynamic_sleeve_caps(vol_score: float, equity: float) -> dict[str, float]:

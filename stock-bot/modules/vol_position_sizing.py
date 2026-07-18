@@ -104,7 +104,8 @@ def _held_symbols(book) -> set[str]:
                 for pos in book._get_positions()
                 if float(pos.qty) > 0
             }
-        except Exception:
+        except Exception as exc:
+            logger.debug("could not read open positions for sizing: %s", exc)
             return set()
     return set()
 
@@ -186,8 +187,8 @@ def _price_and_volume(
         meta = load_screener_ticker_meta().get(sym, {})
         if meta.get("avg_volume") is not None:
             avg_vol = float(meta["avg_volume"])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("screener avg volume unavailable for %s: %s", sym, exc)
     return price, avg_vol
 
 
@@ -210,8 +211,8 @@ def is_speculative_name(
 
         if is_ipo_symbol(sym, data=full_data or data, bar_idx=bar_idx):
             return True, "recent IPO window"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("IPO window check unavailable for %s: %s", sym, exc)
     if 0 < price < TOP1_SPECULATIVE_PRICE:
         return True, f"price ${price:.2f} < ${TOP1_SPECULATIVE_PRICE:.0f}"
     if avg_vol is not None and avg_vol < TOP1_SPECULATIVE_MIN_VOLUME:
@@ -249,8 +250,8 @@ def conviction_score(
         }
         if sym_sector in leader_sectors:
             score = min(1.0, score + 0.20)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("sector leadership conviction bump skipped for %s: %s", symbol, exc)
 
     if config.effective_pattern_awareness_enabled() and data is not None:
         try:
@@ -265,8 +266,8 @@ def conviction_score(
                 ps = pattern_score(hits)
                 if ps > 0.12:
                     score = min(1.0, score + min(0.25, ps))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("chart pattern conviction bump skipped for %s: %s", symbol, exc)
 
     return float(max(0.0, min(1.0, score)))
 

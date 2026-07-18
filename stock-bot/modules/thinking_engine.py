@@ -1,4 +1,9 @@
-"""Local LLM market reasoning via Ollama — paper bot only."""
+"""Local LLM market reasoning via Ollama (+ optional Kimi daily deep think).
+
+System-wide and configurable: paper/research default ON, live default OFF
+(LIVE_THINKING_ENGINE_ENABLED). Live tilts still honor manual approval +
+daily-loss circuit breaker.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +14,22 @@ import logging
 import re
 import time
 import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 import threading
 
 import config
+from modules.ollama_client import (
+    clear_ollama_cache,
+    format_ollama_status_line,
+    model_available,
+    ollama_available,
+    ollama_complete,
+    ollama_installed_models,
+    ollama_json,
+    ollama_version,
+    resolve_model_chain,
+)
 from modules.safe_io import read_json_file, write_json_file
 from modules.logging_utils import log_event, log_subsystem_error, log_subsystem_warning
 
@@ -27,6 +42,11 @@ APPROVAL_FILE = ROOT / config.THINKING_APPROVAL_FILE
 AUDIT_LOG = ROOT / "logs" / "thinking_engine.log"
 THINKING_MAX_TOTAL_DELTA = 0.12
 THINKING_MAX_ACTIVE_SLEEVES = 3
+# Fail-fast for structured / market reasoning calls; heuristic on exhaustion.
+_OLLAMA_THINKING_TIMEOUT_DEFAULT = 90
+_OLLAMA_MAX_ATTEMPTS = 3
+_OLLAMA_STARTUP_CHECKED = False
+_OLLAMA_STARTUP_STATUS: dict[str, Any] = {}
 
 _TILT_KEYS = ("vti", "spy", "energy", "gold", "cash", "crypto", "bonds")
 _CAP_KEYS = ("vti_core", "spy", "crypto", "nyse", "metal", "cash_buffer")
@@ -62,11 +82,108 @@ def _audit_thinking(event: str, **fields: Any) -> None:
         logger.debug("Thinking audit log write failed", exc_info=True)
 
 
+def _ollama_max_attempts() -> int:
+    return max(1, min(_OLLAMA_MAX_ATTEMPTS, int(getattr(config, "OLLAMA_RETRY_COUNT", 3))))
+
+
+def _thinking_timeout_sec(override: int | None = None) -> int:
+    if override is not None:
+        return max(5, int(override))
+    return max(
+        5,
+        int(
+            getattr(
+                config,
+                "OLLAMA_THINKING_TIMEOUT_SEC",
+                _OLLAMA_THINKING_TIMEOUT_DEFAULT,
+            )
+        ),
+    )
+
+
+def _retry_backoff_sec(attempt: int) -> float:
+    """Exponential backoff after attempt N (0-based): 1s, 2s, 4s."""
+    return min(8.0, 1.0 * (2**attempt))
+
+
+def check_ollama_startup_status(*, force: bool = False) -> dict[str, Any]:
+    """Probe Ollama once at thinking-engine startup; log host/model/reachability.
+
+    Safe to call repeatedly — subsequent calls return the cached snapshot unless
+    ``force=True``.
+    """
+    global _OLLAMA_STARTUP_CHECKED, _OLLAMA_STARTUP_STATUS
+    if _OLLAMA_STARTUP_CHECKED and not force and _OLLAMA_STARTUP_STATUS:
+        return dict(_OLLAMA_STARTUP_STATUS)
+
+    host = str(getattr(config, "OLLAMA_HOST", "http://localhost:11434"))
+    primary = str(getattr(config, "OLLAMA_MODEL", "?"))
+    reachable = False
+    version: str | None = None
+    installed: list[str] = []
+    chain: list[str] = []
+    error: str | None = None
+    try:
+        reachable = bool(ollama_available())
+        if reachable:
+            version = ollama_version()
+            installed = sorted(ollama_installed_models())
+            chain = list(thinking_model_chain())
+    except Exception as exc:  # noqa: BLE001
+        error = f"{type(exc).__name__}: {exc}"
+        reachable = False
+
+    status: dict[str, Any] = {
+        "reachable": reachable,
+        "host": host,
+        "version": version,
+        "primary_model": primary,
+        "chain": chain[:5],
+        "installed_count": len(installed),
+        "installed_sample": installed[:5],
+        "timeout_sec": _thinking_timeout_sec(),
+        "max_attempts": _ollama_max_attempts(),
+        "error": error,
+        "banner": format_ollama_status_line(),
+    }
+    _OLLAMA_STARTUP_STATUS = status
+    _OLLAMA_STARTUP_CHECKED = True
+
+    if reachable:
+        logger.info(
+            "Ollama startup OK host=%s version=%s model=%s chain=%s "
+            "timeout=%ss attempts=%s installed=%s",
+            host,
+            version or "?",
+            primary,
+            ",".join(chain[:3]) or primary,
+            status["timeout_sec"],
+            status["max_attempts"],
+            len(installed),
+        )
+    else:
+        logger.warning(
+            "Ollama startup UNAVAILABLE host=%s model=%s error=%s — "
+            "thinking will use heuristic fallback",
+            host,
+            primary,
+            error or "unreachable",
+        )
+    _audit_thinking("ollama_startup_check", **{k: v for k, v in status.items() if k != "banner"})
+    return dict(status)
+
+
+def ensure_ollama_startup_check() -> dict[str, Any]:
+    """Idempotent startup probe used by maybe_run_thinking / tests."""
+    return check_ollama_startup_status(force=False)
+
+
 def _extract_labeled_block(text: str, label: str) -> str:
     if not text:
         return ""
     m = re.search(
         rf"{label}\s*:\s*(.+?)(?=(?:NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|"
+        rf"REGIME_SIGNAL|TILT_SIGNAL|RISK_SIGNAL|"
         rf"RECOMMENDED_TILT|TILT_RATIONALE|CONFIDENCE|RISKS|OPPORTUNITIES)\s*:|$)",
         text,
         re.I | re.S,
@@ -291,9 +408,14 @@ Output format (strict — ENTIRE reply ONLY these lines, no preamble, no markdow
 NARRATIVE: [Regime + AI cycle + VTI-beat thesis in one sentence]
 ASYMMETRY: [Crowd positioning error or forced flow — why VTI passive is wrong/right today]
 SECTOR_VIEW: [Tech/Semis/Energy/Defense/Gold leaders/laggards; stat-arb & vol-overlay read; 3-7d view]
+REGIME_SIGNAL: [risk-on|neutral|defensive] | strength 0.00-1.00 | [one-line driver]
+TILT_SIGNAL: [primary sleeve to add] / [primary sleeve to cut] | conviction 0.00-1.00
+RISK_SIGNAL: [low|medium|high] | [top risk in <=12 words]
 RECOMMENDED_TILT: {"vti": 0.XX, "spy": 0.XX, "tech": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX, "bonds": 0.XX}
 TILT_RATIONALE: [Link asymmetry + sector/stat-arb/vol view to each sleeve >5%; mention VTI vs active trade-off]
 CONFIDENCE: 0.XX
+RISKS: [risk1; risk2]
+OPPORTUNITIES: [opp1; opp2]
 
 Do not explain your process. Start with NARRATIVE:"""
     return _PM_SYSTEM_PROMPT
@@ -305,9 +427,10 @@ def clear_thinking_runtime_caches() -> None:
     _MACRO_SERIES_CACHE.clear()
     _VALIDATION_RESULT_CACHE.clear()
     _OLLAMA_RESPONSE_CACHE.clear()
+    clear_ollama_cache()
 
 _STRUCTURED_FIELD_RE = re.compile(
-    r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
+    r"^(?:#+\s*)?(NARRATIVE|ASYMMETRY|SECTOR_VIEW|AI_CYCLE_PHASE|REGIME_SIGNAL|TILT_SIGNAL|RISK_SIGNAL|RISKS|OPPORTUNITIES|RECOMMENDED_TILT|TILT|TILT_RATIONALE|CONFIDENCE|REASONING|PARADIGM_SHIFT|REGIME_NARRATIVE)\s*[:=\-]\s*(.*)$",
     re.I,
 )
 _TILT_PROSE_RE = re.compile(
@@ -384,8 +507,8 @@ def _yield_curve_summary(macro_cache: dict | None = None) -> str:
 
         if _tlt_yield_stress(tlt, tnx):
             parts.append("yield stress (TNX up + TLT weak)")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("yield-stress annotation unavailable: %s", exc)
     return ", ".join(parts) if parts else "n/a"
 
 
@@ -517,10 +640,593 @@ def _infer_ai_cycle_phase(summary: dict) -> str:
     return "range-bound / unclear phase"
 
 
-def build_market_summary(
+def _build_bubble_context(data, regime: str, vol: str) -> dict[str, Any]:
+    """Buffett / bubble risk for thinking prompts."""
+    try:
+        from modules.bubble_risk import compute_bubble_risk, format_bubble_risk_summary
+
+        ctx = compute_bubble_risk(data, regime, volatility=vol)
+        buff = ctx.get("buffett") or {}
+        ratio = buff.get("ratio_pct")
+        signal = str(buff.get("signal") or "")
+        score_100 = float(ctx.get("score_100") or 0.0)
+        reading = format_bubble_risk_summary(ctx) or (
+            f"Bubble {score_100:.0f}/100"
+            + (f" | Buffett {ratio:.1f}% GDP ({signal})" if ratio is not None else "")
+        )
+        return {
+            "bubble_score": float(ctx.get("score_normalized") or 0.0),
+            "bubble_score_100": score_100,
+            "buffett_signal": signal,
+            "buffett_ratio_pct": ratio,
+            "buffett_reading": reading,
+            "bubble_technical_fraction": ctx.get("technical_fraction"),
+        }
+    except Exception:
+        return {
+            "bubble_score": 0.0,
+            "bubble_score_100": 0.0,
+            "buffett_signal": "",
+            "buffett_ratio_pct": None,
+            "buffett_reading": "bubble data unavailable",
+        }
+
+
+def _build_technical_context(data) -> dict[str, Any]:
+    """Compact technical snapshot for LLM context."""
+    from modules.pipeline_strategies import _spy_market_up_signal
+
+    spy = config.SPY_BOT_SYMBOL
+    up, mom = _spy_market_up_signal(data, spy, config.SPY_MA_WINDOW)
+    lines: list[str] = []
+    if up:
+        lines.append(f"SPY above MA{config.SPY_MA_WINDOW} (+{mom * 100:.1f}%)")
+    else:
+        lines.append(f"SPY below MA{config.SPY_MA_WINDOW}")
+    if config.effective_rvol_scanner_enabled():
+        try:
+            from modules.volume_analysis import get_high_rvol_stocks
+
+            hot = get_high_rvol_stocks(data, min_rvol=2.0, limit=5)
+            if hot:
+                lines.append(
+                    "High RVOL: "
+                    + ", ".join(f"{r['symbol']} {r.get('rvol', 0):.1f}x" for r in hot[:5])
+                )
+        except Exception as exc:
+            logger.debug("high-RVOL technical annotation unavailable: %s", exc)
+    return {"technical_summary": "; ".join(lines) or "n/a"}
+
+
+def _build_stat_arb_context(data, regime: str) -> dict[str, Any]:
+    """Top stat-arb pair candidates for LLM review (scan only, no orders)."""
+    if not config.effective_stat_arb_enabled():
+        return {"stat_arb_candidates": [], "stat_arb_candidate_summary": "stat arb OFF"}
+    try:
+        from modules.stat_arb_sleeve import _nyse_stat_arb_columns, _scan_pair_candidates
+
+        cols = _nyse_stat_arb_columns(data)
+        if len(cols) < 2:
+            return {"stat_arb_candidates": [], "stat_arb_candidate_summary": "universe<2"}
+        raw = _scan_pair_candidates(
+            data,
+            cols,
+            lookback=config.STAT_ARB_LOOKBACK,
+            min_corr=config.effective_stat_arb_min_correlation(),
+            z_entry=config.effective_stat_arb_z_entry(regime=regime),
+            momentum_pick=True,
+            max_leg_vol=config.effective_stat_arb_max_leg_vol(),
+        )
+        candidates = []
+        for score, z, long_sym, short_sym, _beta, _y, _x, corr in raw[:6]:
+            candidates.append(
+                {
+                    "pair": f"{long_sym}/{short_sym}",
+                    "z": round(float(z), 2),
+                    "corr": round(float(corr), 3),
+                    "score": round(float(score), 3),
+                }
+            )
+        summary = (
+            ", ".join(f"{c['pair']} z={c['z']} corr={c['corr']}" for c in candidates[:4])
+            or "no pairs above threshold"
+        )
+        return {"stat_arb_candidates": candidates, "stat_arb_candidate_summary": summary}
+    except Exception as exc:
+        return {"stat_arb_candidates": [], "stat_arb_candidate_summary": f"scan error: {exc}"}
+
+
+_ENRICHMENT_CACHE: dict[str, tuple[float, Any]] = {}
+_ENRICHMENT_CACHE_TTL = 300.0
+
+
+def _cache_get(key: str) -> Any | None:
+    row = _ENRICHMENT_CACHE.get(key)
+    if row and time.monotonic() - row[0] < _ENRICHMENT_CACHE_TTL:
+        return row[1]
+    return None
+
+
+def _cache_put(key: str, value: Any) -> Any:
+    _ENRICHMENT_CACHE[key] = (time.monotonic(), value)
+    return value
+
+
+def _build_insider_thinking_context() -> dict[str, Any]:
+    """Insider cluster buys + executive sells for LLM context."""
+    if not config.effective_insider_monitor_enabled():
+        return {"insider_summary": "monitor OFF"}
+    try:
+        if config.effective_insider_signal_boost_enabled():
+            from modules.insider_signal_handler import get_thinking_context as _insider_ctx
+
+            return _insider_ctx()
+        from modules.insider_monitor import get_insider_context_for_thinking
+
+        return get_insider_context_for_thinking()
+    except Exception:
+        return {"insider_summary": "n/a"}
+
+
+def _build_news_thinking_context(news_headlines: str = "", *, news_analysis: dict | None = None) -> dict[str, Any]:
+    """News headlines + themes for Ollama prompts."""
+    text = str(news_headlines or "").strip()
+    if not text:
+        try:
+            from modules.thinking_news import get_news_for_thinking
+
+            text = get_news_for_thinking(max_items=8) or ""
+        except Exception as exc:
+            logger.debug("news headlines for thinking prompt unavailable: %s", exc)
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()][:8]
+    out: dict[str, Any] = {
+        "news_headline_lines": lines,
+        "news_summary": "; ".join(lines[:4])[:480] if lines else "no headlines cached",
+    }
+    if news_analysis:
+        out["news_themes"] = news_analysis.get("themes")
+        out["news_theme_summary"] = news_analysis.get("theme_summary")
+        out["news_impact_score"] = news_analysis.get("news_impact_score")
+        if news_analysis.get("digest_text"):
+            out["news_digest"] = str(news_analysis["digest_text"])[:600]
+    elif lines:
+        try:
+            from modules.thinking_news import analyze_news_headlines
+
+            analysis = analyze_news_headlines("\n".join(lines))
+            out["news_themes"] = analysis.get("themes")
+            out["news_theme_summary"] = analysis.get("theme_summary")
+            out["news_impact_score"] = analysis.get("news_impact_score")
+            out["news_digest"] = analysis.get("digest_text")
+        except Exception as exc:
+            logger.debug("headline theme analysis unavailable: %s", exc)
+    theme = str(out.get("news_theme_summary") or "").strip()
+    if theme:
+        out["news_catalyst_summary"] = f"{out['news_summary'][:200]} | themes: {theme[:160]}"
+    else:
+        out["news_catalyst_summary"] = out["news_summary"]
+    return out
+
+
+def _build_catalyst_thinking_context(data) -> dict[str, Any]:
+    """Top catalyst scores with factors (structured + summary line)."""
+    if not config.effective_catalyst_scoring_enabled():
+        return {"catalyst_summary": "scanner OFF", "catalyst_top": []}
+    try:
+        from modules.catalyst_scoring import get_top_catalyst_stocks
+
+        if data is None or getattr(data, "empty", True):
+            from modules.pipeline_strategies import load_pipeline_data
+
+            data = load_pipeline_data()
+        top = get_top_catalyst_stocks(
+            data, min_score=float(config.CATALYST_MIN_SCORE), limit=8
+        )
+        rows = []
+        for row in top[:6]:
+            fac = ", ".join((row.get("factors") or [])[:3]) or "multi-signal"
+            rows.append(
+                {
+                    "symbol": row["symbol"],
+                    "score": float(row.get("score") or 0),
+                    "factors": fac,
+                    "rvol": row.get("rvol"),
+                    "line": f"{row['symbol']} {row['score']:.0f} ({fac})",
+                }
+            )
+        if not rows:
+            summary = f"no catalysts ≥ {config.CATALYST_MIN_SCORE:.0f} today"
+        else:
+            summary = "; ".join(r["line"] for r in rows[:4])
+        return {"catalyst_summary": summary, "catalyst_top": rows}
+    except Exception as exc:
+        return {"catalyst_summary": f"catalyst scan error: {exc}", "catalyst_top": []}
+
+
+def _fetch_short_interest_snapshot(tickers: list[str]) -> list[dict[str, Any]]:
+    """Best-effort short interest via yfinance (cached, max 4 symbols)."""
+    symbols = [config.normalize_symbol(t) for t in tickers if t][:4]
+    if not symbols:
+        return []
+    cache_key = "si:" + ",".join(sorted(symbols))
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    rows: list[dict[str, Any]] = []
+    try:
+        import yfinance as yf
+
+        for sym in symbols:
+            try:
+                info = yf.Ticker(sym).info or {}
+            except Exception:
+                continue
+            pct = info.get("shortPercentOfFloat") or info.get("short_percent_of_float")
+            ratio = info.get("shortRatio") or info.get("short_ratio")
+            if pct is None and ratio is None:
+                continue
+            try:
+                pct_f = float(pct) * 100.0 if pct is not None and float(pct) <= 1.0 else float(pct)
+            except (TypeError, ValueError):
+                pct_f = None
+            line_parts = [sym]
+            if pct_f is not None:
+                line_parts.append(f"SI {pct_f:.1f}% float")
+            if ratio is not None:
+                try:
+                    line_parts.append(f"days-to-cover {float(ratio):.1f}")
+                except (TypeError, ValueError):
+                    pass
+            rows.append(
+                {
+                    "ticker": sym,
+                    "short_pct_float": pct_f,
+                    "short_ratio": ratio,
+                    "line": " ".join(line_parts),
+                }
+            )
+    except ImportError:
+        pass
+    return _cache_put(cache_key, rows)
+
+
+def _fetch_options_activity_snapshot(tickers: list[str]) -> list[dict[str, Any]]:
+    """Nearest-expiry put/call volume snapshot (cached, max 2 symbols)."""
+    symbols = [config.normalize_symbol(t) for t in tickers if t][:2]
+    if not symbols:
+        return []
+    cache_key = "opt:" + ",".join(sorted(symbols))
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+    rows: list[dict[str, Any]] = []
+    try:
+        import yfinance as yf
+
+        for sym in symbols:
+            try:
+                t = yf.Ticker(sym)
+                expiries = list(t.options or [])
+                if not expiries:
+                    continue
+                chain = t.option_chain(expiries[0])
+                put_vol = int(chain.puts["volume"].fillna(0).sum())
+                call_vol = int(chain.calls["volume"].fillna(0).sum())
+                total = put_vol + call_vol
+                if total < 100:
+                    continue
+                pc = round(put_vol / call_vol, 2) if call_vol > 0 else None
+                bias = "put-heavy" if pc and pc > 1.2 else ("call-heavy" if pc and pc < 0.8 else "balanced")
+                rows.append(
+                    {
+                        "ticker": sym,
+                        "expiry": expiries[0],
+                        "put_volume": put_vol,
+                        "call_volume": call_vol,
+                        "put_call_ratio": pc,
+                        "bias": bias,
+                        "line": f"{sym} P/C {pc or 'n/a'} vol {total:,} ({bias}, exp {expiries[0]})",
+                    }
+                )
+            except Exception:
+                continue
+    except ImportError:
+        pass
+    return _cache_put(cache_key, rows)
+
+
+def _build_options_flow_context(data, regime: str, vol: str) -> dict[str, Any]:
+    """Unusual options activity (yfinance) + equity RVOL spikes."""
+    out: dict[str, Any] = {
+        "options_flow_summary": "no options flow data",
+        "unusual_equity_volume": [],
+    }
+    opt_tickers = [config.SPY_BOT_SYMBOL]
+    if config.effective_rvol_scanner_enabled() and data is not None and not getattr(data, "empty", True):
+        try:
+            from modules.volume_analysis import get_high_rvol_stocks
+
+            for row in get_high_rvol_stocks(data, min_rvol=2.5, limit=3):
+                sym = str(row["symbol"])
+                out["unusual_equity_volume"].append(
+                    {"symbol": sym, "rvol": float(row.get("rvol", 0)), "line": f"{sym} RVOL {float(row.get('rvol', 0)):.1f}x"}
+                )
+                if sym not in opt_tickers:
+                    opt_tickers.append(sym)
+        except Exception as exc:
+            logger.debug("high-RVOL equity flow annotation unavailable: %s", exc)
+    try:
+        from modules.insider_signal_handler import get_short_candidate_tickers
+
+        for sym in get_short_candidate_tickers()[:2]:
+            if sym not in opt_tickers:
+                opt_tickers.append(sym)
+    except Exception as exc:
+        logger.debug("short-candidate tickers for options flow unavailable: %s", exc)
+    options_rows = _fetch_options_activity_snapshot(opt_tickers)
+    out["unusual_options_activity"] = options_rows
+    parts: list[str] = []
+    if options_rows:
+        parts.extend(r["line"] for r in options_rows[:3])
+        out["options_flow_available"] = True
+    else:
+        out["options_flow_available"] = False
+    rvol_lines = [r["line"] for r in out.get("unusual_equity_volume") or []]
+    if rvol_lines:
+        out["equity_flow_summary"] = " | ".join(rvol_lines[:4])
+        parts.extend(rvol_lines[:2])
+    if config.effective_options_sleeve_enabled():
+        out["options_sleeve"] = "covered-call sleeve armed (calm regime)"
+    out["options_flow_summary"] = " | ".join(parts) if parts else "no unusual options/volume detected"
+    if parts:
+        out["unusual_activity"] = parts
+    return out
+
+
+def _build_short_interest_context(extra_tickers: list[str] | None = None) -> dict[str, Any]:
+    """Short interest from yfinance when available; insider sell watch as fallback."""
+    watch: list[str] = list(extra_tickers or [])
+    try:
+        from modules.insider_signal_handler import get_short_candidate_tickers
+
+        for sym in get_short_candidate_tickers():
+            if sym not in watch:
+                watch.append(sym)
+    except Exception as exc:
+        logger.debug("short-candidate tickers for short-interest watch unavailable: %s", exc)
+    if config.SPY_BOT_SYMBOL not in watch:
+        watch.insert(0, config.SPY_BOT_SYMBOL)
+    si_rows = _fetch_short_interest_snapshot(watch[:5])
+    out: dict[str, Any] = {
+        "short_interest_available": bool(si_rows),
+        "short_interest_rows": si_rows,
+    }
+    if si_rows:
+        out["short_interest_summary"] = "; ".join(r["line"] for r in si_rows[:4])
+    elif watch:
+        out["short_interest_watch"] = watch[:6]
+        out["short_interest_summary"] = (
+            f"SI feed unavailable; insider sell watch: {', '.join(watch[:6])}"
+        )
+    else:
+        out["short_interest_summary"] = "no SI feed (paper ETB-only book)"
+    return out
+
+
+def get_thinking_context(
     data,
     regime: str,
     vol: str,
+    *,
+    news_headlines: str = "",
+    news_analysis: dict | None = None,
+    include_core: bool = True,
+) -> dict[str, Any]:
+    """Enriched Ollama context: insider, bubble, news, catalyst, stat arb, options, short interest."""
+    ctx: dict[str, Any] = {}
+    ctx.update(_build_bubble_context(data, regime, vol))
+    ctx.update(_build_technical_context(data))
+    ctx.update(_build_stat_arb_context(data, regime))
+    ctx.update(_build_insider_thinking_context())
+    ctx.update(_build_news_thinking_context(news_headlines, news_analysis=news_analysis))
+    ctx.update(_build_catalyst_thinking_context(data))
+    ctx.update(_build_options_flow_context(data, regime, vol))
+    insider_tickers = [
+        str(r.get("ticker") or "")
+        for r in (ctx.get("insider_executive_sells") or ctx.get("insider_high_score_sells") or [])[:3]
+    ]
+    ctx.update(_build_short_interest_context(extra_tickers=insider_tickers))
+    if include_core:
+        ctx["regime"] = regime
+        ctx["vol"] = vol
+    return ctx
+
+
+def format_thinking_context_block(ctx: dict[str, Any], *, max_chars: int = 3200) -> str:
+    """Compact text block for LLM prompts — low token, high signal."""
+    lines: list[str] = []
+    lines.append(f"REGIME: {ctx.get('regime', '?')} | vol={ctx.get('vol', '?')}")
+    lines.append(
+        f"SPY: {ctx.get('spy_trend', 'n/a')} | VIX: {ctx.get('vix', 'n/a')} {ctx.get('vix_trend', '')}"
+    )
+    lines.append(f"BUBBLE: {ctx.get('buffett_reading') or ctx.get('bubble_score_100', 'n/a')}")
+
+    cluster_lines = ctx.get("insider_cluster_lines") or [
+        r.get("line") for r in (ctx.get("insider_high_score_buys") or ctx.get("insider_cluster_buys") or [])[:3]
+    ]
+    sell_lines = ctx.get("insider_sell_lines") or [
+        r.get("line") for r in (ctx.get("insider_high_score_sells") or ctx.get("insider_executive_sells") or [])[:3]
+    ]
+    if cluster_lines:
+        lines.append("INSIDER_BUYS: " + "; ".join(str(x) for x in cluster_lines[:3]))
+    if sell_lines:
+        lines.append("INSIDER_SELLS: " + "; ".join(str(x) for x in sell_lines[:3]))
+    tier_lines = ctx.get("insider_tier_lines") or []
+    if tier_lines:
+        lines.append("INSIDER_TIERS: " + "; ".join(str(x) for x in tier_lines[:3]))
+    if not cluster_lines and not sell_lines and not tier_lines:
+        lines.append(f"INSIDER: {str(ctx.get('insider_summary') or 'none')[:200]}")
+
+    news = str(
+        ctx.get("news_catalyst_summary")
+        or ctx.get("news_digest")
+        or ctx.get("news_summary")
+        or ctx.get("top_headline")
+        or "none"
+    )[:280]
+    impact = ctx.get("news_impact_score")
+    if impact is not None:
+        news += f" (impact={float(impact):.2f})"
+    lines.append(f"NEWS: {news}")
+
+    cat = ctx.get("catalyst_summary") or "n/a"
+    lines.append(f"CATALYST: {cat}")
+
+    opts = ctx.get("unusual_options_activity") or []
+    if opts:
+        lines.append("OPTIONS: " + "; ".join(r.get("line", "") for r in opts[:3]))
+    elif ctx.get("options_flow_summary"):
+        lines.append(f"OPTIONS: {ctx.get('options_flow_summary')}")
+
+    si = ctx.get("short_interest_summary") or "n/a"
+    lines.append(f"SHORT_SI: {si}")
+
+    lines.append(f"STAT_ARB: {ctx.get('stat_arb_candidate_summary', 'n/a')}")
+    eq = ctx.get("equity_flow_summary")
+    if eq:
+        lines.append(f"EQ_VOLUME: {eq}")
+    tech = ctx.get("technical_summary")
+    if tech:
+        lines.append(f"TECH: {tech}")
+    conv = ctx.get("conviction_score")
+    if conv is not None:
+        lines.append(f"CONVICTION: {conv}")
+    block = "\n".join(lines)
+    if len(block) > max_chars:
+        block = block[: max_chars - 20] + "\n...(truncated)"
+    return block
+
+
+def _trading_system_prompt(capability: str) -> str:
+    book = "paper" if config.PAPER_TRADING or config.paper_only_sleeves_active() else "live"
+    caps = {
+        "regime_analysis": (
+            "Classify regime posture and conviction. "
+            "Emit risk_posture, sleeve_bias, and a concrete suggested_action."
+        ),
+        "tilt_analysis": (
+            "Propose sleeve tilts vs VTI that improve Sharpe. "
+            "Prefer <=3 material sleeve moves; cite CONTEXT facts only."
+        ),
+        "risk_signals": (
+            "Identify near-term portfolio risks (vol, bubble, crowded beta, drawdown). "
+            "Be conservative on live books; prefer cash/hedge over aggression."
+        ),
+        "stat_arb_pairs": (
+            "Score only listed pairs; never invent symbols."
+        ),
+        "short_validation": (
+            "Validate protective shorts; defer to rule-engine when conflict."
+        ),
+        "weekly_review": (
+            "Weekly actionable focus only — no generic advice."
+        ),
+    }.get(capability, "Provide a precise trading read from CONTEXT.")
+    return (
+        f"You are a quantitative trading assistant ({capability}) for a {book} portfolio bot.\n"
+        f"Task: {caps}\n"
+        "Rules:\n"
+        "- Use ONLY facts in CONTEXT. Never invent tickers, prices, dates, or events.\n"
+        "- Be concise: reasoning max 2 sentences. No generic advice "
+        "(no 'monitor markets', 'stay diversified').\n"
+        "- suggested_action must be specific and executable "
+        "(e.g. 'raise cash 5%, trim SPY 3%', 'long XOM/CVX spread', 'reject SPY short').\n"
+        "- signal_strength 0.0–1.0 = trade signal magnitude; confidence = certainty in your read.\n"
+        "- If data is missing, say so — do not hallucinate.\n"
+        "- Prefer capital preservation when VIX rising or SPY below MA200.\n"
+        "Output valid JSON only matching the schema."
+    )
+
+
+def _normalize_structured_output(raw: dict[str, Any], capability: str) -> dict[str, Any]:
+    """Ensure unified fields: signal_strength, confidence, suggested_action, reasoning."""
+    out = dict(raw)
+    out["capability"] = capability
+
+    def _f(key: str, default: float = 0.0) -> float:
+        try:
+            return round(max(0.0, min(1.0, float(out.get(key, default)))), 3)
+        except (TypeError, ValueError):
+            return default
+
+    out["signal_strength"] = _f("signal_strength", _f("conviction_score", 0.5))
+    out["confidence"] = _f("confidence", 0.5)
+    if not str(out.get("suggested_action") or "").strip():
+        action = out.get("verdict") or out.get("action") or out.get("headline") or "hold"
+        out["suggested_action"] = str(action)[:120]
+    if not str(out.get("reasoning") or "").strip():
+        out["reasoning"] = str(out.get("summary") or out.get("rationale") or out.get("notes") or "")[:280]
+    return out
+
+
+def _coerce_regime_vol(
+    data=None,
+    regime: str | None = None,
+    vol: str | None = None,
+    *,
+    sentiment=None,
+    infer: bool = False,
+) -> tuple[str, str]:
+    """Fill missing regime/vol for partial-data / smoke tests.
+
+    Accepts None sentiment or vol without raising. Defaults: regime=unknown,
+    vol=normal. Optional ``infer=True`` tries market_context helpers (may be slow).
+    """
+    del sentiment  # accepted for API compat; inference uses get_sentiment when infer=True
+    regime_s = str(regime).strip() if regime is not None else ""
+    vol_s = str(vol).strip() if vol is not None else ""
+
+    if infer and (not regime_s or not vol_s) and data is not None and not getattr(data, "empty", True):
+        try:
+            from modules.market_context import (
+                get_market_regime,
+                get_sentiment,
+                get_volatility,
+            )
+
+            sent = None
+            try:
+                sent = get_sentiment(data)
+            except Exception:
+                sent = None
+            if not vol_s:
+                try:
+                    inferred_vol = get_volatility(data)
+                    vol_s = str(inferred_vol).strip() if inferred_vol is not None else ""
+                except Exception:
+                    vol_s = ""
+            if not regime_s:
+                try:
+                    inferred = get_market_regime(
+                        sent if sent is not None else 0.0, vol_s or "normal"
+                    )
+                    regime_s = str(inferred).strip() if inferred is not None else ""
+                except Exception:
+                    regime_s = ""
+        except Exception as exc:
+            logger.debug("regime/vol inference skipped: %s", exc)
+
+    if not vol_s or vol_s.lower() in ("none", "null", "nan"):
+        vol_s = "normal"
+    if not regime_s or regime_s.lower() in ("none", "null", "nan"):
+        regime_s = "unknown"
+    return regime_s, vol_s
+
+
+def build_market_summary(
+    data,
+    regime: str | None = None,
+    vol: str | None = None,
     *,
     wisdom: dict | None = None,
     top_headline: str | None = None,
@@ -528,9 +1234,21 @@ def build_market_summary(
     news_slot: str | None = None,
     base_caps: dict[str, float] | None = None,
 ) -> dict[str, Any]:
-    """Assemble context for the PM-style reasoning prompt."""
+    """Assemble context for the PM-style reasoning prompt.
+
+    ``regime`` / ``vol`` may be None — coerced to unknown/normal (or inferred).
+    """
     from modules.pipeline_strategies import _spy_market_up_signal
     from modules.thinking_news import normalize_news_headlines
+
+    regime, vol = _coerce_regime_vol(data, regime, vol)
+    if news_headlines is None and config.effective_historical_news_enabled():
+        try:
+            from modules.historical_news import backtest_headlines_for_summary
+
+            news_headlines = backtest_headlines_for_summary()
+        except Exception as exc:
+            logger.debug("historical backtest headlines unavailable: %s", exc)
 
     macro_cache: dict = {}
     spy_sym = config.SPY_BOT_SYMBOL
@@ -570,8 +1288,8 @@ def build_market_summary(
 
             if get_live_web_sentiment() is not None:
                 headline = "finance headline mood cached (see web sentiment)"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("live web sentiment headline fallback unavailable: %s", exc)
 
     sector = _build_sector_leadership(data, macro_cache)
     summary = {
@@ -586,6 +1304,7 @@ def build_market_summary(
         "news_headlines": news_text,
         "news_slot": news_slot,
         "regime": regime,
+        "vol": vol,
         "bot_exposure": bot_exposure,
         "bot_exposure_str": _format_bot_exposure(caps),
         "sector_leadership": sector["leadership_str"],
@@ -597,20 +1316,55 @@ def build_market_summary(
     summary["vol_overlay_regime"] = _vol_overlay_regime(summary)
     summary["stat_arb_regime"] = _stat_arb_regime(summary)
     summary["crowded_trade_warning"] = _crowded_trade_warning(summary)
+    news_analysis_obj: dict[str, Any] | None = None
     if news_text:
         from modules.thinking_news import analyze_news_headlines
 
-        news_analysis = analyze_news_headlines(
+        news_analysis_obj = analyze_news_headlines(
             news_text,
             ai_cycle_phase=str(summary.get("ai_cycle_phase") or ""),
         )
-        summary["news_themes"] = news_analysis.get("themes")
-        summary["news_theme_summary"] = news_analysis.get("theme_summary")
-        summary["news_impact_score"] = news_analysis.get("news_impact_score")
-        summary["news_ai_tech_context"] = news_analysis.get("ai_tech_context")
-        summary["news_digest"] = news_analysis.get("digest_text")
+        summary["news_themes"] = news_analysis_obj.get("themes")
+        summary["news_theme_summary"] = news_analysis_obj.get("theme_summary")
+        summary["news_impact_score"] = news_analysis_obj.get("news_impact_score")
+        summary["news_ai_tech_context"] = news_analysis_obj.get("ai_tech_context")
+        summary["news_digest"] = news_analysis_obj.get("digest_text")
     else:
         summary["news_impact_score"] = 0.0
+    summary.update(
+        get_thinking_context(
+            data,
+            regime,
+            vol,
+            news_headlines=news_text,
+            news_analysis=news_analysis_obj,
+            include_core=False,
+        )
+    )
+    try:
+        from modules.risk_management import compute_conviction_score
+
+        conviction = compute_conviction_score(
+            config.SPY_BOT_SYMBOL,
+            data,
+            regime,
+            sleeve="stat_arb_equity",
+        )
+        summary["conviction_score"] = round(float(conviction), 3)
+    except Exception:
+        summary.setdefault("conviction_score", None)
+
+    # Markov regime transition probs (prompt context only — no sizing impact).
+    try:
+        from modules.markov_regime import compute_markov_regime
+
+        spy_prices = None
+        if data is not None and hasattr(data, "columns") and spy_sym in data.columns:
+            spy_prices = data[spy_sym]
+        summary["markov_regime"] = compute_markov_regime(spy_prices)
+    except Exception as exc:
+        logger.debug("markov regime context skipped: %s", exc)
+        summary.setdefault("markov_regime", None)
     return summary
 
 
@@ -978,25 +1732,40 @@ def get_pm_system_prompt() -> str:
 
 
 def get_thinking_status_snapshot() -> dict[str, object]:
-    """Compact audit snapshot for status.py / monitoring."""
+    """Compact audit snapshot for status.py / monitoring / dashboard."""
     cached = read_json_file(OUTPUT_FILE) or {}
     approval = read_json_file(APPROVAL_FILE) or {}
     pending_id = cached.get("decision_id") if cached else None
     approved = bool(pending_id and is_thinking_tilt_approved(cached)) if pending_id else False
+    ollama_ok = False
+    try:
+        ollama_ok = bool(ollama_available())
+    except Exception:
+        ollama_ok = False
     return {
+        "master_enabled": bool(getattr(config, "THINKING_ENGINE_ENABLED", True)),
         "env_enabled": bool(config.PAPER_THINKING_ENGINE_ENABLED),
+        "live_env_enabled": bool(getattr(config, "LIVE_THINKING_ENGINE_ENABLED", False)),
         "effective_enabled": bool(config.effective_thinking_engine_enabled()),
+        "ollama_ok": ollama_ok,
         "last_timestamp": cached.get("timestamp"),
         "last_regime": cached.get("regime"),
         "last_confidence": cached.get("confidence"),
+        "last_source": cached.get("source"),
+        "last_model": cached.get("model"),
         "validation_score": cached.get("validation_score"),
         "narrative_snip": str(cached.get("narrative") or "")[:100],
         "sector_view_snip": str(cached.get("sector_view") or "")[:120],
+        "regime_signal": str(cached.get("regime_signal") or "")[:80],
+        "tilt_signal": str(cached.get("tilt_signal") or "")[:80],
+        "risk_signal": str(cached.get("risk_signal") or "")[:80],
         "ai_cycle_phase": cached.get("ai_cycle_phase"),
         "manual_review_required": bool(cached.get("manual_review_required")),
         "pending_decision_id": pending_id,
         "approved": approved,
         "has_approval_file": bool(approval),
+        "fallback": str(cached.get("source") or "").startswith("heuristic")
+        or str(cached.get("source") or "") == "unavailable",
     }
 
 
@@ -1056,7 +1825,12 @@ def evaluate_live_apply_status(
 
     live_book = not config.PAPER_TRADING and config.ALLOW_LIVE_TRADING
     if live_book or (not config.PAPER_TRADING and not config.paper_only_sleeves_active()):
-        blockers.append("thinking engine disabled on live profile (locked off)")
+        if not getattr(config, "LIVE_THINKING_ENGINE_ENABLED", False):
+            blockers.append(
+                "live thinking OFF (set LIVE_THINKING_ENGINE_ENABLED=true to opt in)"
+            )
+        elif not config.effective_thinking_engine_enabled():
+            blockers.append("thinking engine disabled (master or live flag)")
 
     tripped, trip_reason = thinking_daily_loss_tripped(equity)
     if tripped:
@@ -1435,6 +2209,28 @@ def _finalize_thinking_result(
         )
     if not out.get("ai_cycle_phase"):
         out["ai_cycle_phase"] = market_summary.get("ai_cycle_phase")
+    if not out.get("regime_signal"):
+        posture = "neutral"
+        spy = str(market_summary.get("spy_trend") or "").lower()
+        vix = float(market_summary.get("vix") or 0)
+        if "below" in spy or vix >= 22:
+            posture = "defensive"
+        elif "above" in spy and vix and vix <= 18:
+            posture = "risk-on"
+        out["regime_signal"] = f"{posture} | strength {float(out.get('confidence') or 0.5):.2f} | heuristic"
+    if not out.get("tilt_signal"):
+        top = sorted(
+            (out.get("suggested_tilt") or tilt or {}).items(),
+            key=lambda kv: float(kv[1]),
+            reverse=True,
+        )
+        add = top[0][0] if top else "vti"
+        cut = "cash" if add != "cash" else "spy"
+        out["tilt_signal"] = f"{add} / {cut} | conviction {float(out.get('confidence') or 0.5):.2f}"
+    if not out.get("risk_signal"):
+        vix = float(market_summary.get("vix") or 0)
+        level = "high" if vix >= 22 else ("medium" if vix >= 16 else "low")
+        out["risk_signal"] = f"{level} | VIX {vix:.1f} / trend {market_summary.get('vix_trend', 'n/a')}"
     if force_decision and not out.get("risks"):
         out["risks"] = ["Vol spike / trend break", "Macro headline shock"]
     if force_decision and not out.get("opportunities"):
@@ -1870,57 +2666,9 @@ def _record_thinking_run(
     _audit_thinking("reasoning_complete", **audit_fields)
 
 
-def ollama_available() -> bool:
-    url = f"{config.OLLAMA_HOST.rstrip('/')}/api/tags"
-    try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
-
-
-def ollama_installed_models() -> set[str]:
-    """Return model names reported by Ollama /api/tags."""
-    url = f"{config.OLLAMA_HOST.rstrip('/')}/api/tags"
-    try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
-        return set()
-    names: set[str] = set()
-    for item in body.get("models") or []:
-        name = str(item.get("name") or "").strip()
-        if name:
-            names.add(name)
-    return names
-
-
-def _model_available(model: str, installed: set[str]) -> bool:
-    if not installed:
-        return True
-    if model in installed:
-        return True
-    if ":" not in model:
-        return any(n.startswith(f"{model}:") for n in installed)
-    return False
-
-
 def thinking_model_chain(*, fast_only: bool = False) -> list[str]:
-    """Primary deepseek-r1:8b, then fast fallbacks (llama3.2:3b, deepseek-r1:1.5b)."""
-    fallbacks = [
-        m.strip()
-        for m in config.OLLAMA_FALLBACK_MODELS.split(",")
-        if m.strip()
-    ]
-    if fast_only:
-        return fallbacks or [config.OLLAMA_MODEL]
-    chain = [config.OLLAMA_MODEL]
-    for model in fallbacks:
-        if model not in chain:
-            chain.append(model)
-    return chain
+    """Primary model + fallbacks resolved against installed Ollama tags."""
+    return resolve_model_chain(fast_only=fast_only)
 
 
 def _is_fast_model(model: str) -> bool:
@@ -1938,58 +2686,18 @@ def _ollama_generate(
     system: str | None = None,
     model: str | None = None,
     timeout_sec: int | None = None,
+    retries: int | None = None,
 ) -> tuple[str, str]:
     """Return (full_text_for_logs, answer_text_for_parsing)."""
-    model = model or config.OLLAMA_MODEL
-    cache_payload = f"{model}\0{system or ''}\0{prompt}"
-    cache_key = hashlib.sha256(cache_payload.encode()).hexdigest()[:24]
-    now = time.monotonic()
-    cached = _OLLAMA_RESPONSE_CACHE.get(cache_key)
-    if cached and now - cached[0] < _OLLAMA_CACHE_TTL_SEC:
-        return cached[1]
-
-    body: dict[str, Any] = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.3, "num_predict": _model_num_predict(model)},
-    }
-    if system:
-        body["system"] = system
-    payload = json.dumps(body).encode("utf-8")
-    url = f"{config.OLLAMA_HOST.rstrip('/')}/api/generate"
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    return ollama_complete(
+        prompt,
+        system=system,
+        model=model,
+        timeout_sec=_thinking_timeout_sec(timeout_sec),
+        json_mode=False,
+        # Thinking-engine owns the retry loop; avoid nested 3x3 attempts.
+        retries=1 if retries is None else retries,
     )
-    timeout = timeout_sec if timeout_sec is not None else config.OLLAMA_TIMEOUT_SEC
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-    answer = str(body.get("response") or "").strip()
-    thinking = str(body.get("thinking") or "").strip()
-    if answer and thinking:
-        full = f"{thinking}\n\n---\n{answer}"
-        if re.search(r"NARRATIVE\s*:", answer, re.I):
-            parse_text = answer
-        elif re.search(r"NARRATIVE\s*:", thinking, re.I):
-            parse_text = thinking
-        else:
-            parse_text = f"{thinking}\n{answer}" if thinking else answer
-    elif answer:
-        full = answer
-        parse_text = answer
-    elif thinking:
-        full = thinking
-        parse_text = thinking
-    else:
-        raise RuntimeError("Ollama returned empty response")
-    if len(_OLLAMA_RESPONSE_CACHE) >= _OLLAMA_CACHE_MAX:
-        oldest = min(_OLLAMA_RESPONSE_CACHE, key=lambda k: _OLLAMA_RESPONSE_CACHE[k][0])
-        del _OLLAMA_RESPONSE_CACHE[oldest]
-    _OLLAMA_RESPONSE_CACHE[cache_key] = (time.monotonic(), (full, parse_text))
-    return full, parse_text
 
 
 def _extract_json_block(text: str) -> dict | None:
@@ -2219,6 +2927,12 @@ def _parse_structured_reasoning(text: str) -> dict[str, Any]:
             result["sector_view"] = raw.splitlines()[0] if raw else ""
         elif key == "ai_cycle_phase":
             result["ai_cycle_phase"] = raw.splitlines()[0] if raw else ""
+        elif key == "regime_signal":
+            result["regime_signal"] = raw.splitlines()[0] if raw else ""
+        elif key == "tilt_signal":
+            result["tilt_signal"] = raw.splitlines()[0] if raw else ""
+        elif key == "risk_signal":
+            result["risk_signal"] = raw.splitlines()[0] if raw else ""
         elif key == "paradigm_shift":
             result["paradigm_shift"] = raw.splitlines()[0] if raw else ""
         elif key == "risks":
@@ -2311,6 +3025,24 @@ def _looks_like_meta_narrative(text: str) -> bool:
     )
 
 
+def _format_markov_prompt_line(market_summary: dict) -> str:
+    """One-line Markov regime context for the thinking prompt."""
+    markov = market_summary.get("markov_regime") or {}
+    if not isinstance(markov, dict) or not markov.get("current_state"):
+        return "n/a"
+    state = str(markov.get("current_state") or "sideways")
+    p_bull = float(markov.get("p_bull_tomorrow") or 0.0)
+    p_bear = float(markov.get("p_bear_tomorrow") or 0.0)
+    line = (
+        f"currently {state}, "
+        f"P(bull tomorrow)={p_bull:.0%}, "
+        f"P(bear tomorrow)={p_bear:.0%}"
+    )
+    if str(markov.get("confidence") or "").lower() == "low":
+        line += " — regime transition uncertain — reduce tilt magnitude"
+    return line
+
+
 def _build_reasoning_user_prompt(market_summary: dict) -> str:
     prev = _load_previous_tilt()
     prev_full = _load_previous_tilt_full()
@@ -2360,6 +3092,10 @@ Sector laggards: {', '.join(f"{r['sector']} {float(r['change_5d_pct']):+.1f}%" f
 
 Vol overlay regime: {market_summary.get('vol_overlay_regime', _vol_overlay_regime(market_summary))}
 Stat arb regime: {market_summary.get('stat_arb_regime', _stat_arb_regime(market_summary))}
+Stat arb candidates (top): {market_summary.get('stat_arb_candidate_summary', 'n/a')}
+Bubble risk: {market_summary.get('bubble_score_100', 'n/a')}/100 | Buffett: {market_summary.get('buffett_signal', 'n/a')}
+Technicals: {market_summary.get('technical_summary', 'n/a')}
+Conviction score (SPY/stat-arb): {market_summary.get('conviction_score', 'n/a')}
 Crowding check: {market_summary.get('crowded_trade_warning', _crowded_trade_warning(market_summary))}
 
 SPY vs MA200: {market_summary['spy_trend']}
@@ -2367,8 +3103,13 @@ VIX: {market_summary['vix']} | {vix_note}
 Oil 5d: {market_summary['oil_change']}% | Gold 5d: {market_summary['gold_change']}%
 Yield curve / rates: {market_summary.get('yield_curve', 'n/a')}
 Regime: {market_summary.get('regime', 'unknown')}
+Markov regime: {_format_markov_prompt_line(market_summary)}
 Macro sentiment: {market_summary['macro_sentiment']}
 Top headline: {market_summary['top_headline']}
+Insider / filings (SEC RSS): {market_summary.get('insider_summary', 'n/a')}
+Options / unusual activity: {market_summary.get('options_flow_summary', 'n/a')}
+Short interest: {market_summary.get('short_interest_summary', 'n/a')}
+Catalyst watchlist (RVOL/ORB/news): {market_summary.get('catalyst_summary', 'n/a')}
 {(
     "Scheduled news digest ("
     + str(market_summary.get("news_slot") or "scheduled")
@@ -2407,8 +3148,9 @@ When vol overlay is elevated, trim SPY/NYSE — do not stack beta on top of vol 
 When stat arb is supportive, modest crypto tilt OK; when hostile, raise VTI/cash.
 Use decimal weights in RECOMMENDED_TILT (e.g. 0.52 not "52%"); weights must sum to ~1.0.
 SECTOR_VIEW must include stat-arb + vol-overlay read and 3-7d sector leaders/laggards.
+REGIME_SIGNAL / TILT_SIGNAL / RISK_SIGNAL must be filled (structured one-liners).
 TILT_RATIONALE must link ASYMMETRY + SECTOR_VIEW to each sleeve above 5% and state VTI vs active trade-off.
-Reply with ONLY the structured block (NARRATIVE through CONFIDENCE). Be decisive. Start with NARRATIVE:"""
+Reply with ONLY the structured block (NARRATIVE through OPPORTUNITIES). Be decisive. Start with NARRATIVE:"""
 
 
 def _is_default_tilt(tilt: dict[str, float]) -> bool:
@@ -2446,12 +3188,15 @@ def _llm_parse_quality(
     return round(min(1.0, score), 2)
 
 
-def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[str, Any]:
-    """Single Ollama attempt; raises on transport/empty response."""
-    user_prompt = _build_reasoning_user_prompt(market_summary)
-    full_text, answer_text = _ollama_generate(
-        user_prompt, system=_pm_system_prompt(), model=model
-    )
+def _reasoning_result_from_llm_text(
+    full_text: str,
+    answer_text: str,
+    market_summary: dict,
+    *,
+    model: str,
+    source: str,
+) -> dict[str, Any]:
+    """Parse structured PM block from LLM output (Ollama or Kimi)."""
     structured = _best_structured_parse(full_text, answer_text)
     parse_chunks = _structured_parse_candidates(full_text, answer_text)
     for chunk in parse_chunks:
@@ -2530,11 +3275,109 @@ def _get_market_reasoning_with_model(market_summary: dict, model: str) -> dict[s
         "suggested_tilt": tilt,
         "confidence": round(confidence, 2),
         "model": model,
-        "source": "llm",
+        "source": source,
         "parse_quality": quality,
         "market_summary": market_summary,
     }
-    result = _finalize_thinking_result(result, market_summary, force_decision=False)
+    return _finalize_thinking_result(result, market_summary, force_decision=False)
+
+
+def _get_market_reasoning_with_model(
+    market_summary: dict,
+    model: str,
+    *,
+    timeout_sec: int | None = None,
+) -> dict[str, Any]:
+    """Single-model Ollama attempt with retries + exponential backoff; raises on exhaustion."""
+    user_prompt = _build_reasoning_user_prompt(market_summary)
+    prompt_len = len(user_prompt) + len(_pm_system_prompt() or "")
+    timeout = _thinking_timeout_sec(timeout_sec)
+    attempts = _ollama_max_attempts()
+    last_exc: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            full_text, answer_text = _ollama_generate(
+                user_prompt,
+                system=_pm_system_prompt(),
+                model=model,
+                timeout_sec=timeout,
+            )
+            result = _reasoning_result_from_llm_text(
+                full_text,
+                answer_text,
+                market_summary,
+                model=model,
+                source="llm",
+            )
+            persist_thinking_last(result, regime=market_summary.get("regime"))
+            return result
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            RuntimeError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            last_exc = exc
+            logger.warning(
+                "Ollama market reasoning failed attempt %s/%s model=%s "
+                "prompt_len=%s timeout=%ss error_type=%s err=%s",
+                attempt + 1,
+                attempts,
+                model,
+                prompt_len,
+                timeout,
+                type(exc).__name__,
+                exc,
+            )
+            _audit_thinking(
+                "ollama_retry",
+                capability="market_reasoning",
+                model=model,
+                attempt=attempt + 1,
+                max_attempts=attempts,
+                prompt_len=prompt_len,
+                timeout_sec=timeout,
+                error_type=type(exc).__name__,
+                error=str(exc)[:240],
+            )
+            if attempt + 1 < attempts:
+                time.sleep(_retry_backoff_sec(attempt))
+                continue
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            logger.error(
+                "Ollama market reasoning unexpected error model=%s prompt_len=%s "
+                "error_type=%s err=%s",
+                model,
+                prompt_len,
+                type(exc).__name__,
+                exc,
+            )
+            break
+    assert last_exc is not None
+    raise last_exc
+
+
+def get_market_reasoning_via_kimi(market_summary: dict) -> dict[str, Any]:
+    """Daily deep reasoning via Moonshot/Kimi (cloud API — not for 5m loop)."""
+    from modules.kimi_client import deep_think, record_kimi_daily_run
+
+    user_prompt = _build_reasoning_user_prompt(market_summary)
+    full_text = deep_think(user_prompt, system=_pm_system_prompt())
+    result = _reasoning_result_from_llm_text(
+        full_text,
+        full_text,
+        market_summary,
+        model=config.KIMI_MODEL,
+        source="kimi",
+    )
+    record_kimi_daily_run(
+        regime=str(market_summary.get("regime") or ""),
+        model=config.KIMI_MODEL,
+        source="kimi",
+    )
     persist_thinking_last(result, regime=market_summary.get("regime"))
     return result
 
@@ -2544,14 +3387,23 @@ def get_market_reasoning(
     *,
     fast_model: bool = False,
     model: str | None = None,
+    timeout_sec: int | None = None,
 ) -> dict[str, Any]:
     """Use local LLM with primary -> fallback chain; heuristic if all fail."""
+    ensure_ollama_startup_check()
+    if not ollama_available():
+        result = build_heuristic_reasoning_result(
+            market_summary, reason="ollama-unreachable"
+        )
+        persist_thinking_last(result, regime=market_summary.get("regime"))
+        return result
+
     installed = ollama_installed_models()
     chain = thinking_model_chain(fast_only=fast_model)
     if model:
         candidates = [model]
     else:
-        candidates = [m for m in chain if _model_available(m, installed)]
+        candidates = [m for m in chain if model_available(m, installed)]
         if not candidates:
             if fast_model:
                 result = build_heuristic_reasoning_result(
@@ -2566,9 +3418,18 @@ def get_market_reasoning(
     best: dict[str, Any] | None = None
     for idx, candidate in enumerate(candidates):
         try:
-            result = _get_market_reasoning_with_model(market_summary, candidate)
-        except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
-            errors.append(f"{candidate}: {exc}")
+            result = _get_market_reasoning_with_model(
+                market_summary, candidate, timeout_sec=timeout_sec
+            )
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            RuntimeError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exc:
+            errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
             continue
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{candidate}: {type(exc).__name__}: {exc}")
@@ -2591,6 +3452,11 @@ def get_market_reasoning(
     reason = "; ".join(errors) if errors else "no-models"
     if errors:
         clear_thinking_runtime_caches()
+        logger.warning(
+            "Ollama market reasoning exhausted models=%s errors=%s — heuristic fallback",
+            candidates,
+            errors[:3],
+        )
     result = build_heuristic_reasoning_result(market_summary, reason=reason)
     persist_thinking_last(result, regime=market_summary.get("regime"))
     return result
@@ -2860,6 +3726,43 @@ def run_thinking_with_news(
     return _execute()
 
 
+def _run_thinking_refresh(regime: str, summary: dict) -> dict[str, Any]:
+    """Hybrid refresh: Ollama for quick/regime-change; Kimi once daily when enabled."""
+    from modules.kimi_client import should_run_kimi_daily
+
+    use_kimi = (
+        config.effective_kimi_deep_thinker_enabled()
+        and config.KIMI_DAILY_THINK
+        and should_run_kimi_daily()
+    )
+    if use_kimi:
+        logger.info("Thinking engine: Kimi daily deep think started (background-safe path)")
+        _audit_thinking("kimi_daily_start", regime=regime)
+        try:
+            result = get_market_reasoning_via_kimi(summary)
+            _audit_thinking(
+                "kimi_daily_done",
+                regime=regime,
+                confidence=result.get("confidence"),
+                parse_quality=result.get("parse_quality"),
+            )
+            return result
+        except Exception as exc:
+            log_subsystem_error(
+                "thinking_engine",
+                "Kimi daily deep think failed; falling back to local Ollama",
+                exc,
+            )
+            _audit_thinking("kimi_daily_failed", regime=regime, error=str(exc)[:200])
+
+    if not ollama_available():
+        return build_heuristic_reasoning_result(summary, reason="ollama-unreachable")
+
+    # Regime-change or post-Kimi: fast local Ollama (no cloud cost)
+    fast = bool(config.effective_kimi_deep_thinker_enabled() and not use_kimi)
+    return get_market_reasoning(summary, fast_model=fast)
+
+
 def maybe_run_thinking(
     data,
     regime: str,
@@ -2871,7 +3774,11 @@ def maybe_run_thinking(
     news_slot: str | None = None,
     force: bool = False,
 ) -> dict | None:
-    """Paper-only hook: run LLM reasoning at most once per THINKING_CACHE_HOURS or on regime change."""
+    """Run LLM reasoning at most once per THINKING_CACHE_HOURS or on regime change.
+
+    Available on paper (default ON) and live (default OFF / opt-in). Failures fall
+    back to heuristic tilts; live still requires manual approval when configured.
+    """
     if not config.effective_thinking_engine_enabled():
         return None
     if not force and not should_refresh_thinking(regime):
@@ -2879,6 +3786,7 @@ def maybe_run_thinking(
         if cached:
             return cached
         return None
+    ensure_ollama_startup_check()
     summary = build_market_summary(
         data,
         regime,
@@ -2888,15 +3796,28 @@ def maybe_run_thinking(
         news_headlines=news_headlines,
         news_slot=news_slot,
     )
-    if not ollama_available():
+    news_blob = (
+        news_headlines
+        if isinstance(news_headlines, str)
+        else "\n".join(str(x) for x in news_headlines)
+        if isinstance(news_headlines, list)
+        else None
+    )
+    from modules.kimi_client import should_run_kimi_daily
+
+    kimi_daily_ok = (
+        config.effective_kimi_deep_thinker_enabled() and should_run_kimi_daily()
+    )
+    if not ollama_available() and not kimi_daily_ok:
         logger.info("Thinking engine: Ollama not reachable, using rule-based tilt")
         result = build_heuristic_reasoning_result(summary, reason="ollama-unreachable")
-        _record_thinking_run(regime, result)
+        result["fallback_reason"] = "ollama-unreachable"
+        _record_thinking_run(regime, result, news_summary=news_blob, news_slot=news_slot)
         return result
     # If caller asked for a synchronous forced run, do it now.
     if force:
         try:
-            result = get_market_reasoning(summary)
+            result = _run_thinking_refresh(regime, summary)
         except Exception as exc:
             log_subsystem_error(
                 "thinking_engine",
@@ -2904,6 +3825,7 @@ def maybe_run_thinking(
                 exc,
             )
             result = build_heuristic_reasoning_result(summary, reason="llm-error-forced")
+            result["fallback_reason"] = f"llm-error:{type(exc).__name__}"
         if result.get("source") == "heuristic":
             logger.info("Thinking engine: heuristic fallback (%s)", result.get("model"))
         elif float(result.get("parse_quality") or 0.0) < 0.45:
@@ -2911,7 +3833,12 @@ def maybe_run_thinking(
                 "Thinking engine: low parse quality (%s), using best-effort LLM output",
                 result.get("parse_quality"),
             )
-        _record_thinking_run(regime, result)
+        _record_thinking_run(
+            regime,
+            result,
+            news_summary=news_blob,
+            news_slot=news_slot,
+        )
         return result
 
     # Non-forced path: refresh in background to avoid blocking main loop.
@@ -2919,12 +3846,17 @@ def maybe_run_thinking(
         try:
             logger.info("Thinking engine: background refresh started for regime=%s", regime)
             _audit_thinking("background_refresh_start", regime=regime)
-            res = get_market_reasoning(summary)
+            res = _run_thinking_refresh(regime, summary)
             if res.get("source") == "heuristic":
                 logger.info("Thinking engine background: heuristic fallback (%s)", res.get("model"))
             elif float(res.get("parse_quality") or 0.0) < 0.45:
                 logger.info("Thinking engine background: low parse quality: %s", res.get("parse_quality"))
-            _record_thinking_run(regime, res)
+            _record_thinking_run(
+                regime,
+                res,
+                news_summary=news_blob,
+                news_slot=news_slot,
+            )
             logger.info("Thinking engine: background refresh completed for regime=%s", regime)
             _audit_thinking(
                 "background_refresh_done",
@@ -2938,10 +3870,22 @@ def maybe_run_thinking(
                 "Background refresh failed",
                 exc,
             )
-            cached_err = read_json_file(OUTPUT_FILE)
-            if cached_err:
-                logger.info("Thinking engine: kept last cached snapshot after refresh failure")
-                _audit_thinking("background_refresh_failed_kept_cache", regime=regime)
+            try:
+                # Persist a heuristic snapshot so health/dashboard still have a signal.
+                fb = build_heuristic_reasoning_result(
+                    summary, reason=f"bg-error:{type(exc).__name__}"
+                )
+                fb["fallback_reason"] = f"bg-error:{type(exc).__name__}"
+                _record_thinking_run(regime, fb, news_summary=news_blob, news_slot=news_slot)
+            except Exception:
+                cached_err = read_json_file(OUTPUT_FILE)
+                if cached_err:
+                    logger.info(
+                        "Thinking engine: kept last cached snapshot after refresh failure"
+                    )
+                    _audit_thinking(
+                        "background_refresh_failed_kept_cache", regime=regime
+                    )
 
     t = threading.Thread(target=_bg_refresh, daemon=True)
     t.start()
@@ -2951,6 +3895,7 @@ def maybe_run_thinking(
     if cached:
         return cached
     result = build_heuristic_reasoning_result(summary, reason="background-refresh-started")
+    result["fallback_reason"] = "background-refresh-started"
     _record_thinking_run(regime, result)
     return result
 
@@ -3074,3 +4019,896 @@ def maybe_apply_thinking_caps(
             state["last_apply_log_date"] = today
             write_json_file(STATE_FILE, state)
     return merged, thinking_result
+
+
+# --- Structured AI capabilities (Ollama JSON) --------------------------------
+
+
+def _structured_ai_call(
+    capability: str,
+    system: str,
+    user_prompt: str,
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+    fallback: dict[str, Any] | None = None,
+    timeout_sec: int | None = None,
+    force_fallback: bool = False,
+) -> dict[str, Any]:
+    """Run a JSON-mode Ollama call across the model chain; heuristic fallback on failure."""
+    base = _normalize_structured_output(dict(fallback or {}), capability)
+    prompt_len = len(system or "") + len(user_prompt or "")
+    timeout = _thinking_timeout_sec(timeout_sec)
+
+    if force_fallback:
+        base.update(
+            source="heuristic",
+            model=None,
+            error="force_fallback",
+            fallback_reason="force_fallback",
+        )
+        logger.info(
+            "structured_%s: force_fallback — skipping Ollama (prompt_len=%s)",
+            capability,
+            prompt_len,
+        )
+        return base
+
+    ensure_ollama_startup_check()
+    if not ollama_available():
+        base.update(
+            source="unavailable",
+            model=None,
+            error="ollama_unreachable",
+            fallback_reason="ollama_unreachable",
+        )
+        log_subsystem_warning(
+            "thinking_engine",
+            f"structured_{capability}: Ollama unreachable — using heuristic fallback",
+        )
+        _audit_thinking(
+            f"structured_{capability}_fallback",
+            reason="ollama_unreachable",
+            prompt_len=prompt_len,
+            timeout_sec=timeout,
+        )
+        return base
+
+    installed = ollama_installed_models()
+    chain = [model] if model else thinking_model_chain(fast_only=fast_model)
+    candidates = [m for m in chain if model_available(m, installed)] or chain
+    errors: list[str] = []
+    retries = _ollama_max_attempts()
+    for candidate in candidates:
+        for attempt in range(retries):
+            try:
+                parsed = ollama_json(
+                    user_prompt,
+                    system=system,
+                    model=candidate,
+                    timeout_sec=timeout,
+                    retries=1,  # outer loop owns exponential backoff
+                )
+                if parsed.get("parse_error"):
+                    errors.append(f"{candidate}: json_parse")
+                    logger.warning(
+                        "structured_%s: JSON parse failed model=%s prompt_len=%s "
+                        "attempt=%s/%s",
+                        capability,
+                        candidate,
+                        prompt_len,
+                        attempt + 1,
+                        retries,
+                    )
+                    break  # try next model
+                parsed["model"] = candidate
+                parsed["source"] = "llm"
+                parsed["capability"] = capability
+                _audit_thinking(
+                    f"structured_{capability}",
+                    model=candidate,
+                    signal_strength=parsed.get("signal_strength"),
+                    confidence=parsed.get("confidence"),
+                    attempt=attempt + 1,
+                    prompt_len=prompt_len,
+                    timeout_sec=timeout,
+                )
+                return _normalize_structured_output(parsed, capability)
+            except (
+                urllib.error.URLError,
+                TimeoutError,
+                OSError,
+                RuntimeError,
+                json.JSONDecodeError,
+            ) as exc:
+                err_type = type(exc).__name__
+                errors.append(f"{candidate}@{attempt + 1}: {err_type}: {exc}")
+                logger.warning(
+                    "structured_%s failed attempt %s/%s model=%s prompt_len=%s "
+                    "timeout=%ss error_type=%s err=%s",
+                    capability,
+                    attempt + 1,
+                    retries,
+                    candidate,
+                    prompt_len,
+                    timeout,
+                    err_type,
+                    exc,
+                )
+                _audit_thinking(
+                    "ollama_retry",
+                    capability=capability,
+                    model=candidate,
+                    attempt=attempt + 1,
+                    max_attempts=retries,
+                    prompt_len=prompt_len,
+                    timeout_sec=timeout,
+                    error_type=err_type,
+                    error=str(exc)[:240],
+                )
+                if attempt + 1 < retries:
+                    time.sleep(_retry_backoff_sec(attempt))
+                    continue
+            except Exception as exc:  # noqa: BLE001
+                err_type = type(exc).__name__
+                errors.append(f"{candidate}@{attempt + 1}: {err_type}: {exc}")
+                logger.error(
+                    "structured_%s unexpected error model=%s prompt_len=%s "
+                    "error_type=%s err=%s",
+                    capability,
+                    candidate,
+                    prompt_len,
+                    err_type,
+                    exc,
+                )
+                break
+    base.update(
+        source="heuristic",
+        model=None,
+        errors=errors[:6],
+        fallback_reason="; ".join(errors[:2]) if errors else "all-models-failed",
+    )
+    log_subsystem_warning(
+        "thinking_engine",
+        f"structured_{capability}: all models failed — heuristic fallback",
+    )
+    _audit_thinking(
+        f"structured_{capability}_fallback",
+        reason=base.get("fallback_reason"),
+        prompt_len=prompt_len,
+        timeout_sec=timeout,
+        errors=errors[:4],
+    )
+    return base
+
+
+def analyze_tilt_with_ai(
+    data,
+    regime: str | None = None,
+    vol: str | None = None,
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+    sentiment=None,
+    timeout_sec: int = 90,
+    heuristic_only: bool = False,
+    force_fallback: bool = False,
+) -> dict[str, Any]:
+    """Structured sleeve-tilt recommendation (JSON).
+
+    ``regime`` / ``vol`` / ``sentiment`` may be None — defaults are applied.
+    """
+    if force_fallback:
+        heuristic_only = True
+    regime_s, vol_s = _coerce_regime_vol(data, regime, vol, sentiment=sentiment)
+    data_empty = data is None or getattr(data, "empty", True)
+    try:
+        if data_empty or heuristic_only:
+            raise RuntimeError("empty_data" if data_empty else "heuristic_only")
+        summary, ctx_block = _thinking_context_for_ai(data, regime_s, vol_s)
+    except Exception as exc:
+        if str(exc) in ("empty_data", "heuristic_only"):
+            logger.debug("analyze_tilt_with_ai using partial context: %s", exc)
+        else:
+            logger.warning("analyze_tilt_with_ai context failed: %s", exc)
+        summary = {
+            "regime": regime_s,
+            "vol": vol_s,
+            "spy_trend": "n/a",
+            "vix": "n/a",
+            "sector_leadership": "n/a",
+            "asymmetry": "",
+        }
+        ctx_block = f"REGIME: {regime_s} | vol={vol_s}\n(partial context — build failed)"
+
+    try:
+        heuristic = derive_heuristic_tilt(summary)
+    except Exception as exc:
+        logger.debug("heuristic tilt failed: %s", exc)
+        heuristic = {"vti": 0.70, "cash": 0.20, "spy": 0.10, "energy": 0.0, "gold": 0.0, "crypto": 0.0, "bonds": 0.0}
+
+    top = sorted(heuristic.items(), key=lambda kv: float(kv[1]), reverse=True)
+    add = top[0][0] if top else "vti"
+    cut = "cash" if add != "cash" else "spy"
+    try:
+        rationale = _infer_tilt_rationale(summary, heuristic, _infer_asymmetry(summary))[:200]
+    except Exception:
+        rationale = f"Partial-data tilt toward {add}; trim {cut} (regime={regime_s}, vol={vol_s})"
+    fallback = _normalize_structured_output(
+        {
+            "signal_strength": 0.45,
+            "confidence": 0.4,
+            "suggested_action": f"tilt toward {add}, trim {cut}",
+            "reasoning": rationale,
+            "tilt_signal": f"{add} / {cut} | conviction 0.40",
+            "recommended_tilt": heuristic,
+            "max_sleeve_moves": 3,
+        },
+        "tilt_analysis",
+    )
+    if data_empty or heuristic_only:
+        fallback["regime"] = regime_s
+        fallback["vol"] = vol_s
+        fallback["source"] = "heuristic"
+        if force_fallback:
+            fallback["fallback_reason"] = "force_fallback"
+        else:
+            fallback["fallback_reason"] = "empty_data" if data_empty else "heuristic_only"
+        return fallback
+    prompt = f"""CONTEXT:
+{ctx_block}
+
+Heuristic tilt seed: {json.dumps(heuristic, default=str)}
+Prior day consistency: prefer <=3 sleeve moves, +/-{config.effective_thinking_max_sleeve_delta():.0%} each.
+
+JSON schema:
+{{
+  "signal_strength": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "suggested_action": "e.g. 'raise cash 5%, trim SPY 3%'",
+  "reasoning": "max 2 sentences citing CONTEXT",
+  "tilt_signal": "add_sleeve / cut_sleeve | conviction 0.00-1.00",
+  "recommended_tilt": {{"vti": 0.XX, "spy": 0.XX, "energy": 0.XX, "gold": 0.XX, "cash": 0.XX, "crypto": 0.XX, "bonds": 0.XX}},
+  "max_sleeve_moves": 3
+}}"""
+    try:
+        result = _structured_ai_call(
+            "tilt_analysis",
+            _trading_system_prompt("tilt_analysis"),
+            prompt,
+            model=model,
+            fast_model=fast_model,
+            fallback=fallback,
+            timeout_sec=timeout_sec,
+            force_fallback=force_fallback,
+        )
+    except Exception as exc:
+        logger.warning("analyze_tilt_with_ai LLM path failed: %s", exc)
+        result = dict(fallback)
+        result["fallback_reason"] = f"exception:{type(exc).__name__}"
+    result["regime"] = regime_s
+    result["vol"] = vol_s
+    return result
+
+
+def analyze_risk_signals_with_ai(
+    data,
+    regime: str | None = None,
+    vol: str | None = None,
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+    sentiment=None,
+) -> dict[str, Any]:
+    """Structured near-term risk read (JSON)."""
+    regime_s, vol_s = _coerce_regime_vol(data, regime, vol, sentiment=sentiment)
+    try:
+        summary, ctx_block = _thinking_context_for_ai(data, regime_s, vol_s)
+    except Exception as exc:
+        logger.warning("analyze_risk_signals_with_ai context failed: %s", exc)
+        summary = {"regime": regime_s, "vol": vol_s, "vix": 0, "bubble_score_100": 0, "spy_trend": "n/a"}
+        ctx_block = f"REGIME: {regime_s} | vol={vol_s}\n(partial context)"
+    vix = float(summary.get("vix") or 0) if summary.get("vix") not in (None, "n/a") else 0.0
+    try:
+        bubble = float(summary.get("bubble_score_100") or 0)
+    except (TypeError, ValueError):
+        bubble = 0.0
+    level = "high" if vix >= 22 or bubble >= 70 else ("medium" if vix >= 16 or bubble >= 55 else "low")
+    fallback = _normalize_structured_output(
+        {
+            "signal_strength": 0.7 if level == "high" else (0.45 if level == "medium" else 0.25),
+            "confidence": 0.4,
+            "suggested_action": (
+                "raise cash / cut beta" if level == "high" else "hold risk budget"
+            ),
+            "reasoning": (
+                f"VIX {vix:.1f} ({summary.get('vix_trend')}); "
+                f"bubble {bubble:.0f}/100; SPY {summary.get('spy_trend')}"
+            )[:200],
+            "risk_signal": f"{level} | VIX/bubble/trend",
+            "risk_level": level,
+            "top_risks": [
+                f"VIX {vix:.1f}",
+                f"bubble {bubble:.0f}/100",
+                str(summary.get("crowded_trade_warning") or "crowding n/a")[:60],
+            ],
+        },
+        "risk_signals",
+    )
+    prompt = f"""CONTEXT:
+{ctx_block}
+
+JSON schema:
+{{
+  "signal_strength": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "suggested_action": "raise cash / cut beta | hold | selective add",
+  "reasoning": "max 2 sentences",
+  "risk_signal": "low|medium|high | top risk in <=12 words",
+  "risk_level": "low|medium|high",
+  "top_risks": ["risk1", "risk2", "risk3"]
+}}"""
+    return _structured_ai_call(
+        "risk_signals",
+        _trading_system_prompt("risk_signals"),
+        prompt,
+        model=model,
+        fast_model=fast_model,
+        fallback=fallback,
+        timeout_sec=90,
+    )
+
+
+def thinking_dashboard_snapshot() -> dict[str, Any]:
+    """Dashboard-friendly thinking status (works for paper + live books)."""
+    snap = get_thinking_status_snapshot()
+    enabled = bool(snap.get("effective_enabled"))
+    source = str(snap.get("last_source") or "")
+    conf = snap.get("last_confidence")
+    conf_s = f"{float(conf):.0%}" if conf is not None else "—"
+    if not enabled:
+        status = "OFF"
+        detail = (
+            "paper ON / live OFF by default"
+            if not getattr(config, "LIVE_THINKING_ENGINE_ENABLED", False)
+            else "disabled"
+        )
+    elif not snap.get("ollama_ok") and (not source or source.startswith("heuristic")):
+        status = "FALLBACK"
+        detail = "Ollama down — heuristic tilts"
+    elif source.startswith("heuristic") or source == "unavailable":
+        status = "FALLBACK"
+        detail = f"heuristic · conf {conf_s}"
+    elif snap.get("last_timestamp"):
+        status = "ON"
+        detail = f"{snap.get('last_model') or 'llm'} · conf {conf_s}"
+    else:
+        status = "ON"
+        detail = "awaiting first run"
+    return {
+        **snap,
+        "status": status,
+        "detail": detail,
+        "pill_text": f"Think: {status}" + (f" · {detail}" if detail else ""),
+        "narrative": snap.get("narrative_snip") or "",
+        "regime_signal": snap.get("regime_signal") or "",
+        "tilt_signal": snap.get("tilt_signal") or "",
+        "risk_signal": snap.get("risk_signal") or "",
+    }
+
+
+def thinking_health_snapshot() -> dict[str, Any]:
+    """Inputs for Bot Health Score (thinking engine contribution)."""
+    dash = thinking_dashboard_snapshot()
+    age_hours: float | None = None
+    ts = dash.get("last_timestamp")
+    if ts:
+        try:
+            parsed = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+            age_hours = (
+                datetime.datetime.now(datetime.timezone.utc) - parsed.astimezone(datetime.timezone.utc)
+            ).total_seconds() / 3600.0
+        except (TypeError, ValueError):
+            age_hours = None
+    return {
+        "enabled": bool(dash.get("effective_enabled")),
+        "ollama_ok": bool(dash.get("ollama_ok")),
+        "status": dash.get("status"),
+        "source": dash.get("last_source"),
+        "confidence": dash.get("last_confidence"),
+        "age_hours": age_hours,
+        "fallback": bool(dash.get("fallback")),
+        "validation_score": dash.get("validation_score"),
+        "live_opt_in": bool(dash.get("live_env_enabled")),
+    }
+
+
+def _thinking_context_for_ai(
+    data,
+    regime: str | None = None,
+    vol: str | None = None,
+) -> tuple[dict[str, Any], str]:
+    """Build summary + compact context block for structured LLM calls."""
+    regime_s, vol_s = _coerce_regime_vol(data, regime, vol)
+    summary = build_market_summary(data, regime_s, vol_s)
+    block = format_thinking_context_block(summary)
+    return summary, block
+
+
+def analyze_regime_with_ai(
+    data,
+    regime: str | None = None,
+    vol: str | None = None,
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+    sentiment=None,
+    timeout_sec: int = 90,
+    heuristic_only: bool = False,
+    force_fallback: bool = False,
+) -> dict[str, Any]:
+    """Regime + conviction with unified signal_strength / suggested_action.
+
+    ``regime`` / ``vol`` / ``sentiment`` may be None — defaults are applied.
+    """
+    if force_fallback:
+        heuristic_only = True
+    regime_s, vol_s = _coerce_regime_vol(data, regime, vol, sentiment=sentiment)
+    data_empty = data is None or getattr(data, "empty", True)
+    try:
+        if data_empty or heuristic_only:
+            raise RuntimeError("empty_data" if data_empty else "heuristic_only")
+        summary, ctx_block = _thinking_context_for_ai(data, regime_s, vol_s)
+    except Exception as exc:
+        if str(exc) in ("empty_data", "heuristic_only"):
+            logger.debug("analyze_regime_with_ai using partial context: %s", exc)
+        else:
+            logger.warning("analyze_regime_with_ai context failed: %s", exc)
+        summary = {
+            "regime": regime_s,
+            "vol": vol_s,
+            "spy_trend": "n/a",
+            "bubble_score_100": "n/a",
+            "sector_leadership": "n/a",
+            "crowded_trade_warning": "",
+            "conviction_score": 0.5,
+            "stat_arb_regime": "n/a",
+        }
+        ctx_block = f"REGIME: {regime_s} | vol={vol_s}\n(partial context — build failed)"
+
+    heuristic_conv = 0.5
+    try:
+        heuristic_conv = float(summary.get("conviction_score") or 0.5)
+    except (TypeError, ValueError):
+        heuristic_conv = 0.5
+
+    fallback = _normalize_structured_output(
+        {
+            "regime_label": regime_s,
+            "conviction_score": round(heuristic_conv, 3),
+            "signal_strength": round(heuristic_conv, 3),
+            "risk_posture": "neutral",
+            "suggested_action": "hold current sleeve weights",
+            "reasoning": (
+                f"{regime_s} vol={vol_s}; bubble {summary.get('bubble_score_100', 'n/a')}/100; "
+                f"SPY {summary.get('spy_trend', 'n/a')}"
+            ),
+            "key_drivers": [
+                str(summary.get("sector_leadership") or "n/a")[:80],
+                str(summary.get("crowded_trade_warning") or "")[:80],
+            ],
+            "sleeve_bias": {"vti": "neutral", "spy": "neutral", "cash": "neutral"},
+            "confidence": 0.35,
+        },
+        "regime_analysis",
+    )
+    if data_empty or heuristic_only:
+        fallback["regime"] = regime_s
+        fallback["vol"] = vol_s
+        fallback["source"] = "heuristic"
+        if force_fallback:
+            fallback["fallback_reason"] = "force_fallback"
+        else:
+            fallback["fallback_reason"] = "empty_data" if data_empty else "heuristic_only"
+        return fallback
+    prompt = f"""CONTEXT:
+{ctx_block}
+
+Sector leaders: {summary.get('sector_leadership', 'n/a')}
+Stat-arb regime: {summary.get('stat_arb_regime', 'n/a')}
+
+JSON schema:
+{{
+  "signal_strength": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "suggested_action": "specific sleeve tilt (e.g. 'raise cash 5%, trim SPY 3%')",
+  "reasoning": "max 2 sentences, cite CONTEXT facts only",
+  "regime_label": "{regime_s}",
+  "conviction_score": 0.0-1.0,
+  "risk_posture": "risk-on|risk-off|neutral",
+  "key_drivers": ["fact1", "fact2"],
+  "sleeve_bias": {{"vti": "over|under|neutral", "spy": "...", "cash": "...", "crypto": "...", "nyse": "..."}}
+}}"""
+    try:
+        result = _structured_ai_call(
+            "regime_analysis",
+            _trading_system_prompt("regime_analysis"),
+            prompt,
+            model=model,
+            fast_model=fast_model,
+            fallback=fallback,
+            timeout_sec=timeout_sec,
+            force_fallback=force_fallback,
+        )
+    except Exception as exc:
+        logger.warning("analyze_regime_with_ai LLM path failed: %s", exc)
+        result = dict(fallback)
+        result["fallback_reason"] = f"exception:{type(exc).__name__}"
+    try:
+        conv = float(result.get("conviction_score", result.get("signal_strength", heuristic_conv)))
+        result["conviction_score"] = round(max(0.0, min(1.0, conv)), 3)
+    except (TypeError, ValueError):
+        result["conviction_score"] = round(heuristic_conv, 3)
+    result["regime"] = regime_s
+    result["vol"] = vol_s
+    return result
+
+
+def suggest_stat_arb_pairs(
+    data,
+    regime: str | None = None,
+    vol: str | None = None,
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+    max_pairs: int = 5,
+) -> dict[str, Any]:
+    """AI quality scoring for stat-arb candidates — only pairs listed in CONTEXT."""
+    regime_s, vol_s = _coerce_regime_vol(data, regime, vol)
+    summary, ctx_block = _thinking_context_for_ai(data, regime_s, vol_s)
+    candidates = list(summary.get("stat_arb_candidates") or [])[:8]
+    allowed_pairs = {str(c.get("pair")) for c in candidates if c.get("pair")}
+    fallback_pairs = []
+    for row in candidates[:max_pairs]:
+        score = float(row.get("score") or 0.0)
+        z = abs(float(row.get("z") or 0.0))
+        quality = round(min(100.0, score * 40 + z * 8 + float(row.get("corr") or 0) * 20), 1)
+        action = "long_spread" if float(row.get("z") or 0) < 0 else "short_spread"
+        fallback_pairs.append(
+            {
+                "pair": row.get("pair"),
+                "signal_strength": round(quality / 100.0, 3),
+                "quality_score": quality,
+                "suggested_action": action,
+                "action": action,
+                "reasoning": f"z={row.get('z')} corr={row.get('corr')} rule scan",
+            }
+        )
+    top_action = fallback_pairs[0]["suggested_action"] if fallback_pairs else "no trade"
+    fallback = _normalize_structured_output(
+        {
+            "signal_strength": fallback_pairs[0]["signal_strength"] if fallback_pairs else 0.0,
+            "confidence": 0.4 if fallback_pairs else 0.2,
+            "suggested_action": top_action,
+            "reasoning": str(summary.get("stat_arb_candidate_summary") or "no pairs")[:200],
+            "pairs": fallback_pairs,
+            "market_spread_regime": str(summary.get("stat_arb_regime") or "unknown"),
+        },
+        "stat_arb_pairs",
+    )
+    prompt = f"""CONTEXT:
+{ctx_block}
+
+Candidate pairs (ONLY score these — do not invent symbols):
+{json.dumps(candidates, default=str)}
+
+JSON schema:
+{{
+  "signal_strength": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "suggested_action": "top pair trade or 'stand down'",
+  "reasoning": "max 2 sentences",
+  "market_spread_regime": "mean_reverting|trending|hostile",
+  "pairs": [
+    {{
+      "pair": "LONG/SHORT",
+      "signal_strength": 0.0-1.0,
+      "quality_score": 0-100,
+      "suggested_action": "long_spread|short_spread|avoid",
+      "reasoning": "one line citing z/corr from CONTEXT"
+    }}
+  ]
+}}
+Max {max_pairs} pairs. Reject pairs not in the candidate list."""
+    result = _structured_ai_call(
+        "stat_arb_pairs",
+        _trading_system_prompt("stat_arb_pairs"),
+        prompt,
+        model=model,
+        fast_model=fast_model,
+        fallback=fallback,
+    )
+    pairs = result.get("pairs")
+    if not isinstance(pairs, list):
+        result["pairs"] = fallback_pairs
+    else:
+        filtered = [p for p in pairs if str(p.get("pair") or "") in allowed_pairs or not allowed_pairs]
+        result["pairs"] = filtered[:max_pairs] if filtered else fallback_pairs
+    return result
+
+
+def validate_short_signal(
+    data,
+    regime: str,
+    *,
+    volatility: str | None = None,
+    vol_score: float | None = None,
+    model: str | None = None,
+    fast_model: bool = False,
+) -> dict[str, Any]:
+    """Validate protective short triggers — conservative, fact-bound."""
+    from modules.pipeline_strategies import evaluate_short_entry_triggers
+
+    vol_label = volatility or "normal"
+    triggers = evaluate_short_entry_triggers(
+        data, regime, volatility=volatility, vol_score=vol_score
+    )
+    summary, ctx_block = _thinking_context_for_ai(data, regime, vol_label)
+    allowed = bool(triggers.get("allowed"))
+    bubble = float(triggers.get("bubble_score_100") or summary.get("bubble_score_100") or 0.0)
+    verdict = "approve" if allowed else "reject"
+    fallback = _normalize_structured_output(
+        {
+            "signal_strength": 0.7 if allowed else 0.2,
+            "confidence": 0.5 if allowed else 0.4,
+            "suggested_action": "open protective SPY short" if allowed else "no short — stand down",
+            "reasoning": (
+                f"Rules: allowed={allowed} reject={triggers.get('reject')} "
+                f"bubble={bubble:.0f}/100 path={triggers.get('regime_path')}"
+            ),
+            "valid": allowed,
+            "verdict": verdict,
+            "trigger_alignment": 0.75 if allowed else 0.25,
+            "risks": ["VIX reversal", "squeeze if exhaustion fades"][:2],
+        },
+        "short_validation",
+    )
+    prompt = f"""CONTEXT:
+{ctx_block}
+
+Rule-engine (authoritative):
+{json.dumps({k: triggers.get(k) for k in ('allowed', 'reject', 'regime_path', 'bubble_score_100', 'vix_reason', 'exhaustion_reason', 'bear_streak')}, default=str)}
+
+JSON schema:
+{{
+  "signal_strength": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "suggested_action": "open protective SPY short | reduce short size | no short — stand down",
+  "reasoning": "max 2 sentences; defer to rule-engine when conflict",
+  "valid": true|false,
+  "verdict": "approve|reject|wait",
+  "trigger_alignment": 0.0-1.0,
+  "risks": ["max 2 specific risks"]
+}}"""
+    result = _structured_ai_call(
+        "short_validation",
+        _trading_system_prompt("short_validation"),
+        prompt,
+        model=model,
+        fast_model=fast_model,
+        fallback=fallback,
+    )
+    result["triggers"] = triggers
+    return result
+
+
+def weekly_strategy_review(
+    context: dict[str, Any],
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+) -> dict[str, Any]:
+    """Weekly review — actionable focus items only."""
+    ctx_block = format_thinking_context_block(context) if context.get("regime") else ""
+    compact = {
+        k: context.get(k)
+        for k in (
+            "regime", "vol", "return_30d_pct", "sharpe_30d", "health_score",
+            "best_sleeve", "worst_sleeve", "bubble_score_100", "insider_summary",
+            "stat_arb_candidate_summary", "news_summary",
+        )
+        if context.get(k) is not None
+    }
+    fallback = _normalize_structured_output(
+        {
+            "signal_strength": 0.4,
+            "confidence": 0.35,
+            "suggested_action": "hold core VTI; review stat-arb pair filters",
+            "reasoning": f"30d return {context.get('return_30d_pct')}% sharpe {context.get('sharpe_30d')}",
+            "headline": "Weekly review (heuristic fallback)",
+            "what_worked": [str(context.get("best_sleeve") or "VTI core")],
+            "what_failed": [str(context.get("worst_sleeve") or "n/a")],
+            "next_week_actions": [
+                "tighten stat-arb z-entry if vol stays high",
+                "watch insider cluster buys for NYSE entries",
+            ],
+            "regime_outlook": str(context.get("regime") or "unchanged"),
+        },
+        "weekly_review",
+    )
+    prompt = f"""CONTEXT:
+{ctx_block or json.dumps(compact, default=str)}
+
+Performance: {json.dumps(compact, default=str)}
+
+JSON schema:
+{{
+  "signal_strength": 0.0-1.0,
+  "confidence": 0.0-1.0,
+  "suggested_action": "one specific portfolio adjustment",
+  "reasoning": "max 2 sentences",
+  "headline": "max 12 words",
+  "what_worked": ["max 2 items"],
+  "what_failed": ["max 2 items"],
+  "next_week_actions": ["3 specific trading tasks — no generic advice"],
+  "regime_outlook": "one sentence"
+}}
+Benchmark: beat VTI Sharpe. Max sleeve delta ±6%."""
+    return _structured_ai_call(
+        "weekly_review",
+        _trading_system_prompt("weekly_review"),
+        prompt,
+        model=model,
+        fast_model=fast_model,
+        fallback=fallback,
+    )
+
+
+def run_full_thinking_cycle(
+    data,
+    regime: str,
+    vol: str,
+    *,
+    model: str | None = None,
+    fast_model: bool = False,
+    include_market_reasoning: bool = False,
+) -> dict[str, Any]:
+    """Run all structured capabilities + optional sleeve tilt reasoning."""
+    summary = build_market_summary(data, regime, vol)
+    ctx_block = format_thinking_context_block(summary)
+    cycle: dict[str, Any] = {
+        "regime": regime,
+        "vol": vol,
+        "context_block": ctx_block,
+        "enriched_context": {
+            k: summary.get(k)
+            for k in (
+                "insider_cluster_buys", "insider_executive_sells", "insider_summary",
+                "bubble_score_100", "buffett_signal", "buffett_ratio_pct",
+                "news_summary", "news_headline_lines", "stat_arb_candidates",
+                "stat_arb_candidate_summary", "options_flow_summary", "unusual_activity",
+                "short_interest_summary", "short_interest_watch",
+            )
+            if summary.get(k) is not None
+        },
+        "regime_analysis": analyze_regime_with_ai(
+            data, regime, vol, model=model, fast_model=fast_model
+        ),
+        "stat_arb": suggest_stat_arb_pairs(
+            data, regime, vol, model=model, fast_model=fast_model, max_pairs=4
+        ),
+        "short_validation": validate_short_signal(
+            data, regime, volatility=vol, model=model, fast_model=fast_model
+        ),
+        "weekly_review": weekly_strategy_review(
+            {
+                **summary,
+                "return_30d_pct": summary.get("return_30d_pct"),
+                "sharpe_30d": summary.get("sharpe_30d"),
+                "health_score": summary.get("health_score"),
+            },
+            model=model,
+            fast_model=fast_model,
+        ),
+    }
+    if include_market_reasoning:
+        cycle["market_reasoning"] = get_market_reasoning(
+            summary, model=model, fast_model=fast_model
+        )
+    return cycle
+
+
+def test_ollama_thinking(
+    data=None,
+    *,
+    regime: str | None = None,
+    vol: str | None = None,
+    sentiment=None,
+    fast_model: bool = True,
+    timeout_sec: int = 90,
+    heuristic_only: bool = False,
+    force_fallback: bool = False,
+) -> dict[str, Any]:
+    """Smoke-test regime + tilt analyzers with partial data (None-safe).
+
+    Usage::
+
+        from modules.thinking_engine import test_ollama_thinking
+        test_ollama_thinking()
+
+    Or::
+
+        data = load_pipeline_data()
+        print(analyze_regime_with_ai(data))
+        print(analyze_tilt_with_ai(data))
+
+    Pass ``heuristic_only=True`` or ``force_fallback=True`` to skip Ollama
+    (fast CI / forced heuristic path).
+    """
+    status = check_ollama_startup_status(force=True)
+    print("ollama_startup:", status.get("banner") or status)
+
+    if force_fallback:
+        heuristic_only = True
+
+    if data is None and not heuristic_only:
+        try:
+            from modules.pipeline_strategies import load_pipeline_data
+
+            data = load_pipeline_data()
+        except Exception as exc:
+            print(f"test_ollama_thinking: load_pipeline_data failed ({exc})")
+            data = None
+    if data is None or getattr(data, "empty", True):
+        print("test_ollama_thinking: no pipeline data — using empty frame (heuristic)")
+        import pandas as pd
+
+        data = pd.DataFrame()
+        if not force_fallback:
+            heuristic_only = True
+
+    # Explicit None sentiment/vol path (must not raise).
+    regime_out = analyze_regime_with_ai(
+        data,
+        regime,
+        vol,
+        sentiment=sentiment,
+        fast_model=fast_model,
+        timeout_sec=timeout_sec,
+        heuristic_only=heuristic_only,
+        force_fallback=force_fallback,
+    )
+    tilt_out = analyze_tilt_with_ai(
+        data,
+        regime,
+        vol,
+        sentiment=sentiment,
+        fast_model=fast_model,
+        timeout_sec=timeout_sec,
+        heuristic_only=heuristic_only,
+        force_fallback=force_fallback,
+    )
+    print(regime_out)
+    print(tilt_out)
+    return {
+        "regime_analysis": regime_out,
+        "tilt_analysis": tilt_out,
+        "ollama_startup": status,
+    }
+
+
+if __name__ == "__main__":
+    import sys
+
+    # Default CLI: fast partial-data check.
+    #   --llm            hit Ollama
+    #   --force-fallback  force heuristic path (no Ollama calls)
+    use_llm = "--llm" in sys.argv
+    force_fb = "--force-fallback" in sys.argv
+    test_ollama_thinking(
+        heuristic_only=not use_llm and not force_fb,
+        force_fallback=force_fb,
+    )
+

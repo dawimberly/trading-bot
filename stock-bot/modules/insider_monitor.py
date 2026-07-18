@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import logging
 import re
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -17,6 +18,14 @@ from modules.safe_io import read_json_file, write_json_file
 logger = logging.getLogger(__name__)
 
 _ATOM_NS = {"a": "http://www.w3.org/2005/Atom"}
+
+# In-process TTL memo for refresh_insider_signals(). Insider boosts are looked up
+# once per candidate symbol per cycle; without this each lookup would re-read the
+# on-disk state JSON and recopy the list. The SEC poll window is hours, so a short
+# TTL here only deduplicates within-cycle calls and never masks a real refresh.
+_INMEM_TTL_SEC = 60.0
+_inmem_signals: list[dict[str, Any]] | None = None
+_inmem_at: float = 0.0
 
 SEC_FEEDS: dict[str, str] = {
     "form4": (
@@ -58,15 +67,10 @@ _EXEC_KEYWORDS = (
     "evp",
 )
 _CEO_KEYWORDS = ("chief executive", " ceo", "ceo ", "chief executive officer")
-_BUY_WORDS = ("purchase", "acquired", "buy", " code p", "transaction code: p")
-_SELL_WORDS = ("sale", "sold", "disposed", " code s", "transaction code: s")
 _DILUTION_WORDS = ("at-the-market", "atm", "prospectus supplement", "offering", "dilution")
 
 _SHELF_MIN_VALUE_USD = float(getattr(config, "INSIDER_SHELF_MIN_VALUE_USD", 50_000_000))
 _DEFAULT_MIN_SCORE = int(getattr(config, "INSIDER_DEFAULT_MIN_SCORE", 60))
-
-_CACHE: dict[str, Any] = {"signals": None, "loaded_at": None}
-
 
 def _sig_type(sig: dict[str, Any]) -> str:
     return str(sig.get("signal_type") or sig.get("event_type") or "")
@@ -199,8 +203,8 @@ def _company_ticker_map() -> dict[str, str]:
             name = str(meta.get("name") or meta.get("company") or "").strip().upper()
             if len(name) >= 4:
                 mapping[name] = config.normalize_symbol(sym)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("company->ticker map unavailable: %s", exc)
     return mapping
 
 
@@ -817,15 +821,27 @@ def _cache_fresh(state: dict[str, Any]) -> bool:
 
 
 def refresh_insider_signals(*, force: bool = False) -> list[dict[str, Any]]:
-    """Poll SEC RSS feeds and refresh cached signals (all scores, unfiltered)."""
+    """Poll SEC RSS feeds and refresh cached signals (all scores, unfiltered).
+
+    A short in-process TTL memo (``_INMEM_TTL_SEC``) deduplicates the many
+    per-symbol boost lookups within one trading cycle. ``force`` bypasses it.
+    """
+    global _inmem_signals, _inmem_at
     if not config.effective_insider_monitor_enabled():
         return []
+
+    if (
+        not force
+        and _inmem_signals is not None
+        and (time.monotonic() - _inmem_at) < _INMEM_TTL_SEC
+    ):
+        return list(_inmem_signals)
 
     state = _load_state()
     if not force and _cache_fresh(state):
         signals = state.get("signals") or []
-        _CACHE["signals"] = signals
-        _CACHE["loaded_at"] = state.get("fetched_at")
+        _inmem_signals = list(signals)
+        _inmem_at = time.monotonic()
         return list(signals)
 
     raw_events: list[dict[str, Any]] = []
@@ -866,8 +882,8 @@ def refresh_insider_signals(*, force: bool = False) -> list[dict[str, Any]]:
         "form4_side_cache": side_cache,
     }
     _save_state(payload)
-    _CACHE["signals"] = signals
-    _CACHE["loaded_at"] = payload["fetched_at"]
+    _inmem_signals = list(signals)
+    _inmem_at = time.monotonic()
     return list(signals)
 
 
@@ -946,18 +962,6 @@ def _cluster_buy_tickers(signals: list[dict[str, Any]] | None = None) -> set[str
     return out
 
 
-def _executive_sell_tickers(signals: list[dict[str, Any]] | None = None) -> set[str]:
-    sigs = signals if signals is not None else get_recent_insider_signals(min_score=50)
-    out: set[str] = set()
-    for sig in sigs:
-        if _sig_type(sig) not in ("executive_sell", "insider_sell"):
-            continue
-        t = sig.get("ticker")
-        if t:
-            out.add(config.normalize_symbol(str(t)))
-    return out
-
-
 def _ticker_in_strong_sector(ticker: str) -> bool:
     try:
         from modules.dynamic_universe import sector_for_symbol
@@ -969,19 +973,20 @@ def _ticker_in_strong_sector(ticker: str) -> bool:
             return False
         sec = sector_for_symbol(ticker)
         return sec in active
-    except Exception:
+    except Exception as exc:
+        logger.debug("strong-sector check failed for %s: %s", ticker, exc)
         return False
 
 
-def momentum_rank_boost(symbol: str) -> float:
+def momentum_rank_boost(symbol: str, executor=None) -> float:
     """Extra sort weight for NYSE momentum (cluster buy in strong sector)."""
     if config.effective_insider_signal_boost_enabled():
         try:
             from modules.insider_signal_handler import momentum_rank_boost as handler_boost
 
-            return handler_boost(symbol)
-        except Exception:
-            pass
+            return handler_boost(symbol, executor)
+        except Exception as exc:
+            logger.debug("momentum_rank_boost handler failed, using fallback: %s", exc)
     if not config.effective_insider_monitor_enabled():
         return 0.0
     sym = config.normalize_symbol(symbol)
@@ -999,8 +1004,8 @@ def stat_arb_long_boost(symbol: str) -> float:
             from modules.insider_signal_handler import stat_arb_long_boost as handler_boost
 
             return handler_boost(symbol)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("stat_arb_long_boost handler failed, using fallback: %s", exc)
     if not config.effective_insider_monitor_enabled():
         return 1.0
     sym = config.normalize_symbol(symbol)
@@ -1016,8 +1021,8 @@ def short_candidate_boost(symbol: str, bubble_score: float) -> float:
             from modules.insider_signal_handler import short_candidate_boost as handler_boost
 
             return handler_boost(symbol, bubble_score)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("short_candidate_boost handler failed, using fallback: %s", exc)
     if not config.effective_insider_monitor_enabled():
         return 0.0
     if float(bubble_score) < config.SHORT_BUBBLE_SCORE_MIN:
@@ -1042,33 +1047,79 @@ def get_insider_context_for_thinking() -> dict[str, Any]:
             from modules.insider_signal_handler import get_thinking_context
 
             return get_thinking_context()
-        except Exception:
-            pass
-    signals = get_recent_insider_signals(days=7, min_score=55)[:8]
-    clusters = [s for s in signals if _sig_type(s) == "cluster_buy"]
-    sells = [s for s in signals if _sig_type(s) in ("executive_sell", "insider_sell")]
+        except Exception as exc:
+            logger.debug("insider thinking-context handler failed, using fallback: %s", exc)
+    min_score = 70
+    signals = get_recent_insider_signals(days=7, min_score=min_score)[:12]
+    clusters_raw = [s for s in signals if _sig_type(s) == "cluster_buy"]
+    sells_raw = [s for s in signals if _sig_type(s) in ("executive_sell", "insider_sell")]
     stakes = [s for s in signals if _sig_type(s) in ("activist_13d", "stake_13g")]
+
+    cluster_buys: list[dict[str, Any]] = []
+    cluster_lines: list[str] = []
+    for sig in clusters_raw[:5]:
+        val_s = _format_value(sig.get("value"))
+        ticker = sig.get("ticker") or sig.get("company", "?")
+        score = int(sig.get("score") or 0)
+        insiders = int(sig.get("insiders_count") or 0)
+        line = f"{ticker} cluster_buy s{score}"
+        if val_s:
+            line += f" {val_s}"
+        if insiders:
+            line += f" [{insiders} insiders]"
+        cluster_buys.append(
+            {
+                "ticker": ticker,
+                "score": score,
+                "value": sig.get("value"),
+                "value_str": val_s,
+                "insiders_count": insiders,
+                "line": line,
+            }
+        )
+        cluster_lines.append(line)
+
+    executive_sells: list[dict[str, Any]] = []
+    sell_lines: list[str] = []
+    for sig in sells_raw[:5]:
+        val_s = _format_value(sig.get("value"))
+        ticker = sig.get("ticker") or sig.get("company", "?")
+        score = int(sig.get("score") or 0)
+        role = sig.get("role") or _sig_type(sig)
+        line = f"{ticker} {role} s{score}"
+        if val_s:
+            line += f" {val_s}"
+        executive_sells.append(
+            {
+                "ticker": ticker,
+                "score": score,
+                "value": sig.get("value"),
+                "value_str": val_s,
+                "role": role,
+                "line": line,
+            }
+        )
+        sell_lines.append(line)
+
     parts: list[str] = []
-    if clusters:
-        names = ", ".join(
-            f"{s.get('ticker') or s.get('company', '?')} "
-            f"({s.get('insiders_count', 0)}, score {s.get('score', 0)})"
-            for s in clusters[:4]
-        )
-        parts.append(f"cluster buys: {names}")
-    if sells:
-        top = sells[0]
-        parts.append(
-            f"insider sells: {len(sells)} "
-            f"(top {top.get('ticker') or top.get('company', '?')} score {top.get('score', 0)})"
-        )
+    if cluster_lines:
+        parts.append("cluster buys: " + "; ".join(cluster_lines[:3]))
+    if sell_lines:
+        parts.append("exec sells: " + "; ".join(sell_lines[:3]))
     if stakes:
         parts.append(f"13D/13G stakes: {len(stakes)}")
-    summary = "; ".join(parts) if parts else "no high-signal filings this week"
+    summary = "; ".join(parts) if parts else "no high-score (≥70) filings this week"
     return {
         "insider_signals": signals,
+        "insider_high_score_signals": signals,
         "insider_summary": summary,
-        "insider_cluster_count": len(clusters),
+        "insider_cluster_count": len(clusters_raw),
+        "insider_cluster_buys": cluster_buys,
+        "insider_executive_sells": executive_sells,
+        "insider_high_score_buys": cluster_buys,
+        "insider_high_score_sells": executive_sells,
+        "insider_cluster_lines": cluster_lines,
+        "insider_sell_lines": sell_lines,
     }
 
 
@@ -1109,8 +1160,8 @@ def format_insider_monitor_banner() -> str | None:
                     f" | Boost: {int(state.get('cluster_count') or 0)} clusters, "
                     f"{int(state.get('short_count') or 0)} shorts"
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("insider boost snapshot for banner unavailable: %s", exc)
     return line
 
 
@@ -1122,8 +1173,8 @@ def format_telegram_insider_lines(*, limit: int = 3) -> list[str]:
             from modules.insider_signal_handler import format_telegram_top_signals
 
             return format_telegram_top_signals(limit=limit)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("telegram insider handler failed, using fallback: %s", exc)
     signals = get_recent_insider_signals(days=7, min_score=55)[:limit]
     if not signals:
         return ["Insider: none this week"]

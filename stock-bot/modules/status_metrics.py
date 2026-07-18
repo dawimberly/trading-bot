@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import config
+
+logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[1]
 EQUITY_EVENTS = frozenset({"cycle", "fill", "startup", "halt", "signal"})
@@ -293,8 +297,8 @@ def metrics_30d(*, paper_chase: bool) -> dict:
                 "max_drawdown_pct": float(m.get("max_drawdown_pct") or 0),
                 "source": "journal",
             }
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("status metrics soft-fail: %s", exc)
     return {"return_pct": None, "sharpe": None, "max_drawdown_pct": None, "source": "none"}
 
 
@@ -329,8 +333,8 @@ def thinking_tilt_snip(hb: dict | None) -> str:
         tilt = mon.get("recommended_tilt")
         if tilt:
             return str(tilt)[:90]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("status metrics soft-fail: %s", exc)
     return "none (thinking engine off or no recent decision)"
 
 

@@ -155,6 +155,19 @@ def write_json_file(path: Path | str, payload: dict, *, indent: int = 2) -> bool
         return False
 
 
+def append_jsonl_line(path: Path | str, payload: dict[str, Any]) -> bool:
+    """Append one JSON object as a line; return False on I/O failure."""
+    p = Path(path)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, default=str) + "\n")
+        return True
+    except OSError:
+        logger.warning("append_jsonl_line failed: %s", p, exc_info=True)
+        return False
+
+
 def write_json_atomic(path: str, payload: Any, *, indent: int = 2) -> None:
     """Atomic JSON write (temp file + replace) with non-JSON-native values stringified."""
     directory = os.path.dirname(os.path.abspath(path)) or "."

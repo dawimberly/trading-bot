@@ -69,6 +69,20 @@ def rebalance_vti_core(
 
     symbol = config.VTI_CORE_SYMBOL
     if delta > 0:
+        cash = float(getattr(account, "cash", 0) or 0)
+        # Never buy VTI into margin — leave a small cash reserve for active sleeves.
+        try:
+            reserve_pct = min(0.08, float(config.effective_cash_buffer_pct()) * 0.5)
+        except Exception:
+            reserve_pct = 0.05
+        reserve = max(equity * reserve_pct, min_n)
+        buyable = max(0.0, cash - reserve)
+        if buyable < min_n:
+            result["skipped"] = True
+            result["reason"] = "insufficient cash (reserve)"
+            result["cash"] = round(cash, 2)
+            return result
+        delta = min(delta, round(buyable, 2))
         order = executor.execute_order(symbol, "buy", notional=delta)
         result["action"] = "buy"
     else:

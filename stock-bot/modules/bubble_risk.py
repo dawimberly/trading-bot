@@ -256,8 +256,8 @@ def _as_of_from_data(data) -> datetime | None:
     try:
         if hasattr(data, "index") and len(data.index):
             return pd_timestamp_to_datetime(data.index[-1])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("bubble as-of timestamp parse failed: %s", exc)
     return None
 
 

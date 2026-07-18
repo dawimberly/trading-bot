@@ -108,7 +108,13 @@ from modules.portal_bot import (  # noqa: E402
 
 REFRESH_SECONDS = 45
 _BOOK_ENV_LOCK = threading.Lock()
+_POSITIONS_CACHE_LOCK = threading.Lock()
+# key -> {"at": monotonic, "df": DataFrame|None, "err": str|None}
+_POSITIONS_CACHE: dict[str, dict] = {}
 CRYPTO_VOL_HEARTBEAT_FILE = "crypto_vol_heartbeat.json"
+POSITIONS_REFRESH_SEC = max(
+    5, int(getattr(config, "DASHBOARD_POSITIONS_REFRESH_SEC", 12) or 12)
+)
 TRADES_LIMIT = 50
 TRADE_EVENTS = frozenset({"signal", "exit", "fill"})
 EQUITY_EVENTS = frozenset({"cycle", "startup"})
@@ -443,6 +449,105 @@ def _reset_equity_cache() -> None:
         config._account_equity = None  # type: ignore[attr-defined]
     if getattr(config, "_small_account_mode", False):
         config._small_account_mode = False  # type: ignore[attr-defined]
+
+
+def _positions_cache_key(username: str, book_id: str) -> str:
+    return f"{username}\0{book_id}"
+
+
+def _positions_cache_peek(
+    username: str, book_id: str
+) -> tuple[float | None, pd.DataFrame | None, str | None]:
+    with _POSITIONS_CACHE_LOCK:
+        ent = _POSITIONS_CACHE.get(_positions_cache_key(username, book_id))
+        if not ent:
+            return None, None, None
+        df = ent.get("df")
+        return (
+            float(ent["at"]),
+            df.copy() if df is not None else None,
+            ent.get("err"),
+        )
+
+
+def _positions_cache_put(
+    username: str,
+    book_id: str,
+    df: pd.DataFrame | None,
+    err: str | None,
+) -> None:
+    with _POSITIONS_CACHE_LOCK:
+        _POSITIONS_CACHE[_positions_cache_key(username, book_id)] = {
+            "at": time.monotonic(),
+            "df": df.copy() if df is not None else None,
+            "err": err,
+        }
+
+
+def _positions_cache_age_sec(username: str, book_id: str) -> float | None:
+    with _POSITIONS_CACHE_LOCK:
+        ent = _POSITIONS_CACHE.get(_positions_cache_key(username, book_id))
+        if not ent:
+            return None
+        return time.monotonic() - float(ent["at"])
+
+
+def _positions_cache_fresh(
+    username: str, book_id: str, *, stale_threshold: float | None = None
+) -> bool:
+    threshold = (
+        POSITIONS_REFRESH_SEC if stale_threshold is None else float(stale_threshold)
+    )
+    age = _positions_cache_age_sec(username, book_id)
+    return age is not None and age < threshold
+
+
+def _positions_fingerprint(
+    df: pd.DataFrame | None, err: str | None = None
+) -> object:
+    """Stable fingerprint so unchanged positions skip table rebuild."""
+    if err:
+        return ("err", str(err))
+    if df is None:
+        return None
+    if getattr(df, "empty", True):
+        return ("empty",)
+    rows: list[tuple] = []
+    has_atr = "ATR Stop" in df.columns
+    for _, r in df.iterrows():
+        try:
+            qty = round(float(r.get("Qty") or 0), 6)
+        except (TypeError, ValueError):
+            qty = 0.0
+        try:
+            entry = round(float(r.get("Entry") or 0), 4)
+        except (TypeError, ValueError):
+            entry = 0.0
+        try:
+            current = round(float(r.get("Current") or 0), 4)
+        except (TypeError, ValueError):
+            current = 0.0
+        try:
+            pnl = round(float(r.get("P&L $") or 0), 4)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        try:
+            value = round(float(r.get("Value $") or 0), 4)
+        except (TypeError, ValueError):
+            value = 0.0
+        rows.append(
+            (
+                str(r.get("Ticker") or ""),
+                qty,
+                entry,
+                current,
+                pnl,
+                value,
+                str(r.get("Opened") or ""),
+                str(r.get("ATR Stop") or "") if has_atr else "",
+            )
+        )
+    return tuple(rows)
 
 
 def _fetch_account_summary(
@@ -849,7 +954,11 @@ def _fetch_exit_events_snapshot() -> tuple[list[dict], str | None]:
 
 
 def _collect_refresh_snapshot(
-    username: str, book_id: str, *, fast: bool = False
+    username: str,
+    book_id: str,
+    *,
+    fast: bool = False,
+    fetch_positions: bool = True,
 ) -> dict:
     """Network / disk work for dashboard refresh (safe off UI thread)."""
 
@@ -859,6 +968,7 @@ def _collect_refresh_snapshot(
         "book_paper": _book_is_paper(book_id),
         "fast": fast,
         "partial_errors": [],
+        "positions_fetched": False,
     }
 
     with _BOOK_ENV_LOCK:
@@ -888,10 +998,15 @@ def _collect_refresh_snapshot(
             acct_err = str(exc)
 
         positions_df, pos_err = None, None
-        try:
-            positions_df, pos_err = _fetch_positions(username, book_id)
-        except Exception as exc:  # noqa: BLE001
-            pos_err = str(exc)
+        if fetch_positions:
+            try:
+                positions_df, pos_err = _fetch_positions(username, book_id)
+            except Exception as exc:  # noqa: BLE001
+                pos_err = str(exc)
+            _positions_cache_put(username, book_id, positions_df, pos_err)
+            snap["positions_fetched"] = True
+        else:
+            _, positions_df, pos_err = _positions_cache_peek(username, book_id)
 
         journal_df = None
         try:
@@ -2439,10 +2554,12 @@ class TradingDashboardApp(ctk.CTk):
         self._shutting_down = False
         self._refresh_busy = False
         self._refresh_pending = False
+        self._refresh_pending_force_positions = False
         self._refresh_seq = 0
         self._refresh_auto_cycles = 0
         self._status_restore_job: str | None = None
         self._last_positions_df: pd.DataFrame | None = None
+        self._last_positions_fp: object | None = None
 
         if ICON_PATH.is_file():
             try:
@@ -2595,7 +2712,7 @@ class TradingDashboardApp(ctk.CTk):
             fg_color=COLORS["surface"],
             hover_color=COLORS["accent"],
             text_color=COLORS["text"],
-            command=self.refresh_data,
+            command=self._on_manual_refresh,
             **_header_btn_style,
         )
         self._refresh_btn.grid(row=0, column=1, padx=3, pady=2, sticky="e")
@@ -2699,6 +2816,9 @@ class TradingDashboardApp(ctk.CTk):
             status_inner, "Gates: —", COLORS["surface2"], COLORS["amber"]
         )
         self._pill_health = _pill(status_inner, "Health: —", COLORS["surface2"], COLORS["muted"])
+        self._pill_daily_bank = _pill(
+            status_inner, "Bank: —", COLORS["surface2"], COLORS["muted"]
+        )
         self._pill_thinking = _pill(
             status_inner, "Think: —", COLORS["surface2"], COLORS["muted"]
         )
@@ -3398,6 +3518,8 @@ class TradingDashboardApp(ctk.CTk):
         self._stats_line1.configure(text="Account Total: —")
         self._stats_line2.configure(text="Loading…")
         self._since_start_label.configure(text="Since Start: —")
+        self._last_positions_df = None
+        self._last_positions_fp = None
 
     def _start_book_async(self, book_id: str) -> None:
         self._status_label.configure(text=f"Starting {book_label(book_id)} bot…")
@@ -4137,6 +4259,9 @@ class TradingDashboardApp(ctk.CTk):
         if self._active_tab == "Charts":
             self._charts_dirty = True
             self._draw_charts()
+        elif self._active_tab == "Positions":
+            if not _positions_cache_fresh(self._username, self._book_id):
+                self.refresh_data(force_positions=True)
 
     def _clear_frame(self, frame) -> None:
         for child in frame.winfo_children():
@@ -4234,7 +4359,12 @@ class TradingDashboardApp(ctk.CTk):
         halted: bool = False,
         bot_running_flag: bool = False,
         book_paper: bool | None = None,
+        heartbeat: dict | None = None,
+        snap: dict | None = None,
     ) -> None:
+        if heartbeat is None and snap is not None:
+            heartbeat = snap.get("heartbeat")
+        heartbeat = heartbeat or {}
         live = not (book_paper if book_paper is not None else _book_is_paper(self._book_id))
         if live:
             self._pill_mode.configure(
@@ -4259,7 +4389,7 @@ class TradingDashboardApp(ctk.CTk):
             self._pill_small.pack_forget()
 
         regime_short = regime.split(":")[-1].strip() if ":" in regime else regime
-        hmm = (heartbeat or {}).get("markov_hmm") or {}
+        hmm = heartbeat.get("markov_hmm") or {}
         if hmm.get("ok") and hmm.get("predicted"):
             conf = hmm.get("confidence")
             conf_s = f" {float(conf):.0%}" if conf is not None else ""
@@ -4313,6 +4443,30 @@ class TradingDashboardApp(ctk.CTk):
             fg_color=fg,
             text_color=tc,
         )
+
+    def _update_daily_bank_pill(self, heartbeat: dict | None, *, book_paper: bool) -> None:
+        if not hasattr(self, "_pill_daily_bank"):
+            return
+        bank = (heartbeat or {}).get("daily_bank") or {}
+        if not book_paper or not bank.get("enabled"):
+            self._pill_daily_bank.pack_forget()
+            return
+        self._pill_daily_bank.pack(side="left", padx=(0, 8), before=self._pill_bot)
+        if bank.get("banked"):
+            locked = float(bank.get("locked_gain_pct") or 0)
+            self._pill_daily_bank.configure(
+                text=f"Bank: locked +{locked:.2f}%",
+                fg_color=COLORS["paper_ok_bg"],
+                text_color=COLORS["green"],
+            )
+        else:
+            gain = float(bank.get("gain_pct") or 0)
+            thr = float(bank.get("threshold_pct") or 0.8)
+            self._pill_daily_bank.configure(
+                text=f"Bank: {gain:+.2f}% / {thr:g}%",
+                fg_color=COLORS["surface2"],
+                text_color=COLORS["muted"],
+            )
 
     def _update_thinking_pill(self, snap: dict | None, err: str | None = None) -> None:
         if not hasattr(self, "_pill_thinking"):
@@ -4556,8 +4710,11 @@ class TradingDashboardApp(ctk.CTk):
                 text_color=COLORS["muted"],
             )
 
+    def _on_manual_refresh(self) -> None:
+        self.refresh_data(force_positions=True)
+
     def _on_f5_refresh(self, _event=None) -> str:
-        self.refresh_data()
+        self.refresh_data(force_positions=True)
         return "break"
 
     def _set_refresh_buttons_busy(self, busy: bool) -> None:
@@ -4608,15 +4765,26 @@ class TradingDashboardApp(ctk.CTk):
             parts.append(f"{len(errs)} partial error(s)")
         return " · ".join(parts)
 
-    def refresh_data(self, *, full: bool | None = None) -> None:
+    def refresh_data(
+        self, *, full: bool | None = None, force_positions: bool = False
+    ) -> None:
         if self._refresh_busy:
             self._refresh_pending = True
+            self._refresh_pending_force_positions = (
+                self._refresh_pending_force_positions or force_positions
+            )
             return
         if full is None:
             full = False
         fast = not full
         include_charts = bool(
             getattr(self, "_charts_var", None) and self._charts_var.get()
+        )
+        positions_tab = getattr(self, "_active_tab", "") == "Positions"
+        cache_fresh = _positions_cache_fresh(self._username, self._book_id)
+        # Full positions fetch only when tab is active (and cache stale) or manual Refresh.
+        fetch_positions = bool(
+            force_positions or (positions_tab and not cache_fresh)
         )
         self._refresh_busy = True
         self._refresh_seq += 1
@@ -4625,10 +4793,21 @@ class TradingDashboardApp(ctk.CTk):
         book_id = self._book_id
         self._set_refresh_buttons_busy(True)
         self._set_refresh_status_message("Refreshing data…")
+        if fetch_positions:
+            has_rows = (
+                self._last_positions_df is not None
+                and not getattr(self._last_positions_df, "empty", True)
+            )
+            self._set_positions_loading(clear_table=not has_rows)
 
         def _worker() -> None:
             try:
-                snap = _collect_refresh_snapshot(username, book_id, fast=fast)
+                snap = _collect_refresh_snapshot(
+                    username,
+                    book_id,
+                    fast=fast,
+                    fetch_positions=fetch_positions,
+                )
             except Exception as exc:  # noqa: BLE001
                 snap = {
                     "book_id": book_id,
@@ -4642,6 +4821,7 @@ class TradingDashboardApp(ctk.CTk):
                     "scorecard_src": "",
                     "positions_df": None,
                     "pos_err": str(exc),
+                    "positions_fetched": fetch_positions,
                     "journal_df": None,
                     "running": False,
                     "partial_errors": [str(exc)],
@@ -4666,8 +4846,15 @@ class TradingDashboardApp(ctk.CTk):
                     self._refresh_busy = False
                     self._set_refresh_buttons_busy(False)
                     if self._refresh_pending:
+                        pending_force = self._refresh_pending_force_positions
                         self._refresh_pending = False
-                        self.after(150, lambda: self.refresh_data(full=False))
+                        self._refresh_pending_force_positions = False
+                        self.after(
+                            150,
+                            lambda: self.refresh_data(
+                                full=False, force_positions=pending_force
+                            ),
+                        )
 
             self.after(0, _apply)
 
@@ -4675,7 +4862,7 @@ class TradingDashboardApp(ctk.CTk):
 
     def _apply_refresh_core(self, snap: dict) -> None:
         """Fast UI path: equity, small-account banner, sparkline, positions."""
-        heartbeat = snap.get("heartbeat")
+        heartbeat = snap.get("heartbeat") or {}
         acct_err = snap.get("acct_err")
         positions_df = snap.get("positions_df")
         pos_err = snap.get("pos_err")
@@ -4694,8 +4881,12 @@ class TradingDashboardApp(ctk.CTk):
         cash_pct = (cash / equity * 100) if equity > 0 else 0.0
         invested = self._invested_pct(heartbeat, equity, cash)
         upl = 0.0
-        if positions_df is not None and not positions_df.empty:
-            upl = float(positions_df["P&L $"].sum())
+        if positions_df is not None and not getattr(positions_df, "empty", True):
+            try:
+                if "P&L $" in positions_df.columns:
+                    upl = float(positions_df["P&L $"].sum())
+            except Exception:  # noqa: BLE001
+                upl = 0.0
 
         self._metric_cards["equity"].set(f"${equity:,.2f}")
         self._metric_cards["cash"].set(
@@ -4715,9 +4906,11 @@ class TradingDashboardApp(ctk.CTk):
             equity,
             small_acct,
             regime=regime,
-            halted=bool((heartbeat or {}).get("halted")),
+            halted=bool(heartbeat.get("halted")),
             bot_running_flag=running,
             book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+            heartbeat=heartbeat,
+            snap=snap,
         )
 
         self._bot_badge.configure(
@@ -4753,6 +4946,10 @@ class TradingDashboardApp(ctk.CTk):
         self._fill_overview(heartbeat, equity, acct_err, snap=snap)
         self._update_health_pill(
             snap.get("bot_health"),
+            book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+        )
+        self._update_daily_bank_pill(
+            heartbeat,
             book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
         )
         self._update_thinking_pill(snap.get("thinking_snap"), snap.get("thinking_err"))
@@ -4885,6 +5082,8 @@ class TradingDashboardApp(ctk.CTk):
                 halted=True,
                 bot_running_flag=_book_running_status(self._username, self._book_id),
                 book_paper=_book_is_paper(self._book_id),
+                heartbeat=heartbeat,
+                snap=snap,
             )
             self._pill_regime.configure(
                 text=f"Alpaca: {acct_err[:40]}",
@@ -4913,6 +5112,8 @@ class TradingDashboardApp(ctk.CTk):
                 regime="Waiting…" if running else "No heartbeat",
                 bot_running_flag=running,
                 book_paper=_book_is_paper(self._book_id),
+                heartbeat=heartbeat,
+                snap=snap,
             )
             self._clear_frame(self._actions_scroll)
             btn_row = ctk.CTkFrame(self._actions_scroll, fg_color="transparent")
@@ -4968,6 +5169,8 @@ class TradingDashboardApp(ctk.CTk):
             halted=halted,
             bot_running_flag=_book_running_status(self._username, self._book_id),
             book_paper=_book_is_paper(self._book_id),
+            heartbeat=heartbeat,
+            snap=snap,
         )
         self._update_entry_gates_pill(heartbeat)
 
@@ -5014,15 +5217,15 @@ class TradingDashboardApp(ctk.CTk):
         rows = []
         for _, r in positions_df.iterrows():
             try:
-                qty = float(r["Qty"])
+                qty = float(r.get("Qty", 0) or 0)
             except (TypeError, ValueError):
                 qty = 0.0
             try:
-                entry = float(r["Entry"])
+                entry = float(r.get("Entry", 0) or 0)
             except (TypeError, ValueError):
                 entry = 0.0
             try:
-                current = float(r["Current"])
+                current = float(r.get("Current", 0) or 0)
             except (TypeError, ValueError):
                 current = 0.0
             if current != current:
@@ -5034,16 +5237,16 @@ class TradingDashboardApp(ctk.CTk):
             if market_value != market_value:
                 market_value = 0.0
             try:
-                pnl = float(r["P&L $"])
+                pnl = float(r.get("P&L $", 0) or 0)
             except (TypeError, ValueError):
                 pnl = 0.0
             try:
-                pnl_pct = float(r["P&L %"])
+                pnl_pct = float(r.get("P&L %", 0) or 0)
             except (TypeError, ValueError):
                 pnl_pct = 0.0
             rows.append(
                 {
-                    "Ticker": r["Ticker"],
+                    "Ticker": str(r.get("Ticker") or "?"),
                     "Sleeve": r.get("Sleeve", ""),
                     "Opened": r.get("Opened", "—"),
                     "Qty": f"{qty:.4f}",
@@ -5063,44 +5266,99 @@ class TradingDashboardApp(ctk.CTk):
             )
         return rows
 
+    def _set_positions_loading(self, *, clear_table: bool = True) -> None:
+        """Show a loading placeholder on the Positions tab while refresh runs."""
+        try:
+            self._positions_empty_label.place_forget()
+            if clear_table:
+                self._positions_table.clear()
+            self._pos_total.configure(text="Loading positions…", text_color=COLORS["amber"])
+            if clear_table:
+                self._positions_empty_label.configure(
+                    text="Loading positions…",
+                    text_color=COLORS["muted"],
+                )
+                self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
+        except Exception:
+            pass
+
     def _fill_positions(
         self,
         positions_df: pd.DataFrame | None,
         pos_err: str | None,
         total_upl: float,
     ) -> None:
-        self._positions_empty_label.place_forget()
-        if pos_err:
-            self._last_positions_df = None
-            self._positions_table.clear()
-            self._pos_total.configure(text=pos_err, text_color=COLORS["red"])
-            self._positions_empty_label.configure(
-                text=f"Could not load positions\n{pos_err[:120]}",
-                text_color=COLORS["red"],
-            )
-            self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
-            return
-        if positions_df is None or positions_df.empty:
-            self._last_positions_df = None
-            self._positions_table.clear()
+        try:
+            fp = _positions_fingerprint(positions_df, pos_err)
+            if (
+                fp is not None
+                and fp == getattr(self, "_last_positions_fp", None)
+                and not pos_err
+            ):
+                # Data unchanged — skip tree rebuild; keep total text in sync.
+                color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
+                n = 0
+                if positions_df is not None and not getattr(positions_df, "empty", True):
+                    n = len(positions_df)
+                if n:
+                    self._pos_total.configure(
+                        text=f"{n} position(s) · unrealized P&L ${total_upl:+,.2f}",
+                        text_color=color,
+                    )
+                return
+
+            self._positions_empty_label.place_forget()
+            if pos_err:
+                self._last_positions_df = None
+                self._last_positions_fp = fp
+                self._positions_table.clear()
+                self._pos_total.configure(text=pos_err, text_color=COLORS["red"])
+                self._positions_empty_label.configure(
+                    text=f"Could not load positions\n{pos_err[:120]}",
+                    text_color=COLORS["red"],
+                )
+                self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
+                return
+            if positions_df is None or getattr(positions_df, "empty", True):
+                self._last_positions_df = None
+                self._last_positions_fp = fp
+                self._positions_table.clear()
+                self._pos_total.configure(
+                    text="No open positions",
+                    text_color=COLORS["muted"],
+                )
+                self._positions_empty_label.configure(
+                    text="No open positions\nCash idle until the next rebalance cycle.",
+                    text_color=COLORS["muted"],
+                )
+                self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
+                return
+            self._last_positions_df = positions_df.copy()
+            self._last_positions_fp = fp
+            rows = self._position_rows(positions_df)
+            self._positions_table.set_rows(rows, pnl_col="_pnl")
+            color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
             self._pos_total.configure(
-                text="No open positions",
-                text_color=COLORS["muted"],
+                text=f"{len(rows)} position(s) · unrealized P&L ${total_upl:+,.2f}",
+                text_color=color,
             )
-            self._positions_empty_label.configure(
-                text="No open positions\nCash idle until the next rebalance cycle.",
-                text_color=COLORS["muted"],
-            )
-            self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
-            return
-        self._last_positions_df = positions_df.copy()
-        rows = self._position_rows(positions_df)
-        self._positions_table.set_rows(rows, pnl_col="_pnl")
-        color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
-        self._pos_total.configure(
-            text=f"{len(rows)} position(s) · unrealized P&L ${total_upl:+,.2f}",
-            text_color=color,
-        )
+        except Exception as exc:  # noqa: BLE001
+            self._last_positions_df = None
+            self._last_positions_fp = None
+            try:
+                self._positions_table.clear()
+            except Exception:
+                pass
+            msg = f"Positions display error: {exc}"
+            try:
+                self._pos_total.configure(text=msg[:80], text_color=COLORS["red"])
+                self._positions_empty_label.configure(
+                    text=f"Could not render positions\n{str(exc)[:120]}",
+                    text_color=COLORS["red"],
+                )
+                self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
+            except Exception:
+                pass
 
     def _fill_trades(self, journal_df: pd.DataFrame | None) -> None:
         if journal_df is None or journal_df.empty:

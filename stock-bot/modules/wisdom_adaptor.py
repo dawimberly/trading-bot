@@ -142,8 +142,13 @@ def get_dynamic_wisdom_signal(
         mult = min(max_mult, mult * config.DYNAMIC_LOW_VOL_TREND_BOOST)
 
     paused = False
-    if gap_tier == "defensive":
-        if stress:
+    if gap_tier == "defensive" and stress:
+        # Full pause only when stress and risk-off align (bearish AND high vol).
+        bearish = (
+            effective < -config.REGIME_SENTIMENT_THRESHOLD
+            or eff_regime in (BEAR_REGIME, PANIC_REGIME)
+        )
+        if bearish and vol == "High":
             paused = True
         else:
             mult = min(mult, min_mult)

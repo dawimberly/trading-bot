@@ -17,6 +17,7 @@ from modules.sentiment_keywords import (
     score_text_sentiment,
 )
 
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -96,12 +97,22 @@ def enrich_manifest_row(row: dict) -> dict:
     if not text:
         text = str(row.get("title") or "")
     channel = row.get("channel_name") or row.get("channel_id")
-    use_boost = config.paper_aggressive_context() and config.PAPER_SOCIAL_MACRO_BOOST_ENABLED
+    paper_tuning = (
+        config.paper_aggressive_context()
+        and config.FELIX_SENTIMENT_ENABLED
+        and (
+            config.PAPER_SOCIAL_SLEEVE_ENABLED
+            or config.effective_felix_social_dynamic_enabled()
+            or config.felix_social_manual_override()
+        )
+    )
+    use_boost = paper_tuning and config.PAPER_SOCIAL_MACRO_BOOST_ENABLED
     if text.strip():
-        if use_boost:
+        if use_boost or paper_tuning:
             score, hits = score_creator_transcript_sentiment(
                 text,
                 channel_name=str(channel) if channel else None,
+                creator_boost=use_boost or is_creator_channel(str(channel) if channel else None),
             )
         else:
             score = score_text_sentiment(text, macro_weight=1.0)

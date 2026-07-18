@@ -39,8 +39,8 @@ def _coerce_bar_index(value) -> int:
     if callable(ts):
         try:
             return int(ts() // 86400)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("stat arb soft-fail: %s", exc)
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -434,16 +434,10 @@ def _symbol_liquidity_ok(symbol: str, data: pd.DataFrame | None = None) -> bool:
         if len(prices) >= 5 and float(prices.iloc[-1]) < min_px:
             return False
 
-    # Core static universe: always tradable for pairs even when screener meta
-    # omits dollar volume (common with offline / sparse screener seeds).
+    # Core static universe: allow when screener ADV is missing (offline / sparse meta).
+    # No price-history fallback — stronger liquidity gate for quality tune.
     if adv <= 0 and sym in config.UNIVERSE:
         return True
-
-    # Sparse screener meta: allow names with enough recent price history and
-    # price above the floor so pair discovery is not starved when ADV is absent.
-    # Does not relax risk caps — only avoids false illiquid rejects.
-    if adv <= 0 and prices is not None and len(prices) >= 10:
-        return float(prices.iloc[-1]) >= min_px
 
     return False
 
@@ -480,7 +474,7 @@ def _equity_exit_decision(
     favorable = _z_reverted_toward_zero(entry_z, z)
     best_fav = max(float(pos.get("best_favorable", 0.0)), favorable)
     pos["best_favorable"] = best_fav
-    # v1.5.2 fill-rate: arm trail at 50% of profit-z; exit on 35% pullback from best.
+    # Quality: arm trail at 45% of profit-z; exit on 30% pullback from best.
     profit_gate = profit_delta * config.effective_stat_arb_trail_min_profit_frac()
     trail_arm = max(profit_delta * config.effective_stat_arb_trailing_arm_frac(), profit_gate)
     trail_pull = config.effective_stat_arb_trailing_pullback_frac()
@@ -491,8 +485,9 @@ def _equity_exit_decision(
             config.effective_stat_arb_partial_exit_enabled()
             and not pos.get("partial_taken")
         ):
-            rr = float(config.PARTIAL_EXIT_RR)
-            if favorable >= profit_delta * rr:
+            # Partial at N:1 vs stop distance (not full profit target).
+            partial_rr = config.effective_stat_arb_partial_exit_rr()
+            if favorable >= stop_delta * partial_rr:
                 pos["partial_taken"] = True
                 record_exit_event("partial", pos.get("pair_key", ""), sleeve="stat_arb", partial=True)
                 return True, "partial_1r", False
@@ -523,7 +518,7 @@ def _equity_exit_decision(
         entry_bar = pos.get("entry_bar")
         if entry_bar is not None:
             held = _coerce_bar_index(now) - _coerce_bar_index(entry_bar)
-            # v1.5.2: soft time exit — close aging pairs with partial reversion
+            # Soft time exit — close aging pairs with partial reversion
             # before max hold / EOD force-close bleed.
             soft_hold = max(15, config.effective_stat_arb_equity_max_hold_bars() - 5)
             if held >= soft_hold:
@@ -672,6 +667,15 @@ def pair_leg_notional(
                 None if is_crypto else config.effective_stat_arb_conviction_scale_band()
             ),
         )
+    # Markov × time-of-day Stat Arb soft boost (paper research)
+    try:
+        from modules.markov_regime import hmm_stat_arb_boost
+
+        sa_boost = float(hmm_stat_arb_boost())
+        if leg is not None and abs(sa_boost - 1.0) > 1e-6:
+            leg = round(float(leg) * sa_boost, 2)
+    except Exception as exc:
+        logger.debug("stat arb soft-fail: %s", exc)
     if leg is not None and config.effective_correlation_guard_enabled() and equity is not None:
         from modules.risk_management import apply_correlation_guard_notional
 
@@ -768,8 +772,8 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int 
             snap = get_boost_snapshot()
             if float((snap.get("stat_arb_boosts") or {}).get(long_sym, 1.0)) > 1.0:
                 record_insider_boost_trade("stat_arb")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("stat arb soft-fail: %s", exc)
 
     msg = (
         f"Stat arb: LONG {long_sym} / SHORT {short_sym}, "

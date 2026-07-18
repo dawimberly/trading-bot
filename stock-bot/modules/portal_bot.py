@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from modules.portal_paths import (
@@ -39,20 +40,42 @@ WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
 
 
 def _python() -> str:
-    """Interpreter for run_all.py (venv or PATH python when dashboard is frozen)."""
-    for venv in (
-        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+    """Interpreter for run_all.py — prefer a venv that has project deps (dotenv)."""
+    candidates = [
         PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
-    ):
-        if venv.is_file():
-            return str(venv)
+        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT.parent / ".venv" / "bin" / "python",
+        PROJECT_ROOT / ".venv" / "bin" / "python",
+    ]
+    existing = [p for p in candidates if p.is_file()]
+    for path in existing:
+        try:
+            probe = subprocess.run(
+                [str(path), "-c", "import dotenv"],
+                capture_output=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if probe.returncode == 0:
+                return str(path)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    if existing:
+        return str(existing[0])
     if getattr(sys, "frozen", False):
         import shutil
 
         for name in ("python", "python3", "python.exe"):
             found = shutil.which(name)
-            if found:
+            if found and Path(found).name.lower() != "python":
+                # Skip zero-byte decoy files named "python" with no extension.
                 return found
+            if found and Path(found).suffix.lower() in (".exe", ""):
+                try:
+                    if Path(found).stat().st_size > 0:
+                        return found
+                except OSError:
+                    continue
     return sys.executable
 
 
@@ -747,3 +770,62 @@ def restart_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str
         return False, start_msg
     prefix = "Bot restarted successfully" if was_running else "Bot started successfully"
     return True, f"{prefix} ({mode} mode).\n{stop_msg}\n{start_msg}"
+
+
+def refresh_bot_daily_data(*, daily_days: int | None = None) -> tuple[bool, str]:
+    """Download daily bars into market_data.db (same as fetch_data.py --daily)."""
+    import config as _config
+
+    days = int(daily_days or _config.BACKTEST_DAYS)
+    try:
+        from fetch_data import fetch_daily_history
+        from modules.data_loader import clear_close_matrix_cache
+
+        fetch_daily_history(days=days, use_max=False)
+        clear_close_matrix_cache()
+        return True, f"Daily market data refreshed ({days} calendar days)."
+    except Exception as exc:
+        return False, f"Daily data refresh failed: {exc}"
+
+
+def refresh_bot(
+    username: str,
+    book_id: str = "alpaca_paper",
+    *,
+    daily_days: int | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> tuple[bool, str]:
+    """Stop bot, refresh daily DB, restart — full 'Refresh Bot' cycle."""
+    mode = "paper" if _is_paper_book(username, book_id) else "live"
+    steps: list[str] = []
+
+    def _notify(msg: str) -> None:
+        if progress:
+            progress(msg)
+
+    was_running = bot_running(username, book_id)
+    if was_running:
+        _notify("Stopping bot…")
+        ok, stop_msg = stop_bot(username, book_id)
+        if not ok:
+            return False, stop_msg
+        steps.append(stop_msg)
+    else:
+        steps.append("Bot was not running.")
+
+    _notify("Refreshing daily market data…")
+    ok, data_msg = refresh_bot_daily_data(daily_days=daily_days)
+    if not ok:
+        if was_running:
+            start_bot(username, book_id)
+        return False, "\n".join(steps + [data_msg])
+    steps.append(data_msg)
+
+    _notify("Restarting bot…")
+    ok, start_msg = start_bot(username, book_id)
+    if not ok:
+        return False, "\n".join(steps + [start_msg])
+    steps.append(start_msg)
+    return True, (
+        f"Refresh Bot complete ({mode} / {book_id}).\n" + "\n".join(steps)
+    )

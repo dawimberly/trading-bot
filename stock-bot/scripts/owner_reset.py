@@ -27,8 +27,8 @@ def _log(msg: str) -> None:
 
 def _pythonw() -> str:
     for candidate in (
-        ROOT / ".venv" / "Scripts" / "pythonw.exe",
         ROOT.parent / ".venv" / "Scripts" / "pythonw.exe",
+        ROOT / ".venv" / "Scripts" / "pythonw.exe",
         Path(sys.executable).with_name("pythonw.exe"),
     ):
         if candidate.is_file():
@@ -129,6 +129,44 @@ def clean_restart_paper_only(username: str) -> tuple[bool, str]:
     return ok, f"{msg} | {detail}" if ok else msg
 
 
+def wait_for_paper_heartbeat(username: str, timeout_sec: int = 75) -> tuple[bool, str]:
+    """Poll the paper book heartbeat until it is fresh (bot responding)."""
+    from modules.portal_bot import book_heartbeat_path
+
+    path = book_heartbeat_path(username, "alpaca_paper")
+    deadline = time.monotonic() + max(10, timeout_sec)
+    last_age: float | None = None
+    while time.monotonic() < deadline:
+        age = _heartbeat_age_sec(path)
+        if age is not None:
+            last_age = age
+            if age < 120:
+                return True, f"heartbeat fresh ({age:.0f}s old)"
+        time.sleep(3)
+    if last_age is not None:
+        return False, f"heartbeat still stale ({last_age:.0f}s old)"
+    return False, "no heartbeat file yet (first cycle may still be warming up)"
+
+
+def _heartbeat_age_sec(path: Path) -> float | None:
+    if not path.is_file():
+        return None
+    try:
+        import json
+        from datetime import datetime
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        ts = data.get("timestamp")
+        if not ts:
+            return None
+        parsed = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            parsed = parsed.replace(tzinfo=None)
+        return max(0.0, (datetime.now() - parsed).total_seconds())
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 def _default_username() -> str:
     prefs = ROOT / "data" / "portal" / "desktop_prefs.json"
     if prefs.is_file():
@@ -144,6 +182,36 @@ def _default_username() -> str:
     return "dawimberly"
 
 
+def _run_paper_only(username: str, *, verify: bool) -> int:
+    """Force-restart only the paper bot with strong orphan killing (live preserved)."""
+    from modules.portal_paths import bind_project_root
+
+    bind_project_root(ROOT)
+
+    _log("Paper-only force restart (live bot preserved)...")
+    ok, msg = clean_restart_paper_only(username)
+    _log(msg if ok else f"[ERROR] {msg}")
+    if not ok:
+        _log("Bot restart FAILED — check portal Alpaca keys for alpaca_paper.")
+        return 1
+
+    if verify:
+        _log("Verifying paper bot is responding (waiting for fresh heartbeat)...")
+        fresh, detail = wait_for_paper_heartbeat(username)
+        _log(f"Heartbeat: {detail}")
+        if fresh:
+            _log("Bot restarted successfully — paper bot is RESPONDING.")
+            return 0
+        _log(
+            "Bot restarted, but heartbeat not confirmed yet. Give it ~60s, "
+            "then check the dashboard Overview tab."
+        )
+        return 0
+
+    _log("Bot restarted successfully (paper only). Wait ~60s for a fresh heartbeat.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reset owner Alpaca bots + monitor")
     parser.add_argument(
@@ -151,11 +219,24 @@ def main() -> int:
         default=os.getenv("PORTAL_USERNAME") or _default_username(),
     )
     parser.add_argument("--no-dashboard", action="store_true", help="Skip monitor relaunch")
+    parser.add_argument(
+        "--paper-only",
+        action="store_true",
+        help="Force-restart only the paper bot (live bot preserved)",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Wait for a fresh paper heartbeat and confirm the bot is responding",
+    )
     args = parser.parse_args()
     username = args.username.strip().lower()
 
     print(f"=== PythonTrading reset ({username}) ===", flush=True)
     print(f"Project root: {ROOT}", flush=True)
+
+    if args.paper_only:
+        return _run_paper_only(username, verify=args.verify)
 
     _log("Stopping old dashboard windows (if any)...")
     _stop_dashboards()
@@ -195,6 +276,8 @@ def main() -> int:
     _log("Starting Live + Paper bots...")
     ok, msg = restart_all_bots(username)
     _log(msg if ok else f"[ERROR] {msg}")
+    if ok:
+        _log("Bot restarted successfully (live + paper).")
 
     if not args.no_dashboard:
         _stop_dashboards()

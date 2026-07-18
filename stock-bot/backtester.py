@@ -1269,6 +1269,12 @@ def run_backtest(
         reset_markov_hmm_state()
     except Exception:
         pass
+    try:
+        from modules.garch_vol import reset_garch_vol_state
+
+        reset_garch_vol_state()
+    except Exception:
+        pass
     if paper_aggressive and config.effective_dynamic_core_enabled():
         from modules.core_allocator import maybe_refresh_core_allocation
 
@@ -1423,6 +1429,30 @@ def run_backtest(
     last_executor = None
     strategic_rebalancer = None
     prev_bar_date = None
+    prev_bar_equity: float | None = None
+    daily_bank_days = 0
+    if config.effective_daily_bank_enabled():
+        try:
+            from modules.daily_profit_banking import reset_daily_bank_state
+
+            reset_daily_bank_state()
+        except Exception:
+            pass
+    garch_high_vol_days = 0
+    if config.effective_garch_vol_enabled():
+        try:
+            from modules.garch_vol import reset_garch_vol_state
+
+            reset_garch_vol_state()
+        except Exception:
+            pass
+    if config.effective_smart_stops_enabled():
+        try:
+            from modules.smart_atr_stops import reset_smart_stop_stats
+
+            reset_smart_stop_stats()
+        except Exception:
+            pass
     if config.REBALANCE_ENABLED:
         from modules.rebalancer import StrategicRebalancer
 
@@ -1460,6 +1490,23 @@ def run_backtest(
             sentiment = get_price_sentiment(window)
             vol = get_volatility(window)
             regime = get_market_regime(sentiment, vol, apply_hysteresis=True)
+            # Optional HMM primary (default OFF): update early so sizing/exits see it.
+            if config.effective_markov_hmm_enabled():
+                try:
+                    from modules.markov_regime import (
+                        apply_hmm_primary_regime,
+                        update_markov_hmm,
+                    )
+
+                    update_markov_hmm(
+                        window,
+                        regime=regime,
+                        sentiment=float(sentiment) if sentiment is not None else None,
+                    )
+                    if config.effective_markov_hmm_primary_regime():
+                        regime = apply_hmm_primary_regime(regime)
+                except Exception:
+                    pass
             from modules.regime_sizing import effective_regime_sizing_multiplier
 
             sizing_mult = effective_regime_sizing_multiplier(regime)
@@ -1543,6 +1590,32 @@ def run_backtest(
 
         vol_score = cross_asset_vol_score(window)
         if paper_aggressive:
+            if config.effective_garch_vol_enabled():
+                try:
+                    from modules.garch_vol import (
+                        garch_high_vol_day_count,
+                        update_garch_vol,
+                    )
+
+                    update_garch_vol(window)
+                    garch_high_vol_days = garch_high_vol_day_count()
+                except Exception:
+                    pass
+            if config.effective_daily_bank_enabled():
+                try:
+                    from modules.daily_profit_banking import (
+                        bank_day_count,
+                        update_daily_bank,
+                    )
+
+                    update_daily_bank(
+                        eq,
+                        bar_date=bar_date,
+                        day_open_equity=prev_bar_equity,
+                    )
+                    daily_bank_days = bank_day_count()
+                except Exception:
+                    pass
             dd_now = risk_manager.current_drawdown(eq)
             if config.PAPER_DYNAMIC_RISK_ENABLED:
                 hist = equity_curve[-max(60, int(config.PORTFOLIO_VOL_WINDOW) + 5) :]
@@ -1641,6 +1714,18 @@ def run_backtest(
                         insider_state=insider_state_bt,
                         sentiment=float(sentiment) if sentiment is not None else None,
                     )
+                except Exception:
+                    pass
+            # GARCH already updated earlier in the bar (before risk sizing); refresh
+            # again here only if disabled earlier path was skipped (non-paper).
+            if (
+                config.effective_garch_vol_enabled()
+                and not paper_aggressive
+            ):
+                try:
+                    from modules.garch_vol import update_garch_vol
+
+                    update_garch_vol(window)
                 except Exception:
                     pass
             vti_core_pct = _resolve_backtest_vti_pct(
@@ -2131,6 +2216,7 @@ def run_backtest(
                 vol_state["premium_days"] = int(vol_state.get("premium_days", 0)) + 1
         total_orders += len(executor.orders)
         trade_days += 1
+        prev_bar_equity = float(portfolio.equity(prices))
         if attribution_tracker is not None:
             attribution_tracker.snapshot_mtm(executor, prices)
 
@@ -2260,7 +2346,15 @@ def run_backtest(
         "equity_values": [round(v, 2) for v in equity_curve],
         "pairs_traded": pairs_traded,
         "pair_pnl_correlation": pair_pnl_corr,
+        "daily_bank_days": int(daily_bank_days),
+        "garch_high_vol_days": int(garch_high_vol_days),
     }
+    try:
+        from modules.smart_atr_stops import smart_stop_stats
+
+        result["smart_stop_stats"] = smart_stop_stats()
+    except Exception:
+        result["smart_stop_stats"] = {}
     from modules.entry_skip_tracker import finalize_backtest_accumulator
 
     result["entry_skip_breakdown"] = finalize_backtest_accumulator(skip_acc)
@@ -3616,6 +3710,170 @@ def run_stat_arb_v152_compare(days=None, refresh=False, use_max=False) -> None:
                 f"fill {m1['fill_rate'] - m0['fill_rate']:+.1f}pp | "
                 f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d} | "
                 f"no_room {m1['sa_no_room'] - m0['sa_no_room']:+d}"
+            )
+    finally:
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+
+
+# Fill-rate baseline (post universe/liquidity/coint fixes): activity-first params.
+_FILL_RATE_STAT_ARB_BEFORE = {
+    "PAPER_STAT_ARB_MIN_CORR": 0.68,
+    "PAPER_STAT_ARB_MAX_PAIRS": 8,
+    "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 12,
+    "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 12,
+    "PAPER_STAT_ARB_COINT_PVALUE": 0.12,
+    "PAPER_STAT_ARB_Z_ENTRY_BASE": 2.0,
+    "PAPER_STAT_ARB_Z_ENTRY_MAX": 2.6,
+    "PAPER_STAT_ARB_RISK_REWARD": 1.6,
+    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": 0.50,
+    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": 0.35,
+    "PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC": 0.50,
+    "PAPER_STAT_ARB_MAX_HOLD_BARS": 35,
+    "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": 35,
+    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": 35_000_000,
+    "PAPER_STAT_ARB_MAX_LEG_VOL": 0.065,
+    "PAPER_STAT_ARB_CONVICTION_MIN_SCALE": 0.65,
+    "PAPER_STAT_ARB_CONVICTION_MAX_SCALE": 1.50,
+    "PAPER_STAT_ARB_PARTIAL_EXIT": False,
+    "PAPER_STAT_ARB_PARTIAL_EXIT_RR": 1.0,
+    "STAT_ARB_SLEEVE_CAP_ENABLED": True,
+    "STAT_ARB_SLEEVE_CAP_PCT": 0.07,
+    "STAT_ARB_VOL_SCALING_ENABLED": True,
+}
+
+
+def _stat_arb_quality_config_snapshot() -> dict[str, float | int | bool]:
+    snap = _stat_arb_v152_config_snapshot()
+    snap.update(
+        {
+            "PAPER_STAT_ARB_CONVICTION_MIN_SCALE": float(
+                config.PAPER_STAT_ARB_CONVICTION_MIN_SCALE
+            ),
+            "PAPER_STAT_ARB_CONVICTION_MAX_SCALE": float(
+                config.PAPER_STAT_ARB_CONVICTION_MAX_SCALE
+            ),
+            "PAPER_STAT_ARB_PARTIAL_EXIT": bool(config.PAPER_STAT_ARB_PARTIAL_EXIT),
+            "PAPER_STAT_ARB_PARTIAL_EXIT_RR": float(
+                config.PAPER_STAT_ARB_PARTIAL_EXIT_RR
+            ),
+        }
+    )
+    return snap
+
+
+def run_stat_arb_quality_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare fill-rate baseline vs v1.5.4 quality tune (tighter entry/exit/liquidity)."""
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    config.PAPER_DEPLOY_DEBUG = False
+    sim_days = days or config.BACKTEST_DAYS
+    _prefetch_screener_for_backtest(sim_days, refresh=refresh, use_max=use_max)
+    try:
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            data = _ensure_daily_data(sim_days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        after = {
+            "PAPER_STAT_ARB_MIN_CORR": 0.68,
+            "PAPER_STAT_ARB_MAX_PAIRS": 8,
+            "PAPER_STAT_ARB_MAX_PAIRS_EXPANDED": 12,
+            "PAPER_STAT_ARB_MAX_PAIRS_CEILING": 12,
+            "PAPER_STAT_ARB_COINT_PVALUE": 0.12,
+            "PAPER_STAT_ARB_Z_ENTRY_BASE": 2.1,
+            "PAPER_STAT_ARB_Z_ENTRY_MAX": 2.7,
+            "PAPER_STAT_ARB_RISK_REWARD": 1.7,
+            "PAPER_STAT_ARB_TRAILING_ARM_FRAC": 0.45,
+            "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": 0.30,
+            "PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC": 0.50,
+            "PAPER_STAT_ARB_MAX_HOLD_BARS": 35,
+            "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": 35,
+            "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": 50_000_000,
+            "PAPER_STAT_ARB_MAX_LEG_VOL": 0.055,
+            "PAPER_STAT_ARB_CONVICTION_MIN_SCALE": 0.60,
+            "PAPER_STAT_ARB_CONVICTION_MAX_SCALE": 1.40,
+            "PAPER_STAT_ARB_PARTIAL_EXIT": True,
+            "PAPER_STAT_ARB_PARTIAL_EXIT_RR": 1.2,
+            "STAT_ARB_SLEEVE_CAP_ENABLED": True,
+            "STAT_ARB_SLEEVE_CAP_PCT": 0.07,
+            "STAT_ARB_VOL_SCALING_ENABLED": True,
+        }
+        base_kwargs = {
+            "paper_aggressive": True,
+            "paper_sleeve_features": True,
+            "stat_arb_report": True,
+        }
+        configs = [
+            ("fill-rate baseline (Z2.0-2.6)", _FILL_RATE_STAT_ARB_BEFORE),
+            ("v1.5.4 quality (Z2.1-2.7 RR1.7)", after),
+        ]
+        print("--- STAT ARB v1.5.4 QUALITY (before vs after) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            "After: Z 2.1-2.7 | vol<5.5% | RR 1.7 | trail 45%/30% | partial@1.2R | "
+            "ADV $50M | conviction 0.6-1.4x | pairs 8-12"
+        )
+        print(
+            f"{'Config':<36} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'SA PnL':>9} {'Win%':>6} {'Fill%':>6} {'Pairs':>6}"
+        )
+        print("-" * 98)
+
+        saved = _stat_arb_quality_config_snapshot()
+        original_enforce = config.enforce_realistic_research_profile
+        results: list[tuple[str, dict]] = []
+
+        def _skip_profile_enforce() -> None:
+            return None
+
+        try:
+            config.enforce_realistic_research_profile = _skip_profile_enforce
+            for label, cfg in configs:
+                _apply_stat_arb_config(cfg)
+                result = run_backtest(data, track_metrics=True, **base_kwargs)
+                m = _stat_arb_validation_metrics(result)
+                sa = (result.get("attribution") or {}).get("stat_arb") or {}
+                m["fill_rate"] = float(sa.get("fill_rate_pct", 0) or 0)
+                signals = ((result.get("attribution") or {}).get("signals") or {}).get(
+                    "stat_arb", 0
+                )
+                m["signals"] = int(signals or 0)
+                results.append((label, m))
+                print(
+                    f"{label:<36} "
+                    f"{m['return_pct']:>+7.2f}% "
+                    f"{m['sharpe']:>7.2f} "
+                    f"{m['max_dd']:>7.2f}% "
+                    f"{m['stat_arb_pnl']:>+9.2f} "
+                    f"{m['stat_arb_win']:>5.1f}% "
+                    f"{m['fill_rate']:>5.1f}% "
+                    f"{m['stat_arb_pairs']:>6}"
+                )
+        finally:
+            config.enforce_realistic_research_profile = original_enforce
+            _apply_stat_arb_config(saved)
+
+        print("-" * 98)
+        if len(results) == 2:
+            _, m0 = results[0]
+            _, m1 = results[1]
+            print(
+                f"Delta (after - before): "
+                f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+                f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+                f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+                f"SA PnL ${m1['stat_arb_pnl'] - m0['stat_arb_pnl']:+.2f} | "
+                f"win {m1['stat_arb_win'] - m0['stat_arb_win']:+.1f}pp | "
+                f"fill {m1['fill_rate'] - m0['fill_rate']:+.1f}pp | "
+                f"pairs {m1['stat_arb_pairs'] - m0['stat_arb_pairs']:+d}"
             )
     finally:
         config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
@@ -5549,10 +5807,339 @@ def run_felix_dynamic_compare(days=None, refresh=False, use_max=False) -> None:
         ) = saved
 
 
-def run_markov_hmm_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare paper aggressive with Markov HMM soft-signals ON vs OFF."""
-    saved_hmm = bool(config.MARKOV_HMM_ENABLED)
+def run_daily_bank_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with Daily Profit Banking ON vs OFF."""
+    saved_bank = bool(config.DAILY_BANK_ENABLED)
     saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    saved_hmm = bool(config.MARKOV_HMM_ENABLED)
+    config.PAPER_DEPLOY_DEBUG = False
+    # Keep HMM off for a clean/faster A/B of banking alone.
+    config.MARKOV_HMM_ENABLED = False
+    try:
+        from modules.daily_profit_banking import reset_daily_bank_state
+
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            days = days or config.BACKTEST_DAYS
+            data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        configs = [
+            ("Banking OFF", False),
+            (
+                f"Banking ON ({config.DAILY_BANK_THRESHOLD_PCT:g}% / "
+                f"x{config.DAILY_BANK_RISK_MULT:.1f})",
+                True,
+            ),
+        ]
+        print("--- DAILY PROFIT BANKING A/B (paper aggressive) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            f"Threshold: {config.DAILY_BANK_THRESHOLD_PCT:g}% | "
+            f"risk mult when banked: {config.DAILY_BANK_RISK_MULT:.1f} | "
+            f"VTI boost: +{config.DAILY_BANK_VTI_BOOST_PP:.0f}pp"
+        )
+        print(
+            f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'BankDays':>9} {'vs VTI':>8}"
+        )
+        print("-" * 78)
+
+        results: list[tuple[str, dict]] = []
+        original_enforce = config.enforce_realistic_research_profile
+
+        def _skip_profile_enforce() -> None:
+            return None
+
+        try:
+            config.enforce_realistic_research_profile = _skip_profile_enforce
+            for label, enabled in configs:
+                config.DAILY_BANK_ENABLED = bool(enabled)
+                reset_daily_bank_state()
+                result = run_backtest(
+                    data,
+                    track_metrics=True,
+                    paper_aggressive=True,
+                    paper_sleeve_features=True,
+                )
+                row = {
+                    "return_pct": float(result.get("total_return_pct", 0) or 0),
+                    "sharpe": float(result.get("sharpe", 0) or 0),
+                    "max_dd": float(result.get("max_drawdown_pct", 0) or 0),
+                    "bank_days": int(result.get("daily_bank_days", 0) or 0),
+                }
+                vs_vti = row["return_pct"] - float(bench or 0)
+                results.append((label, row))
+                print(
+                    f"{label:<32} "
+                    f"{row['return_pct']:>+7.2f}% "
+                    f"{row['sharpe']:>7.2f} "
+                    f"{row['max_dd']:>7.2f}% "
+                    f"{row['bank_days']:>9} "
+                    f"{vs_vti:>+7.2f}%"
+                )
+        finally:
+            config.enforce_realistic_research_profile = original_enforce
+
+        print("-" * 78)
+        if len(results) == 2:
+            _, m0 = results[0]
+            _, m1 = results[1]
+            print(
+                f"Delta (ON - OFF): "
+                f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+                f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+                f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+                f"bank days {m1['bank_days'] - m0['bank_days']:+d}"
+            )
+    finally:
+        config.DAILY_BANK_ENABLED = saved_bank
+        config.MARKOV_HMM_ENABLED = saved_hmm
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        try:
+            from modules.daily_profit_banking import reset_daily_bank_state
+
+            reset_daily_bank_state()
+        except Exception:
+            pass
+
+
+def run_garch_vol_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with GARCH vol forecast sizing ON vs OFF."""
+    saved_garch = bool(config.GARCH_VOL_ENABLED)
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    saved_hmm = bool(config.MARKOV_HMM_ENABLED)
+    config.PAPER_DEPLOY_DEBUG = False
+    # Keep HMM off for a clean/faster A/B of GARCH alone.
+    config.MARKOV_HMM_ENABLED = False
+    try:
+        from modules.garch_vol import reset_garch_vol_state
+
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            days = days or config.BACKTEST_DAYS
+            data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        lo = float(getattr(config, "GARCH_VOL_MULT_MIN", 0.55))
+        hi = float(getattr(config, "GARCH_VOL_MULT_MAX", 1.0))
+        configs = [
+            ("GARCH Vol OFF", False),
+            (f"GARCH Vol ON (x{lo:.2f}-{hi:.2f})", True),
+        ]
+        print("--- GARCH(1,1) VOL FORECAST A/B (paper aggressive) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            f"Lookback: {config.GARCH_VOL_LOOKBACK}d | "
+            f"anchor {config.GARCH_VOL_ANCHOR_WINDOW}d | "
+            f"ratio {config.GARCH_VOL_RATIO_LOW:g}-{config.GARCH_VOL_RATIO_HIGH:g} | "
+            f"VTI max ±{config.GARCH_VOL_VTI_MAX_PP:g}pp | HMM off for isolation"
+        )
+        print(
+            f"{'Config':<32} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'HiVolDays':>10} {'vs VTI':>8}"
+        )
+        print("-" * 80)
+
+        results: list[tuple[str, dict]] = []
+        original_enforce = config.enforce_realistic_research_profile
+
+        def _skip_profile_enforce() -> None:
+            return None
+
+        try:
+            config.enforce_realistic_research_profile = _skip_profile_enforce
+            for label, enabled in configs:
+                config.GARCH_VOL_ENABLED = bool(enabled)
+                reset_garch_vol_state()
+                result = run_backtest(
+                    data,
+                    track_metrics=True,
+                    paper_aggressive=True,
+                    paper_sleeve_features=True,
+                )
+                row = {
+                    "return_pct": float(result.get("total_return_pct", 0) or 0),
+                    "sharpe": float(result.get("sharpe", 0) or 0),
+                    "max_dd": float(result.get("max_drawdown_pct", 0) or 0),
+                    "hi_vol_days": int(result.get("garch_high_vol_days", 0) or 0),
+                }
+                vs_vti = row["return_pct"] - float(bench or 0)
+                results.append((label, row))
+                print(
+                    f"{label:<32} "
+                    f"{row['return_pct']:>+7.2f}% "
+                    f"{row['sharpe']:>7.2f} "
+                    f"{row['max_dd']:>7.2f}% "
+                    f"{row['hi_vol_days']:>10} "
+                    f"{vs_vti:>+7.2f}%"
+                )
+        finally:
+            config.enforce_realistic_research_profile = original_enforce
+
+        print("-" * 80)
+        if len(results) == 2:
+            _, m0 = results[0]
+            _, m1 = results[1]
+            print(
+                f"Delta (ON - OFF): "
+                f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+                f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+                f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+                f"hi-vol days {m1['hi_vol_days'] - m0['hi_vol_days']:+d}"
+            )
+    finally:
+        config.GARCH_VOL_ENABLED = saved_garch
+        config.MARKOV_HMM_ENABLED = saved_hmm
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        try:
+            from modules.garch_vol import reset_garch_vol_state
+
+            reset_garch_vol_state()
+        except Exception:
+            pass
+
+
+def run_smart_stops_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare paper aggressive with Smart ATR stops ON vs OFF."""
+    saved_smart = bool(config.PAPER_SMART_STOPS)
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    saved_hmm = bool(config.MARKOV_HMM_ENABLED)
+    config.PAPER_DEPLOY_DEBUG = False
+    config.MARKOV_HMM_ENABLED = False
+    try:
+        from modules.smart_atr_stops import reset_smart_stop_stats, reeval_thresholds
+
+        if use_max:
+            data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+        else:
+            days = days or config.BACKTEST_DAYS
+            data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+        if len(data) < 20:
+            print(f"Need at least 20 daily bars; got {len(data)}.")
+            return
+
+        bench = _benchmark_return(data, MIN_HISTORY)
+        soft, hard = reeval_thresholds()
+        configs = [
+            ("Smart Stops OFF", False),
+            (
+                f"Smart Stops ON ({config.ATR_STOP_MULTIPLIER:.1f}x/"
+                f"{config.ATR_TIGHTEN_MULTIPLIER:.1f}x)",
+                True,
+            ),
+        ]
+        print("--- SMART ATR STOPS A/B (paper aggressive) ---")
+        print(
+            f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+            f"({len(data) - MIN_HISTORY} sim bars)"
+        )
+        if bench is not None:
+            print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+        print(
+            f"Default {config.ATR_STOP_MULTIPLIER:.1f}x ATR | "
+            f"reeval @{soft:.0%} (tighten {config.ATR_TIGHTEN_MULTIPLIER:.1f}x / cut 50%) | "
+            f"hard exit @{hard:.0%}"
+        )
+        print(
+            f"{'Config':<36} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'ATR-X':>6} {'Tight':>6} {'Cut':>5} {'Hard':>5} {'vs VTI':>8}"
+        )
+        print("-" * 96)
+
+        results: list[tuple[str, dict]] = []
+        original_enforce = config.enforce_realistic_research_profile
+
+        def _skip_profile_enforce() -> None:
+            return None
+
+        try:
+            config.enforce_realistic_research_profile = _skip_profile_enforce
+            for label, enabled in configs:
+                config.PAPER_SMART_STOPS = bool(enabled)
+                reset_smart_stop_stats()
+                result = run_backtest(
+                    data,
+                    track_metrics=True,
+                    paper_aggressive=True,
+                    paper_sleeve_features=True,
+                )
+                stats = result.get("smart_stop_stats") or {}
+                row = {
+                    "return_pct": float(result.get("total_return_pct", 0) or 0),
+                    "sharpe": float(result.get("sharpe", 0) or 0),
+                    "max_dd": float(result.get("max_drawdown_pct", 0) or 0),
+                    "atr_exits": int(stats.get("atr_exits", 0) or 0),
+                    "tighten": int(stats.get("tighten", 0) or 0),
+                    "size_reduce": int(stats.get("size_reduce", 0) or 0),
+                    "hard_exit": int(stats.get("hard_exit", 0) or 0),
+                }
+                vs_vti = row["return_pct"] - float(bench or 0)
+                results.append((label, row))
+                print(
+                    f"{label:<36} "
+                    f"{row['return_pct']:>+7.2f}% "
+                    f"{row['sharpe']:>7.2f} "
+                    f"{row['max_dd']:>7.2f}% "
+                    f"{row['atr_exits']:>6} "
+                    f"{row['tighten']:>6} "
+                    f"{row['size_reduce']:>5} "
+                    f"{row['hard_exit']:>5} "
+                    f"{vs_vti:>+7.2f}%"
+                )
+        finally:
+            config.enforce_realistic_research_profile = original_enforce
+
+        print("-" * 96)
+        if len(results) == 2:
+            _, m0 = results[0]
+            _, m1 = results[1]
+            print(
+                f"Delta (ON - OFF): "
+                f"return {m1['return_pct'] - m0['return_pct']:+.2f}pp | "
+                f"Sharpe {m1['sharpe'] - m0['sharpe']:+.2f} | "
+                f"MaxDD {m1['max_dd'] - m0['max_dd']:+.2f}pp | "
+                f"ATR exits {m1['atr_exits'] - m0['atr_exits']:+d} | "
+                f"tighten {m1['tighten'] - m0['tighten']:+d} | "
+                f"cuts {m1['size_reduce'] - m0['size_reduce']:+d} | "
+                f"hard {m1['hard_exit'] - m0['hard_exit']:+d}"
+            )
+    finally:
+        config.PAPER_SMART_STOPS = saved_smart
+        config.MARKOV_HMM_ENABLED = saved_hmm
+        config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
+        try:
+            from modules.smart_atr_stops import reset_smart_stop_stats
+
+            reset_smart_stop_stats()
+        except Exception:
+            pass
+
+
+def run_markov_hmm_compare(days=None, refresh=False, use_max=False) -> None:
+    """Compare RHYME-only vs HMM soft-signals vs optional HMM primary regime."""
+    saved_hmm = bool(config.MARKOV_HMM_ENABLED)
+    saved_primary = bool(getattr(config, "MARKOV_HMM_PRIMARY_REGIME", False))
+    saved_deploy_debug = bool(getattr(config, "PAPER_DEPLOY_DEBUG", False))
+    saved_retrain = int(getattr(config, "HMM_RETRAIN_EVERY_BARS", 5) or 5)
     config.PAPER_DEPLOY_DEBUG = False
     try:
         from modules.markov_regime import reset_markov_hmm_state
@@ -5567,17 +6154,14 @@ def run_markov_hmm_compare(days=None, refresh=False, use_max=False) -> None:
             return
 
         bench = _benchmark_return(data, MIN_HISTORY)
+        # Soften retrain cadence for faster walk-forward compares (still OOS-ish).
+        config.HMM_RETRAIN_EVERY_BARS = max(saved_retrain, 21)
         configs = [
-            (
-                "HMM OFF (RHYME only)",
-                False,
-            ),
-            (
-                "HMM ON (5-state soft)",
-                True,
-            ),
+            ("RHYME only", False, False),
+            ("HMM soft", True, False),
+            ("HMM primary", True, True),
         ]
-        print("--- MARKOV HMM A/B (paper aggressive, soft-signal VTI/sizing/shorts) ---")
+        print("--- MARKOV 3-way: RHYME | HMM soft | HMM primary ---")
         print(
             f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
             f"({len(data) - MIN_HISTORY} sim bars)"
@@ -5587,18 +6171,31 @@ def run_markov_hmm_compare(days=None, refresh=False, use_max=False) -> None:
         print(
             f"HMM: n_states={config.HMM_N_STATES} | "
             f"train_window={config.HMM_TRAIN_WINDOW_DAYS}d | "
-            f"horizon={config.HMM_PREDICTION_HORIZON}d | fallback=RHYME"
+            f"retrain_every={config.HMM_RETRAIN_EVERY_BARS}b | fallback=RHYME | "
+            f"primary_default={saved_primary}"
         )
         print(
-            f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
-            f"{'AvgVTI':>7} {'Trades':>7}"
+            f"{'Config':<30} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+            f"{'AvgVTI':>7} {'Switches':>8} {'Trades':>7}"
         )
-        print("-" * 72)
+        print("-" * 84)
+
+        def _switch_count(series: list) -> int:
+            if not series:
+                return 0
+            n = 0
+            prev = series[0]
+            for cur in series[1:]:
+                if cur != prev:
+                    n += 1
+                    prev = cur
+            return n
 
         results: list[dict] = []
-        for label, enabled in configs:
+        for label, enabled, primary in configs:
             reset_markov_hmm_state()
             config.MARKOV_HMM_ENABLED = bool(enabled)
+            config.MARKOV_HMM_PRIMARY_REGIME = bool(primary)
             result = run_backtest(
                 data,
                 paper_aggressive=True,
@@ -5613,37 +6210,48 @@ def run_markov_hmm_compare(days=None, refresh=False, use_max=False) -> None:
             if 0.0 < avg_vti <= 1.5:
                 avg_vti = avg_vti * 100.0
             trades = int(result.get("total_orders") or 0)
+            switches = _switch_count(list(result.get("regime_series") or []))
             row = {
                 "label": label,
                 "return_pct": result["total_return_pct"],
                 "sharpe": result["sharpe"],
                 "max_dd_pct": result["max_drawdown_pct"],
                 "avg_vti": avg_vti,
+                "switches": switches,
                 "trades": trades,
             }
             results.append(row)
             print(
-                f"{label:<28} "
+                f"{label:<30} "
                 f"{result['total_return_pct']:>+7.2f}% "
                 f"{result['sharpe']:>7.2f} "
                 f"{result['max_drawdown_pct']:>7.2f}% "
                 f"{avg_vti:>6.1f}% "
+                f"{switches:>8} "
                 f"{trades:>7}"
             )
-        print("-" * 72)
-        if len(results) == 2:
-            a, b = results[0], results[1]
-            print(
-                f"Delta (ON - OFF): return {b['return_pct'] - a['return_pct']:+.2f}pp | "
-                f"Sharpe {b['sharpe'] - a['sharpe']:+.2f} | "
-                f"MaxDD {b['max_dd_pct'] - a['max_dd_pct']:+.2f}pp | "
-                f"AvgVTI {b['avg_vti'] - a['avg_vti']:+.1f}pp"
-            )
-        print("-" * 72)
+        print("-" * 84)
+        if len(results) >= 2:
+            base = results[0]
+            for other in results[1:]:
+                print(
+                    f"Delta ({other['label']} - RHYME): "
+                    f"return {other['return_pct'] - base['return_pct']:+.2f}pp | "
+                    f"Sharpe {other['sharpe'] - base['sharpe']:+.2f} | "
+                    f"MaxDD {other['max_dd_pct'] - base['max_dd_pct']:+.2f}pp | "
+                    f"switches {other['switches'] - base['switches']:+d}"
+                )
+        print(
+            "Decision rule: only enable MARKOV_HMM_PRIMARY_REGIME if primary "
+            "clearly beats RHYME on return+Sharpe without worse MaxDD/switches."
+        )
+        print("-" * 84)
         return results
     finally:
         config.PAPER_DEPLOY_DEBUG = saved_deploy_debug
         config.MARKOV_HMM_ENABLED = saved_hmm
+        config.MARKOV_HMM_PRIMARY_REGIME = saved_primary
+        config.HMM_RETRAIN_EVERY_BARS = saved_retrain
         try:
             from modules.markov_regime import reset_markov_hmm_state
 
@@ -7250,7 +7858,27 @@ if __name__ == "__main__":
     parser.add_argument(
         "--compare-markov-hmm",
         action="store_true",
-        help="Compare paper aggressive with Markov HMM soft-signals ON vs OFF",
+        help="3-way compare: RHYME only | HMM soft-signal | HMM primary (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-daily-bank",
+        action="store_true",
+        help="Compare Daily Profit Banking ON vs OFF (0.8%% threshold, risk x0.4)",
+    )
+    parser.add_argument(
+        "--compare-garch-vol",
+        action="store_true",
+        help="Compare GARCH(1,1) vol forecast sizing ON vs OFF (paper aggressive)",
+    )
+    parser.add_argument(
+        "--compare-smart-stops",
+        action="store_true",
+        help="Compare Smart ATR stops ON vs OFF (2.0x / reeval @-5%% / hard @-10%%)",
+    )
+    parser.add_argument(
+        "--smart-stops",
+        action="store_true",
+        help="Force PAPER_SMART_STOPS=true for this run (paper aggressive)",
     )
     parser.add_argument(
         "--compare-macro-regime",
@@ -7331,6 +7959,11 @@ if __name__ == "__main__":
         "--compare-stat-arb-v152",
         action="store_true",
         help="Compare prior locked stat-arb vs v1.5.2 fill-rate tune (8-12p, corr 0.68)",
+    )
+    parser.add_argument(
+        "--compare-stat-arb-quality",
+        action="store_true",
+        help="Compare fill-rate baseline vs v1.5.4 quality (Z 2.1-2.7, RR 1.7, partial@1.2)",
     )
     parser.add_argument(
         "--compare-stat-arb-v12",
@@ -7523,6 +8156,8 @@ if __name__ == "__main__":
     RUN_OPTIONS.fast_mode = bool(args.fast_mode)
     RUN_OPTIONS.no_thinking = bool(args.no_thinking)
     RUN_OPTIONS.realistic_costs = not args.no_realistic_costs
+    if getattr(args, "smart_stops", False):
+        config.PAPER_SMART_STOPS = True
     if args.equity_slippage_bps is not None:
         RUN_OPTIONS.equity_slippage_bps = max(0.0, float(args.equity_slippage_bps))
     if args.crypto_slippage_bps is not None:
@@ -7599,6 +8234,27 @@ if __name__ == "__main__":
             print("--compare-markov-hmm requires --paper-aggressive")
             sys.exit(1)
         run_markov_hmm_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_daily_bank:
+        if not args.paper_aggressive:
+            print("--compare-daily-bank requires --paper-aggressive")
+            sys.exit(1)
+        run_daily_bank_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_garch_vol:
+        if not args.paper_aggressive:
+            print("--compare-garch-vol requires --paper-aggressive")
+            sys.exit(1)
+        run_garch_vol_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_smart_stops:
+        if not args.paper_aggressive:
+            print("--compare-smart-stops requires --paper-aggressive")
+            sys.exit(1)
+        run_smart_stops_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_macro_regime or args.compare_regime:
@@ -7689,6 +8345,13 @@ if __name__ == "__main__":
             print("--compare-stat-arb-v152 requires --paper-aggressive")
             sys.exit(1)
         run_stat_arb_v152_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif args.compare_stat_arb_quality:
+        if not args.paper_aggressive:
+            print("--compare-stat-arb-quality requires --paper-aggressive")
+            sys.exit(1)
+        run_stat_arb_quality_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_stat_arb_v12:

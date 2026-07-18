@@ -296,6 +296,8 @@ RISK_EVENTS_LOG = "risk_events.log"
 PAPER_JOURNAL_CSV = os.getenv("PAPER_JOURNAL_CSV", "paper_journal.csv")
 HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "bot_heartbeat.json")
 AUTO_LAUNCH_DASHBOARD = _parse_env_bool("AUTO_LAUNCH_DASHBOARD", default="false")
+# Dashboard Positions tab: skip Alpaca positions fetch when cache younger than this (seconds).
+DASHBOARD_POSITIONS_REFRESH_SEC = int(os.getenv("DASHBOARD_POSITIONS_REFRESH_SEC", "12"))
 
 
 def resolve_db_path() -> Path:
@@ -443,8 +445,8 @@ REALISTIC_RESEARCH_FEATURE_DETAIL = (
     "ATR Vol Breakout (RVOL+MTF, <=1% risk) + "
     "Sector-Aware Portfolio Constructor + "
     "Dynamic Felix/social (RHYME_E / bubble>=65) + "
-    "RVOL/ORB/Catalyst/ATR + Conviction + MTF + Exits + Corr Guard + Shorts + "
-    "Stat Arb v1.5.2 + Enriched Thinking"
+    "RVOL/ORB/Catalyst/ATR + Conviction + GARCH vol + MTF + Exits + Corr Guard + Shorts + "
+    "RHYME primary regime + HMM soft-signal + Stat Arb quality + Enriched Thinking"
 )
 # Locked when enforce_realistic_research_profile() runs (paper chase / Profile B):
 REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
@@ -458,12 +460,16 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "Portfolio correlation guard (max 0.65)",
     "Insider monitor + boosts",
     "Protective shorts (8-18%) + sector shorts",
-    "Stat arb (8-12 pairs, corr 0.68, RR 1.6, trail 50/35, v1.5.2 fill-rate)",
+    "Stat arb (8-12 pairs, Z 2.1-2.7, RR 1.7, trail 45/30, partial@1.2, v1.5.4 quality)",
     "Smart Dynamic VTI core (35-75%: NYSE/metals, insider, bubble, regime)",
     "Sector rotation (top 2-3 SPDRs, max 25%/sector, monthly/regime)",
     "ATR vol breakout (expand>=1.5x + RVOL/MTF, <=1% risk, paper-only)",
     "Dynamic Felix/social (ON: RHYME_E or bubble>=65; OFF: RHYME_C/D)",
-    "Markov HMM regime (5 states, next-day soft-signal → VTI/sizing/shorts)",
+    "RHYME primary regime (locked) + Markov HMM soft-signal only (primary OFF)",
+    "Time-of-day analysis (open/first_30m/midday/last_hour/close edges)",
+    "Daily Profit Banking (bank >=0.8%, risk x0.4, reset 30m after open)",
+    "GARCH(1,1) vol sizing (locked paper ON / live OFF; size x0.55-1.0; high vol → smaller)",
+    "Smart ATR stops (2.0x default; reeval @-5% tighten/cut; hard exit @-10%)",
     "Enriched thinking engine (Ollama context + heuristic backtest tilts)",
     "Tail risk controls",
     "Bot Health + strategy performance tracking",
@@ -817,7 +823,8 @@ PAPER_PAIR_Z_STRESS = float(os.getenv("PAPER_PAIR_Z_STRESS", "2.4"))
 PAPER_PAIR_COINT_SLOPE = float(os.getenv("PAPER_PAIR_COINT_SLOPE", "-0.01"))
 PAPER_STAT_ARB_MAX_TRADES = int(os.getenv("PAPER_STAT_ARB_MAX_TRADES", "2"))
 # Stat arb v1.5.2 fill-rate tune (paper): corr 0.68, dynamic 8→12 pairs when room,
-# Z 2.0–2.6 + vol filter, RR 1.6:1, trail 50% arm / 35% pullback, 35-bar hold.
+# v1.5.4 quality: Z 2.1–2.7 + stronger vol filter, RR 1.7:1, trail 45%/30%,
+# partial @ 1.2:1, conviction 0.6–1.4x, liquidity $50M (max pairs stay 8–12).
 PAPER_STAT_ARB_MIN_CORR = float(os.getenv("PAPER_STAT_ARB_MIN_CORR", "0.68"))
 PAPER_STAT_ARB_MAX_PAIRS = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS", "8"))
 PAPER_STAT_ARB_MAX_PAIRS_EXPANDED = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_EXPANDED", "12"))
@@ -825,36 +832,40 @@ PAPER_STAT_ARB_MAX_PAIRS_CEILING = int(os.getenv("PAPER_STAT_ARB_MAX_PAIRS_CEILI
 # Overlap guard: block top N*mult NYSE momentum names from stat-arb legs (avoid double exposure).
 STAT_ARB_NYSE_OVERLAP_BLOCK_MULT = int(os.getenv("STAT_ARB_NYSE_OVERLAP_BLOCK_MULT", "2"))
 PAPER_STAT_ARB_MAX_HOLD_BARS = int(os.getenv("PAPER_STAT_ARB_MAX_HOLD_BARS", "35"))
-PAPER_STAT_ARB_Z_ENTRY_BASE = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_BASE", "2.0"))
-PAPER_STAT_ARB_Z_ENTRY_MAX = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_MAX", "2.6"))
-PAPER_STAT_ARB_RISK_REWARD = float(os.getenv("PAPER_STAT_ARB_RISK_REWARD", "1.6"))
+PAPER_STAT_ARB_Z_ENTRY_BASE = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_BASE", "2.1"))
+PAPER_STAT_ARB_Z_ENTRY_MAX = float(os.getenv("PAPER_STAT_ARB_Z_ENTRY_MAX", "2.7"))
+PAPER_STAT_ARB_RISK_REWARD = float(os.getenv("PAPER_STAT_ARB_RISK_REWARD", "1.7"))
 PAPER_STAT_ARB_COINT_PVALUE = float(os.getenv("PAPER_STAT_ARB_COINT_PVALUE", "0.12"))
 PAPER_STAT_ARB_Z_EXIT = float(os.getenv("PAPER_STAT_ARB_Z_EXIT", "0.5"))
 PAPER_STAT_ARB_MIN_REVERT_FRAC = float(os.getenv("PAPER_STAT_ARB_MIN_REVERT_FRAC", "0.55"))
 PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = float(
-    os.getenv("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME", "35000000")
+    os.getenv("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME", "50000000")
 )
 PAPER_STAT_ARB_TRAILING_ARM_FRAC = float(
-    os.getenv("PAPER_STAT_ARB_TRAILING_ARM_FRAC", "0.50")
+    os.getenv("PAPER_STAT_ARB_TRAILING_ARM_FRAC", "0.45")
 )
 PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = float(
-    os.getenv("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC", "0.35")
+    os.getenv("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC", "0.30")
 )
 PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC = float(
     os.getenv("PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC", "0.50")
 )
 PAPER_STAT_ARB_PARTIAL_EXIT = _env_bool_first(
-    "PAPER_STAT_ARB_PARTIAL_EXIT", default="false"
+    "PAPER_STAT_ARB_PARTIAL_EXIT", default="true"
+)
+# Dedicated RR for equity-pair partial (does not change sleeve-wide PARTIAL_EXIT_RR).
+PAPER_STAT_ARB_PARTIAL_EXIT_RR = float(
+    os.getenv("PAPER_STAT_ARB_PARTIAL_EXIT_RR", "1.2")
 )
 PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS = int(
     os.getenv("PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS", "35")
 )
-PAPER_STAT_ARB_MAX_LEG_VOL = float(os.getenv("PAPER_STAT_ARB_MAX_LEG_VOL", "0.065"))
+PAPER_STAT_ARB_MAX_LEG_VOL = float(os.getenv("PAPER_STAT_ARB_MAX_LEG_VOL", "0.055"))
 PAPER_STAT_ARB_CONVICTION_MIN_SCALE = float(
-    os.getenv("PAPER_STAT_ARB_CONVICTION_MIN_SCALE", "0.65")
+    os.getenv("PAPER_STAT_ARB_CONVICTION_MIN_SCALE", "0.60")
 )
 PAPER_STAT_ARB_CONVICTION_MAX_SCALE = float(
-    os.getenv("PAPER_STAT_ARB_CONVICTION_MAX_SCALE", "1.50")
+    os.getenv("PAPER_STAT_ARB_CONVICTION_MAX_SCALE", "1.40")
 )
 PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF = _env_bool_first(
     "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF", default="true"
@@ -1661,6 +1672,83 @@ HMM_PREDICTION_HORIZON = int(os.getenv("HMM_PREDICTION_HORIZON", "1"))
 HMM_RETRAIN_EVERY_BARS = int(os.getenv("HMM_RETRAIN_EVERY_BARS", "5"))
 # Live stays off unless MARKOV_HMM_LIVE_ENABLED=true.
 MARKOV_HMM_LIVE_ENABLED = _parse_env_bool("MARKOV_HMM_LIVE_ENABLED", default="false")
+# Optional: replace RHYME with HMM predicted state (paper only). Default OFF —
+# keep soft-signals until 365d primary clearly beats RHYME. RHYME remains fallback.
+MARKOV_HMM_PRIMARY_REGIME = _parse_env_bool(
+    "MARKOV_HMM_PRIMARY_REGIME", default="false"
+)
+MARKOV_HMM_PRIMARY_MIN_CONFIDENCE = float(
+    os.getenv("MARKOV_HMM_PRIMARY_MIN_CONFIDENCE", "0.40")
+)
+
+# --- Time-of-day predictability (paper / Realistic Research ON; live opt-in) ---
+TIME_OF_DAY_ANALYSIS = _parse_env_bool("TIME_OF_DAY_ANALYSIS", default="true")
+TIME_OF_DAY_LIVE_ENABLED = _parse_env_bool("TIME_OF_DAY_LIVE_ENABLED", default="false")
+HMM_OBSERVATIONS = [
+    s.strip()
+    for s in os.getenv(
+        "HMM_OBSERVATIONS",
+        "returns,vol,sentiment,bubble,sector_corr,tod_bucket,overnight_gap",
+    ).split(",")
+    if s.strip()
+]
+
+# --- Daily Profit Banking (paper / Realistic Research ON; live opt-in) ---
+# Threshold is in percent points: 0.8 => bank when day gain >= 0.8%.
+DAILY_BANK_ENABLED = _parse_env_bool("DAILY_BANK_ENABLED", default="true")
+DAILY_BANK_LIVE_ENABLED = _parse_env_bool("DAILY_BANK_LIVE_ENABLED", default="false")
+DAILY_BANK_THRESHOLD_PCT = float(os.getenv("DAILY_BANK_THRESHOLD_PCT", "0.8"))
+DAILY_BANK_RISK_MULT = float(os.getenv("DAILY_BANK_RISK_MULT", "0.4"))
+DAILY_BANK_RESET_MINUTES_AFTER_OPEN = int(
+    os.getenv("DAILY_BANK_RESET_MINUTES_AFTER_OPEN", "30")
+)
+DAILY_BANK_VTI_BOOST_PP = float(os.getenv("DAILY_BANK_VTI_BOOST_PP", "10"))
+
+# --- GARCH(1,1) vol forecast sizing (locked paper ON; live OFF unless opt-in) ---
+# Next-day σ → size / VTI multiplier (high vol → smaller). Default MULT_MAX=1.0
+# never increases risk vs baseline; optional modest upside via GARCH_VOL_MULT_MAX>1.
+# Locked for Realistic Research like RHYME primary / Daily Banking (365d edge).
+GARCH_VOL_ENABLED = _parse_env_bool("GARCH_VOL_ENABLED", default="true")
+GARCH_VOL_LIVE_ENABLED = _parse_env_bool("GARCH_VOL_LIVE_ENABLED", default="false")
+GARCH_VOL_SYMBOL = os.getenv("GARCH_VOL_SYMBOL", "SPY").strip().upper() or "SPY"
+GARCH_VOL_LOOKBACK = int(os.getenv("GARCH_VOL_LOOKBACK", "252"))
+GARCH_VOL_ANCHOR_WINDOW = int(os.getenv("GARCH_VOL_ANCHOR_WINDOW", "21"))
+GARCH_VOL_RETRAIN_EVERY_BARS = int(os.getenv("GARCH_VOL_RETRAIN_EVERY_BARS", "5"))
+GARCH_VOL_MULT_MIN = float(os.getenv("GARCH_VOL_MULT_MIN", "0.55"))
+GARCH_VOL_MULT_MAX = float(os.getenv("GARCH_VOL_MULT_MAX", "1.0"))
+GARCH_VOL_RATIO_LOW = float(os.getenv("GARCH_VOL_RATIO_LOW", "0.85"))
+GARCH_VOL_RATIO_HIGH = float(os.getenv("GARCH_VOL_RATIO_HIGH", "1.35"))
+GARCH_VOL_VTI_SCALE_PP = float(os.getenv("GARCH_VOL_VTI_SCALE_PP", "8"))
+GARCH_VOL_VTI_MAX_PP = float(os.getenv("GARCH_VOL_VTI_MAX_PP", "6"))
+# Soft-trim weight on conviction regime component (risk_$ path already applies full mult).
+GARCH_VOL_CONVICTION_BLEND = float(os.getenv("GARCH_VOL_CONVICTION_BLEND", "0.35"))
+
+# --- Smart ATR stops with conviction reevaluation (paper / research; live opt-in) ---
+PAPER_SMART_STOPS = _env_bool_first("PAPER_SMART_STOPS", "SMART_STOPS_ENABLED", default="true")
+SMART_STOPS_LIVE_ENABLED = _parse_env_bool("SMART_STOPS_LIVE_ENABLED", default="false")
+ATR_STOP_MULTIPLIER = float(
+    os.getenv("ATR_STOP_MULTIPLIER", os.getenv("ATR_RISK_MULTIPLE", "2.0"))
+)
+ATR_TIGHTEN_MULTIPLIER = float(os.getenv("ATR_TIGHTEN_MULTIPLIER", "1.0"))
+SMART_STOP_CATALYST_MIN = float(os.getenv("SMART_STOP_CATALYST_MIN", "70"))
+
+
+def _parse_stop_loss_reeval_pcts(raw: str | None = None) -> list[float]:
+    """Parse ``[-5,-10]`` / ``-5,-10`` into negative fractions."""
+    import re
+
+    text = (raw if raw is not None else os.getenv("STOP_LOSS_REEVAL_PCTS", "[-5,-10]")).strip()
+    nums = re.findall(r"-?\d+(?:\.\d+)?", text or "")
+    out: list[float] = []
+    for n in nums:
+        v = float(n)
+        if abs(v) > 1.0:
+            v = v / 100.0
+        out.append(v)
+    return out or [-0.05, -0.10]
+
+
+STOP_LOSS_REEVAL_PCTS = _parse_stop_loss_reeval_pcts()
 
 # --- SpaceX IPO ↔ crypto monitor (headline watch; S-1 BTC treasury narrative) ---
 SPACEX_IPO_MONITOR_ENABLED = os.getenv("SPACEX_IPO_MONITOR_ENABLED", "true").lower() in (
@@ -2558,6 +2646,20 @@ def effective_risk_per_trade(
             ),
             6,
         )
+    if effective_daily_bank_enabled():
+        try:
+            from modules.daily_profit_banking import daily_bank_risk_multiplier
+
+            base = round(base * float(daily_bank_risk_multiplier()), 6)
+        except Exception:
+            pass
+    if effective_garch_vol_enabled():
+        try:
+            from modules.garch_vol import garch_vol_size_multiplier
+
+            base = round(base * float(garch_vol_size_multiplier()), 6)
+        except Exception:
+            pass
     return base
 
 
@@ -3634,13 +3736,16 @@ def _env_explicit(*keys: str) -> bool:
 def enforce_realistic_research_profile() -> None:
     """Re-apply Realistic Research v1.5 locks (.env overrides win).
 
-  Final paper default (Profile B / alpaca_paper). Locked stack:
+    Final paper default (Profile B / alpaca_paper). Locked stack:
     - Scanners: RVOL, ORB, Catalyst, ATR sizing
     - Sizing: conviction (0.4x-1.8x), multi-timeframe confirmation, correlation guard
     - Exits: partial @1R, dynamic trail, time-based max hold
     - Insider monitor + signal boosts + risk guard
     - Protective + sector shorts (8-18% gross, RR 1.6)
     - Stat arb 10-14 pairs, Smart Dynamic VTI (default), tail-risk vol ceiling
+    - Regime: RHYME primary locked; Markov HMM soft-signal only (primary OFF)
+    - GARCH(1,1) vol sizing locked paper ON / live OFF (unless GARCH_VOL_LIVE_ENABLED)
+    - Daily Profit Banking paper ON / live OFF
     - Bot health + per-strategy performance tracking
     - Heartbeat watchdog + auto-recovery (supervisor)
     See REALISTIC_RESEARCH_LOCKED_FEATURES for the banner summary.
@@ -3711,6 +3816,8 @@ def enforce_realistic_research_profile() -> None:
     global PAPER_STAT_ARB_CONVICTION_MIN_SCALE
     global PAPER_STAT_ARB_CONVICTION_MAX_SCALE
     global PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC
+    global PAPER_STAT_ARB_PARTIAL_EXIT
+    global PAPER_STAT_ARB_PARTIAL_EXIT_RR
     global PAPER_STAT_ARB_MAX_PAIRS
     global PAPER_STAT_ARB_MAX_PAIRS_EXPANDED
     global PAPER_STAT_ARB_MAX_PAIRS_CEILING
@@ -3799,10 +3906,34 @@ def enforce_realistic_research_profile() -> None:
     global ATR_MAX_SIZE_PCT
     global FELIX_SOCIAL_DYNAMIC_ENABLED
     global MARKOV_HMM_ENABLED
+    global MARKOV_HMM_PRIMARY_REGIME
     global HMM_N_STATES
     global HMM_TRAIN_WINDOW_DAYS
     global HMM_PREDICTION_HORIZON
     global HMM_RETRAIN_EVERY_BARS
+    global TIME_OF_DAY_ANALYSIS
+    global DAILY_BANK_ENABLED
+    global DAILY_BANK_THRESHOLD_PCT
+    global DAILY_BANK_RISK_MULT
+    global DAILY_BANK_RESET_MINUTES_AFTER_OPEN
+    global DAILY_BANK_VTI_BOOST_PP
+    global GARCH_VOL_ENABLED
+    global GARCH_VOL_LIVE_ENABLED
+    global GARCH_VOL_LOOKBACK
+    global GARCH_VOL_ANCHOR_WINDOW
+    global GARCH_VOL_RETRAIN_EVERY_BARS
+    global GARCH_VOL_MULT_MIN
+    global GARCH_VOL_MULT_MAX
+    global GARCH_VOL_RATIO_LOW
+    global GARCH_VOL_RATIO_HIGH
+    global GARCH_VOL_VTI_SCALE_PP
+    global GARCH_VOL_VTI_MAX_PP
+    global GARCH_VOL_CONVICTION_BLEND
+    global PAPER_SMART_STOPS
+    global ATR_STOP_MULTIPLIER
+    global ATR_TIGHTEN_MULTIPLIER
+    global STOP_LOSS_REEVAL_PCTS
+    global SMART_STOP_CATALYST_MIN
     global FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD
     global FELIX_SENTIMENT_ENABLED
     global PAPER_SOCIAL_SLEEVE_ENABLED
@@ -3936,29 +4067,33 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("PAPER_STAT_ARB_MAX_HOLD_BARS"):
         PAPER_STAT_ARB_MAX_HOLD_BARS = 35
     if not _env_explicit("PAPER_STAT_ARB_Z_ENTRY_BASE"):
-        PAPER_STAT_ARB_Z_ENTRY_BASE = 2.0
+        PAPER_STAT_ARB_Z_ENTRY_BASE = 2.1
     if not _env_explicit("PAPER_STAT_ARB_Z_ENTRY_MAX"):
-        PAPER_STAT_ARB_Z_ENTRY_MAX = 2.6
+        PAPER_STAT_ARB_Z_ENTRY_MAX = 2.7
     if not _env_explicit("PAPER_STAT_ARB_RISK_REWARD"):
-        PAPER_STAT_ARB_RISK_REWARD = 1.6
+        PAPER_STAT_ARB_RISK_REWARD = 1.7
     if not _env_explicit("PAPER_STAT_ARB_MIN_DOLLAR_VOLUME"):
-        PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = 35_000_000
+        PAPER_STAT_ARB_MIN_DOLLAR_VOLUME = 50_000_000
     if not _env_explicit("PAPER_STAT_ARB_TRAILING_ARM_FRAC"):
-        PAPER_STAT_ARB_TRAILING_ARM_FRAC = 0.50
+        PAPER_STAT_ARB_TRAILING_ARM_FRAC = 0.45
     if not _env_explicit("PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC"):
-        PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = 0.35
+        PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC = 0.30
     if not _env_explicit("PAPER_STAT_ARB_MIN_REVERT_FRAC"):
         PAPER_STAT_ARB_MIN_REVERT_FRAC = 0.55
     if not _env_explicit("PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS"):
         PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS = 35
     if not _env_explicit("PAPER_STAT_ARB_MAX_LEG_VOL"):
-        PAPER_STAT_ARB_MAX_LEG_VOL = 0.065
+        PAPER_STAT_ARB_MAX_LEG_VOL = 0.055
     if not _env_explicit("PAPER_STAT_ARB_CONVICTION_MIN_SCALE"):
-        PAPER_STAT_ARB_CONVICTION_MIN_SCALE = 0.65
+        PAPER_STAT_ARB_CONVICTION_MIN_SCALE = 0.60
     if not _env_explicit("PAPER_STAT_ARB_CONVICTION_MAX_SCALE"):
-        PAPER_STAT_ARB_CONVICTION_MAX_SCALE = 1.50
+        PAPER_STAT_ARB_CONVICTION_MAX_SCALE = 1.40
     if not _env_explicit("PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC"):
         PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC = 0.50
+    if not _env_explicit("PAPER_STAT_ARB_PARTIAL_EXIT"):
+        PAPER_STAT_ARB_PARTIAL_EXIT = True
+    if not _env_explicit("PAPER_STAT_ARB_PARTIAL_EXIT_RR"):
+        PAPER_STAT_ARB_PARTIAL_EXIT_RR = 1.2
     if not _env_explicit("PAPER_STAT_ARB_COINT_PVALUE"):
         PAPER_STAT_ARB_COINT_PVALUE = 0.12
     if not _env_explicit("PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF"):
@@ -4179,6 +4314,9 @@ def enforce_realistic_research_profile() -> None:
         FELIX_SOCIAL_DYNAMIC_BUBBLE_THRESHOLD = 65.0
     if not _env_explicit("MARKOV_HMM_ENABLED"):
         MARKOV_HMM_ENABLED = True
+    # RHYME stays primary — HMM soft-signal only (locked for Realistic Research).
+    if not _env_explicit("MARKOV_HMM_PRIMARY_REGIME"):
+        MARKOV_HMM_PRIMARY_REGIME = False
     if not _env_explicit("HMM_N_STATES"):
         HMM_N_STATES = 5
     if not _env_explicit("HMM_TRAIN_WINDOW_DAYS"):
@@ -4187,6 +4325,53 @@ def enforce_realistic_research_profile() -> None:
         HMM_PREDICTION_HORIZON = 1
     if not _env_explicit("HMM_RETRAIN_EVERY_BARS"):
         HMM_RETRAIN_EVERY_BARS = 5
+    if not _env_explicit("TIME_OF_DAY_ANALYSIS"):
+        TIME_OF_DAY_ANALYSIS = True
+    if not _env_explicit("DAILY_BANK_ENABLED"):
+        DAILY_BANK_ENABLED = True
+    if not _env_explicit("DAILY_BANK_THRESHOLD_PCT"):
+        DAILY_BANK_THRESHOLD_PCT = 0.8
+    if not _env_explicit("DAILY_BANK_RISK_MULT"):
+        DAILY_BANK_RISK_MULT = 0.4
+    if not _env_explicit("DAILY_BANK_RESET_MINUTES_AFTER_OPEN"):
+        DAILY_BANK_RESET_MINUTES_AFTER_OPEN = 30
+    if not _env_explicit("DAILY_BANK_VTI_BOOST_PP"):
+        DAILY_BANK_VTI_BOOST_PP = 10.0
+    # GARCH vol sizing locked ON for paper research; live stays off unless opt-in.
+    if not _env_explicit("GARCH_VOL_ENABLED"):
+        GARCH_VOL_ENABLED = True
+    if not _env_explicit("GARCH_VOL_LIVE_ENABLED"):
+        GARCH_VOL_LIVE_ENABLED = False
+    if not _env_explicit("GARCH_VOL_LOOKBACK"):
+        GARCH_VOL_LOOKBACK = 252
+    if not _env_explicit("GARCH_VOL_ANCHOR_WINDOW"):
+        GARCH_VOL_ANCHOR_WINDOW = 21
+    if not _env_explicit("GARCH_VOL_RETRAIN_EVERY_BARS"):
+        GARCH_VOL_RETRAIN_EVERY_BARS = 5
+    if not _env_explicit("GARCH_VOL_MULT_MIN"):
+        GARCH_VOL_MULT_MIN = 0.55
+    if not _env_explicit("GARCH_VOL_MULT_MAX"):
+        GARCH_VOL_MULT_MAX = 1.0
+    if not _env_explicit("GARCH_VOL_RATIO_LOW"):
+        GARCH_VOL_RATIO_LOW = 0.85
+    if not _env_explicit("GARCH_VOL_RATIO_HIGH"):
+        GARCH_VOL_RATIO_HIGH = 1.35
+    if not _env_explicit("GARCH_VOL_VTI_SCALE_PP"):
+        GARCH_VOL_VTI_SCALE_PP = 8.0
+    if not _env_explicit("GARCH_VOL_VTI_MAX_PP"):
+        GARCH_VOL_VTI_MAX_PP = 6.0
+    if not _env_explicit("GARCH_VOL_CONVICTION_BLEND"):
+        GARCH_VOL_CONVICTION_BLEND = 0.35
+    if not _env_explicit("PAPER_SMART_STOPS", "SMART_STOPS_ENABLED"):
+        PAPER_SMART_STOPS = True
+    if not _env_explicit("ATR_STOP_MULTIPLIER"):
+        ATR_STOP_MULTIPLIER = 2.0
+    if not _env_explicit("ATR_TIGHTEN_MULTIPLIER"):
+        ATR_TIGHTEN_MULTIPLIER = 1.0
+    if not _env_explicit("STOP_LOSS_REEVAL_PCTS"):
+        STOP_LOSS_REEVAL_PCTS = [-0.05, -0.10]
+    if not _env_explicit("SMART_STOP_CATALYST_MIN"):
+        SMART_STOP_CATALYST_MIN = 70.0
     # Sentiment scoring needed when dynamic sleeve may turn on mid-session.
     if (
         FELIX_SOCIAL_DYNAMIC_ENABLED
@@ -4263,17 +4448,19 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "STAT_ARB_NYSE_OVERLAP_BLOCK_MULT": "2",
     "PAPER_STAT_ARB_MAX_HOLD_BARS": "35",
     "PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS": "35",
-    "PAPER_STAT_ARB_Z_ENTRY_BASE": "2.0",
-    "PAPER_STAT_ARB_Z_ENTRY_MAX": "2.6",
-    "PAPER_STAT_ARB_RISK_REWARD": "1.6",
-    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": "35000000",
+    "PAPER_STAT_ARB_Z_ENTRY_BASE": "2.1",
+    "PAPER_STAT_ARB_Z_ENTRY_MAX": "2.7",
+    "PAPER_STAT_ARB_RISK_REWARD": "1.7",
+    "PAPER_STAT_ARB_MIN_DOLLAR_VOLUME": "50000000",
     "PAPER_STAT_ARB_MIN_REVERT_FRAC": "0.55",
-    "PAPER_STAT_ARB_MAX_LEG_VOL": "0.065",
-    "PAPER_STAT_ARB_CONVICTION_MIN_SCALE": "0.65",
-    "PAPER_STAT_ARB_CONVICTION_MAX_SCALE": "1.50",
+    "PAPER_STAT_ARB_MAX_LEG_VOL": "0.055",
+    "PAPER_STAT_ARB_CONVICTION_MIN_SCALE": "0.60",
+    "PAPER_STAT_ARB_CONVICTION_MAX_SCALE": "1.40",
     "PAPER_STAT_ARB_TRAIL_MIN_PROFIT_FRAC": "0.50",
-    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": "0.50",
-    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": "0.35",
+    "PAPER_STAT_ARB_TRAILING_ARM_FRAC": "0.45",
+    "PAPER_STAT_ARB_TRAILING_PULLBACK_FRAC": "0.30",
+    "PAPER_STAT_ARB_PARTIAL_EXIT": "true",
+    "PAPER_STAT_ARB_PARTIAL_EXIT_RR": "1.2",
     "PAPER_STAT_ARB_COINT_PVALUE": "0.12",
     "PAPER_STAT_ARB_USE_COINT": "true",
     "PAPER_STAT_ARB_SECTOR_NEUTRAL_PREF": "true",
@@ -4428,9 +4615,32 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_SOCIAL_SLEEVE_ENABLED": "false",
     "SOCIAL_SLEEVE_ENABLED": "false",
     "MARKOV_HMM_ENABLED": "true",
+    "MARKOV_HMM_PRIMARY_REGIME": "false",
     "HMM_N_STATES": "5",
     "HMM_TRAIN_WINDOW_DAYS": "252",
     "HMM_PREDICTION_HORIZON": "1",
+    "TIME_OF_DAY_ANALYSIS": "true",
+    "DAILY_BANK_ENABLED": "true",
+    "DAILY_BANK_THRESHOLD_PCT": "0.8",
+    "DAILY_BANK_RISK_MULT": "0.4",
+    "DAILY_BANK_RESET_MINUTES_AFTER_OPEN": "30",
+    "DAILY_BANK_VTI_BOOST_PP": "10",
+    "GARCH_VOL_ENABLED": "true",
+    "GARCH_VOL_LIVE_ENABLED": "false",
+    "GARCH_VOL_LOOKBACK": "252",
+    "GARCH_VOL_ANCHOR_WINDOW": "21",
+    "GARCH_VOL_RETRAIN_EVERY_BARS": "5",
+    "GARCH_VOL_MULT_MIN": "0.55",
+    "GARCH_VOL_MULT_MAX": "1.0",
+    "GARCH_VOL_RATIO_LOW": "0.85",
+    "GARCH_VOL_RATIO_HIGH": "1.35",
+    "GARCH_VOL_VTI_SCALE_PP": "8",
+    "GARCH_VOL_VTI_MAX_PP": "6",
+    "GARCH_VOL_CONVICTION_BLEND": "0.35",
+    "PAPER_SMART_STOPS": "true",
+    "ATR_STOP_MULTIPLIER": "2.0",
+    "ATR_TIGHTEN_MULTIPLIER": "1.0",
+    "STOP_LOSS_REEVAL_PCTS": "[-5,-10]",
 }
 
 
@@ -4479,8 +4689,8 @@ def format_universe_pool_label() -> str:
 def format_realistic_research_headline() -> str:
     """Prominent version line for paper bot startup."""
     features = (
-        "RVOL + ORB + Catalyst + ATR | Tuned Shorts 8-18% | Sector Shorts | "
-        "Dynamic Core 63d | Insider Boosts | Stat Arb 8-12p v1.5.2 | Thinking ON"
+        "RHYME primary | HMM soft | GARCH vol | RVOL/ORB/Catalyst/ATR | "
+        "Shorts 8-18% | Stat Arb 8-12p | Dynamic VTI 35-75%"
     )
     return (
         f">>> REALISTIC RESEARCH v{REALISTIC_RESEARCH_VERSION} (LOCKED) - "
@@ -4637,6 +4847,52 @@ def format_realistic_research_startup_lines() -> list[str]:
         hmm_line = format_markov_hmm_banner()
         if hmm_line:
             lines.append(f">>> {hmm_line} <<<")
+        else:
+            lines.append(">>> Regime: RHYME primary | Markov HMM soft: OFF <<<")
+        if not effective_markov_hmm_primary_regime():
+            lines.append(
+                ">>> Regime lock: RHYME primary | HMM soft-signal only "
+                "(MARKOV_HMM_PRIMARY_REGIME=false) <<<"
+            )
+    except Exception:
+        lines.append(
+            ">>> Regime lock: RHYME primary | Markov HMM unavailable (RHYME only) <<<"
+        )
+    try:
+        from modules.time_of_day import format_tod_banner
+
+        tod_line = format_tod_banner()
+        if tod_line:
+            lines.append(f">>> {tod_line} <<<")
+    except Exception:
+        pass
+    try:
+        from modules.daily_profit_banking import format_daily_bank_banner
+
+        bank_line = format_daily_bank_banner()
+        if bank_line:
+            lines.append(f">>> {bank_line} <<<")
+    except Exception:
+        pass
+    try:
+        from modules.garch_vol import format_garch_vol_banner
+
+        garch_line = format_garch_vol_banner()
+        if garch_line:
+            lines.append(f">>> {garch_line} <<<")
+        if GARCH_VOL_ENABLED and not GARCH_VOL_LIVE_ENABLED:
+            lines.append(
+                ">>> GARCH vol lock: paper ON | live OFF "
+                "(GARCH_VOL_LIVE_ENABLED=false) <<<"
+            )
+    except Exception:
+        pass
+    try:
+        from modules.smart_atr_stops import format_smart_stops_banner
+
+        smart_line = format_smart_stops_banner()
+        if smart_line:
+            lines.append(smart_line)
     except Exception:
         pass
     try:
@@ -5658,6 +5914,11 @@ def effective_stat_arb_partial_exit_enabled() -> bool:
     return bool(PAPER_STAT_ARB_PARTIAL_EXIT) and effective_exit_optimization_enabled()
 
 
+def effective_stat_arb_partial_exit_rr() -> float:
+    """Partial take-profit multiple of stop distance (Z-space), e.g. 1.2 = 1.2R."""
+    return max(0.25, float(PAPER_STAT_ARB_PARTIAL_EXIT_RR))
+
+
 def effective_stat_arb_equity_max_hold_bars() -> int:
     """Equity-pair max hold; falls back to shared max hold when unset/larger."""
     dedicated = int(PAPER_STAT_ARB_EQUITY_MAX_HOLD_BARS)
@@ -5721,19 +5982,24 @@ def format_stat_arb_research_line() -> str | None:
         f"trail {effective_stat_arb_trailing_arm_frac():.0%}/"
         f"{effective_stat_arb_trailing_pullback_frac():.0%}"
     )
+    if effective_stat_arb_partial_exit_enabled():
+        partial_note = f" | partial @{effective_stat_arb_partial_exit_rr():.1f}R"
+    else:
+        partial_note = " | partial OFF"
     try:
         uni_n = len(get_nyse_universe())
     except Exception:
         uni_n = 0
     uni_note = f" | Stat Arb universe: {uni_n} names" if uni_n else ""
     return (
-        f">>> STAT ARB v{REALISTIC_RESEARCH_VERSION}: cointegration p<{PAPER_STAT_ARB_COINT_PVALUE:.2f} | "
+        f">>> STAT ARB v{REALISTIC_RESEARCH_VERSION} quality: "
+        f"cointegration p<{PAPER_STAT_ARB_COINT_PVALUE:.2f} | "
         f"corr>={effective_stat_arb_min_correlation():.2f} | "
         f"liquidity>${effective_stat_arb_min_dollar_volume()/1e6:.0f}M{vol_note} | "
         f"{format_stat_arb_pairs_label()} | "
         f"hold={hold_b}b | revert>={PAPER_STAT_ARB_MIN_REVERT_FRAC:.0%} | "
         f"RR {effective_stat_arb_risk_reward():.1f}:1 + {trail_note}"
-        f"{conv_note}{sector_note} | partial OFF | NYSE overlap blocked{cap_line}{uni_note}"
+        f"{conv_note}{sector_note}{partial_note} | NYSE overlap blocked{cap_line}{uni_note}"
     )
 
 
@@ -5905,6 +6171,75 @@ def effective_markov_hmm_enabled() -> bool:
     if paper_only_sleeves_active() or paper_aggressive_context() or is_realistic_research_active():
         return True
     return bool(MARKOV_HMM_LIVE_ENABLED)
+
+
+def effective_markov_hmm_primary_regime() -> bool:
+    """Use HMM predicted state as the trading regime (RHYME fallback).
+
+    Default OFF — soft-signals stay the production path until a 365d primary
+    A/B clearly beats RHYME on return/Sharpe/MaxDD without instability.
+    """
+    if not MARKOV_HMM_PRIMARY_REGIME:
+        return False
+    if not effective_markov_hmm_enabled():
+        return False
+    return bool(
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    )
+
+
+def effective_time_of_day_analysis() -> bool:
+    """Session-bucket predictability — paper default; live opt-in."""
+    if not TIME_OF_DAY_ANALYSIS:
+        return False
+    if paper_only_sleeves_active() or paper_aggressive_context() or is_realistic_research_active():
+        return True
+    return bool(TIME_OF_DAY_LIVE_ENABLED)
+
+
+def effective_daily_bank_enabled() -> bool:
+    """Daily profit banking — paper / Realistic Research default; live opt-in."""
+    if not DAILY_BANK_ENABLED:
+        return False
+    if (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    ):
+        return True
+    return bool(DAILY_BANK_LIVE_ENABLED)
+
+
+def effective_garch_vol_enabled() -> bool:
+    """GARCH(1,1) vol sizing — locked paper / Realistic Research ON; live opt-in."""
+    if not GARCH_VOL_ENABLED:
+        return False
+    if (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    ):
+        return True
+    return bool(GARCH_VOL_LIVE_ENABLED)
+
+
+def effective_smart_stops_enabled() -> bool:
+    """Smart ATR stops with reeval — paper / Realistic Research; live opt-in."""
+    if not PAPER_SMART_STOPS:
+        return False
+    if (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    ):
+        return True
+    return bool(SMART_STOPS_LIVE_ENABLED)
 
 
 def felix_social_manual_override() -> bool:

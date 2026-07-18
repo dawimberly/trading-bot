@@ -9,9 +9,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import config
@@ -19,6 +20,9 @@ import config
 STATE_FILE = "alert_state.json"
 _ET = ZoneInfo("America/New_York")
 _GMAIL_APP_PASSWORD_URL = "https://myaccount.google.com/apppasswords"
+_DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+_YIELD_GATE_ALERT_PATH = _DATA_DIR / "yield_gate_last_alert.json"
+_YIELD_GATE_COOLDOWN = timedelta(minutes=30)
 
 # Internal categories -> config flags
 _CATEGORY_FLAGS: dict[str, str] = {
@@ -27,6 +31,8 @@ _CATEGORY_FLAGS: dict[str, str] = {
     "drawdown_major": "TELEGRAM_ALERT_DRAWDOWN_MAJOR",
     "yield_gate": "TELEGRAM_ALERT_YIELD_GATE",
     "daily_summary": "TELEGRAM_ALERT_DAILY_SUMMARY",
+    "periodic_summary": "TELEGRAM_ALERT_PERIODIC_SUMMARY",
+    "live_daily_summary": "TELEGRAM_ALERT_LIVE_DAILY_SUMMARY",
     "live_fill": "TELEGRAM_ALERT_LIVE_FILLS",
     "spacex": "TELEGRAM_ALERT_SPACEX",
     "btc": "TELEGRAM_ALERT_BTC",
@@ -406,7 +412,11 @@ def maybe_major_drawdown_alert(
 
 
 def maybe_yield_gate_alert(active: bool) -> None:
-    """Alert on yield-gate state transitions (on/off)."""
+    """Alert on yield-gate ON/OFF transitions with a 30-minute cooldown.
+
+    Always keeps the first ON and first OFF alerts; later flips are throttled
+    via ``data/yield_gate_last_alert.json`` so paper override chatter does not spam.
+    """
     state = _load_state()
     prev = state.get("yield_gate_active")
     if prev is None:
@@ -419,6 +429,9 @@ def maybe_yield_gate_alert(active: bool) -> None:
     state["yield_gate_active"] = bool(active)
     _save_state(state)
 
+    if not _yield_gate_alert_allowed(bool(active)):
+        return
+
     mode = _mode_label()
     label = "ACTIVATED" if active else "DEACTIVATED"
     subject = f"[PythonTrading {mode}] Yield gate {label}"
@@ -427,8 +440,57 @@ def maybe_yield_gate_alert(active: bool) -> None:
         f"New SPY/equity entries are {'blocked' if active else 'allowed'}.\n\n"
         f"Time: {datetime.now(_ET):%Y-%m-%d %H:%M:%S} ET"
     )
-    broadcast(subject, body, category="yield_gate")
+    if broadcast(subject, body, category="yield_gate"):
+        _mark_yield_gate_alert_sent(bool(active))
 
+
+def _load_yield_gate_alert_cache() -> dict:
+    if not _YIELD_GATE_ALERT_PATH.is_file():
+        return {}
+    try:
+        raw = json.loads(_YIELD_GATE_ALERT_PATH.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _save_yield_gate_alert_cache(payload: dict) -> None:
+    try:
+        _DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _YIELD_GATE_ALERT_PATH.write_text(
+            json.dumps(payload, indent=2), encoding="utf-8"
+        )
+    except OSError as exc:
+        print(f"Yield gate alert cache write failed: {exc}")
+
+
+def _yield_gate_alert_allowed(active: bool) -> bool:
+    """True for first ON/OFF ever, or when 30+ minutes since last yield-gate alert."""
+    cache = _load_yield_gate_alert_cache()
+    first_key = "first_on_sent" if active else "first_off_sent"
+    if not cache.get(first_key):
+        return True
+    raw = cache.get("last_alert_at")
+    if not raw:
+        return True
+    try:
+        last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=_ET)
+        return datetime.now(_ET) - last.astimezone(_ET) >= _YIELD_GATE_COOLDOWN
+    except (TypeError, ValueError):
+        return True
+
+
+def _mark_yield_gate_alert_sent(active: bool) -> None:
+    cache = _load_yield_gate_alert_cache()
+    if active:
+        cache["first_on_sent"] = True
+    else:
+        cache["first_off_sent"] = True
+    cache["last_alert_at"] = datetime.now(_ET).isoformat()
+    cache["last_state"] = bool(active)
+    _save_yield_gate_alert_cache(cache)
 
 def maybe_monthly_wisdom_summary(rollup: dict) -> None:
     """Disabled unless TELEGRAM_ALERT_SOCIAL=true (noisy / research-only)."""

@@ -224,6 +224,8 @@ def _is_live_book_active() -> bool:
 
 
 def _live_profile_line() -> str:
+    if config.live_conservative_profile_active():
+        return config.format_live_conservative_banner()
     vti = config.SMALL_ACCOUNT_VTI_CORE_PCT
     return (
         f"VTI ~{vti:.0%} | risk {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} | "
@@ -317,7 +319,7 @@ def _live_flags() -> str:
         _flag("macro", config.MACRO_REGIME_ADAPTOR_ENABLED),
         _flag("social", config.SOCIAL_SLEEVE_ENABLED),
         _flag("spy_exit", config.SPY_EXIT_ON_MA_BREAK),
-        "thinking=off (live locked)",
+        "thinking=off unless LIVE_THINKING_ENGINE_ENABLED",
     ]
     return " | ".join(parts)
 
@@ -365,38 +367,34 @@ def _safety_status_banner(*, live: bool, current_equity: float | None = None) ->
 
     thinking = config.get_thinking_safety_summary()
     if live:
+        live_on = bool(thinking.get("live_thinking_enabled"))
         thinking_bit = (
-            f"thinking off | tilt +/-{s['live_tilt_cap_pp']:.0f}% | "
+            f"thinking live {'ON' if live_on else 'OFF (default)'} | "
+            f"tilt +/-{s['live_tilt_cap_pp']:.0f}% | "
             f"approval {'required' if thinking['manual_approval_live'] else 'off'}"
         )
     else:
         eng = "on" if thinking["paper_thinking_enabled"] else "off (opt-in)"
-        thinking_bit = f"thinking {eng} | tilt +/-{s['max_sleeve_delta_pp']:.0f}%"
+        live_eng = "on" if thinking.get("live_thinking_enabled") else "off"
+        thinking_bit = (
+            f"thinking paper {eng} / live {live_eng} | "
+            f"tilt +/-{s['max_sleeve_delta_pp']:.0f}%"
+        )
 
     breaker = "breaker on" if s["daily_loss_breaker_enabled"] else "breaker off"
     return f"SAFETY STATUS ({book}): {state} | {thinking_bit} | {breaker}"
 
 
 def _thinking_effective_label() -> str:
-    if not config.PAPER_THINKING_ENGINE_ENABLED:
-        return "OFF (v2.2 default is ON — set PAPER_THINKING_ENGINE_ENABLED=true)"
-    was_ctx = config.paper_aggressive_context()
-    was_bt = config.backtest_paper_sleeves_context()
-    config.set_paper_aggressive_context(True)
-    config.set_backtest_paper_sleeves_context(True)
-    try:
-        if config.effective_thinking_engine_enabled():
-            return "ON"
-    finally:
-        config.set_paper_aggressive_context(was_ctx)
-        config.set_backtest_paper_sleeves_context(was_bt)
-    if config.paper_chase_mode_enabled() or os.getenv("PAPER_CHASE_MODE", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    ):
-        return "ON when paper bot runs (restart run_paper_bot.py)"
-    return "OFF (start paper bot with PAPER_CHASE_MODE)"
+    if not getattr(config, "THINKING_ENGINE_ENABLED", True):
+        return "OFF (THINKING_ENGINE_ENABLED=false)"
+    if config.PAPER_TRADING or config.paper_only_sleeves_active():
+        if not config.PAPER_THINKING_ENGINE_ENABLED:
+            return "OFF paper (set PAPER_THINKING_ENGINE_ENABLED=true)"
+        return "ON (paper)"
+    if getattr(config, "LIVE_THINKING_ENGINE_ENABLED", False):
+        return "ON (live opt-in)"
+    return "OFF live (default; set LIVE_THINKING_ENGINE_ENABLED=true)"
 
 
 def _thinking_engine_monitor_lines(live_equity: float | None = None) -> list[str]:
@@ -502,7 +500,7 @@ def _profile_table_lines() -> list[str]:
         "=== Profiles ===",
         f"| | Live Profile A (~$300) | Paper {paper_label} |",
         "|--|------------------------|---------------------------|",
-        f"| VTI core | {config.SMALL_ACCOUNT_VTI_CORE_PCT:.0%} (<$500) / 80% | dynamic 40-75% |",
+        f"| VTI core | {config.LIVE_VTI_CORE_PCT:.0%} + {config.LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY (<$500) / 80% | dynamic 40-75% |",
         f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
         "| Crypto sleeve | OFF (disabled) | OFF (locked) |",
         "| Stat arb / vol / options | off | on (locked stack) |",
@@ -534,7 +532,9 @@ def _safety_table_lines(
         f"| Daily loss circuit breaker | {s['daily_loss_limit_live_pct']:.0f}% -> pause entries + tilts | {s['daily_loss_limit_paper_pct']:.0f}% |",
         f"| Thinking max tilt / sleeve | +/-{s['live_tilt_cap_pp']:.0f}% | +/-{s['max_sleeve_delta_pp']:.0f}% |",
         f"| Thinking manual approval | {'required' if s['manual_approval_live'] else 'off'} | auto when engine on |",
-        f"| Thinking engine default | off | {'on (v2.2)' if s['paper_thinking_enabled'] else 'off (override)'} |",
+        f"| Thinking engine default | "
+        f"{'on (opt-in)' if s.get('live_thinking_enabled') else 'off'} | "
+        f"{'on' if s['paper_thinking_enabled'] else 'off (override)'} |",
         f"| Daily loss breaker enabled | {'yes' if s['daily_loss_breaker_enabled'] else 'no'} | same |",
         f"| Today circuit (live) | "
         f"{'TRIPPED' if live_dl.get('tripped') else 'ok'} "
@@ -668,6 +668,7 @@ def main() -> None:
         live_hb=live_hb,
     ):
         _emit(line)
+    _emit(config.format_paper_live_profile_line())
     _emit(config.get_best_paper_final_lock_banner())
     for line in config.get_best_paper_v22_summary_lines():
         _emit(line)

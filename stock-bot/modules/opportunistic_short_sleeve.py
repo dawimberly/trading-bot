@@ -35,8 +35,8 @@ def _coerce_bar_index(value) -> int:
     if callable(ts):
         try:
             return int(ts() // 86400)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("short sleeve soft-fail: %s", exc)
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -234,8 +234,8 @@ def _regime_size_multiplier(regime: str, bubble_score: float) -> float:
         from modules.markov_regime import hmm_short_boost
 
         mult *= float(hmm_short_boost())
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("short sleeve soft-fail: %s", exc)
     return mult
 
 
@@ -276,8 +276,8 @@ def short_target_gross_pct(regime: str, bubble_score: float) -> float:
         boost = float(hmm_short_boost())
         if boost != 1.0:
             pct = mid + (pct - mid) * boost
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("short sleeve soft-fail: %s", exc)
     return round(max(lo, min(hi, pct)), 4)
 
 
@@ -864,8 +864,8 @@ def _open_short(
             snap = get_boost_snapshot()
             if sym in (snap.get("short_boosts") or {}):
                 record_insider_boost_trade("short")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("short sleeve soft-fail: %s", exc)
     pair_cooldown[pair_key] = now
     att = getattr(executor, "_attribution", None)
     if att and hasattr(att, "record_short_entry") and trigger_reason:

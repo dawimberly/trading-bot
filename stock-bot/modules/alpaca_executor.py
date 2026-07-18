@@ -20,7 +20,19 @@ T = TypeVar("T")
 
 
 class AlpacaExecutor:
-    """Submit market orders via alpaca-py with shared credential loading."""
+    """Submit market orders via alpaca-py with shared credential loading.
+
+    EXTENSION POINT — adding a new broker (multi-broker support):
+      The trading loop only relies on a small duck-typed surface, so a new broker
+      needs a class exposing the same methods used by run_all.py / the sleeves:
+        - execute_order(symbol, side, *, notional=..., reason=..., sleeve=..., ...)
+        - _get_account()  -> object with `.equity`
+        - _get_positions() / get_all_positions() -> iterable of positions
+        - prices (dict-like)  and  portfolio (with .equity(prices))
+      Keep the same PAPER_TRADING / ALLOW_LIVE_TRADING guard so a misconfigured
+      live key can never trade by accident. MockExecutor (modules/mock_executor.py)
+      is the minimal reference implementation for backtests.
+    """
 
     def __init__(self, paper=None, credentials_fn=None, *, allow_live=None):
         cred_fn = credentials_fn or config.get_alpaca_credentials
@@ -74,6 +86,9 @@ class AlpacaExecutor:
     def set_wisdom_sizing_multiplier(self, multiplier: float = 1.0) -> None:
         self._wisdom_sizing_multiplier = float(multiplier)
 
+    def set_current_regime(self, regime: str) -> None:
+        self._current_regime = str(regime or "")
+
     def set_dynamic_sleeve_caps(self, caps: dict[str, float] | None) -> None:
         """Per-cycle cap overrides from get_dynamic_sleeve_caps (vol scaling)."""
         self._dynamic_sleeve_caps = dict(caps) if caps else None
@@ -99,13 +114,40 @@ class AlpacaExecutor:
 
     def _sleeve_cap_pct(self, key: str, base_pct: float) -> float:
         caps = getattr(self, "_dynamic_sleeve_caps", None)
-        if caps and key in caps:
-            pct = caps[key]
-        elif key == "vti_core":
+        account = self._get_account()
+        equity = float(account.equity)
+        cash = float(account.cash)
+        broker_pct = round(cash / equity, 6) if equity > 0 else None
+        regime = getattr(self, "_current_regime", None) or None
+
+        if key == "vti_core":
             return config.vti_core_allocation_pct()
+
+        if key == "nyse" and (
+            config.paper_aggressive_context() or config.is_realistic_research_active()
+        ):
+            # Prefer expanded paper NYSE target; floor dynamic constructor caps when cash high.
+            target = config.effective_nyse_sleeve_cap_pct(
+                broker_pct,
+                equity=equity,
+                cash=cash,
+                regime=regime,
+                base_pct=base_pct,
+            )
+            if caps and key in caps:
+                dyn = float(caps[key])
+                if config.paper_deploy_aggressive(broker_pct, equity=equity, cash=cash):
+                    pct = max(dyn, target)
+                else:
+                    pct = max(dyn, min(target, float(config.PAPER_NYSE_SLEEVE_CAP_PCT)))
+            else:
+                pct = target
+        elif caps and key in caps:
+            pct = caps[key]
         else:
             pct = config.effective_sleeve_cap(base_pct)
-        pod_key = key if key in ("spy", "crypto", "nyse") else None
+
+        pod_key = key if key in ("spy", "crypto", "nyse", "stat_arb") else None
         if pod_key:
             pct *= self.pod_risk_scale(pod_key)
         return pct
@@ -125,6 +167,10 @@ class AlpacaExecutor:
         if notional is None:
             return None
         mult = getattr(self, "_wisdom_sizing_multiplier", 1.0)
+        if sleeve_key and str(sleeve_key).upper() != "SHORT":
+            hedge = getattr(self, "_short_long_hedge_mult", 1.0)
+            if hedge < 0.999:
+                mult *= hedge
         if sleeve_key:
             mult *= underwater_sizing_scale(sleeve_key, getattr(self, "_sleeve_pnl", None))
         if mult >= 0.999:
@@ -375,8 +421,13 @@ class AlpacaExecutor:
         return canceled
 
     def get_order_params(self, symbol):
-        is_crypto_sym = config.is_crypto(symbol)
-        formatted_symbol = symbol.replace("-", "/") if is_crypto_sym else symbol
+        raw = str(symbol)
+        # Slash USD pairs (e.g. WIF/USD from crypto vol sleeve) are crypto even
+        # when outside the static CRYPTO_TICKERS / main UNIVERSE set.
+        is_crypto_sym = config.is_crypto(symbol) or (
+            "/" in raw and raw.upper().endswith("USD")
+        )
+        formatted_symbol = raw.replace("-", "/") if is_crypto_sym else raw
         tif = TimeInForce.GTC if is_crypto_sym else TimeInForce.DAY
         return formatted_symbol, tif, is_crypto_sym
 
@@ -422,6 +473,14 @@ class AlpacaExecutor:
             return False
         if AlpacaExecutor._is_vti_core_position(pos):
             return False
+        # Sector SPDRs belong to the sector-rotation sleeve, not NYSE momentum.
+        try:
+            from modules.sector_screener import sector_etf_symbols
+
+            if config.normalize_symbol(pos.symbol) in set(sector_etf_symbols()):
+                return False
+        except Exception:
+            pass
         return True
 
     def _sleeve_exposure(self, predicate):
@@ -430,9 +489,34 @@ class AlpacaExecutor:
             for pos in self._get_positions():
                 if predicate(pos):
                     total += self._position_market_value(pos)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("sleeve exposure scan failed: %s", exc)
         return total
+
+    def stat_arb_sleeve_value(self):
+        from modules.stat_arb_sleeve import stat_arb_sleeve_gross_value
+
+        return stat_arb_sleeve_gross_value(self)
+
+    def nyse_momentum_sleeve_value(self):
+        total = self.nyse_sleeve_value()
+        if not config.effective_stat_arb_sleeve_cap_enabled():
+            return total
+        from modules.stat_arb_sleeve import stat_arb_pair_symbols
+
+        pair_syms = stat_arb_pair_symbols(self)
+        if not pair_syms:
+            return total
+        excluded = 0.0
+        try:
+            for pos in self._get_positions():
+                sym = config.normalize_symbol(pos.symbol)
+                if sym not in pair_syms or float(pos.qty) <= 0:
+                    continue
+                excluded += self._position_market_value(pos)
+        except Exception:
+            return total
+        return max(0.0, total - excluded)
 
     def crypto_sleeve_value(self):
         return self._sleeve_exposure(self._is_crypto_position)
@@ -446,32 +530,138 @@ class AlpacaExecutor:
     def spy_sleeve_value(self):
         return self._sleeve_exposure(self._is_spy_position)
 
+    def _log_deploy_skip(self, sleeve_key, reason, *, symbol=None, extra=None):
+        if not config.PAPER_DEPLOY_DEBUG or not reason:
+            return
+        sym = f" {symbol}" if symbol else ""
+        detail = f" {extra}" if extra else ""
+        logger.info(
+            "deploy_skip sleeve=%s%s reason=%s%s",
+            sleeve_key or "?",
+            sym,
+            reason,
+            detail,
+        )
+
     def _compute_capped_notional_raw(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
-        return deployment_sizing.resolve_sleeve_notional(
+        broker_pct = round(cash / equity, 6) if equity > 0 else None
+        if config.paper_deploy_aggressive(broker_pct, equity=equity, cash=cash):
+            logger.info(
+                "aggressive deploy mode activated equity=%.0f cash=%.0f cash_pct=%.1f%%",
+                equity,
+                cash,
+                (broker_pct or 0.0) * 100.0,
+            )
+        notional, skip_reason = deployment_sizing.resolve_sleeve_notional_detail(
             equity,
             cash,
             sleeve_cap_pct,
             sleeve_value,
             sleeve_key or "",
             self._cofire_notionals,
+            regime=getattr(self, "_current_regime", None) or None,
         )
+        if (
+            notional is None
+            and skip_reason
+            and str(skip_reason).startswith("no_room")
+            and sleeve_key == "nyse"
+            and config.paper_deploy_aggressive(broker_pct, equity=equity, cash=cash)
+        ):
+            # High-cash paper: allow a small top-up even when sleeve room is dust.
+            top_up = deployment_sizing.high_cash_nyse_top_up_notional(
+                equity,
+                cash,
+                sleeve_cap_pct,
+                sleeve_value,
+                cash_pct=broker_pct,
+            )
+            if top_up is not None:
+                logger.info(
+                    "NYSE high-cash top-up allowed notional=%.2f (was %s) equity=%.0f cash=%.0f",
+                    top_up,
+                    skip_reason,
+                    equity,
+                    cash,
+                )
+                return top_up
+        if notional is None and skip_reason:
+            self._log_deploy_skip(
+                sleeve_key,
+                skip_reason,
+                extra=f"equity={equity:.0f} cash={cash:.0f}",
+            )
+        return notional
 
-    def _compute_capped_notional(self, sleeve_cap_pct, sleeve_value, sleeve_key=None):
-        return self._apply_sizing_multiplier(
-            self._compute_capped_notional_raw(sleeve_cap_pct, sleeve_value, sleeve_key),
-            sleeve_key=sleeve_key,
+    def _compute_capped_notional(
+        self, sleeve_cap_pct, sleeve_value, sleeve_key=None, symbol=None
+    ):
+        raw = self._compute_capped_notional_raw(
+            sleeve_cap_pct, sleeve_value, sleeve_key
         )
+        if raw is None:
+            return None
+        scaled = self._apply_sizing_multiplier(raw, sleeve_key=sleeve_key)
+        if scaled is None:
+            self._log_deploy_skip(
+                sleeve_key,
+                "sizing_multiplier",
+                symbol=symbol,
+            )
+            return None
+        if scaled < config.effective_min_notional(self._account_equity()):
+            self._log_deploy_skip(
+                sleeve_key,
+                "min_notional",
+                symbol=symbol,
+                extra=f"raw={scaled:.2f}",
+            )
+            return None
+        if not symbol:
+            return scaled
+        adjusted = self._atr_adjust_notional(symbol, scaled)
+        if adjusted is None:
+            self._log_deploy_skip(
+                sleeve_key,
+                "atr_adjust",
+                symbol=symbol,
+            )
+        return adjusted
 
-    def compute_notional(self):
+    def compute_notional(self, symbol=None):
+        del symbol
         account = self._get_account()
         equity = float(account.equity)
         cash = float(account.cash)
+        broker_pct = round(cash / equity, 6) if equity > 0 else None
+        cash_use = (
+            config.PAPER_AGGRESSIVE_CASH_USE_PCT
+            if config.paper_deploy_aggressive(broker_pct, equity=equity, cash=cash)
+            else 0.95
+        )
         raw = round(equity * self._risk_per_trade(equity), 2)
-        capped = min(raw, self._max_notional(), round(cash * 0.95, 2))
-        return self._apply_sizing_multiplier(max(self._min_notional(), capped))
+        capped = min(raw, self._max_notional(), round(cash * cash_use, 2))
+        order_min = (
+            config.ALPACA_MIN_NOTIONAL
+            if config.paper_deploy_aggressive(broker_pct, equity=equity, cash=cash)
+            else self._min_notional()
+        )
+        return self._apply_sizing_multiplier(max(order_min, capped))
+
+    def _atr_adjust_notional(self, symbol, notional):
+        if notional is None:
+            return None
+        from modules.risk_management import atr_adjust_notional
+
+        return atr_adjust_notional(
+            notional,
+            self._account_equity(),
+            symbol,
+            getattr(self, "_sizing_data", None),
+        )
 
     def compute_crypto_notional(self):
         raw = self._compute_capped_notional(
@@ -484,11 +674,43 @@ class AlpacaExecutor:
         )
 
     def compute_nyse_notional(self):
+        sleeve_val = (
+            self.nyse_momentum_sleeve_value()
+            if config.effective_stat_arb_sleeve_cap_enabled()
+            else self.nyse_sleeve_value()
+        )
         return self._compute_capped_notional(
             self._sleeve_cap_pct("nyse", config.NYSE_SLEEVE_CAP_PCT),
-            self.nyse_sleeve_value(),
+            sleeve_val,
             "nyse",
         )
+
+    def compute_stat_arb_notional(self):
+        equity = self._account_equity()
+        min_n = config.effective_min_notional(equity)
+        leg_min = min_n * (
+            config.PAPER_STAT_ARB_LEG_MIN_MULT
+            if config.paper_aggressive_context()
+            else 2.0
+        )
+        if config.effective_stat_arb_sleeve_cap_enabled():
+            raw = self._compute_capped_notional(
+                self._sleeve_cap_pct("stat_arb", config.STAT_ARB_SLEEVE_CAP_PCT),
+                self.stat_arb_sleeve_value(),
+                "stat_arb",
+            )
+        else:
+            raw = self.compute_nyse_notional()
+        if raw is None:
+            return None
+        if float(raw) < leg_min:
+            self._log_deploy_skip(
+                "stat_arb",
+                "leg_min_notional",
+                extra=f"raw={float(raw):.2f} min={leg_min:.2f}",
+            )
+            return None
+        return raw
 
     def spy_position_value(self):
         return self.spy_sleeve_value()
@@ -574,7 +796,12 @@ class AlpacaExecutor:
         if qty > 0:
             mv = qty * price
             sell_notional = min(reduce_notional, mv)
-            if sell_notional < self._min_notional():
+            min_n = self._min_notional()
+            if sell_notional < min_n:
+                if config.paper_aggressive_context() and mv <= min_n * 3:
+                    return self.execute_full_exit(
+                        symbol, reason=reason or "dust_exit", sleeve=sleeve
+                    )
                 return None
             if is_crypto_sym:
                 sell_qty = min(qty, sell_notional / price)
@@ -647,6 +874,8 @@ class AlpacaExecutor:
         if qty == 0 or price <= 0:
             return None
         if qty > 0:
+            mv = round(qty * price, 2)
+            min_n = self._min_notional()
             if is_crypto_sym:
                 order = MarketOrderRequest(
                     symbol=formatted_symbol,
@@ -654,10 +883,18 @@ class AlpacaExecutor:
                     side=OrderSide.SELL,
                     time_in_force=tif,
                 )
+            elif mv < min_n:
+                # Sub-min equity exits: qty market (notional orders reject or leave dust).
+                order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    qty=str(qty),
+                    side=OrderSide.SELL,
+                    time_in_force=tif,
+                )
             else:
                 order = MarketOrderRequest(
                     symbol=formatted_symbol,
-                    notional=round(qty * price, 2),
+                    notional=mv,
                     side=OrderSide.SELL,
                     time_in_force=tif,
                 )
@@ -715,6 +952,7 @@ class AlpacaExecutor:
                     and (
                         config.effective_equity_pairs_enabled()
                         or config.effective_stat_arb_enabled()
+                        or config.effective_opportunistic_short_enabled()
                     )
                 )
                 if not short_open_ok:
@@ -723,12 +961,42 @@ class AlpacaExecutor:
         self._cancel_open_orders_for(symbol)
 
         target_notional = notional if notional is not None else self.compute_notional()
+        if target_notional is not None and not is_crypto_sym:
+            target_notional = self._atr_adjust_notional(symbol, target_notional)
         if is_crypto_sym and side_lower == "buy":
             target_notional = deployment_sizing.apply_alpaca_crypto_fee_reserve(
                 target_notional, equity=self._account_equity()
             )
         if target_notional is None or target_notional < self._min_notional():
             return None
+        if side_lower == "buy" and config.paper_aggressive_context():
+            from modules.paper_risk_controls import cap_per_name_buy_notional
+
+            equity = self._account_equity()
+            positions: dict[str, float] = {}
+            prices: dict[str, float] = {}
+            for p in self._get_positions():
+                sym = config.normalize_symbol(p.symbol)
+                positions[sym] = float(p.qty)
+                px = float(p.current_price or p.avg_entry_price or 0)
+                if px > 0:
+                    prices[sym] = px
+            pos = self._find_position(symbol)
+            if pos is not None:
+                sym = config.normalize_symbol(symbol)
+                px = float(pos.current_price or pos.avg_entry_price or 0)
+                if px > 0:
+                    prices[sym] = px
+            target_notional = cap_per_name_buy_notional(
+                symbol=symbol,
+                side=side,
+                notional=target_notional,
+                equity=equity,
+                prices=prices,
+                positions=positions,
+            )
+            if target_notional is None or target_notional < self._min_notional():
+                return None
 
         order_side = OrderSide.BUY if side_lower == "buy" else OrderSide.SELL
         order = MarketOrderRequest(
@@ -785,7 +1053,7 @@ class AlpacaExecutor:
             dry_run=dry_run,
             max_notional=max_notional
             if max_notional is not None
-            else DEFAULT_DUST_MAX_NOTIONAL,
+            else config.effective_dust_max_notional(),
             max_qty=max_qty if max_qty is not None else DEFAULT_DUST_MAX_QTY,
             symbols=symbols,
         )

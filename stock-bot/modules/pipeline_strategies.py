@@ -58,8 +58,8 @@ def _calendar_day_key(now=None, data=None) -> str:
             from pandas import Timestamp
 
             return Timestamp(ts).date().isoformat()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("pipeline soft-fail: %s", exc)
     if isinstance(now, (int, float)) and data is not None and hasattr(data, "index"):
         try:
             idx = int(now)
@@ -70,8 +70,8 @@ def _calendar_day_key(now=None, data=None) -> str:
                 from pandas import Timestamp
 
                 return Timestamp(ts).date().isoformat()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("pipeline soft-fail: %s", exc)
     return datetime.now().date().isoformat()
 
 
@@ -188,8 +188,8 @@ def _nyse_journal_entered_today(symbol: str, now=None, data=None) -> bool:
     try:
         if config.backtest_paper_sleeves_context():
             return False
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("pipeline soft-fail: %s", exc)
     try:
         import pandas as pd
         from modules.paper_journal import ENTRY_EVENTS, journal_paths, normalize_journal_df, read_journal

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import config
+
+logger = logging.getLogger(__name__)
 
 _WEAK_REGIME_LETTERS = frozenset({"B", "D", "E"})
 
@@ -68,8 +72,8 @@ def effective_regime_sizing_multiplier(
                 from modules.markov_regime import hmm_sizing_multiplier
 
                 mult = round(mult * float(hmm_sizing_multiplier()), 3)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("regime sizing soft-fail: %s", exc)
         return mult
     from modules.pipeline_strategies import regime_soft_pause_sizing_multiplier
 

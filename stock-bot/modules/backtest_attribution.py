@@ -1047,7 +1047,7 @@ def format_stat_arb_banner(attribution: dict | None) -> str | None:
         contrib = 0.0
     stat_sleeve = sleeves.get("stat_arb") or {}
     line = (
-        f"Stat Arb v1.5.2: {pairs} pairs ({fill:.0f}% fill, {contrib:.0f}% equity PnL) "
+        f"Stat Arb v1.5.4 quality: {pairs} pairs ({fill:.0f}% fill, {contrib:.0f}% equity PnL) "
         f"PnL ${stat_pnl:+.2f} (real ${realized:+.2f}) | win {stat_sleeve.get('win_rate_pct', 0):.0f}% "
         f"| avg Z {sa.get('avg_entry_z', 0):.2f} | avg hold {sa.get('avg_hold_bars', 0):.0f}b"
     )

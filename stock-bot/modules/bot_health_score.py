@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from modules.bot_health import calculate_health_score, gather_health_context
+from modules.bot_health import calculate_health_score, gather_health_context, _clamp_score, _grade
 
 
 def compute_bot_health_score(
@@ -35,16 +35,11 @@ def compute_bot_health_score(
         notes = list(result.get("notes") or [])
         notes.append(f"Stale heartbeat ({heartbeat_age_min:.0f}m)")
         adj = float(result["score"]) - 8
-        result["score"] = max(0, min(100, int(round(adj))))
-        result["grade"] = (
-            "Excellent"
-            if result["score"] >= 85
-            else "Good"
-            if result["score"] >= 70
-            else "Fair"
-            if result["score"] >= 50
-            else "Needs attention"
-        )
+        result["score"] = _clamp_score(adj)
+        result["grade"] = _grade(result["score"])
+        from modules.bot_health import health_color
+
+        result["color"] = health_color(result["score"])
         result["notes"] = notes
 
     m30 = metrics_30d or {}

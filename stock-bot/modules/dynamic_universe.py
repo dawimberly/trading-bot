@@ -394,8 +394,8 @@ def prefetch_screener_price_data(
         from modules.data_loader import clear_close_matrix_cache
 
         clear_close_matrix_cache()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("dyn universe soft-fail: %s", exc)
     return out
 
 
@@ -522,8 +522,8 @@ def maybe_refresh_screener_universe(
                     "prefetch": pref,
                     **screener_universe_meta(),
                 }
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("dyn universe soft-fail: %s", exc)
         return {
             "action": "failed",
             "error": str(exc),

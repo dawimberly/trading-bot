@@ -64,6 +64,26 @@ def crypto_trading_allowed(
                 "reason": "regime_paused",
             }
 
+        if config.effective_crypto_regime_filter():
+            from modules.pipeline_strategies import PAUSED_REGIMES
+
+            if reg == "RHYME_B: Panic_Volatility":
+                return {
+                    "allowed": False,
+                    "vol": vol,
+                    "regime": reg,
+                    "spacex_override": False,
+                    "reason": "bearish_regime",
+                }
+            if reg == "RHYME_E: Steady_Bearish_Decline":
+                return {
+                    "allowed": False,
+                    "vol": vol,
+                    "regime": reg,
+                    "spacex_override": False,
+                    "reason": "bearish_regime",
+                }
+
         if not config.effective_crypto_vol_only():
             return {
                 "allowed": True,

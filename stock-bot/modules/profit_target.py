@@ -254,12 +254,22 @@ def run_profit_target_exits(
                 eq = float(executor._get_account().equity)
             except Exception:
                 eq = 0.0
+            exit_kw = {}
+            try:
+                if config.effective_paper_momentum_quality_fixes():
+                    exit_kw["exit_reason"] = "take_profit"
+                    from modules.position_exits import _position_entry_hour_et
+
+                    exit_kw["entry_hour"] = _position_entry_hour_et(pos)
+            except Exception as exc:
+                logger.debug("profit target soft-fail: %s", exc)
             journal.log_exit(
                 symbol,
                 "sell",
                 f"profit_trailing {pnl:.2%}",
                 eq,
                 journal_path=journal_path,
+                **exit_kw,
             )
         logger.info(
             "profit_target exit %s pnl=%.2f%% trail=%.0f%%",

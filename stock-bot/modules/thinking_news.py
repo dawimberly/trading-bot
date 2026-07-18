@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEDULE_STATE_FILE = ROOT / "thinking_news_schedule.json"
 NEWS_CACHE_FILE = ROOT / "thinking_news_cache.json"
 MANUAL_NEWS_FILE = ROOT / "thinking_news_manual.txt"
-ET = ZoneInfo("America/New_York")
+EASTERN_TZ = ZoneInfo("America/New_York")
 
 # Lightweight Google News RSS (no API key)
 RSS_FEEDS = (
@@ -645,7 +645,7 @@ def _save_schedule_state(state: dict) -> None:
 
 def due_news_slot(now_et: datetime.datetime | None = None) -> str | None:
     """Return premarket/postmarket slot due today (max 2/day), or None."""
-    now_et = now_et or datetime.datetime.now(ET)
+    now_et = now_et or datetime.datetime.now(EASTERN_TZ)
     today = now_et.date().isoformat()
     state = _schedule_state()
     if state.get("date") != today:
@@ -665,7 +665,7 @@ def due_news_slot(now_et: datetime.datetime | None = None) -> str | None:
 
 def mark_slot_started(slot: str) -> None:
     state = _schedule_state()
-    today = datetime.datetime.now(ET).date().isoformat()
+    today = datetime.datetime.now(EASTERN_TZ).date().isoformat()
     if state.get("date") != today:
         state = {"date": today, "runs": [], "in_progress": None}
     state["in_progress"] = slot
@@ -674,7 +674,7 @@ def mark_slot_started(slot: str) -> None:
 
 def mark_slot_completed(slot: str) -> None:
     state = _schedule_state()
-    today = datetime.datetime.now(ET).date().isoformat()
+    today = datetime.datetime.now(EASTERN_TZ).date().isoformat()
     if state.get("date") != today:
         state = {"date": today, "runs": [], "in_progress": None}
     runs = list(state.get("runs") or [])

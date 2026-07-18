@@ -529,13 +529,20 @@ def atr_adjust_notional(
 
 
 def atr_stop_price(data, symbol: str, *, side: str = "long") -> float | None:
-    """Implied stop level at ATR_RISK_MULTIPLE from last price."""
+    """Implied stop level at ATR_STOP_MULTIPLIER (fallback ATR_RISK_MULTIPLE) from last price."""
     sym = config.normalize_symbol(symbol)
     atr = calculate_atr(data, sym)
     px = _symbol_price(data, sym)
     if atr is None or px is None:
         return None
-    dist = atr * float(getattr(config, "ATR_RISK_MULTIPLE", 2.0))
+    mult = float(
+        getattr(
+            config,
+            "ATR_STOP_MULTIPLIER",
+            getattr(config, "ATR_RISK_MULTIPLE", 2.0),
+        )
+    )
+    dist = atr * mult
     if str(side).lower() == "short":
         return round(px + dist, 2)
     return round(max(0.01, px - dist), 2)
@@ -718,7 +725,22 @@ def _conviction_regime_component(regime: str | None) -> float | None:
 
         hmm_c = hmm_conviction_component()
         if hmm_c is not None:
-            return round(0.65 * base + 0.35 * float(hmm_c), 4)
+            base = round(0.65 * base + 0.35 * float(hmm_c), 4)
+    except Exception:
+        pass
+    # Soft-trim conviction when GARCH forecast vol is elevated (does not re-apply
+    # the full risk_per_trade multiplier — that path already sizes dollars).
+    try:
+        if config.effective_garch_vol_enabled():
+            from modules.garch_vol import garch_vol_size_multiplier
+
+            g = float(garch_vol_size_multiplier())
+            blend = float(getattr(config, "GARCH_VOL_CONVICTION_BLEND", 0.35) or 0.35)
+            blend = max(0.0, min(1.0, blend))
+            if blend > 0 and g < 0.999:
+                # Map size mult [min,1] → conviction tilt toward lower score.
+                tilted = base * (1.0 + blend * (g - 1.0))
+                base = round(max(0.0, min(1.0, tilted)), 4)
     except Exception:
         pass
     return base

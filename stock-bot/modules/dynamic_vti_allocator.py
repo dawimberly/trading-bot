@@ -56,6 +56,9 @@ class VtiAllocatorContext:
     hmm_vti_adj_pp: float | None = None
     hmm_predicted: str | None = None
     hmm_confidence: float | None = None
+    garch_vti_adj_pp: float | None = None
+    garch_size_mult: float | None = None
+    garch_ratio: float | None = None
 
 
 @dataclass
@@ -218,6 +221,28 @@ def build_vti_allocator_context(
         except Exception as exc:
             logger.debug("HMM VTI driver unavailable: %s", exc)
 
+    if config.effective_garch_vol_enabled():
+        try:
+            from modules.garch_vol import (
+                get_garch_vol_state,
+                garch_vol_vti_adjustment_pp,
+                update_garch_vol,
+            )
+
+            st = get_garch_vol_state()
+            if not st.ok and data is not None:
+                st = update_garch_vol(data)
+            if st.ok:
+                ctx.garch_vti_adj_pp = float(
+                    st.vti_adj_pp if st.vti_adj_pp is not None else garch_vol_vti_adjustment_pp()
+                )
+                ctx.garch_size_mult = float(st.size_mult)
+                ctx.garch_ratio = float(st.ratio) if st.ratio is not None else None
+            else:
+                ctx.garch_vti_adj_pp = float(garch_vol_vti_adjustment_pp())
+        except Exception as exc:
+            logger.debug("GARCH VTI driver unavailable: %s", exc)
+
     if bubble_score_100 is None and data is not None and regime:
         try:
             from modules.bubble_risk import compute_bubble_risk
@@ -373,10 +398,23 @@ def _driver_points(ctx: VtiAllocatorContext) -> tuple[float, list[tuple[float, s
             from modules.markov_regime import hmm_vti_adjustment_pp
 
             hmm_adj = hmm_vti_adjustment_pp()
-        except Exception:
+        except Exception as exc:
+            logger.debug("HMM VTI soft-signal skipped: %s", exc)
             hmm_adj = None
     if hmm_adj is not None and abs(float(hmm_adj)) >= 0.5:
         scored.append((float(hmm_adj), "HMM next-regime"))
+
+    garch_adj = ctx.garch_vti_adj_pp
+    if garch_adj is None:
+        try:
+            from modules.garch_vol import garch_vol_vti_adjustment_pp
+
+            garch_adj = garch_vol_vti_adjustment_pp()
+        except Exception as exc:
+            logger.debug("GARCH VTI soft-signal skipped: %s", exc)
+            garch_adj = None
+    if garch_adj is not None and abs(float(garch_adj)) >= 0.5:
+        scored.append((float(garch_adj), "GARCH vol forecast"))
 
     net = sum(pt for pt, _ in scored)
     ranked = sorted(scored, key=lambda row: abs(row[0]), reverse=True)
@@ -413,6 +451,16 @@ def compute_smart_vti_core_pct(
     base = _vol_stress_base_pct(ctx.vol_score, ctx.volatility, ctx.macro_stress)
     adj_pp, ranked = _driver_points(ctx)
     raw = base + (adj_pp / 100.0)
+    # Daily profit banking: park more in VTI/cash for the rest of the day.
+    try:
+        from modules.daily_profit_banking import daily_bank_vti_boost_pp
+
+        bank_pp = float(daily_bank_vti_boost_pp())
+        if bank_pp:
+            raw += bank_pp / 100.0
+            ranked = list(ranked) + [(bank_pp, f"banked +{bank_pp:.0f}pp VTI")]
+    except Exception as exc:
+        logger.debug("daily bank VTI boost skipped: %s", exc)
     floor = float(config.DYNAMIC_VTI_PAPER_FLOOR)
     ceiling = float(config.DYNAMIC_VTI_PAPER_CEILING)
     pct = max(floor, min(ceiling, raw))

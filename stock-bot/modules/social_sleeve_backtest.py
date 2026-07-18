@@ -93,10 +93,26 @@ def run_social_backtest_day(
     """
     Rebalance paper social sleeve (GLD / XLE / SPY / cash) on one daily bar.
     Uses zero equity commission; separate portfolio from main fund.
+    When dynamically disabled, flat to cash (sell held sleeve symbols).
     """
     actions: list[dict] = []
     meta = {"target": None, "reason": "disabled", "score": agg.get("score")}
-    if not config.effective_social_sleeve_enabled() or not market_open:
+    if not market_open:
+        return actions, meta
+
+    if not config.effective_social_sleeve_enabled():
+        # Wind down residual sleeve inventory when dynamic gate turns off.
+        for sym in _social_symbols_held(portfolio):
+            qty = portfolio.positions.get(sym, 0)
+            if qty <= 0:
+                continue
+            price = float(prices[sym])
+            sell_n = round(qty * price, 2)
+            if sell_n > 0:
+                order = portfolio.trade(sym, "sell", price, tx_cost=0.0, notional=sell_n)
+                if order:
+                    actions.append({"action": "sell", "symbol": sym, "notional": sell_n})
+        meta["reason"] = "dynamic_off_flatten"
         return actions, meta
 
     target_raw, reason = resolve_social_target(agg, log=False)
