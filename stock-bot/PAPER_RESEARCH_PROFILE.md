@@ -1,10 +1,14 @@
-# Paper / Research Profile (Realistic Research v1.5.4 — **OFFICIALLY LOCKED**)
+# Paper / Research Profile (Realistic Research v1.5.4 — **FINAL LOCK**)
 
 **Audience:** Profile B — `alpaca_paper` / `--paper-aggressive` research book only. Live Profile A unchanged.
+
+**Status:** Final lock for Monday / production-ready paper. Do not invent version bumps past **1.5.4**.
 
 **Version:** `REALISTIC_RESEARCH_VERSION = "1.5.4"` (locked in `config.py` via `enforce_realistic_research_profile()`)
 
 **Tagline:** `v1.5.4 — Sector-Aware Portfolio Constructor`
+
+**Locked stack (confirm at startup):** GARCH paper ON / live OFF · Smart Dynamic VTI ON (35–75%) · Daily Profit Banking ON · RHYME primary · HMM soft-only (`MARKOV_HMM_PRIMARY_REGIME=false`)
 
 ```
 >>> PAPER BOT: Realistic Research v1.5.4 (Aggressive) | v1.5.4 — Sector-Aware Portfolio Constructor | Live Bot: Conservative 85% VTI
@@ -201,15 +205,16 @@ flag misconfiguration. Per-cycle banner + heartbeat block in `run_all.py`; per-b
 
 ---
 
-## Monday prep commands (v1.5.4 locks)
+## Monday prep commands (v1.5.4 final lock)
 
-Confirm before open (or Sunday night):
+Confirm before open (or Sunday night) — production-ready paper checklist:
 
 | Lock | Expected |
 |------|----------|
 | Version | `REALISTIC_RESEARCH_VERSION=1.5.4` / banner `v1.5.4 — Sector-Aware Portfolio Constructor` |
 | Regime | **RHYME primary**; `MARKOV_HMM_PRIMARY_REGIME=false` (HMM soft only) |
 | GARCH | Paper **ON** / live **OFF** (`GARCH_VOL_LIVE_ENABLED=false`) |
+| Dynamic VTI | **ON** 35–75% |
 | Daily Banking | Paper **ON** (≥0.8% → risk ×0.4); live off |
 | Portfolio constructor | ON (paper aggressive only) |
 

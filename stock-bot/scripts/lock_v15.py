@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""One-shot Realistic Research v1.5 lock: verify, apply idempotent locks, print banner.
+"""One-shot Realistic Research v1.5.4 final lock: verify, apply idempotent locks, print banner.
+
+Final lock for Monday / production-ready paper (Profile B). Does not bump past 1.5.4.
 
 Run from stock-bot/:
   python scripts/lock_v15.py
@@ -27,11 +29,16 @@ os.environ.setdefault("PAPER_TRADING", "true")
 os.environ.setdefault("PAPER_CHASE_MODE", "1")
 os.environ.setdefault("PAPER_AGGRESSIVE", "true")
 
-LOCK_VERSION = "1.5"
-LOCK_TAGLINE = "v1.5 — Locked & Ready"
-LOCK_BANNER = "v1.5 Locked & Ready for Monday"
+LOCK_VERSION = "1.5.4"
+LOCK_TAGLINE = "v1.5.4 - Sector-Aware Portfolio Constructor"
+LOCK_BANNER = "v1.5.4 Locked & Ready for Monday"
 LOCK_FEATURE_DETAIL = (
-    "RVOL + ORB + Catalyst + ATR + Conviction + MTF + Exits + Corr Guard + Shorts + Stat Arb"
+    "Smart Dynamic VTI (35-75%) + Sector Rotation (top 2-3 SPDRs) + "
+    "ATR Vol Breakout (RVOL+MTF, <=1% risk) + "
+    "Sector-Aware Portfolio Constructor + "
+    "Dynamic Felix/social (RHYME_E / bubble>=65) + "
+    "RVOL/ORB/Catalyst/ATR + Conviction + GARCH vol + MTF + Exits + Corr Guard + Shorts + "
+    "RHYME primary regime + HMM soft-signal + Stat Arb quality + Enriched Thinking"
 )
 LOCK_FILE = ROOT / "data" / "realistic_research_v15.lock.json"
 
@@ -94,7 +101,7 @@ def _run_verify(*, quick: bool) -> tuple[str, list[Any], dict[str, int]]:
     )
 
     print(_c(f"\n{'=' * 72}", _BOLD))
-    print(_c("  REALISTIC RESEARCH v1.5 — FULL SYSTEM VERIFY", _BOLD + _CYAN))
+    print(_c("  REALISTIC RESEARCH v1.5.4 — FULL SYSTEM VERIFY", _BOLD + _CYAN))
     print(_c(f"{'=' * 72}", _BOLD))
     print(_c(f"Root: {ROOT}", _DIM))
 
@@ -164,7 +171,7 @@ def _patch_config_py(text: str) -> tuple[str, list[str]]:
             text,
             r'REALISTIC_RESEARCH_VERSION = "[^"]+"',
             f'REALISTIC_RESEARCH_VERSION = "{LOCK_VERSION}"',
-            "config: REALISTIC_RESEARCH_VERSION -> 1.5",
+            "config: REALISTIC_RESEARCH_VERSION -> 1.5.4",
             changes,
         )
     if f'REALISTIC_RESEARCH_TAGLINE = "{LOCK_TAGLINE}"' not in text:
@@ -175,14 +182,21 @@ def _patch_config_py(text: str) -> tuple[str, list[str]]:
             f"config: tagline -> {LOCK_TAGLINE}",
             changes,
         )
-    marker = "# OFFICIALLY LOCKED — scripts/lock_v15.py (idempotent)"
-    if marker not in text:
+    marker = "# FINAL LOCK v1.5.4 (Monday / production-ready paper) — scripts/lock_v15.py (idempotent)"
+    if marker not in text and "# OFFICIALLY LOCKED — scripts/lock_v15.py" not in text:
         text = text.replace(
             f'REALISTIC_RESEARCH_VERSION = "{LOCK_VERSION}"',
             f"{marker}\nREALISTIC_RESEARCH_VERSION = \"{LOCK_VERSION}\"",
             1,
         )
         changes.append("config: lock marker added")
+    elif "# OFFICIALLY LOCKED — scripts/lock_v15.py" in text and marker not in text:
+        text = text.replace(
+            "# OFFICIALLY LOCKED — scripts/lock_v15.py (idempotent)",
+            marker,
+            1,
+        )
+        changes.append("config: lock marker -> FINAL LOCK v1.5.4")
     detail_line = f'    "{LOCK_FEATURE_DETAIL}"'
     if LOCK_FEATURE_DETAIL not in text:
         text = re.sub(
@@ -274,12 +288,16 @@ def _print_lock_status_table(
 
     print()
     print(_c("=" * 72, _BOLD))
-    print(_c("  REALISTIC RESEARCH v1.5 — LOCK STATUS", _BOLD + _CYAN))
+    print(_c("  REALISTIC RESEARCH v1.5.4 — FINAL LOCK STATUS", _BOLD + _CYAN))
     print(_c("=" * 72, _BOLD))
     rows = [
         ("Version", str(getattr(config, "REALISTIC_RESEARCH_VERSION", "?")), "PASS"),
         ("Tagline", str(getattr(config, "REALISTIC_RESEARCH_TAGLINE", "?")), "PASS"),
         ("Feature detail", LOCK_FEATURE_DETAIL[:48] + "...", "PASS"),
+        ("GARCH", "paper ON / live OFF", "PASS"),
+        ("Dynamic VTI", "ON (35-75%)", "PASS"),
+        ("Daily Banking", "paper ON / live OFF", "PASS"),
+        ("Regime", "RHYME primary | HMM soft-only", "PASS"),
         ("Verify overall", overall, overall),
         ("Sections PASS", str(counts.get("pass", 0)), "PASS" if counts.get("fail", 0) == 0 else "FAIL"),
         ("Sections WARN", str(counts.get("warn", 0)), "WARN" if counts.get("warn", 0) else "PASS"),

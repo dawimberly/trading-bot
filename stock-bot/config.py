@@ -436,7 +436,8 @@ MA_WINDOW = 45
 #   4. ATR Sizing — volatility-based notional (14d ATR, 2.0× stop, 4% per-trade cap)
 # Carries forward v1.4: tuned shorts 8–18%, sector shorts, dynamic core 63d, insider boosts,
 # stat arb 10–14 pairs (RR 1.6:1), tail-risk vol ceiling, sector screener expansion.
-# OFFICIALLY LOCKED — scripts/lock_v15.py (idempotent)
+# FINAL LOCK v1.5.4 (Monday / production-ready paper) — scripts/lock_v15.py (idempotent)
+# Do not invent version bumps past 1.5.4 without an explicit research decision.
 REALISTIC_RESEARCH_VERSION = "1.5.4"
 REALISTIC_RESEARCH_PROFILE_VERSION = REALISTIC_RESEARCH_VERSION
 REALISTIC_RESEARCH_TAGLINE = "v1.5.4 - Sector-Aware Portfolio Constructor"
@@ -3734,15 +3735,15 @@ def _env_explicit(*keys: str) -> bool:
 
 
 def enforce_realistic_research_profile() -> None:
-    """Re-apply Realistic Research v1.5 locks (.env overrides win).
+    """Re-apply Realistic Research v1.5.4 final locks (.env overrides win).
 
-    Final paper default (Profile B / alpaca_paper). Locked stack:
+    Final Monday / production-ready paper default (Profile B / alpaca_paper). Locked stack:
     - Scanners: RVOL, ORB, Catalyst, ATR sizing
     - Sizing: conviction (0.4x-1.8x), multi-timeframe confirmation, correlation guard
     - Exits: partial @1R, dynamic trail, time-based max hold
     - Insider monitor + signal boosts + risk guard
     - Protective + sector shorts (8-18% gross, RR 1.6)
-    - Stat arb 10-14 pairs, Smart Dynamic VTI (default), tail-risk vol ceiling
+    - Stat arb quality (8-12 pairs), Smart Dynamic VTI ON (35-75%), tail-risk vol ceiling
     - Regime: RHYME primary locked; Markov HMM soft-signal only (primary OFF)
     - GARCH(1,1) vol sizing locked paper ON / live OFF (unless GARCH_VOL_LIVE_ENABLED)
     - Daily Profit Banking paper ON / live OFF

@@ -162,7 +162,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 
 ## What's New in v1.5
 
-**Realistic Research v1.5.4** is the official locked paper default (`REALISTIC_RESEARCH_VERSION = "1.5.4"`). Startup banners show **`v1.5.4 — Sector-Aware Portfolio Constructor`**; run **`Lock_v15.bat`** for the Monday-ready sign-off banner.
+**Realistic Research v1.5.4** is the **final lock** for Monday / production-ready paper (`REALISTIC_RESEARCH_VERSION = "1.5.4"`). Startup banners show **`v1.5.4 — Sector-Aware Portfolio Constructor`**; run **`Lock_v15.bat`** for the Monday-ready sign-off banner. Do not invent version bumps past 1.5.4.
 
 | Layer | v1.5.4 lock |
 |-------|-------------|
@@ -193,7 +193,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 
 ## Monday Ready (daily routine)
 
-Use this sequence before market open (or Sunday night for autonomous overnight). Confirms **Realistic Research v1.5.4 locks**: RHYME primary, GARCH paper ON / live OFF, Daily Banking, HMM soft-only.
+Use this sequence before market open (or Sunday night for autonomous overnight). Confirms **Realistic Research v1.5.4 final lock**: RHYME primary, Dynamic VTI ON, GARCH paper ON / live OFF, Daily Banking, HMM soft-only.
 
 | Step | Command | Purpose |
 |------|---------|---------|
