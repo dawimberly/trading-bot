@@ -743,6 +743,20 @@ def _conviction_regime_component(regime: str | None) -> float | None:
                 base = round(max(0.0, min(1.0, tilted)), 4)
     except Exception:
         pass
+    # Optional ARIMA / hybrid: soft-lift conviction when size mult ≠ 1
+    # (hybrid already vol-scales mean; GARCH conviction trim above stays separate).
+    try:
+        if config.effective_arima_enabled():
+            from modules.arima_forecast import arima_size_multiplier
+
+            a = float(arima_size_multiplier())
+            blend = float(getattr(config, "ARIMA_CONVICTION_BLEND", 0.25) or 0.25)
+            blend = max(0.0, min(1.0, blend))
+            if blend > 0 and abs(a - 1.0) > 1e-6:
+                tilted = base * (1.0 + blend * (a - 1.0))
+                base = round(max(0.0, min(1.0, tilted)), 4)
+    except Exception:
+        pass
     return base
 
 
@@ -867,10 +881,24 @@ def get_conviction_based_notional(
     base_risk_pct = float(base_risk_pct)
     base_notional = round(equity * base_risk_pct, 2)
     if not config.effective_conviction_sizing_enabled():
+        if symbol:
+            try:
+                from modules.dynamic_vti_allocator import spy_like_size_boost
+
+                return round(base_notional * float(spy_like_size_boost(symbol, data)), 2)
+            except Exception:
+                pass
         return base_notional
 
     scale = conviction_scale(conviction_score)
     notional = round(base_notional * scale, 2)
+    if symbol:
+        try:
+            from modules.dynamic_vti_allocator import spy_like_size_boost
+
+            notional = round(notional * float(spy_like_size_boost(symbol, data)), 2)
+        except Exception:
+            pass
     max_pct = float(getattr(config, "ATR_MAX_SIZE_PCT", 0.04))
     notional = min(notional, round(equity * max_pct, 2))
     notional = min(notional, config.effective_max_notional_per_order(equity))
@@ -899,11 +927,27 @@ def scale_notional_by_conviction(
     ``scale_band`` overrides the global conviction scale range (used by stat-arb
     pairs for a tighter 0.6x–1.4x band).
     """
-    if notional is None or not config.effective_conviction_sizing_enabled():
+    if notional is None:
+        return notional
+    if not config.effective_conviction_sizing_enabled():
+        if symbol:
+            try:
+                from modules.dynamic_vti_allocator import spy_like_size_boost
+
+                return round(float(notional) * float(spy_like_size_boost(symbol, data)), 2)
+            except Exception:
+                pass
         return notional
     equity = float(equity)
     scale = conviction_scale(conviction_score, scale_band=scale_band)
     scaled = round(float(notional) * scale, 2)
+    if symbol:
+        try:
+            from modules.dynamic_vti_allocator import spy_like_size_boost
+
+            scaled = round(scaled * float(spy_like_size_boost(symbol, data)), 2)
+        except Exception:
+            pass
     min_n = config.effective_min_notional(equity)
     max_pct = float(getattr(config, "ATR_MAX_SIZE_PCT", 0.04))
     scaled = min(scaled, round(equity * max_pct, 2))

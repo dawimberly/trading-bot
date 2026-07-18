@@ -575,6 +575,22 @@ def main():
         except Exception as exc:
             _warn_nonfatal("GARCH vol forecast", exc)
 
+    if config.effective_arima_enabled():
+        try:
+            from modules.arima_forecast import (
+                format_arima_forecast_banner,
+                update_arima_forecast,
+            )
+            from modules.pipeline_strategies import load_pipeline_data
+
+            _adata = load_pipeline_data()
+            update_arima_forecast(_adata)
+            arima_banner = format_arima_forecast_banner()
+            if arima_banner and _main_cycle_count <= 2:
+                print(f"--- {arima_banner} ---")
+        except Exception as exc:
+            _warn_nonfatal("ARIMA mean forecast", exc)
+
     if dl_tripped:
         logger.warning(
             "DAILY LOSS CIRCUIT: %s - no new entries or thinking tilts today",

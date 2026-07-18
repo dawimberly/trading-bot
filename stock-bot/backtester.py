@@ -985,6 +985,24 @@ def _resolve_backtest_vti_pct(
     insider_state: dict | None = None,
 ) -> float:
     if paper_aggressive and config.PAPER_DYNAMIC_VTI_ENABLED:
+        if data is not None or regime is not None:
+            try:
+                from modules.dynamic_vti_allocator import (
+                    build_vti_allocator_context,
+                    compute_smart_vti_core_pct,
+                )
+
+                ctx = build_vti_allocator_context(
+                    data=data,
+                    regime=regime,
+                    vol_score=vol_score,
+                    volatility=volatility,
+                    macro_stress=macro_stress_flag,
+                    insider_state=insider_state,
+                )
+                return float(compute_smart_vti_core_pct(equity, ctx).pct)
+            except Exception:
+                pass
         return config.clamp_paper_vti_core(
             config.get_vti_core_pct(
                 equity,
@@ -1446,6 +1464,13 @@ def run_backtest(
             reset_garch_vol_state()
         except Exception:
             pass
+    if config.effective_arima_enabled():
+        try:
+            from modules.arima_forecast import reset_arima_forecast_state
+
+            reset_arima_forecast_state()
+        except Exception:
+            pass
     if config.effective_smart_stops_enabled():
         try:
             from modules.smart_atr_stops import reset_smart_stop_stats
@@ -1601,6 +1626,13 @@ def run_backtest(
                     garch_high_vol_days = garch_high_vol_day_count()
                 except Exception:
                     pass
+            if config.effective_arima_enabled():
+                try:
+                    from modules.arima_forecast import update_arima_forecast
+
+                    update_arima_forecast(window)
+                except Exception:
+                    pass
             if config.effective_daily_bank_enabled():
                 try:
                     from modules.daily_profit_banking import (
@@ -1726,6 +1758,16 @@ def run_backtest(
                     from modules.garch_vol import update_garch_vol
 
                     update_garch_vol(window)
+                except Exception:
+                    pass
+            if (
+                config.effective_arima_enabled()
+                and not paper_aggressive
+            ):
+                try:
+                    from modules.arima_forecast import update_arima_forecast
+
+                    update_arima_forecast(window)
                 except Exception:
                     pass
             vti_core_pct = _resolve_backtest_vti_pct(

@@ -3,6 +3,9 @@
 Floor/ceiling are sourced from ``config`` (``DYNAMIC_VTI_PAPER_FLOOR`` /
 ``DYNAMIC_VTI_PAPER_CEILING``) at decision time so runtime enforcement and
 env overrides are always respected.
+
+Optional VTI (paper-first): when SPY-like confluence is strong, the effective
+floor may drop to ``DYNAMIC_VTI_FLOOR_MIN`` (~20%) or 0% if allow-zero is on.
 """
 
 from __future__ import annotations
@@ -59,6 +62,9 @@ class VtiAllocatorContext:
     garch_vti_adj_pp: float | None = None
     garch_size_mult: float | None = None
     garch_ratio: float | None = None
+    spy_like_strength: float | None = None
+    spy_like_hits: int = 0
+    spy_like_scored: int = 0
 
 
 @dataclass
@@ -68,6 +74,7 @@ class VtiAllocationDecision:
     adjustment_pp: float
     drivers: list[str] = field(default_factory=list)
     detail: dict[str, Any] = field(default_factory=dict)
+    floor: float = 0.35
 
 
 def get_last_vti_allocation_decision() -> dict[str, Any] | None:
@@ -166,6 +173,130 @@ def _regime_conviction(regime: str | None) -> float | None:
         if "RHYME_B" in reg or "PANIC" in reg:
             return 0.15
         return 0.50
+
+
+def _strong_rvol(symbol: str, data) -> bool:
+    try:
+        from modules.volume_analysis import calculate_rvol
+
+        rvol = calculate_rvol(data, symbol)
+        if rvol is None:
+            return False
+        return float(rvol) >= float(config.RVOL_MOMENTUM_BOOST_THRESHOLD)
+    except Exception:
+        return False
+
+
+def _strong_orb(symbol: str, data) -> bool:
+    try:
+        from modules.orb_strategy import calculate_opening_range
+        from modules.volume_analysis import calculate_rvol
+
+        or_info = calculate_opening_range(
+            data, symbol, minutes=int(getattr(config, "ORB_BREAKOUT_MINUTES", 30))
+        )
+        if not or_info or not or_info.get("breakout_up"):
+            return False
+        rvol = calculate_rvol(data, symbol)
+        return rvol is not None and float(rvol) >= float(config.ORB_RVOL_MIN)
+    except Exception:
+        return False
+
+
+def _strong_catalyst(symbol: str, data) -> bool:
+    try:
+        from modules.catalyst_scoring import score_catalysts
+
+        row = score_catalysts(data, symbol)
+        score = float(row.get("score") or 0)
+        boost_at = float(getattr(config, "CATALYST_MIN_SCORE", 65))
+        try:
+            boost_at = max(boost_at, float(os.getenv("CATALYST_BOOST_SCORE", "70")))
+        except Exception:
+            pass
+        return score >= boost_at
+    except Exception:
+        return False
+
+
+def _strong_insider(symbol: str) -> bool:
+    if not config.effective_insider_signal_boost_enabled():
+        return False
+    try:
+        from modules.insider_signal_handler import momentum_rank_boost
+
+        return float(momentum_rank_boost(symbol)) > 0.0
+    except Exception:
+        return False
+
+
+def score_spy_like_confluence(symbol: str, data=None) -> dict[str, Any]:
+    """RVOL + ORB + Catalyst + insider confluence for one SPY-like name (0–1)."""
+    sym = config.normalize_symbol(symbol)
+    flags = {
+        "rvol": bool(data is not None and _strong_rvol(sym, data)),
+        "orb": bool(data is not None and _strong_orb(sym, data)),
+        "catalyst": bool(data is not None and _strong_catalyst(sym, data)),
+        "insider": _strong_insider(sym),
+    }
+    hits = sum(1 for v in flags.values() if v)
+    need = max(1, int(getattr(config, "SPY_LIKE_CONFLUENCE_MIN", 3)))
+    strength = round(hits / 4.0, 4)
+    return {
+        "symbol": sym,
+        "flags": flags,
+        "hits": hits,
+        "strength": strength,
+        "confluent": hits >= need,
+    }
+
+
+def compute_spy_like_universe_strength(data=None) -> dict[str, Any]:
+    """Portfolio-level SPY-like strength (mean of per-name confluence scores)."""
+    universe = list(config.spy_like_universe())
+    if not universe:
+        return {"strength": 0.0, "hits": 0, "scored": 0, "names": []}
+    rows: list[dict[str, Any]] = []
+    for sym in universe:
+        if data is not None and not getattr(data, "empty", True):
+            cols = {str(c).upper() for c in data.columns}
+            if sym not in cols and f"{sym}-USD" not in cols:
+                continue
+        row = score_spy_like_confluence(sym, data)
+        rows.append(row)
+    if not rows:
+        return {"strength": 0.0, "hits": 0, "scored": 0, "names": []}
+    strength = sum(float(r["strength"]) for r in rows) / len(rows)
+    confluent = [r for r in rows if r.get("confluent")]
+    if confluent:
+        strength = max(strength, sum(float(r["strength"]) for r in confluent) / len(rows))
+    return {
+        "strength": round(min(1.0, strength), 4),
+        "hits": len(confluent),
+        "scored": len(rows),
+        "names": [r["symbol"] for r in confluent[:5]],
+    }
+
+
+def spy_like_size_boost(symbol: str | None, data=None) -> float:
+    """Conservative 1.05–1.2x size mult for SPY-like names with strong confluence."""
+    if not symbol or not config.effective_spy_like_boost_enabled():
+        return 1.0
+    if not config.is_spy_like_symbol(symbol):
+        return 1.0
+    row = score_spy_like_confluence(symbol, data)
+    if not row.get("confluent"):
+        return 1.0
+    base = float(getattr(config, "SPY_LIKE_BOOST_MULT", 1.10))
+    hits = int(row.get("hits") or 0)
+    lo = float(getattr(config, "SPY_LIKE_BOOST_MULT_MIN", 1.05))
+    hi = float(getattr(config, "SPY_LIKE_BOOST_MULT_MAX", 1.20))
+    span = max(0.01, hi - lo)
+    t = min(1.0, max(0.0, (hits - 3) / 1.0))
+    mult = lo + span * (0.5 + 0.5 * t) if hits >= 3 else 1.0
+    if hits >= 4:
+        mult = max(mult, base)
+    return config.clamp_spy_like_boost_mult(mult)
 
 
 def build_vti_allocator_context(
@@ -284,6 +415,15 @@ def build_vti_allocator_context(
         except Exception as exc:
             logger.debug("insider boost snapshot unavailable for VTI allocator: %s", exc)
 
+    if config.effective_dynamic_vti_optional() or config.effective_spy_like_boost_enabled():
+        try:
+            spy_like = compute_spy_like_universe_strength(data)
+            ctx.spy_like_strength = float(spy_like.get("strength") or 0.0)
+            ctx.spy_like_hits = int(spy_like.get("hits") or 0)
+            ctx.spy_like_scored = int(spy_like.get("scored") or 0)
+        except Exception as exc:
+            logger.debug("SPY-like strength unavailable for VTI allocator: %s", exc)
+
     return ctx
 
 
@@ -297,7 +437,7 @@ def _driver_points(ctx: VtiAllocatorContext) -> tuple[float, list[tuple[float, s
          POSITIVE points push toward MORE VTI (defensive/passive), NEGATIVE
          points push toward LESS VTI (favor active sleeves). Magnitude = conviction.
       3. Nothing else changes: ``net`` sums all points and the final pct is clamped
-         to [DYNAMIC_VTI_PAPER_FLOOR, DYNAMIC_VTI_PAPER_CEILING] by the caller, and
+         to [effective floor, DYNAMIC_VTI_PAPER_CEILING] by the caller, and
          the top-3 labels by |points| are surfaced as the banner drivers.
     """
     scored: list[tuple[float, str]] = []
@@ -416,6 +556,16 @@ def _driver_points(ctx: VtiAllocatorContext) -> tuple[float, list[tuple[float, s
     if garch_adj is not None and abs(float(garch_adj)) >= 0.5:
         scored.append((float(garch_adj), "GARCH vol forecast"))
 
+    # SPY-like confluence: favor active sleeves / optional lower VTI floor.
+    spy_str = ctx.spy_like_strength
+    if spy_str is not None and config.effective_dynamic_vti_optional():
+        if spy_str >= float(getattr(config, "SPY_LIKE_STRENGTH_ALLOW_ZERO", 0.85)):
+            scored.append((-18.0, "SPY-like confluence (optional VTI)"))
+        elif spy_str >= float(getattr(config, "SPY_LIKE_STRENGTH_REDUCE_FLOOR", 0.60)):
+            scored.append((-12.0, "strong SPY-like signals"))
+        elif spy_str >= 0.40:
+            scored.append((-6.0, "firm SPY-like signals"))
+
     net = sum(pt for pt, _ in scored)
     ranked = sorted(scored, key=lambda row: abs(row[0]), reverse=True)
     return net, ranked
@@ -461,7 +611,7 @@ def compute_smart_vti_core_pct(
             ranked = list(ranked) + [(bank_pp, f"banked +{bank_pp:.0f}pp VTI")]
     except Exception as exc:
         logger.debug("daily bank VTI boost skipped: %s", exc)
-    floor = float(config.DYNAMIC_VTI_PAPER_FLOOR)
+    floor = float(config.resolve_dynamic_vti_floor(ctx.spy_like_strength))
     ceiling = float(config.DYNAMIC_VTI_PAPER_CEILING)
     pct = max(floor, min(ceiling, raw))
 
@@ -479,6 +629,7 @@ def compute_smart_vti_core_pct(
         base_pct=round(base, 4),
         adjustment_pp=round(adj_pp, 2),
         drivers=drivers[:3],
+        floor=round(floor, 4),
         detail={
             "nyse_momentum": ctx.nyse_momentum,
             "metal_momentum": ctx.metal_momentum,
@@ -489,6 +640,11 @@ def compute_smart_vti_core_pct(
             "regime_conviction": ctx.regime_conviction,
             "vti_vs_spy_momentum": ctx.vti_vs_spy_momentum,
             "sector_regime_score": ctx.sector_regime_score,
+            "spy_like_strength": ctx.spy_like_strength,
+            "spy_like_hits": ctx.spy_like_hits,
+            "spy_like_scored": ctx.spy_like_scored,
+            "effective_floor": round(floor, 4),
+            "optional_vti": config.effective_dynamic_vti_optional(),
         },
     )
     global _last_decision
@@ -497,6 +653,7 @@ def compute_smart_vti_core_pct(
         "base_pct": decision.base_pct,
         "adjustment_pp": decision.adjustment_pp,
         "drivers": list(decision.drivers),
+        "floor": decision.floor,
         "detail": dict(decision.detail),
     }
     return decision
@@ -504,10 +661,18 @@ def compute_smart_vti_core_pct(
 
 def format_dynamic_vti_banner(pct: float, drivers: list[str] | None = None) -> str:
     labels = [d for d in (drivers or []) if d]
+    floor_note = ""
+    last = _last_decision or {}
+    eff_floor = last.get("floor")
+    if (
+        eff_floor is not None
+        and float(eff_floor) < float(config.DYNAMIC_VTI_PAPER_FLOOR) - 1e-9
+    ):
+        floor_note = f" [floor {float(eff_floor):.0%}]"
     if labels:
         driver_text = " + ".join(labels[:3])
-        return f"Smart Dynamic VTI {pct:.0%} — {driver_text}"
-    return f"Smart Dynamic VTI {pct:.0%} — vol/stress baseline"
+        return f"Smart Dynamic VTI {pct:.0%}{floor_note} — {driver_text}"
+    return f"Smart Dynamic VTI {pct:.0%}{floor_note} — vol/stress baseline"
 
 
 def format_startup_smart_vti_banner(

@@ -1,4 +1,4 @@
-"""Best Paper Bot v3.2 — Realistic Research v1.4 (locked default for alpaca_paper)."""
+"""Best Paper Bot v3.3 — Realistic Research v1.5.4 (locked default for alpaca_paper)."""
 
 
 
@@ -10,11 +10,11 @@ import os
 
 
 
-BEST_PAPER_VERSION = "3.2"
+BEST_PAPER_VERSION = "3.3"
 
-REALISTIC_RESEARCH_VERSION = "1.4"
+REALISTIC_RESEARCH_VERSION = "1.5.4"
 
-BEST_PAPER_PROFILE = "realistic_research_v1.4"
+BEST_PAPER_PROFILE = "realistic_research_v1.5.4"
 
 BEST_PAPER_DISPLAY_NAME = f"Best Paper Bot v{BEST_PAPER_VERSION} (Realistic Research v{REALISTIC_RESEARCH_VERSION})"
 
@@ -40,7 +40,7 @@ PRODUCTION_SAFETY = {
 
 
 
-# Core ON — Realistic Research v1.4 (tail risk + Stat Arb 10-14p + dynamic core + sector shorts)
+# Core ON — Realistic Research v1.5 (v1.4 stack + RVOL/ORB/Catalyst/ATR scanners)
 
 BEST_PAPER_CORE_ON: dict[str, bool] = {
 
@@ -300,7 +300,8 @@ def apply_best_paper_config() -> None:
 def get_validated_defaults_line() -> str:
     return (
         f"Validated defaults: Realistic Research v{REALISTIC_RESEARCH_VERSION} | "
-        "v1.4 — improved shorts + Stat Arb | dynamic core 30-50% | sector shorts 8-15% | tail risk ON"
+        "Smart Dynamic VTI 35-75% | RVOL + ORB + Catalyst + ATR | "
+        "Tuned Shorts + Sector + Insider | Stat Arb 10-14p | tail risk ON"
     )
 
 
@@ -323,7 +324,8 @@ def get_v22_config_summary_lines() -> list[str]:
         f"=== Realistic Research v{REALISTIC_RESEARCH_VERSION} (paper aggressive) ===",
         f"  ON: {', '.join(on) if on else '—'}",
         f"  OFF: {', '.join(off) if off else '—'}",
-        "  Core: dynamic VTI/SPY 30-50% | Stat Arb v1.4 (10-14p, RR 1.6) | shorts 8-15% + sector",
+        "  Core: Smart Dynamic VTI 35-75% (NYSE/metals, insider, bubble, regime) | "
+        "Stat Arb v1.5 | RVOL/ORB/Catalyst/ATR | tuned shorts 8-18% + sector + insider",
     ]
 
 
@@ -331,7 +333,7 @@ def get_restart_commands_block() -> list[str]:
     return [
         "=== Restart bots ===",
         "Live: python run_all.py",
-        "Paper: python run_paper_bot.py  (Realistic Research v1.4 — improved shorts + Stat Arb)",
+        "Paper: python run_paper_bot.py  (Realistic Research v1.5.4 — Smart Dynamic VTI + Portfolio Constructor + RVOL/ORB/Catalyst/ATR)",
     ]
 
 

@@ -280,7 +280,7 @@ def run_metals_backtest(
                 continue
 
             ts = data.index[i]
-            regime, vol, paused, sizing_mult = resolve_backtest_regime(
+            regime, vol, paused, sizing_mult, _classified = resolve_backtest_regime(
                 window,
                 ts,
                 monthly_web,
@@ -430,7 +430,7 @@ def run_fresh_capital_backtest(
                 continue
 
             ts = data.index[i]
-            regime, vol, paused, sizing_mult = resolve_backtest_regime(
+            regime, vol, paused, sizing_mult, _classified = resolve_backtest_regime(
                 window,
                 ts,
                 monthly_web,

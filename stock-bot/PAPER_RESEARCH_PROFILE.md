@@ -26,7 +26,7 @@
 
 | Feature | Default | Env keys |
 |---------|---------|----------|
-| **Smart Dynamic VTI core** | **35–75%** multi-signal allocator (default ON), now sector-regime-aware | `PAPER_DYNAMIC_VTI=true`, `DYNAMIC_VTI_PAPER_FLOOR`, `DYNAMIC_VTI_PAPER_CEILING` |
+| **Smart Dynamic VTI core** | **35–75%** multi-signal allocator (default ON); optional floor →20%/0% on SPY-like strength | `PAPER_DYNAMIC_VTI=true`, `DYNAMIC_VTI_PAPER_FLOOR`, `DYNAMIC_VTI_OPTIONAL_ENABLED`, `SPY_LIKE_UNIVERSE` |
 | **Portfolio constructor** | Sector-regime tilts on active sleeve / stat arb / short willingness (default ON) | `PORTFOLIO_CONSTRUCTOR_ENABLED`, `PORTFOLIO_ACTIVE_SLEEVE_MULT_FLOOR/CEILING`, `PORTFOLIO_STAT_ARB_MULT_FLOOR/CEILING`, `PORTFOLIO_SHORT_WILLINGNESS_FLOOR/CEILING` |
 | **RVOL Scanner** | ON, min **2.0×**, boost @ **2.5×** | `RVOL_SCANNER_ENABLED`, `RVOL_MIN_THRESHOLD`, `RVOL_MOMENTUM_BOOST_THRESHOLD` |
 | **ORB Scanner** | ON, **30m** range, RVOL ≥ **2.0×** | `ORB_ENABLED`, `ORB_BREAKOUT_MINUTES`, `ORB_RVOL_MIN` |
@@ -52,6 +52,7 @@
 | **Time-of-day analysis** | Session buckets (open / first_30m / mid_morning / midday / last_hour / close) — win rate, Sharpe, Stat Arb edges. Feeds Markov soft-signals. Live off. | `TIME_OF_DAY_ANALYSIS`, `TIME_OF_DAY_LIVE_ENABLED` |
 | **Daily Profit Banking** | Bank when day gain ≥**0.8%**; risk **×0.4** + VTI boost for rest of day; reset **30m after open**. Live off. | `DAILY_BANK_ENABLED`, `DAILY_BANK_THRESHOLD_PCT`, `DAILY_BANK_RISK_MULT` |
 | **GARCH vol sizing** | **Locked paper ON / live OFF.** GARCH(1,1) next-day σ → size **×0.55–1.0** + VTI nudge (high vol → smaller; default never sizes up). 365d lock rationale: ON beat OFF (~+1.06pp return, +0.04 Sharpe, MaxDD ≈ flat). | `GARCH_VOL_ENABLED`, `GARCH_VOL_LIVE_ENABLED`, `GARCH_VOL_MULT_*`, `GARCH_VOL_VTI_*` |
+| **ARIMA / ARIMA–GARCH hybrid** | **Optional** (default **OFF**). ARIMA mean sign → boost **×1.08**; with `ARIMA_GARCH_HYBRID=true` (default when ARIMA on), high GARCH vol **scales down** the mean excess (does not re-multiply full GARCH size). Cap 1.15 / floor 0.55. Paper only; live off. | `ARIMA_ENABLED`, `ARIMA_GARCH_HYBRID`, `ARIMA_WINDOW`, `ARIMA_BOOST_MULT` |
 | **Smart ATR Stops** | Default **2.0×** ATR stop; at **−5%** unrealized: high conviction (RVOL>2.5 / catalyst>70 / insider cluster) → tighten **1.0×**, else cut size **50%**; at **−10%** hard full exit. Live off. | `PAPER_SMART_STOPS`, `ATR_STOP_MULTIPLIER`, `ATR_TIGHTEN_MULTIPLIER`, `STOP_LOSS_REEVAL_PCTS` |
 
 ### Dynamic Felix / social sleeve (paper)
@@ -138,6 +139,31 @@ Also nudges Dynamic VTI (+pp when elevated; tiny cut when calm, capped) and soft
 - Banner: `>>> GARCH Vol: ON locked paper (σ̂/anchor … → size x…, VTI …pp) <<<`
 - Lock line: `>>> GARCH vol lock: paper ON | live OFF (GARCH_VOL_LIVE_ENABLED=false) <<<`
 
+### Optional ARIMA / ARIMA–GARCH hybrid (paper; default OFF)
+
+`modules/arima_forecast.py` fits **statsmodels** ARIMA on a rolling window of daily **log returns** (stationarity-friendly vs close levels). Default order **(1,0,1)** with fallback **(1,1,1)**; if both fail, uses the last return. Next-step **mean forecast sign** is a soft directional signal:
+
+| Forecast | Mean mult (defaults) |
+|----------|----------------------|
+| **> 0** | **×1.08** (cap **1.15** via `ARIMA_MULT_MAX`) |
+| **≤ 0** | **×1.0** (neutral — no size-up; set `ARIMA_NEG_MULT` e.g. `0.97` for slight dampen) |
+
+**Hybrid** (`ARIMA_GARCH_HYBRID=true`, default when ARIMA is on): combines mean direction with GARCH vol awareness without stacking GARCH twice.
+
+| Mode | Combine |
+|------|---------|
+| GARCH already in `effective_risk_per_trade` | `size = clamp(1 + (mean_mult − 1) × vol_scale, 0.55, 1.15)` where `vol_scale` maps GARCH σ̂/anchor ratio (low→1.0, high→0.0) |
+| GARCH off / no state | `size = mean_mult` |
+
+Applied on the same paths as before: `effective_risk_per_trade` (momentum + Stat Arb notional) and a soft conviction-regime blend (`ARIMA_CONVICTION_BLEND=0.25`). Set `ARIMA_GARCH_HYBRID=false` for pure mean-only ARIMA (legacy A/B).
+
+**Optional — not locked.** Default `ARIMA_ENABLED=false`. Live always off unless `ARIMA_LIVE_ENABLED=true`. Enforce does **not** turn it on.
+
+- Enable (paper): `ARIMA_ENABLED=true` in `.env` (or portal paper env)
+- Config: `ARIMA_WINDOW=252`, `ARIMA_GARCH_HYBRID=true`, `ARIMA_BOOST_MULT=1.08`
+- Smoke: `python -m pytest tests/test_arima_forecast.py -q`
+- Banner (when enabled): `>>> ARIMA–GARCH hybrid: ON optional paper (fc … → size x…) <<<`
+
 ### Smart ATR Stops (paper)
 
 `modules/smart_atr_stops.py` sets a default **2.0× ATR** protective stop on new tactical longs. At **−5%** unrealized: high conviction (RVOL > 2.5 OR catalyst > 70 OR insider cluster) tightens to **1.0× ATR**; otherwise size is cut **50%** with the stop kept on the remainder. At **−10%**: hard full exit (no exceptions). Live stays off unless `SMART_STOPS_LIVE_ENABLED`.
@@ -159,7 +185,20 @@ python backtester.py --days 90 --paper-aggressive --compare-felix-dynamic
 
 Replaces the legacy 63d Sharpe VTI/SPY picker and locked SPY@40% slice on paper research.
 
-**Range:** 35–75% VTI (`DYNAMIC_VTI_PAPER_FLOOR` → `DYNAMIC_VTI_PAPER_CEILING`)
+**Range:** 35–75% VTI normally (`DYNAMIC_VTI_PAPER_FLOOR` → `DYNAMIC_VTI_PAPER_CEILING`)
+
+**Optional VTI floor (paper-first, v1.5.4):** VTI is not mandatory at 35%+. When **SPY-like**
+confluence is strong (RVOL + ORB + Catalyst + insider on `SPY_LIKE_UNIVERSE`), the effective
+floor can drop to `DYNAMIC_VTI_FLOOR_MIN` (~20%) or **0%** if `DYNAMIC_VTI_ALLOW_ZERO` /
+`VTI_OPTIONAL` is on (Realistic Research enforce default). Live keeps the higher floor unless
+`DYNAMIC_VTI_OPTIONAL_LIVE=true`. This is **not** locked as mandatory — disable with
+`DYNAMIC_VTI_OPTIONAL_ENABLED=false`.
+
+**SPY-like boost (paper-first):** names in
+`SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO` get a conservative **1.05–1.2×**
+size mult when ≥`SPY_LIKE_CONFLUENCE_MIN` (default 3) of RVOL/ORB/Catalyst/insider fire.
+Wired into conviction sizing (`get_conviction_based_notional` / `scale_notional_by_conviction`).
+Live off unless `SPY_LIKE_BOOST_LIVE_ENABLED=true`.
 
 **Drivers (weighted):**
 
@@ -173,8 +212,10 @@ Replaces the legacy 63d Sharpe VTI/SPY picker and locked SPY@40% slice on paper 
 | Macro stress / elevated vol | Higher VTI (defensive baseline) |
 | Regime conviction + VTI vs SPY momentum | Fine-tune within range |
 | **Sector regime score (v1.5.4)** | Broad/strong sector breadth → lower VTI; narrow/weak breadth → higher VTI |
+| **SPY-like confluence (optional floor)** | Strong → lower floor (20% or 0%) + lower VTI target |
 
-Startup prints current target % and top 3 drivers. Per-cycle banner + heartbeat `dynamic_vti` block in `run_all.py`.
+Startup prints current target % and top 3 drivers (banner notes reduced floor when active).
+Per-cycle banner + heartbeat `dynamic_vti` block in `run_all.py`.
 
 **Disable for the legacy fixed 80/20 split is still available with `PAPER_DYNAMIC_VTI=false` + `PAPER_VTI_CORE_PCT=0.80`.
 
@@ -262,6 +303,12 @@ python -u backtester.py --compare-dynamic-vti --days 365 --no-thinking > backtes
 | `PAPER_DYNAMIC_VTI` | `true` (default) |
 | `DYNAMIC_VTI_PAPER_FLOOR` | `0.35` |
 | `DYNAMIC_VTI_PAPER_CEILING` | `0.75` |
+| `DYNAMIC_VTI_OPTIONAL_ENABLED` | `true` (paper; live off unless `DYNAMIC_VTI_OPTIONAL_LIVE`) |
+| `DYNAMIC_VTI_ALLOW_ZERO` | `true` under Realistic Research enforce (alias `VTI_OPTIONAL`) |
+| `DYNAMIC_VTI_FLOOR_MIN` | `0.20` |
+| `SPY_LIKE_UNIVERSE` | `SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO` |
+| `SPY_LIKE_BOOST_ENABLED` | `true` (paper; live off unless `SPY_LIKE_BOOST_LIVE_ENABLED`) |
+| `SPY_LIKE_BOOST_MULT` | `1.10` (clamped 1.05–1.20) |
 | `CORE_ALLOCATOR_LOCKED` | `false` (Smart VTI replaces locked SPY@40%) |
 | `PORTFOLIO_CONSTRUCTOR_ENABLED` | `true` (default) |
 | `PORTFOLIO_ACTIVE_SLEEVE_MULT_FLOOR` / `_CEILING` | `0.85` / `1.15` |
@@ -284,6 +331,8 @@ python -u backtester.py --compare-dynamic-vti --days 365 --no-thinking > backtes
 | `GARCH_VOL_ENABLED` | `true` (**locked** paper ON) |
 | `GARCH_VOL_LIVE_ENABLED` | `false` (live OFF unless opt-in) |
 | `GARCH_VOL_MULT_MIN` / `_MAX` | `0.55` / `1.0` |
+| `ARIMA_ENABLED` | `false` (**optional** — set `true` to enable paper hybrid/boost) |
+| `ARIMA_GARCH_HYBRID` | `true` (when ARIMA on: vol-aware mean; no double GARCH) |
 
 `.env` overrides win — only set keys you intend to change.
 
@@ -299,6 +348,12 @@ REALISTIC_RESEARCH_VERSION=1.5.4
 PAPER_DYNAMIC_VTI=true
 DYNAMIC_VTI_PAPER_FLOOR=0.35
 DYNAMIC_VTI_PAPER_CEILING=0.75
+DYNAMIC_VTI_OPTIONAL_ENABLED=true
+DYNAMIC_VTI_ALLOW_ZERO=true
+DYNAMIC_VTI_FLOOR_MIN=0.20
+SPY_LIKE_UNIVERSE=SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO
+SPY_LIKE_BOOST_ENABLED=true
+SPY_LIKE_BOOST_MULT=1.10
 CORE_ALLOCATOR_LOCKED=false
 PORTFOLIO_CONSTRUCTOR_ENABLED=true
 RVOL_SCANNER_ENABLED=true
@@ -319,6 +374,11 @@ GARCH_VOL_ENABLED=true
 GARCH_VOL_LIVE_ENABLED=false
 GARCH_VOL_MULT_MIN=0.55
 GARCH_VOL_MULT_MAX=1.0
+# Optional ARIMA / ARIMA–GARCH hybrid (default off):
+# ARIMA_ENABLED=true
+# ARIMA_GARCH_HYBRID=true
+# ARIMA_WINDOW=252
+# ARIMA_BOOST_MULT=1.08
 ```
 
 ---

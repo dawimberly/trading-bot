@@ -771,6 +771,39 @@ PAPER_HALT_RECOVERY_RISK_MULT = float(os.getenv("PAPER_HALT_RECOVERY_RISK_MULT",
 PAPER_HALT_RECOVERY_CLEAR_PCT = float(os.getenv("PAPER_HALT_RECOVERY_CLEAR_PCT", "0.03"))
 DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.35"))
 DYNAMIC_VTI_PAPER_CEILING = float(os.getenv("DYNAMIC_VTI_PAPER_CEILING", "0.75"))
+# Optional VTI floor reduction when SPY-like confluence is strong (paper-first).
+# Normal floor stays DYNAMIC_VTI_PAPER_FLOOR (~35%); reduced floor / zero only when strength clears thresholds.
+DYNAMIC_VTI_OPTIONAL_ENABLED = _env_bool_first(
+    "DYNAMIC_VTI_OPTIONAL_ENABLED", "VTI_OPTIONAL_FLOOR", default="true"
+)
+DYNAMIC_VTI_ALLOW_ZERO = _env_bool_first(
+    "DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL", default="false"
+)
+DYNAMIC_VTI_FLOOR_MIN = float(os.getenv("DYNAMIC_VTI_FLOOR_MIN", "0.20"))
+_DEFAULT_SPY_LIKE_UNIVERSE = (
+    "SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO"
+)
+SPY_LIKE_UNIVERSE = tuple(
+    s.strip().upper()
+    for s in os.getenv("SPY_LIKE_UNIVERSE", _DEFAULT_SPY_LIKE_UNIVERSE).split(",")
+    if s.strip()
+)
+SPY_LIKE_BOOST_ENABLED = _env_bool_first(
+    "SPY_LIKE_BOOST_ENABLED", "PAPER_SPY_LIKE_BOOST_ENABLED", default="true"
+)
+SPY_LIKE_BOOST_LIVE_ENABLED = _parse_env_bool(
+    "SPY_LIKE_BOOST_LIVE_ENABLED", default="false"
+)
+SPY_LIKE_BOOST_MULT = float(os.getenv("SPY_LIKE_BOOST_MULT", "1.10"))
+SPY_LIKE_BOOST_MULT_MAX = float(os.getenv("SPY_LIKE_BOOST_MULT_MAX", "1.20"))
+SPY_LIKE_BOOST_MULT_MIN = float(os.getenv("SPY_LIKE_BOOST_MULT_MIN", "1.05"))
+SPY_LIKE_STRENGTH_REDUCE_FLOOR = float(
+    os.getenv("SPY_LIKE_STRENGTH_REDUCE_FLOOR", "0.60")
+)
+SPY_LIKE_STRENGTH_ALLOW_ZERO = float(
+    os.getenv("SPY_LIKE_STRENGTH_ALLOW_ZERO", "0.85")
+)
+SPY_LIKE_CONFLUENCE_MIN = int(os.getenv("SPY_LIKE_CONFLUENCE_MIN", "3"))
 # Paper aggressive dynamic VTI tiers (fund_config.get_vti_core_pct; live unchanged)
 DYNAMIC_VTI_STRESS_PCT = float(os.getenv("DYNAMIC_VTI_STRESS_PCT", "0.75"))
 DYNAMIC_VTI_DEFAULT_PCT = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.60"))
@@ -1724,6 +1757,29 @@ GARCH_VOL_VTI_MAX_PP = float(os.getenv("GARCH_VOL_VTI_MAX_PP", "6"))
 # Soft-trim weight on conviction regime component (risk_$ path already applies full mult).
 GARCH_VOL_CONVICTION_BLEND = float(os.getenv("GARCH_VOL_CONVICTION_BLEND", "0.35"))
 
+# --- Optional ARIMA mean / ARIMA–GARCH hybrid (paper-only; default OFF — not locked) ---
+# Rolling log-return ARIMA → next-step mean sign. Boost momentum/stat-arb size only
+# when forecast > 0 (conservative); negative → neutral (or slight dampen via NEG_MULT).
+# Enable on paper: ARIMA_ENABLED=true. Live stays off unless ARIMA_LIVE_ENABLED=true.
+# Hybrid (default when ARIMA on): scale mean boost by GARCH ratio — does NOT re-multiply
+# full garch_vol_size_multiplier when GARCH already applies in effective_risk_per_trade.
+ARIMA_ENABLED = _parse_env_bool("ARIMA_ENABLED", default="false")
+ARIMA_LIVE_ENABLED = _parse_env_bool("ARIMA_LIVE_ENABLED", default="false")
+ARIMA_GARCH_HYBRID = _parse_env_bool("ARIMA_GARCH_HYBRID", default="true")
+ARIMA_SYMBOL = os.getenv("ARIMA_SYMBOL", "SPY").strip().upper() or "SPY"
+ARIMA_WINDOW = int(os.getenv("ARIMA_WINDOW", os.getenv("ARIMA_LOOKBACK", "252")))
+ARIMA_LOOKBACK = ARIMA_WINDOW  # alias
+ARIMA_ORDER = os.getenv("ARIMA_ORDER", "1,0,1").strip() or "1,0,1"
+ARIMA_RETRAIN_EVERY_BARS = int(os.getenv("ARIMA_RETRAIN_EVERY_BARS", "5"))
+ARIMA_BOOST_MULT = float(os.getenv("ARIMA_BOOST_MULT", "1.08"))
+ARIMA_NEG_MULT = float(os.getenv("ARIMA_NEG_MULT", "1.0"))
+ARIMA_MULT_MAX = float(os.getenv("ARIMA_MULT_MAX", "1.15"))
+ARIMA_HYBRID_MULT_MIN = float(os.getenv("ARIMA_HYBRID_MULT_MIN", "0.55"))
+# Floor for vol_scale at high GARCH ratio (0 = fully neutralize mean excess).
+ARIMA_HYBRID_VOL_SCALE_FLOOR = float(os.getenv("ARIMA_HYBRID_VOL_SCALE_FLOOR", "0.0"))
+# Soft conviction regime tilt (risk_$ path already applies full size mult).
+ARIMA_CONVICTION_BLEND = float(os.getenv("ARIMA_CONVICTION_BLEND", "0.25"))
+
 # --- Smart ATR stops with conviction reevaluation (paper / research; live opt-in) ---
 PAPER_SMART_STOPS = _env_bool_first("PAPER_SMART_STOPS", "SMART_STOPS_ENABLED", default="true")
 SMART_STOPS_LIVE_ENABLED = _parse_env_bool("SMART_STOPS_LIVE_ENABLED", default="false")
@@ -2659,6 +2715,15 @@ def effective_risk_per_trade(
             from modules.garch_vol import garch_vol_size_multiplier
 
             base = round(base * float(garch_vol_size_multiplier()), 6)
+        except Exception:
+            pass
+    if effective_arima_enabled():
+        try:
+            # Hybrid (default): vol-scaled mean boost — does not re-apply full GARCH
+            # size mult (GARCH already applied above when enabled).
+            from modules.arima_forecast import arima_size_multiplier
+
+            base = round(base * float(arima_size_multiplier()), 6)
         except Exception:
             pass
     return base
@@ -3743,9 +3808,11 @@ def enforce_realistic_research_profile() -> None:
     - Exits: partial @1R, dynamic trail, time-based max hold
     - Insider monitor + signal boosts + risk guard
     - Protective + sector shorts (8-18% gross, RR 1.6)
-    - Stat arb quality (8-12 pairs), Smart Dynamic VTI ON (35-75%), tail-risk vol ceiling
+    - Stat arb quality (8-12 pairs), Smart Dynamic VTI ON (35-75%, optional floor on SPY-like),
+      tail-risk vol ceiling
     - Regime: RHYME primary locked; Markov HMM soft-signal only (primary OFF)
     - GARCH(1,1) vol sizing locked paper ON / live OFF (unless GARCH_VOL_LIVE_ENABLED)
+    - Optional ARIMA / ARIMA–GARCH hybrid paper OFF by default (ARIMA_ENABLED; live OFF)
     - Daily Profit Banking paper ON / live OFF
     - Bot health + per-strategy performance tracking
     - Heartbeat watchdog + auto-recovery (supervisor)
@@ -3757,6 +3824,10 @@ def enforce_realistic_research_profile() -> None:
     global REBALANCE_ENABLED
     global POSITIONING_OVERLAY_ENABLED
     global PAPER_DYNAMIC_VTI_ENABLED
+    global DYNAMIC_VTI_OPTIONAL_ENABLED
+    global DYNAMIC_VTI_ALLOW_ZERO
+    global DYNAMIC_VTI_FLOOR_MIN
+    global SPY_LIKE_BOOST_ENABLED
     global PAPER_VTI_CORE_PCT
     global VTI_CORE_PCT
     global PAPER_RISK_PER_TRADE
@@ -3930,6 +4001,19 @@ def enforce_realistic_research_profile() -> None:
     global GARCH_VOL_VTI_SCALE_PP
     global GARCH_VOL_VTI_MAX_PP
     global GARCH_VOL_CONVICTION_BLEND
+    global ARIMA_ENABLED
+    global ARIMA_LIVE_ENABLED
+    global ARIMA_GARCH_HYBRID
+    global ARIMA_WINDOW
+    global ARIMA_LOOKBACK
+    global ARIMA_ORDER
+    global ARIMA_RETRAIN_EVERY_BARS
+    global ARIMA_BOOST_MULT
+    global ARIMA_NEG_MULT
+    global ARIMA_MULT_MAX
+    global ARIMA_HYBRID_MULT_MIN
+    global ARIMA_HYBRID_VOL_SCALE_FLOOR
+    global ARIMA_CONVICTION_BLEND
     global PAPER_SMART_STOPS
     global ATR_STOP_MULTIPLIER
     global ATR_TIGHTEN_MULTIPLIER
@@ -3951,6 +4035,15 @@ def enforce_realistic_research_profile() -> None:
         POSITIONING_OVERLAY_ENABLED = False
     if not _env_explicit("PAPER_DYNAMIC_VTI", "PAPER_DYNAMIC_VTI_ENABLED"):
         PAPER_DYNAMIC_VTI_ENABLED = True
+    if not _env_explicit("DYNAMIC_VTI_OPTIONAL_ENABLED", "VTI_OPTIONAL_FLOOR"):
+        DYNAMIC_VTI_OPTIONAL_ENABLED = True
+    if not _env_explicit("DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL"):
+        # Optional VTI: paper may drop floor to 0% on strong SPY-like confluence.
+        DYNAMIC_VTI_ALLOW_ZERO = True
+    if not _env_explicit("DYNAMIC_VTI_FLOOR_MIN"):
+        DYNAMIC_VTI_FLOOR_MIN = 0.20
+    if not _env_explicit("SPY_LIKE_BOOST_ENABLED", "PAPER_SPY_LIKE_BOOST_ENABLED"):
+        SPY_LIKE_BOOST_ENABLED = True
     if not _env_explicit("PORTFOLIO_CONSTRUCTOR_ENABLED"):
         # Sector-aware sleeve/short tilts on top of Smart Dynamic VTI (v1.5.4, paper research).
         PORTFOLIO_CONSTRUCTOR_ENABLED = True
@@ -4363,6 +4456,32 @@ def enforce_realistic_research_profile() -> None:
         GARCH_VOL_VTI_MAX_PP = 6.0
     if not _env_explicit("GARCH_VOL_CONVICTION_BLEND"):
         GARCH_VOL_CONVICTION_BLEND = 0.35
+    # Optional ARIMA / hybrid — default OFF (not locked). Live stays off.
+    # Do not force ARIMA_ENABLED=true; operators opt in via env.
+    # Hybrid defaults ON when ARIMA is enabled (ARIMA_GARCH_HYBRID=true).
+    if not _env_explicit("ARIMA_LIVE_ENABLED"):
+        ARIMA_LIVE_ENABLED = False
+    if not _env_explicit("ARIMA_GARCH_HYBRID"):
+        ARIMA_GARCH_HYBRID = True
+    if not _env_explicit("ARIMA_WINDOW", "ARIMA_LOOKBACK"):
+        ARIMA_WINDOW = 252
+        ARIMA_LOOKBACK = 252
+    if not _env_explicit("ARIMA_ORDER"):
+        ARIMA_ORDER = "1,0,1"
+    if not _env_explicit("ARIMA_RETRAIN_EVERY_BARS"):
+        ARIMA_RETRAIN_EVERY_BARS = 5
+    if not _env_explicit("ARIMA_BOOST_MULT"):
+        ARIMA_BOOST_MULT = 1.08
+    if not _env_explicit("ARIMA_NEG_MULT"):
+        ARIMA_NEG_MULT = 1.0
+    if not _env_explicit("ARIMA_MULT_MAX"):
+        ARIMA_MULT_MAX = 1.15
+    if not _env_explicit("ARIMA_HYBRID_MULT_MIN"):
+        ARIMA_HYBRID_MULT_MIN = 0.55
+    if not _env_explicit("ARIMA_HYBRID_VOL_SCALE_FLOOR"):
+        ARIMA_HYBRID_VOL_SCALE_FLOOR = 0.0
+    if not _env_explicit("ARIMA_CONVICTION_BLEND"):
+        ARIMA_CONVICTION_BLEND = 0.25
     if not _env_explicit("PAPER_SMART_STOPS", "SMART_STOPS_ENABLED"):
         PAPER_SMART_STOPS = True
     if not _env_explicit("ATR_STOP_MULTIPLIER"):
@@ -4405,6 +4524,14 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_DYNAMIC_VTI_ENABLED": "true",
     "DYNAMIC_VTI_PAPER_FLOOR": "0.35",
     "DYNAMIC_VTI_PAPER_CEILING": "0.75",
+    "DYNAMIC_VTI_OPTIONAL_ENABLED": "true",
+    "DYNAMIC_VTI_ALLOW_ZERO": "true",
+    "DYNAMIC_VTI_FLOOR_MIN": "0.20",
+    "SPY_LIKE_UNIVERSE": (
+        "SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO"
+    ),
+    "SPY_LIKE_BOOST_ENABLED": "true",
+    "SPY_LIKE_BOOST_MULT": "1.10",
     "CORE_ALLOCATOR_LOCKED": "false",
     "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
     "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "300",
@@ -4638,6 +4765,18 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "GARCH_VOL_VTI_SCALE_PP": "8",
     "GARCH_VOL_VTI_MAX_PP": "6",
     "GARCH_VOL_CONVICTION_BLEND": "0.35",
+    # Optional ARIMA / hybrid — default OFF (opt-in via ARIMA_ENABLED=true on paper)
+    "ARIMA_ENABLED": "false",
+    "ARIMA_LIVE_ENABLED": "false",
+    "ARIMA_GARCH_HYBRID": "true",
+    "ARIMA_WINDOW": "252",
+    "ARIMA_ORDER": "1,0,1",
+    "ARIMA_BOOST_MULT": "1.08",
+    "ARIMA_NEG_MULT": "1.0",
+    "ARIMA_MULT_MAX": "1.15",
+    "ARIMA_HYBRID_MULT_MIN": "0.55",
+    "ARIMA_HYBRID_VOL_SCALE_FLOOR": "0.0",
+    "ARIMA_CONVICTION_BLEND": "0.25",
     "PAPER_SMART_STOPS": "true",
     "ATR_STOP_MULTIPLIER": "2.0",
     "ATR_TIGHTEN_MULTIPLIER": "1.0",
@@ -4886,6 +5025,14 @@ def format_realistic_research_startup_lines() -> list[str]:
                 ">>> GARCH vol lock: paper ON | live OFF "
                 "(GARCH_VOL_LIVE_ENABLED=false) <<<"
             )
+    except Exception:
+        pass
+    try:
+        from modules.arima_forecast import format_arima_forecast_banner
+
+        arima_line = format_arima_forecast_banner()
+        if arima_line:
+            lines.append(f">>> {arima_line} <<<")
     except Exception:
         pass
     try:
@@ -5238,9 +5385,14 @@ def effective_regime_dynamic_sizing() -> bool:
 
 def format_smart_dynamic_vti_lock_banner() -> str:
     """Static lock banner for Realistic Research paper-aggressive startup."""
+    opt = ""
+    if effective_dynamic_vti_optional():
+        zero = "->0%" if effective_dynamic_vti_allow_zero() else f"->{DYNAMIC_VTI_FLOOR_MIN:.0%}"
+        opt = f" | optional floor {DYNAMIC_VTI_PAPER_FLOOR:.0%}{zero} on SPY-like strength"
     return (
-        f">>> SMART DYNAMIC VTI DEFAULT — {DYNAMIC_VTI_PAPER_FLOOR:.0%}-{DYNAMIC_VTI_PAPER_CEILING:.0%} {VTI_CORE_SYMBOL} | "
-        "drivers: NYSE/metals momentum, insider clusters, bubble/Buffett, regime, VTI vs SPY"
+        f">>> SMART DYNAMIC VTI DEFAULT — {DYNAMIC_VTI_PAPER_FLOOR:.0%}-{DYNAMIC_VTI_PAPER_CEILING:.0%} {VTI_CORE_SYMBOL}"
+        f"{opt} | "
+        "drivers: NYSE/metals, insider, bubble/Buffett, regime, VTI vs SPY, SPY-like confluence"
     )
 
 
@@ -5258,15 +5410,19 @@ def paper_fixed_vti_ceiling() -> float | None:
     return float(PAPER_VTI_CORE_PCT)
 
 
-def clamp_paper_vti_core(pct: float) -> float:
-    """Clamp paper VTI core into the Smart Dynamic band when enabled, else fixed ceiling."""
+def clamp_paper_vti_core(pct: float, *, floor: float | None = None) -> float:
+    """Clamp paper VTI core into the Smart Dynamic band when enabled, else fixed ceiling.
+
+    ``floor`` overrides the normal ``DYNAMIC_VTI_PAPER_FLOOR`` (used when optional VTI
+    reduces the floor on strong SPY-like confluence).
+    """
     if PAPER_DYNAMIC_VTI_ENABLED and (
         paper_aggressive_context()
         or backtest_paper_sleeves_context()
         or paper_only_sleeves_active()
         or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
     ):
-        lo = float(DYNAMIC_VTI_PAPER_FLOOR)
+        lo = float(DYNAMIC_VTI_PAPER_FLOOR if floor is None else floor)
         hi = float(DYNAMIC_VTI_PAPER_CEILING)
         if hi < lo:
             lo, hi = hi, lo
@@ -5414,6 +5570,89 @@ def effective_rvol_scanner_enabled() -> bool:
         or is_realistic_research_active()
         or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
     )
+
+
+def spy_like_universe() -> frozenset[str]:
+    """Normalized SPY-like names eligible for confluence boost / optional VTI floor drop."""
+    return frozenset(normalize_symbol(s) for s in SPY_LIKE_UNIVERSE if s)
+
+
+def is_spy_like_symbol(symbol: str | None) -> bool:
+    if not symbol:
+        return False
+    return normalize_symbol(symbol) in spy_like_universe()
+
+
+def effective_dynamic_vti_optional() -> bool:
+    """Allow reduced/zero VTI floor on strong SPY-like confluence — paper ON; live OFF."""
+    if not DYNAMIC_VTI_OPTIONAL_ENABLED:
+        return False
+    if not PAPER_DYNAMIC_VTI_ENABLED:
+        return False
+    if PAPER_TRADING or backtest_paper_sleeves_context() or is_realistic_research_active():
+        return bool(
+            paper_aggressive_context()
+            or backtest_paper_sleeves_context()
+            or paper_only_sleeves_active()
+            or is_realistic_research_active()
+            or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
+        )
+    # Live: keep higher floor unless explicit opt-in via DYNAMIC_VTI_OPTIONAL_LIVE.
+    return _parse_env_bool("DYNAMIC_VTI_OPTIONAL_LIVE", default="false")
+
+
+def effective_dynamic_vti_allow_zero() -> bool:
+    """Permit 0% VTI floor when SPY-like strength is very high (paper-first)."""
+    if not effective_dynamic_vti_optional():
+        return False
+    if _env_explicit("DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL"):
+        return bool(DYNAMIC_VTI_ALLOW_ZERO)
+    # Paper / Realistic Research: allow zero by default when optional floor is on.
+    return bool(
+        paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or paper_only_sleeves_active()
+        or is_realistic_research_active()
+        or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
+    )
+
+
+def effective_spy_like_boost_enabled() -> bool:
+    """Conservative SPY-like size boost — paper ON; live OFF unless opt-in."""
+    if not SPY_LIKE_BOOST_ENABLED:
+        return False
+    if PAPER_TRADING or backtest_paper_sleeves_context() or is_realistic_research_active():
+        return bool(
+            paper_aggressive_context()
+            or backtest_paper_sleeves_context()
+            or paper_only_sleeves_active()
+            or is_realistic_research_active()
+            or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
+        )
+    return bool(SPY_LIKE_BOOST_LIVE_ENABLED)
+
+
+def resolve_dynamic_vti_floor(spy_like_strength: float | None = None) -> float:
+    """Effective VTI floor: normal ~35%, or reduced/zero when SPY-like strength is high."""
+    base = float(DYNAMIC_VTI_PAPER_FLOOR)
+    if not effective_dynamic_vti_optional():
+        return base
+    strength = float(spy_like_strength or 0.0)
+    if effective_dynamic_vti_allow_zero() and strength >= float(SPY_LIKE_STRENGTH_ALLOW_ZERO):
+        return 0.0
+    if strength >= float(SPY_LIKE_STRENGTH_REDUCE_FLOOR):
+        reduced = float(DYNAMIC_VTI_FLOOR_MIN)
+        # Keep reduced floor in a sensible 20–30% band unless allow-zero path already returned.
+        return max(0.0, min(base, reduced))
+    return base
+
+
+def clamp_spy_like_boost_mult(mult: float) -> float:
+    lo = float(SPY_LIKE_BOOST_MULT_MIN)
+    hi = float(SPY_LIKE_BOOST_MULT_MAX)
+    if hi < lo:
+        lo, hi = hi, lo
+    return round(min(hi, max(lo, float(mult))), 4)
 
 
 def effective_orb_enabled() -> bool:
@@ -6229,6 +6468,20 @@ def effective_garch_vol_enabled() -> bool:
     return bool(GARCH_VOL_LIVE_ENABLED)
 
 
+def effective_arima_enabled() -> bool:
+    """Optional ARIMA mean boost — paper only when ARIMA_ENABLED; live opt-in."""
+    if not ARIMA_ENABLED:
+        return False
+    if (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    ):
+        return True
+    return bool(ARIMA_LIVE_ENABLED)
+
+
 def effective_smart_stops_enabled() -> bool:
     """Smart ATR stops with reeval — paper / Realistic Research; live opt-in."""
     if not PAPER_SMART_STOPS:
@@ -6482,7 +6735,38 @@ def vti_core_allocation_pct(
         or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
     )
     if paper_agg and PAPER_DYNAMIC_VTI_ENABLED:
+        # Prefer the latest Smart Dynamic VTI decision (includes optional floor / SPY-like).
+        try:
+            from modules.dynamic_vti_allocator import get_last_vti_allocation_decision
+
+            last = get_last_vti_allocation_decision()
+            if last and last.get("pct") is not None:
+                return round(min(0.95, max(0.0, float(last["pct"]))), 6)
+        except Exception:
+            pass
         eq = equity if equity is not None and equity > 0 else (_account_equity or 0.0)
+        if eq > 0 and (data is not None or regime is not None):
+            try:
+                from modules.dynamic_vti_allocator import (
+                    build_vti_allocator_context,
+                    compute_smart_vti_core_pct,
+                )
+
+                ctx = build_vti_allocator_context(
+                    data=data,
+                    regime=regime,
+                    vol_score=vol_score,
+                    volatility=volatility,
+                    macro_stress=macro_stress,
+                    bubble_score_100=bubble_score_100,
+                    insider_state=insider_state,
+                )
+                return round(
+                    min(0.95, max(0.0, float(compute_smart_vti_core_pct(eq, ctx).pct))),
+                    6,
+                )
+            except Exception:
+                pass
         if eq > 0:
             pct = get_vti_core_pct(
                 eq,
