@@ -22,7 +22,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 No extra flags required — preflight and `status.py` confirm the stack.
 
-**Paper research** (`paper_aggressive`): **Best Paper Bot v2.2** — dynamic VTI, stat arb, vol overlay, options, overlap/chunk/co-fire **on**; macro/social/risk parity **off**. Thinking engine **opt-in** (`PAPER_THINKING_ENGINE_ENABLED=true`), non-blocking Ollama refresh. See [Profile B](#profile-b-best-paper-bot-v22-paper_aggressive), [Final recommended configuration](#final-recommended-configuration-lock-2026-06-19), and **[Research velocity profile](PAPER_RESEARCH_PROFILE.md)** (high order flow + stat arb/crypto attribution).
+**Paper research** (`paper_aggressive`): **Realistic Research v1.5.4** (locked) — RHYME primary / HMM soft, Dynamic VTI + optional floor, GARCH paper ON / live OFF, Daily Banking, Stat Arb quality; ARIMA optional OFF. See [What's New in v1.5](#whats-new-in-v15), [Profile B](#profile-b-realistic-research-v154-paper_aggressive), and **[Research velocity profile](PAPER_RESEARCH_PROFILE.md)**.
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -162,38 +162,36 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 
 ## What's New in v1.5
 
-**Realistic Research v1.5.4** is the **final lock** for Monday / production-ready paper (`REALISTIC_RESEARCH_VERSION = "1.5.4"`). Startup banners show **`v1.5.4 — Sector-Aware Portfolio Constructor`**; run **`Lock_v15.bat`** for the Monday-ready sign-off banner. Do not invent version bumps past 1.5.4.
+### v1.5.4 final summary (Monday / production-ready paper)
+
+**Realistic Research v1.5.4** is the **final lock** for production-ready paper (`REALISTIC_RESEARCH_VERSION = "1.5.4"`). Startup banners show **`v1.5.4 — Sector-Aware Portfolio Constructor`**; run **`Lock_v15.bat`** for the Monday-ready sign-off. Do not invent version bumps past 1.5.4.
+
+**Locked paper defaults (do not flip casually):**
 
 | Layer | v1.5.4 lock |
 |-------|-------------|
-| **RVOL scanner** | Min **2.0×** relative volume; momentum boost @ **2.5×** |
-| **ORB scanner** | **30m** opening range; RVOL ≥ **2.0×** for upside breakouts |
-| **Catalyst scoring** | Composite news/insider/RVOL/ORB score; min **65**, boost @ **70** |
-| **ATR sizing** | **14d** ATR, **2.0×** stop, **4%** per-trade cap |
-| **Conviction sizing** | **0.4×–1.8×** notional by signal strength (rolling metrics) |
-| **Multi-timeframe** | 5m / daily / weekly alignment ≥ **0.65** boosts entries |
-| **Exit optimization** | Partial @ **1R**, dynamic trail (**50%** arm / **35%** pullback), max **35** bars |
-| **Correlation guard** | Scale down when portfolio corr > **0.65** (floor **0.60×**) |
-| **Insider boosts** | SEC Form 4 clusters → NYSE momentum / stat arb / short context |
-| **Tuned shorts** | Protective **8–18%** gross, RR **1.6:1**, RHYME_E waiver, sector ETF shorts |
-| **Stat arb** | **8–12** pairs, corr ≥ **0.68**, coint **p &lt; 0.12**, Z **2.1–2.7**, RR **1.7:1**, trail **45%/30%**, partial@**1.2R**, hold 35b, 7% cap |
-| **Dynamic core** | **Smart Dynamic VTI 35–75%** + sector-aware portfolio constructor |
 | **Regime** | **RHYME primary locked**; HMM soft-signal only (`MARKOV_HMM_PRIMARY_REGIME=false`) |
-| **GARCH vol sizing** | **Locked** paper ON / live OFF — size ×**0.55–1.0** + VTI nudge |
+| **GARCH vol sizing** | **Paper ON / live OFF** — size ×**0.55–1.0** + VTI nudge (`GARCH_VOL_LIVE_ENABLED=false`) |
 | **Daily Profit Banking** | Bank ≥**0.8%** day gain → risk ×**0.4** + VTI nudge (paper ON; live off) |
-| **Tail risk** | Vol ceiling, DD tiers, RHYME_B sizing cuts, per-name **8%** cap |
-| **Bot Health Score** | 0–100 dashboard pill; strong strategies boost score |
-| **Strategy performance** | Per-strategy ratings (30d/90d/all-time) in dashboard + weekly Telegram |
-| **Historical news** | Backtest headline proxy (`modules/historical_news.py`) |
-| **Full verify** | `Lock_v15.bat` or `python scripts/full_system_verify.py` — 12 sections, Monday-ready banner |
+| **Stat arb quality** | **8–12** pairs, corr ≥ **0.68**, coint **p &lt; 0.12**, Z **2.1–2.7**, RR **1.7:1**, trail **45%/30%**, partial@**1.2R**, ADV **$50M**, 35b hold, 7% cap |
+| **Dynamic VTI** | Smart **35–75%** + optional floor path (**20% / 0%** headroom when strength clears thresholds) + **SPY-like boosts** (paper ON; live off) |
+| **ARIMA / ARIMA–GARCH** | **Optional, default OFF** (`ARIMA_ENABLED=false`) — 365d tune: ON worse return/Sharpe; leave off unless re-validated |
+| **RVOL / ORB / Catalyst** | RVOL min **2.0×**; ORB **30m**; Catalyst min **65** |
+| **ATR / conviction / MTF / exits** | ATR **14d / 2.0× / 4%** cap; conviction **0.4–1.8×**; MTF ≥ **0.65**; partial @ **1R** + trail |
+| **Corr guard / shorts** | Corr &gt; **0.65** → scale (floor **0.60×**); protective **8–18%** gross, RR **1.6:1**, sector ETF shorts |
+| **Tail risk / health** | Vol ceiling, DD tiers, per-name **8%** cap; Bot Health Score + strategy ratings |
 
-**Carried from v1.4:** overlap/chunk/co-fire, vol overlay, options income, weekly MD/HTML + Friday Telegram, insider monitor.
+**Validation headlines:**
+- **Thorough 1000d** (`backtest_v154_thorough_1000.txt`): **+53.36%** return, Sharpe **1.02**, Max DD **−16.23%**, vs VTI **+45.53%** (~875 calendar days / 800 bars). GARCH + Dynamic VTI + Daily Banking + RHYME primary / HMM soft.
+- **365d tune takeaways:** Stat Arb quality beats fill-rate baseline (~**+1.45pp** / **+0.07** Sharpe); ARIMA stay OFF; optional VTI floor + SPY-like boosts flat/harmless — keep paper defaults.
+
+**Carried from v1.4:** overlap/chunk/co-fire, vol overlay, options income, weekly MD/HTML + Friday Telegram, insider monitor. Full verify: `Lock_v15.bat` or `python scripts/full_system_verify.py`.
 
 ---
 
 ## Monday Ready (daily routine)
 
-Use this sequence before market open (or Sunday night for autonomous overnight). Confirms **Realistic Research v1.5.4 final lock**: RHYME primary, Dynamic VTI ON, GARCH paper ON / live OFF, Daily Banking, HMM soft-only.
+Use this sequence before market open (or Sunday night for autonomous overnight). Confirms **Realistic Research v1.5.4 final lock**: RHYME primary, Dynamic VTI ON, GARCH paper ON / live OFF, Daily Banking, HMM soft-only, ARIMA OFF.
 
 | Step | Command | Purpose |
 |------|---------|---------|
@@ -209,17 +207,34 @@ Use this sequence before market open (or Sunday night for autonomous overnight).
 - Heartbeat age &lt; 30m after restart; no cycle NameErrors in `logs/run_all.log`
 - Portal paper book (`alpaca_paper`) using chase journal / heartbeat paths
 
-**Recommended overnight (paper):** double-click **`Start_Autonomous.bat`** — restarts paper bot, runs verify, saves pre-market report, sends **9:00 AM ET** Telegram (`logs\autostart_paper.log`).
+### Autonomous overnight (paper)
 
-**Morning manual alternative:** `Start_Bot_and_Dashboard.bat` (both books + dashboard).
+Leave the paper book running overnight safely — sleep / PC awake, power settings not set to hibernate mid-session.
+
+| Goal | What to run |
+|------|-------------|
+| **Paper only overnight** | Double-click **`stock-bot\Start_Autonomous.bat`** — restarts paper bot, runs verify, writes pre-market report, sends **9:00 AM ET** Telegram |
+| **Both books + dashboard** | Repo-root **`Start_Bot_and_Dashboard.bat`** once (live + paper + monitor). Prefer this if you want the dashboard open overnight |
+| **Do not** | Re-click launchers (duplicates); use `launch.bat` / `launch_both.bat` / frozen EXE for overnight portal ops; flip live GARCH / ARIMA / HMM-primary; edit `.env` mid-run without a clean restart |
+
+**Heartbeat / watchdog:** portal paper heartbeat under `data/portal/users/<user>/books/alpaca_paper/bot_heartbeat.json` (not `dist/`). Autostart polls freshness after restart; optional `scripts/background_runner.py --mode auto` checks stale heartbeats. Dashboard Overview → Bot status should not show **STALE**.
+
+**Env reminders (paper):** `PAPER_TRADING=true` / chase mode on the paper book; GARCH paper ON / live OFF; `MARKOV_HMM_PRIMARY_REGIME=false`; `ARIMA_ENABLED=false`; Alpaca paper keys in `stock-bot/.env` (or portal book `.env`). Telegram needs token + chat id for the 9 AM summary.
+
+**Morning check (~2 min):**
+1. `python status.py` — equity, regime, heartbeat age
+2. Tail `logs\autostart_paper.log` (if overnight) and `logs\run_all.log` / portal `bot.log` for cycle errors
+3. Smoke: `python scripts\full_system_verify.py` (WARN on quiet scanners after hours is OK; FAIL is not)
+4. If stale: run `Start_Bot_and_Dashboard.bat` once, or dashboard **Restart Bot**
 
 ```powershell
 cd C:\Users\Owner\PythonTrading\stock-bot
-.\.venv\Scripts\python.exe scripts\full_system_verify.py
-.\.venv\Scripts\python.exe scripts\maintenance\cleanup_journal_csv.py --dry-run
-.\.venv\Scripts\python.exe scripts\owner_reset.py
-.\.venv\Scripts\python.exe status.py
-# Overnight autonomous (recommended for paper):
+# Prefer repo-root venv when present:
+C:\Users\Owner\PythonTrading\.venv\Scripts\python.exe scripts\full_system_verify.py
+C:\Users\Owner\PythonTrading\.venv\Scripts\python.exe scripts\maintenance\cleanup_journal_csv.py --dry-run
+C:\Users\Owner\PythonTrading\.venv\Scripts\python.exe scripts\owner_reset.py
+C:\Users\Owner\PythonTrading\.venv\Scripts\python.exe status.py
+# Overnight autonomous (paper):
 Start_Autonomous.bat
 ```
 
@@ -442,7 +457,7 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 
 | Layer | Default | Env flag |
 |-------|---------|----------|
-| **VTI core** | **Smart Dynamic 35–75%** (default ON) | `PAPER_DYNAMIC_VTI=true` |
+| **VTI core** | **Smart Dynamic 35–75%** + optional floor (**20%/0%** when strength clears) + **SPY-like boosts** (paper ON) | `PAPER_DYNAMIC_VTI`, `DYNAMIC_VTI_OPTIONAL_*`, `SPY_LIKE_BOOST_*` |
 | **Risk per trade** | Dynamic **1.1–2.2%** (calm cap 2.2%) | `PAPER_DYNAMIC_RISK_ENABLED=true` |
 | **SPY / NYSE MAs** | **MA150 / MA70** (tuned 365d grid) | `PAPER_SPY_MA_WINDOW`, `PAPER_NYSE_MA_WINDOW` |
 | **RHYME_E sizing** | **1.60×** | `PAPER_REGIME_E_SIZING_MULT` |
@@ -450,6 +465,7 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()`.
 | **Stat arb** | v1.5.4 quality: corr≥0.68, coint p&lt;0.12, **8–12 pairs**, Z **2.1–2.7** + vol&lt;5.5%, RR **1.7:1**, trail **45%/30%**, partial@**1.2R**, ADV **$50M**, conviction **0.6–1.4×**, 35b hold, 7% cap | `PAPER_STAT_ARB_*` in `.env.example` |
 | **Daily Profit Banking** | Bank ≥**0.8%** day gain → risk **×0.4** + VTI nudge; reset **30m after open** (paper ON; live off) | `DAILY_BANK_*` |
 | **GARCH vol sizing** | **Locked** paper ON / live OFF — GARCH(1,1) next-day σ → size **×0.55–1.0** + VTI nudge | `GARCH_VOL_*` |
+| **ARIMA / hybrid** | **Optional default OFF** — mean boost + optional ARIMA–GARCH hybrid; leave off unless re-validated | `ARIMA_ENABLED=false` |
 | **Regime** | **RHYME primary locked**; HMM soft-signal only (`MARKOV_HMM_PRIMARY_REGIME=false`) | `MARKOV_HMM_*` |
 | **RVOL / ORB / Catalyst / ATR** | v1.5: RVOL min **2.0×**, ORB **30m**, Catalyst min **65**, ATR **14d / 2.0× / 4%** cap | `RVOL_*`, `ORB_*`, `CATALYST_*`, `ATR_*` |
 | **Conviction / MTF / Exits / Corr** | Conviction **0.4–1.8×**, MTF align ≥ **0.65**, partial @ **1R** + trail, corr guard **0.65** | `CONVICTION_*`, `MULTI_TIMEFRAME_*`, `EXIT_*`, `CORRELATION_*` |
@@ -491,14 +507,16 @@ Restart paper bot after changing thinking env: `python run_paper_bot.py`
 For **research velocity** (order flow, stat arb funnels, attribution), use **[`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md)** — **Realistic Research v1.5.4** is the **official locked default** for `alpaca_paper`:
 
 - **Tagline:** `v1.5.4 — Sector-Aware Portfolio Constructor`
-- **Feature detail:** Smart Dynamic VTI (35-75%) + RVOL + ORB + Catalyst + ATR + Conviction + GARCH vol + MTF + Exits + Corr Guard + Shorts + Stat Arb + RHYME primary regime + HMM soft-signal + Time-of-day
+- **Feature detail:** Smart Dynamic VTI (35-75%, optional 20%/0% floor) + SPY-like boosts + RVOL + ORB + Catalyst + ATR + Conviction + GARCH vol + MTF + Exits + Corr Guard + Shorts + Stat Arb quality + RHYME primary + HMM soft + Time-of-day
 - **v1.5 scanners:** RVOL (min 2.0×), ORB (30m + RVOL confirm), Catalyst (min 65), ATR sizing (14d, 2.0× stop, 4% cap)
 - **v1.5 sizing/exits:** conviction 0.4–1.8×, multi-timeframe confirmation, partial exits + dynamic trail, correlation guard
 - **GARCH vol sizing:** **locked** paper ON / live OFF — next-day σ → size ×0.55–1.0 + VTI nudge (`GARCH_VOL_LIVE_ENABLED=false`)
-- **Smart Dynamic VTI core** 35–75% (NYSE/metals momentum, insider clusters, bubble/Buffett, regime)
+- **Daily Profit Banking:** bank ≥0.8% day gain → risk ×0.4 + VTI nudge (paper ON; live off)
+- **Smart Dynamic VTI core** 35–75% + optional floor path; SPY-like boosts paper ON
+- **ARIMA / ARIMA–GARCH hybrid:** optional, **default OFF** (`ARIMA_ENABLED=false`) — 365d tune worse when ON
 - **Regime:** **RHYME primary locked**; Markov HMM soft-signal only (`MARKOV_HMM_PRIMARY_REGIME=false`). Primary is research-only after 3-way compare.
 - **Time-of-day analysis** session buckets (open / first_30m / midday / last_hour / close) for entries + Stat Arb; feeds Markov (`TIME_OF_DAY_ANALYSIS=true`)
-- **Stat arb** 8–12 pairs (dynamic), corr≥0.68, RR 1.6, trail 50%/35%, 35b hold, 7% cap, universe floor + static fallback
+- **Stat arb quality** 8–12 pairs, corr≥0.68, Z 2.1–2.7, RR 1.7, trail 45%/30%, partial@1.2R, ADV $50M, 35b hold, 7% cap
 - **Protective + sector shorts** 8–18% gross, RHYME_E waiver (bubble≥60, no exhaustion)
 - **Insider boosts** cluster buys → momentum / stat arb / shorts
 - **Strategy performance** per-strategy ratings (dashboard + weekly Telegram top/bottom 3)
@@ -523,9 +541,10 @@ Startup prints:
 >>> STAT ARB v1.5.4: ... RR 1.6:1 + trail ... | Stat Arb universe: X names
 ```
 
-**1000-day validation** (`python backtester.py --days 1000 --paper-aggressive --no-thinking` → `backtest_v14_1000day.txt`):
+**1000-day validation:**
 
-Effective simulation window **~800 calendar days** (2024-04-26 → 2026-07-05) due to deep-history data availability; allocator window pinned at 1000 bars.
+- **v1.5.4 thorough** (`python backtester.py --days 1000 --paper-aggressive --no-thinking` → `backtest_v154_thorough_1000.txt`): **+53.36%** / Sharpe **1.02** / Max DD **−16.23%** / vs VTI **+45.53%** (~875 calendar days, 800 bars). Flags: GARCH ON, Dynamic VTI ON, Daily Banking ON, RHYME primary, HMM soft.
+- Earlier v1.4 long-window baseline (`backtest_v14_1000day.txt`):
 
 | Version | Window | Return | Sharpe | Max DD | Stat Arb PnL | Short PnL | Fires |
 |---------|--------|--------|--------|--------|--------------|-----------|-------|
@@ -533,8 +552,11 @@ Effective simulation window **~800 calendar days** (2024-04-26 → 2026-07-05) d
 | v1.3 (shorts ON) | 365d | +25.10% | 1.52 | -7.17% | -$59.38 | -$217.48 | 7/80 |
 | v1.4 | 365d | +26.48% | 1.56 | -7.17% | -$58.57 | -$94.49 | 7/80 |
 | **v1.4** | **~800d** | **+47.14%** | **1.07** | **-16.02%** | **-$51.83** | **-$454.68** | **11/189** |
+| **v1.5.4 thorough** | **~875d** | **+53.36%** | **1.02** | **-16.23%** | **+$21.38** | **-$12.74** | **1/156** |
 
-v1.4 improved short sleeve economics vs v1.3 on the 365d window (+$123 short PnL delta). Longer window shows higher absolute return but deeper drawdown and stat-arb drag; monitor on paper before any live adoption.
+**365d tune takeaways (v1.5.4):** Stat Arb quality &gt; fill-rate baseline; ARIMA stay OFF; optional VTI 20%/0% floor + SPY-like boosts flat — keep paper defaults. See `scripts/analysis/_v154_tune_ab_365_recommendations.txt`.
+
+v1.4 improved short sleeve economics vs v1.3 on the 365d window. Longer windows show higher absolute return but deeper drawdown; monitor on paper before any live adoption.
 
 **Stat arb validation (365d):**
 

@@ -36,11 +36,14 @@ cd /d "%STOCK_BOT%"
 set "PYTHONTRADING_ROOT=%STOCK_BOT%"
 title PythonTrading - Starting...
 
-set "PY=python"
-if exist "%STOCK_BOT%\.venv\Scripts\python.exe" (
-    set "PY=%STOCK_BOT%\.venv\Scripts\python.exe"
-) else if exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
+set "PY="
+REM Prefer repo-root .venv (full deps). stock-bot\.venv may be incomplete.
+if exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
     set "PY=%REPO_ROOT%\.venv\Scripts\python.exe"
+) else if exist "%STOCK_BOT%\.venv\Scripts\python.exe" (
+    set "PY=%STOCK_BOT%\.venv\Scripts\python.exe"
+) else (
+    set "PY=python"
 )
 
 echo.
@@ -52,9 +55,21 @@ echo   This window shows startup progress only.
 echo   The dashboard opens in a separate window.
 echo.
 echo   Project: %STOCK_BOT%
+echo   Python:  %PY%
 echo ========================================
 echo.
 
+"%PY%" -c "import dotenv" 1>nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Selected Python cannot import dotenv:
+    echo   %PY%
+    echo.
+    echo   Fix: use the repo .venv at %REPO_ROOT%\.venv
+    echo   or run: "%REPO_ROOT%\.venv\Scripts\python.exe" -m pip install python-dotenv
+    echo.
+    pause
+    exit /b 1
+)
 "%PY%" -u "%RESET_SCRIPT%"
 set "RC=%ERRORLEVEL%"
 

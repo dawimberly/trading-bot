@@ -442,14 +442,16 @@ REALISTIC_RESEARCH_VERSION = "1.5.4"
 REALISTIC_RESEARCH_PROFILE_VERSION = REALISTIC_RESEARCH_VERSION
 REALISTIC_RESEARCH_TAGLINE = "v1.5.4 - Sector-Aware Portfolio Constructor"
 REALISTIC_RESEARCH_FEATURE_DETAIL = (
-    "Smart Dynamic VTI (35-75%) + Sector Rotation (top 2-3 SPDRs) + "
+    "FINAL LOCK (365d tune): Smart Dynamic VTI (35-75%, optional floor 20%/0%) + "
+    "SPY-like boosts (paper ON) + Sector Rotation (top 2-3 SPDRs) + "
     "ATR Vol Breakout (RVOL+MTF, <=1% risk) + "
     "Sector-Aware Portfolio Constructor + "
     "Dynamic Felix/social (RHYME_E / bubble>=65) + "
     "RVOL/ORB/Catalyst/ATR + Conviction + GARCH vol + MTF + Exits + Corr Guard + Shorts + "
-    "RHYME primary regime + HMM soft-signal + Stat Arb quality + Enriched Thinking"
+    "RHYME primary + HMM soft + Stat Arb quality + ARIMA OFF (optional) + Enriched Thinking"
 )
-# Locked when enforce_realistic_research_profile() runs (paper chase / Profile B):
+# Locked when enforce_realistic_research_profile() runs (paper chase / Profile B).
+# 365d tune final lock: Stat Arb quality ON; ARIMA OFF; optional VTI + SPY-like ON (paper).
 REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "RVOL scanner (min 2.0x)",
     "ORB scanner (30m + RVOL confirm)",
@@ -461,8 +463,11 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "Portfolio correlation guard (max 0.65)",
     "Insider monitor + boosts",
     "Protective shorts (8-18%) + sector shorts",
-    "Stat arb (8-12 pairs, Z 2.1-2.7, RR 1.7, trail 45/30, partial@1.2, v1.5.4 quality)",
+    "Stat arb quality ON (8-12 pairs, Z 2.1-2.7, RR 1.7, trail 45/30, partial@1.2) — 365d locked",
     "Smart Dynamic VTI core (35-75%: NYSE/metals, insider, bubble, regime)",
+    "Optional VTI floor ON paper (20%/0% on SPY-like strength; live OFF unless opt-in)",
+    "SPY-like boost ON paper (1.05-1.2x; live OFF unless opt-in)",
+    "ARIMA / ARIMA-GARCH hybrid OFF by default (ARIMA_ENABLED=false; hybrid stays true when ARIMA on)",
     "Sector rotation (top 2-3 SPDRs, max 25%/sector, monthly/regime)",
     "ATR vol breakout (expand>=1.5x + RVOL/MTF, <=1% risk, paper-only)",
     "Dynamic Felix/social (ON: RHYME_E or bubble>=65; OFF: RHYME_C/D)",
@@ -1757,9 +1762,10 @@ GARCH_VOL_VTI_MAX_PP = float(os.getenv("GARCH_VOL_VTI_MAX_PP", "6"))
 # Soft-trim weight on conviction regime component (risk_$ path already applies full mult).
 GARCH_VOL_CONVICTION_BLEND = float(os.getenv("GARCH_VOL_CONVICTION_BLEND", "0.35"))
 
-# --- Optional ARIMA mean / ARIMA–GARCH hybrid (paper-only; default OFF — not locked) ---
+# --- Optional ARIMA mean / ARIMA–GARCH hybrid (paper-only; FINAL LOCK default OFF) ---
 # Rolling log-return ARIMA → next-step mean sign. Boost momentum/stat-arb size only
 # when forecast > 0 (conservative); negative → neutral (or slight dampen via NEG_MULT).
+# 365d tune: ON worse return/Sharpe — enforce forces ARIMA_ENABLED=false unless env-explicit.
 # Enable on paper: ARIMA_ENABLED=true. Live stays off unless ARIMA_LIVE_ENABLED=true.
 # Hybrid (default when ARIMA on): scale mean boost by GARCH ratio — does NOT re-multiply
 # full garch_vol_size_multiplier when GARCH already applies in effective_risk_per_trade.
@@ -3800,22 +3806,16 @@ def _env_explicit(*keys: str) -> bool:
 
 
 def enforce_realistic_research_profile() -> None:
-    """Re-apply Realistic Research v1.5.4 final locks (.env overrides win).
+    """Re-apply Realistic Research v1.5.4 FINAL LOCK (.env overrides win).
 
-    Final Monday / production-ready paper default (Profile B / alpaca_paper). Locked stack:
-    - Scanners: RVOL, ORB, Catalyst, ATR sizing
-    - Sizing: conviction (0.4x-1.8x), multi-timeframe confirmation, correlation guard
-    - Exits: partial @1R, dynamic trail, time-based max hold
-    - Insider monitor + signal boosts + risk guard
-    - Protective + sector shorts (8-18% gross, RR 1.6)
-    - Stat arb quality (8-12 pairs), Smart Dynamic VTI ON (35-75%, optional floor on SPY-like),
-      tail-risk vol ceiling
-    - Regime: RHYME primary locked; Markov HMM soft-signal only (primary OFF)
-    - GARCH(1,1) vol sizing locked paper ON / live OFF (unless GARCH_VOL_LIVE_ENABLED)
-    - Optional ARIMA / ARIMA–GARCH hybrid paper OFF by default (ARIMA_ENABLED; live OFF)
-    - Daily Profit Banking paper ON / live OFF
-    - Bot health + per-strategy performance tracking
-    - Heartbeat watchdog + auto-recovery (supervisor)
+    Final Monday / production-ready paper default (Profile B / alpaca_paper).
+    365d tune recommendations locked as paper defaults:
+    - Stat Arb quality ON (beats fill-rate baseline)
+    - ARIMA / ARIMA–GARCH hybrid OFF unless ARIMA_ENABLED is env-explicit
+    - Dynamic VTI optional floor ON paper; live OFF unless DYNAMIC_VTI_OPTIONAL_LIVE
+    - SPY-like boost ON paper; live OFF unless SPY_LIKE_BOOST_LIVE_ENABLED
+    Existing locks kept: RHYME primary, HMM soft-only, GARCH paper ON/live OFF,
+    Daily Banking, scanners, shorts, Smart Dynamic VTI 35-75%, etc.
     See REALISTIC_RESEARCH_LOCKED_FEATURES for the banner summary.
     """
     global DYNAMIC_CORE_ENABLED
@@ -4456,9 +4456,10 @@ def enforce_realistic_research_profile() -> None:
         GARCH_VOL_VTI_MAX_PP = 6.0
     if not _env_explicit("GARCH_VOL_CONVICTION_BLEND"):
         GARCH_VOL_CONVICTION_BLEND = 0.35
-    # Optional ARIMA / hybrid — default OFF (not locked). Live stays off.
-    # Do not force ARIMA_ENABLED=true; operators opt in via env.
-    # Hybrid defaults ON when ARIMA is enabled (ARIMA_GARCH_HYBRID=true).
+    # ARIMA final lock (365d tune): forced OFF unless env-explicit.
+    # Hybrid may stay true so enabling ARIMA later gets vol-aware mean (no double GARCH).
+    if not _env_explicit("ARIMA_ENABLED"):
+        ARIMA_ENABLED = False
     if not _env_explicit("ARIMA_LIVE_ENABLED"):
         ARIMA_LIVE_ENABLED = False
     if not _env_explicit("ARIMA_GARCH_HYBRID"):
@@ -4532,6 +4533,8 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     ),
     "SPY_LIKE_BOOST_ENABLED": "true",
     "SPY_LIKE_BOOST_MULT": "1.10",
+    "SPY_LIKE_BOOST_LIVE_ENABLED": "false",
+    "DYNAMIC_VTI_OPTIONAL_LIVE": "false",
     "CORE_ALLOCATOR_LOCKED": "false",
     "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
     "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "300",
@@ -4827,10 +4830,11 @@ def format_universe_pool_label() -> str:
 
 
 def format_realistic_research_headline() -> str:
-    """Prominent version line for paper bot startup."""
+    """Prominent version line for paper bot startup (v1.5.4 FINAL LOCK)."""
     features = (
-        "RHYME primary | HMM soft | GARCH vol | RVOL/ORB/Catalyst/ATR | "
-        "Shorts 8-18% | Stat Arb 8-12p | Dynamic VTI 35-75%"
+        "FINAL LOCK | RHYME primary | HMM soft | GARCH vol | Daily Banking | "
+        "Stat Arb quality | Dynamic VTI 35-75% + optional floor | SPY-like ON | "
+        "ARIMA OFF | RVOL/ORB/Catalyst/ATR | Shorts 8-18%"
     )
     return (
         f">>> REALISTIC RESEARCH v{REALISTIC_RESEARCH_VERSION} (LOCKED) - "

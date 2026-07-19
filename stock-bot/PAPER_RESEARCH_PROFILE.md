@@ -8,7 +8,20 @@
 
 **Tagline:** `v1.5.4 — Sector-Aware Portfolio Constructor`
 
-**Locked stack (confirm at startup):** GARCH paper ON / live OFF · Smart Dynamic VTI ON (35–75%) · Daily Profit Banking ON · RHYME primary · HMM soft-only (`MARKOV_HMM_PRIMARY_REGIME=false`)
+**Locked stack (confirm at startup):** GARCH paper ON / live OFF · Smart Dynamic VTI ON (35–75%) · optional VTI floor ON paper · SPY-like boost ON paper · Daily Profit Banking ON · RHYME primary · HMM soft-only · Stat Arb quality ON · ARIMA OFF
+
+### 365d tune final lock (paper defaults)
+
+Evidence: `scripts/analysis/_v154_tune_ab_365_recommendations.txt` (365d paper-aggressive, HMM off).
+
+| Feature | Paper default | Rationale |
+|---------|---------------|-----------|
+| **Stat Arb v1.5.4 quality** | **ON (locked)** | +1.45pp return / +0.07 Sharpe vs fill-rate baseline; better DD |
+| **ARIMA / ARIMA–GARCH hybrid** | **OFF** (`ARIMA_ENABLED=false`) | ON worse (−0.25pp / −0.01 Sharpe); hybrid may stay true for later opt-in |
+| **Dynamic VTI optional floor** | **ON** (20%/0% path) | Flat this window; no harm; live OFF unless `DYNAMIC_VTI_OPTIONAL_LIVE` |
+| **SPY-like boost** | **ON** (paper) | Flat this window; live OFF unless `SPY_LIKE_BOOST_LIVE_ENABLED` |
+
+Keep existing locks: RHYME primary, HMM soft-only, GARCH paper ON / live OFF, Daily Banking, scanners, shorts.
 
 ```
 >>> PAPER BOT: Realistic Research v1.5.4 (Aggressive) | v1.5.4 — Sector-Aware Portfolio Constructor | Live Bot: Conservative 85% VTI
@@ -52,7 +65,7 @@
 | **Time-of-day analysis** | Session buckets (open / first_30m / mid_morning / midday / last_hour / close) — win rate, Sharpe, Stat Arb edges. Feeds Markov soft-signals. Live off. | `TIME_OF_DAY_ANALYSIS`, `TIME_OF_DAY_LIVE_ENABLED` |
 | **Daily Profit Banking** | Bank when day gain ≥**0.8%**; risk **×0.4** + VTI boost for rest of day; reset **30m after open**. Live off. | `DAILY_BANK_ENABLED`, `DAILY_BANK_THRESHOLD_PCT`, `DAILY_BANK_RISK_MULT` |
 | **GARCH vol sizing** | **Locked paper ON / live OFF.** GARCH(1,1) next-day σ → size **×0.55–1.0** + VTI nudge (high vol → smaller; default never sizes up). 365d lock rationale: ON beat OFF (~+1.06pp return, +0.04 Sharpe, MaxDD ≈ flat). | `GARCH_VOL_ENABLED`, `GARCH_VOL_LIVE_ENABLED`, `GARCH_VOL_MULT_*`, `GARCH_VOL_VTI_*` |
-| **ARIMA / ARIMA–GARCH hybrid** | **Optional** (default **OFF**). ARIMA mean sign → boost **×1.08**; with `ARIMA_GARCH_HYBRID=true` (default when ARIMA on), high GARCH vol **scales down** the mean excess (does not re-multiply full GARCH size). Cap 1.15 / floor 0.55. Paper only; live off. | `ARIMA_ENABLED`, `ARIMA_GARCH_HYBRID`, `ARIMA_WINDOW`, `ARIMA_BOOST_MULT` |
+| **ARIMA / ARIMA–GARCH hybrid** | **Optional** (default **OFF** — **365d final lock**). ARIMA mean sign → boost **×1.08**; with `ARIMA_GARCH_HYBRID=true` (default when ARIMA on), high GARCH vol **scales down** the mean excess (does not re-multiply full GARCH size). Cap 1.15 / floor 0.55. Enforce forces OFF unless env-explicit. Paper only; live off. | `ARIMA_ENABLED`, `ARIMA_GARCH_HYBRID`, `ARIMA_WINDOW`, `ARIMA_BOOST_MULT` |
 | **Smart ATR Stops** | Default **2.0×** ATR stop; at **−5%** unrealized: high conviction (RVOL>2.5 / catalyst>70 / insider cluster) → tighten **1.0×**, else cut size **50%**; at **−10%** hard full exit. Live off. | `PAPER_SMART_STOPS`, `ATR_STOP_MULTIPLIER`, `ATR_TIGHTEN_MULTIPLIER`, `STOP_LOSS_REEVAL_PCTS` |
 
 ### Dynamic Felix / social sleeve (paper)
@@ -157,7 +170,7 @@ Also nudges Dynamic VTI (+pp when elevated; tiny cut when calm, capped) and soft
 
 Applied on the same paths as before: `effective_risk_per_trade` (momentum + Stat Arb notional) and a soft conviction-regime blend (`ARIMA_CONVICTION_BLEND=0.25`). Set `ARIMA_GARCH_HYBRID=false` for pure mean-only ARIMA (legacy A/B).
 
-**Optional — not locked.** Default `ARIMA_ENABLED=false`. Live always off unless `ARIMA_LIVE_ENABLED=true`. Enforce does **not** turn it on.
+**Optional — final lock default OFF.** Enforce forces `ARIMA_ENABLED=false` unless env-explicit. 365d tune: ON worse return/Sharpe. Live always off unless `ARIMA_LIVE_ENABLED=true`.
 
 - Enable (paper): `ARIMA_ENABLED=true` in `.env` (or portal paper env)
 - Config: `ARIMA_WINDOW=252`, `ARIMA_GARCH_HYBRID=true`, `ARIMA_BOOST_MULT=1.08`
