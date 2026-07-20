@@ -296,6 +296,17 @@ RISK_EVENTS_LOG = "risk_events.log"
 PAPER_JOURNAL_CSV = os.getenv("PAPER_JOURNAL_CSV", "paper_journal.csv")
 HEARTBEAT_FILE = os.getenv("HEARTBEAT_FILE", "bot_heartbeat.json")
 AUTO_LAUNCH_DASHBOARD = _parse_env_bool("AUTO_LAUNCH_DASHBOARD", default="false")
+# On dashboard open/reopen: clean-restart both portal books (owner_reset-style).
+# Set false to keep the old "monitor only" behavior. Launchers that already
+# restarted bots (owner_reset, AUTO_LAUNCH_DASHBOARD) set this false in the child env.
+DASHBOARD_RESTART_BOTS_ON_OPEN = _parse_env_bool(
+    "DASHBOARD_RESTART_BOTS_ON_OPEN", default="true"
+)
+# On real quit (not tray minimize): stop portal live + paper. Default false so
+# closing the monitor does not kill overnight / Monday_Checklist bots.
+DASHBOARD_STOP_BOTS_ON_CLOSE = _parse_env_bool(
+    "DASHBOARD_STOP_BOTS_ON_CLOSE", default="false"
+)
 # Dashboard Positions tab: skip Alpaca positions fetch when cache younger than this (seconds).
 DASHBOARD_POSITIONS_REFRESH_SEC = int(os.getenv("DASHBOARD_POSITIONS_REFRESH_SEC", "12"))
 
@@ -474,7 +485,7 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "RHYME primary regime (locked) + Markov HMM soft-signal only (primary OFF)",
     "Time-of-day analysis (open/first_30m/midday/last_hour/close edges)",
     "Daily Profit Banking (bank >=0.8%, risk x0.4, reset 30m after open)",
-    "GARCH(1,1) vol sizing (locked paper ON / live OFF; size x0.55-1.0; high vol → smaller)",
+    "GARCH(1,1) vol sizing (locked paper ON; Live Conservative enables via enforce_live + GARCH_VOL_LIVE_ENABLED)",
     "Smart ATR stops (2.0x default; reeval @-5% tighten/cut; hard exit @-10%)",
     "Enriched thinking engine (Ollama context + heuristic backtest tilts)",
     "Tail risk controls",
@@ -688,6 +699,19 @@ STAT_ARB_MAX_SCAN_UNIVERSE = int(os.getenv("STAT_ARB_MAX_SCAN_UNIVERSE", "80"))
 PAPER_MOMENTUM_QUALITY_FIXES = _parse_env_bool(
     "PAPER_MOMENTUM_QUALITY_FIXES", default="false"
 )
+# NYSE pick rotation — cap per-symbol pick frequency in rolling bar window (paper only).
+NYSE_PICK_ROTATION_ENABLED = _parse_env_bool(
+    "NYSE_PICK_ROTATION_ENABLED", default="false"
+)
+NYSE_MAX_PICKS_PER_SYMBOL_WINDOW = int(
+    os.getenv("NYSE_MAX_PICKS_PER_SYMBOL_WINDOW", "5")
+)
+NYSE_PICK_WINDOW_BARS = int(os.getenv("NYSE_PICK_WINDOW_BARS", "20"))
+# Strict-at-candidate: intersect MA50 pool with strict screener (not just reorder).
+NYSE_STRICT_INTERSECT_CANDIDATES = _parse_env_bool(
+    "NYSE_STRICT_INTERSECT_CANDIDATES", default="false"
+)
+NYSE_STRICT_INTERSECT_MIN = int(os.getenv("NYSE_STRICT_INTERSECT_MIN", "3"))
 # Dynamic sector screener — expand momentum/stat-arb pools in strong sectors (paper only).
 DYNAMIC_SECTOR_SCREENER_ENABLED = _env_bool_first(
     "DYNAMIC_SECTOR_SCREENER_ENABLED", default="true"
@@ -1311,6 +1335,36 @@ OPTIONS_OTM_PCT_MAX = 0.10
 OPTIONS_VIX_CALM_MAX = float(os.getenv("OPTIONS_VIX_CALM_MAX", "22"))
 OPTIONS_MONTHLY_BARS = int(os.getenv("OPTIONS_MONTHLY_BARS", "21"))
 OPTIONS_VTI_ALLOC_PCT = float(os.getenv("OPTIONS_VTI_ALLOC_PCT", "0.70"))
+# Wheel strategy (CSP → assignment → CC) — paper opt-in; default OFF
+PAPER_WHEEL_SLEEVE_ENABLED = _parse_env_bool("PAPER_WHEEL_SLEEVE_ENABLED", default="false")
+WHEEL_SLEEVE_ENABLED = _parse_env_bool("WHEEL_SLEEVE_ENABLED", default="false")
+WHEEL_SLEEVE_CAP_PCT = float(os.getenv("WHEEL_SLEEVE_CAP_PCT", "0.08"))
+WHEEL_OTM_PCT = float(os.getenv("WHEEL_OTM_PCT", "0.05"))
+WHEEL_MANAGE_BARS = int(os.getenv("WHEEL_MANAGE_BARS", "5"))
+WHEEL_DTE_BARS = int(os.getenv("WHEEL_DTE_BARS", "21"))
+WHEEL_VIX_CALM_MAX = float(os.getenv("WHEEL_VIX_CALM_MAX", "22"))
+WHEEL_UNDERLYINGS = os.getenv("WHEEL_UNDERLYINGS", "SPY,QQQ")
+WHEEL_MIN_NOTIONAL = float(os.getenv("WHEEL_MIN_NOTIONAL", "100"))
+WHEEL_BACKTEST_ENABLED = _parse_env_bool("WHEEL_BACKTEST_ENABLED", default="true")
+# Politician copy trading (Capitol Trades) — paper opt-in; default OFF
+PAPER_POLITICIAN_COPY_ENABLED = _parse_env_bool(
+    "PAPER_POLITICIAN_COPY_ENABLED", default="false"
+)
+POLITICIAN_COPY_ENABLED = _parse_env_bool("POLITICIAN_COPY_ENABLED", default="false")
+POLITICIAN_COPY_CAP_PCT = float(os.getenv("POLITICIAN_COPY_CAP_PCT", "0.05"))
+POLITICIAN_COPY_MAX_NAME_PCT = float(os.getenv("POLITICIAN_COPY_MAX_NAME_PCT", "0.02"))
+POLITICIAN_COPY_TOP_TRADERS = int(os.getenv("POLITICIAN_COPY_TOP_TRADERS", "5"))
+POLITICIAN_COPY_MAX_PER_DAY = int(os.getenv("POLITICIAN_COPY_MAX_PER_DAY", "2"))
+POLITICIAN_COPY_LOOKBACK_DAYS = int(os.getenv("POLITICIAN_COPY_LOOKBACK_DAYS", "45"))
+POLITICIAN_COPY_MIN_AMOUNT_USD = float(os.getenv("POLITICIAN_COPY_MIN_AMOUNT_USD", "15000"))
+POLITICIAN_COPY_SIZE_SCALE = float(os.getenv("POLITICIAN_COPY_SIZE_SCALE", "0.02"))
+POLITICIAN_COPY_CACHE_HOURS = float(os.getenv("POLITICIAN_COPY_CACHE_HOURS", "12"))
+POLITICIAN_COPY_SOURCE_URL = os.getenv(
+    "POLITICIAN_COPY_SOURCE_URL", "https://www.capitoltrades.com/trades"
+)
+POLITICIAN_COPY_BACKTEST_ENABLED = _parse_env_bool(
+    "POLITICIAN_COPY_BACKTEST_ENABLED", default="true"
+)
 # Volatility trading overlay — paper aggressive only; live stays off
 PAPER_VOL_TRADING_ENABLED = os.getenv("PAPER_VOL_TRADING_ENABLED", "true").lower() in (
     "1",
@@ -1786,6 +1840,27 @@ ARIMA_HYBRID_VOL_SCALE_FLOOR = float(os.getenv("ARIMA_HYBRID_VOL_SCALE_FLOOR", "
 # Soft conviction regime tilt (risk_$ path already applies full size mult).
 ARIMA_CONVICTION_BLEND = float(os.getenv("ARIMA_CONVICTION_BLEND", "0.25"))
 
+# --- Strategy rating feedback + paper param opt (opt-in; default OFF) ---
+# Scores sleeves from recent paper journals / strategy_metrics → clipped size
+# mult (0.8–1.2). Live stays off unless STRATEGY_RATING_LIVE_ENABLED=true.
+# Enable paper: STRATEGY_RATING_ENABLED=true
+# CLI: python scripts/analysis/run_strategy_rating_opt.py --days 365
+STRATEGY_RATING_ENABLED = _parse_env_bool("STRATEGY_RATING_ENABLED", default="false")
+STRATEGY_RATING_LIVE_ENABLED = _parse_env_bool(
+    "STRATEGY_RATING_LIVE_ENABLED", default="false"
+)
+STRATEGY_RATING_LOOKBACK_DAYS = int(os.getenv("STRATEGY_RATING_LOOKBACK_DAYS", "365"))
+STRATEGY_RATING_MULT_MIN = float(os.getenv("STRATEGY_RATING_MULT_MIN", "0.8"))
+STRATEGY_RATING_MULT_MAX = float(os.getenv("STRATEGY_RATING_MULT_MAX", "1.2"))
+STRATEGY_RATING_MIN_TRADES = int(os.getenv("STRATEGY_RATING_MIN_TRADES", "5"))
+STRATEGY_RATING_CACHE_SEC = int(os.getenv("STRATEGY_RATING_CACHE_SEC", "3600"))
+# Pull stack mult toward 1.0 (0=ignore stack, 1=full geo-mean of active).
+STRATEGY_RATING_STACK_BLEND = float(os.getenv("STRATEGY_RATING_STACK_BLEND", "0.5"))
+# When true, also tilt effective_risk_per_trade by stack_mult (still clipped).
+STRATEGY_RATING_APPLY_STACK_RISK = _parse_env_bool(
+    "STRATEGY_RATING_APPLY_STACK_RISK", default="true"
+)
+
 # --- Smart ATR stops with conviction reevaluation (paper / research; live opt-in) ---
 PAPER_SMART_STOPS = _env_bool_first("PAPER_SMART_STOPS", "SMART_STOPS_ENABLED", default="true")
 SMART_STOPS_LIVE_ENABLED = _parse_env_bool("SMART_STOPS_LIVE_ENABLED", default="false")
@@ -1958,7 +2033,7 @@ REBALANCE_ON_STARTUP = os.getenv("REBALANCE_ON_STARTUP", "false").lower() in (
 
 # --- Operating Layer + Wisdom Layer (strategic rebalance) ---
 REBALANCE_ENABLED = _env_bool_first(
-    "REBALANCE_ENABLED", "WISDOM_LAYER_ENABLED", default="false"
+    "REBALANCE_ENABLED", "WISDOM_LAYER_ENABLED", default="true"
 )
 REBALANCE_CORE_TARGET = float(os.getenv("REBALANCE_CORE_TARGET", "0.80"))
 REBALANCE_BAND_WIDTH = float(os.getenv("REBALANCE_BAND_WIDTH", "0.08"))
@@ -2020,12 +2095,14 @@ SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
 )
 SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
 SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
-# Live conservative profile (alpaca_live small account): 85% VTI + 5% active sleeve winner.
+# Live Conservative profile (alpaca_live) — separate from Paper Research v1.5.4 FINAL LOCK.
+# High VTI + SPY-trend sleeve + safety stack (GARCH/ATR/exits/corr/tail); research sleeves OFF.
 LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.85"))
 LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.05"))
 # v1.1c 365d evidence: SPY MA200 best risk-adjusted live sleeve (PF 114, 98% win vs NYSE unrealized).
 LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "spy").strip().lower()
 LIVE_CONSERVATIVE_ENABLED = _env_bool_first("LIVE_CONSERVATIVE_ENABLED", default="true")
+LIVE_CONSERVATIVE_LABEL = "Live Conservative"
 LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
     "vti_core_pct": LIVE_VTI_CORE_PCT,
     "active_sleeve_pct": LIVE_SMALL_ACTIVE_SLEEVE_PCT,
@@ -2033,6 +2110,25 @@ LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
     "risk_per_trade": SMALL_ACCOUNT_RISK_PER_TRADE,
     "max_notional_per_order": SMALL_ACCOUNT_MAX_NOTIONAL,
 }
+# Locked when enforce_live_conservative_profile() runs (live book / Profile A).
+LIVE_CONSERVATIVE_LOCKED_ON: tuple[str, ...] = (
+    "SPY trend (LIVE_ACTIVE_SLEEVE_CHOICE=spy)",
+    "High VTI core (LIVE_VTI_CORE_PCT; no optional 0% floor)",
+    "GARCH vol sizing (GARCH_VOL_LIVE_ENABLED via live enforce)",
+    "Tail-risk controls",
+    "Correlation guard",
+    "ATR sizing",
+    "Exit optimization (partial + dynamic trail)",
+)
+LIVE_CONSERVATIVE_LOCKED_OFF: tuple[str, ...] = (
+    "Stat Arb",
+    "Protective shorts / sector shorts",
+    "Aggressive scanners (RVOL / ORB / Catalyst)",
+    "Optional VTI 0% floor",
+    "SPY-like boosts",
+    "ARIMA",
+    "Daily Banking",
+)
 SMALL_ACCOUNT_VTI_CORE_PCT = float(
     os.getenv("SMALL_ACCOUNT_VTI_CORE_PCT", str(LIVE_VTI_CORE_PCT))
 )
@@ -2571,24 +2667,105 @@ def backtest_live_conservative_context() -> bool:
     return bool(_backtest_live_conservative_ctx)
 
 
-def live_conservative_profile_active() -> bool:
-    """85/15 live small-account split: 85% VTI + 5% SPY trend (v1.1c winner) + legacy active."""
+def live_conservative_lock_active() -> bool:
+    """True when Live Conservative feature lock applies (live book, not paper research)."""
     if not LIVE_CONSERVATIVE_ENABLED:
         return False
-    if paper_aggressive_context() or paper_only_sleeves_active():
+    if (
+        PAPER_TRADING
+        or paper_aggressive_context()
+        or paper_only_sleeves_active()
+        or is_realistic_research_active()
+        or backtest_paper_sleeves_context()
+    ):
+        return False
+    if backtest_live_conservative_context():
+        return True
+    return not PAPER_TRADING
+
+
+def live_conservative_profile_active() -> bool:
+    """85/15 live small-account split: 85% VTI + 5% SPY trend (v1.1c winner) + legacy active."""
+    if not live_conservative_lock_active():
         return False
     if backtest_small_account_context():
         return backtest_live_conservative_context()
-    if PAPER_TRADING:
-        return False
     return is_small_account()
 
 
-def enforce_live_small_account_profile() -> None:
-    """Apply live conservative defaults for alpaca_live small accounts (.env overrides win)."""
+def enforce_live_conservative_profile() -> None:
+    """Lock Live Conservative ON/OFF matrix for the live book (.env overrides win).
+
+    Paper Research v1.5.4 stays aggressive via ``enforce_realistic_research_profile()``;
+    this path must not weaken paper locks. Called from ``configure_account_profile``,
+    live backtests, and live startup when ``PAPER_TRADING=false``.
+    """
     global SMALL_ACCOUNT_VTI_CORE_PCT
+    global LIVE_ACTIVE_SLEEVE_CHOICE
+    global GARCH_VOL_ENABLED
+    global GARCH_VOL_LIVE_ENABLED
+    global ATR_SIZING_ENABLED
+    global EXIT_OPTIMIZATION_ENABLED
+    global CORRELATION_GUARD_ENABLED
+    global TAIL_RISK_CONTROLS_ENABLED
+    global ORB_MOMENTUM_LIVE_SLEEVE
+    global SECTOR_ROTATION_LIVE_SLEEVE
+    global SPY_LIKE_BOOST_LIVE_ENABLED
+    global ARIMA_LIVE_ENABLED
+    global DAILY_BANK_LIVE_ENABLED
+    global MARKOV_HMM_LIVE_ENABLED
+    global TIME_OF_DAY_LIVE_ENABLED
+    global SMART_STOPS_LIVE_ENABLED
+
+    if not LIVE_CONSERVATIVE_ENABLED:
+        return
+    if PAPER_TRADING or paper_aggressive_context() or paper_only_sleeves_active():
+        return
+    if is_realistic_research_active():
+        return
+
+    # --- High VTI + SPY trend sleeve ---
     if not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
         SMALL_ACCOUNT_VTI_CORE_PCT = LIVE_VTI_CORE_PCT
+    if not _env_explicit("LIVE_ACTIVE_SLEEVE_CHOICE"):
+        LIVE_ACTIVE_SLEEVE_CHOICE = "spy"
+
+    # --- Live ON (safety / sizing stack) ---
+    if not _env_explicit("GARCH_VOL_ENABLED"):
+        GARCH_VOL_ENABLED = True
+    if not _env_explicit("GARCH_VOL_LIVE_ENABLED"):
+        GARCH_VOL_LIVE_ENABLED = True
+    if not _env_explicit("ATR_SIZING_ENABLED", "PAPER_ATR_SIZING_ENABLED"):
+        ATR_SIZING_ENABLED = True
+    if not _env_explicit("EXIT_OPTIMIZATION_ENABLED", "PAPER_EXIT_OPTIMIZATION_ENABLED"):
+        EXIT_OPTIMIZATION_ENABLED = True
+    if not _env_explicit("CORRELATION_GUARD_ENABLED", "PAPER_CORRELATION_GUARD_ENABLED"):
+        CORRELATION_GUARD_ENABLED = True
+    if not _env_explicit("TAIL_RISK_CONTROLS_ENABLED"):
+        TAIL_RISK_CONTROLS_ENABLED = True
+
+    # --- Paper-only reinforced OFF for live (env-explicit opt-in still wins) ---
+    if not _env_explicit("ORB_MOMENTUM_LIVE_SLEEVE"):
+        ORB_MOMENTUM_LIVE_SLEEVE = False
+    if not _env_explicit("SECTOR_ROTATION_LIVE_SLEEVE"):
+        SECTOR_ROTATION_LIVE_SLEEVE = False
+    if not _env_explicit("SPY_LIKE_BOOST_LIVE_ENABLED"):
+        SPY_LIKE_BOOST_LIVE_ENABLED = False
+    if not _env_explicit("ARIMA_LIVE_ENABLED"):
+        ARIMA_LIVE_ENABLED = False
+    if not _env_explicit("DAILY_BANK_LIVE_ENABLED"):
+        DAILY_BANK_LIVE_ENABLED = False
+    if not _env_explicit("MARKOV_HMM_LIVE_ENABLED"):
+        MARKOV_HMM_LIVE_ENABLED = False
+    if not _env_explicit("TIME_OF_DAY_LIVE_ENABLED"):
+        TIME_OF_DAY_LIVE_ENABLED = False
+    if not _env_explicit("SMART_STOPS_LIVE_ENABLED"):
+        SMART_STOPS_LIVE_ENABLED = False
+
+
+def enforce_live_small_account_profile() -> None:
+    """Backward-compatible alias for ``enforce_live_conservative_profile()``."""
+    enforce_live_conservative_profile()
 
 
 def format_live_conservative_banner() -> str:
@@ -2602,18 +2779,43 @@ def format_live_conservative_banner() -> str:
     legacy_active = max(
         0.0, 1.0 - LIVE_VTI_CORE_PCT - LIVE_SMALL_ACTIVE_SLEEVE_PCT
     )
+    garch = "ON" if GARCH_VOL_LIVE_ENABLED and GARCH_VOL_ENABLED else "OFF"
     return (
-        f"Live Conservative {LIVE_VTI_CORE_PCT:.0%}/{legacy_active:.0%}: "
+        f"{LIVE_CONSERVATIVE_LABEL} {LIVE_VTI_CORE_PCT:.0%}/{legacy_active:.0%}: "
         f"{LIVE_VTI_CORE_PCT:.0%} VTI | {LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {sleeve} | "
         f"{legacy_active:.0%} NYSE/active | "
+        f"GARCH {garch} | ATR/exits/corr/tail ON | "
+        f"scanners/shorts/stat-arb OFF | "
         f"{SMALL_ACCOUNT_RISK_PER_TRADE:.0%} risk | ${SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max/order"
+    )
+
+
+def format_live_conservative_headline() -> str:
+    """Prominent Live Conservative FINAL LOCK line (mirrors paper FINAL LOCK headline)."""
+    on = " | ".join(
+        (
+            "SPY trend",
+            f"High VTI {LIVE_VTI_CORE_PCT:.0%}",
+            "GARCH",
+            "Tail risk",
+            "Corr guard",
+            "ATR",
+            "Exits",
+        )
+    )
+    off = "Stat Arb / shorts / RVOL-ORB-Catalyst / optional VTI floor / SPY-like / ARIMA / Daily Bank"
+    return (
+        f">>> {LIVE_CONSERVATIVE_LABEL} FINAL LOCK — ON: {on} | "
+        f"OFF: {off} | Paper stays Realistic Research v{REALISTIC_RESEARCH_VERSION} FINAL LOCK <<<"
     )
 
 
 def get_live_profile_summary() -> str:
     return (
-        f"Live Conservative: {LIVE_VTI_CORE_PCT:.0%} VTI | "
-        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY trend | crypto OFF | thinking OFF | static universe"
+        f"{LIVE_CONSERVATIVE_LABEL}: {LIVE_VTI_CORE_PCT:.0%} VTI | "
+        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY trend | GARCH ON | "
+        f"ATR/exits/corr/tail ON | scanners/shorts/stat-arb OFF | "
+        f"crypto OFF | thinking OFF | static universe"
     )
 
 
@@ -2623,8 +2825,8 @@ def configure_account_profile(equity: float, cash: float | None = None) -> dict:
     _account_equity = float(equity)
     _account_cash = float(cash) if cash is not None else _account_cash
     _small_account_mode = _account_equity < SMALL_ACCOUNT_EQUITY_THRESHOLD
-    if _small_account_mode and not PAPER_TRADING:
-        enforce_live_small_account_profile()
+    if not PAPER_TRADING:
+        enforce_live_conservative_profile()
     core_pct = effective_vti_core_pct(equity=_account_equity)
     return {
         "equity": _account_equity,
@@ -2632,6 +2834,7 @@ def configure_account_profile(equity: float, cash: float | None = None) -> dict:
         "cash_pct": account_cash_pct(),
         "small_account": _small_account_mode,
         "live_conservative": live_conservative_profile_active(),
+        "live_conservative_lock": live_conservative_lock_active(),
         "risk_per_trade": effective_risk_per_trade(_account_equity),
         "max_notional_per_order": effective_max_notional_per_order(),
         "vti_core_pct": core_pct,
@@ -2732,6 +2935,13 @@ def effective_risk_per_trade(
             base = round(base * float(arima_size_multiplier()), 6)
         except Exception:
             pass
+    if effective_strategy_rating_enabled():
+        try:
+            from modules.strategy_rating import stack_risk_multiplier
+
+            base = round(base * float(stack_risk_multiplier()), 6)
+        except Exception:
+            pass
     return base
 
 
@@ -2741,9 +2951,11 @@ def effective_per_name_max_pct() -> float:
 
 
 def effective_tail_risk_controls() -> bool:
-    """Conservative tail-risk overlay — paper/research only."""
+    """Tail-risk overlay — paper/research + Live Conservative lock."""
     if not TAIL_RISK_CONTROLS_ENABLED:
         return False
+    if live_conservative_lock_active():
+        return True
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
         return False
     return bool(
@@ -3073,7 +3285,11 @@ def effective_max_notional_per_order(equity: float | None = None) -> float:
 
 def is_crypto(symbol: str) -> bool:
     """True for universe crypto pairs (BTC-USD) or Alpaca format (BTC/USD, BTCUSD)."""
+    if symbol is None:
+        return False
     sym = normalize_symbol(symbol)
+    if not sym:
+        return False
     if sym.endswith("-USD"):
         return True
     if "/" in str(symbol).upper() and str(symbol).upper().endswith("/USD"):
@@ -3092,7 +3308,11 @@ def is_crypto(symbol: str) -> bool:
 
 def normalize_symbol(symbol: str) -> str:
     """Alpaca (BTCUSD, BTC/USD) -> universe form (BTC-USD)."""
-    s = symbol.replace("/", "-")
+    if symbol is None:
+        return ""
+    s = str(symbol).strip().replace("/", "-")
+    if not s or s.lower() in ("none", "null", "nan"):
+        return ""
     if s.endswith("USD") and "-" not in s:
         return f"{s[:-3]}-USD"
     return s
@@ -3353,11 +3573,34 @@ def apply_best_paper_config_if_enabled() -> None:
 
 
 def print_live_stack_flags() -> None:
-    """Log Profile A: current_dynamic live stack (preflight / live run_all / backtest default)."""
+    """Log Profile A: Live Conservative stack (preflight / live run_all / backtest default)."""
     gp = _game_plan_label()
-    print("--- current_dynamic live stack (Profile A) ---")
+    print(f"--- {LIVE_CONSERVATIVE_LABEL} live stack (Profile A) ---")
+    print(format_live_conservative_headline())
     print(f"  game_plan:              {gp}")
     print(f"  yield_gate:             {YIELD_GATE_ENABLED}")
+    print(f"  active_sleeve:          {LIVE_ACTIVE_SLEEVE_CHOICE} (SPY trend path)")
+    print(
+        f"  garch_vol:              {effective_garch_vol_enabled()} "
+        f"(GARCH_VOL_LIVE_ENABLED={GARCH_VOL_LIVE_ENABLED})"
+    )
+    print(f"  atr_sizing:             {effective_atr_sizing_enabled()}")
+    print(f"  exit_optimization:      {effective_exit_optimization_enabled()}")
+    print(f"  correlation_guard:      {effective_correlation_guard_enabled()}")
+    print(f"  tail_risk:              {effective_tail_risk_controls()}")
+    print(
+        f"  paper_only_off:         stat_arb={effective_stat_arb_enabled()} | "
+        f"shorts={effective_opportunistic_short_enabled()} | "
+        f"rvol={effective_rvol_scanner_enabled()} | "
+        f"orb={effective_orb_enabled()} | "
+        f"catalyst={effective_catalyst_scoring_enabled()}"
+    )
+    print(
+        f"  paper_only_off_cont:    optional_vti={effective_dynamic_vti_optional()} | "
+        f"spy_like={effective_spy_like_boost_enabled()} | "
+        f"arima={effective_arima_enabled()} | "
+        f"daily_bank={effective_daily_bank_enabled()}"
+    )
     print(f"  nyse_overlap_filter:    {NYSE_OVERLAP_FILTER_ENABLED} (corr max {NYSE_SPY_CORR_MAX})")
     print(f"  nyse_beta_scaling:      {NYSE_BETA_SCALING_ENABLED}")
     print(f"  spy_exit_on_ma_break:   {SPY_EXIT_ON_MA_BREAK}")
@@ -3410,6 +3653,8 @@ def get_best_paper_bot_stack() -> dict[str, bool]:
         stack["thinking_engine"] = PAPER_THINKING_ENGINE_ENABLED
         stack["vol_overlay"] = PAPER_VOL_TRADING_ENABLED
         stack["options_income"] = PAPER_OPTIONS_SLEEVE_ENABLED
+        stack["wheel_strategy"] = PAPER_WHEEL_SLEEVE_ENABLED
+        stack["politician_copy"] = PAPER_POLITICIAN_COPY_ENABLED
         stack["dynamic_vti"] = PAPER_DYNAMIC_VTI_ENABLED
         stack["dynamic_risk"] = PAPER_DYNAMIC_RISK_ENABLED
         stack["nyse_overlap"] = PAPER_NYSE_OVERLAP_FILTER_ENABLED
@@ -3814,9 +4059,12 @@ def enforce_realistic_research_profile() -> None:
     - ARIMA / ARIMA–GARCH hybrid OFF unless ARIMA_ENABLED is env-explicit
     - Dynamic VTI optional floor ON paper; live OFF unless DYNAMIC_VTI_OPTIONAL_LIVE
     - SPY-like boost ON paper; live OFF unless SPY_LIKE_BOOST_LIVE_ENABLED
-    Existing locks kept: RHYME primary, HMM soft-only, GARCH paper ON/live OFF,
+    Existing locks kept: RHYME primary, HMM soft-only, GARCH paper ON
+    (Live Conservative separately enables GARCH via GARCH_VOL_LIVE_ENABLED),
     Daily Banking, scanners, shorts, Smart Dynamic VTI 35-75%, etc.
     See REALISTIC_RESEARCH_LOCKED_FEATURES for the banner summary.
+    Live Profile A uses ``enforce_live_conservative_profile()`` — do not weaken
+    that path from here; paper stays aggressive research.
     """
     global DYNAMIC_CORE_ENABLED
     global DEEP_HISTORY_ENABLED
@@ -3961,6 +4209,12 @@ def enforce_realistic_research_profile() -> None:
     global SECTOR_ROTATION_MAX_SECTOR_PCT
     global SECTOR_ROTATION_TOP_N
     global SECTOR_ROTATION_BACKTEST_ENABLED
+    global PAPER_WHEEL_SLEEVE_ENABLED
+    global WHEEL_SLEEVE_CAP_PCT
+    global WHEEL_BACKTEST_ENABLED
+    global PAPER_POLITICIAN_COPY_ENABLED
+    global POLITICIAN_COPY_CAP_PCT
+    global POLITICIAN_COPY_BACKTEST_ENABLED
     global CATALYST_SCORING_ENABLED
     global CATALYST_MIN_SCORE
     global CATALYST_BOOST_FACTOR
@@ -4318,6 +4572,19 @@ def enforce_realistic_research_profile() -> None:
         SECTOR_ROTATION_TOP_N = 3
     if not _env_explicit("SECTOR_ROTATION_BACKTEST_ENABLED"):
         SECTOR_ROTATION_BACKTEST_ENABLED = True
+    # Wheel + Politician copy: optional paper sleeves — OFF unless env-explicit
+    if not _env_explicit("PAPER_WHEEL_SLEEVE_ENABLED", "WHEEL_SLEEVE_ENABLED"):
+        PAPER_WHEEL_SLEEVE_ENABLED = False
+    if not _env_explicit("WHEEL_SLEEVE_CAP_PCT"):
+        WHEEL_SLEEVE_CAP_PCT = 0.08
+    if not _env_explicit("WHEEL_BACKTEST_ENABLED"):
+        WHEEL_BACKTEST_ENABLED = True
+    if not _env_explicit("PAPER_POLITICIAN_COPY_ENABLED", "POLITICIAN_COPY_ENABLED"):
+        PAPER_POLITICIAN_COPY_ENABLED = False
+    if not _env_explicit("POLITICIAN_COPY_CAP_PCT"):
+        POLITICIAN_COPY_CAP_PCT = 0.05
+    if not _env_explicit("POLITICIAN_COPY_BACKTEST_ENABLED"):
+        POLITICIAN_COPY_BACKTEST_ENABLED = True
     if not _env_explicit("CATALYST_SCORING_ENABLED", "PAPER_CATALYST_SCORING_ENABLED"):
         CATALYST_SCORING_ENABLED = True
     if not _env_explicit("CATALYST_MIN_SCORE"):
@@ -4668,6 +4935,12 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "SECTOR_ROTATION_TOP_N": "3",
     "SECTOR_ROTATION_LIVE_SLEEVE": "false",
     "SECTOR_ROTATION_BACKTEST_ENABLED": "true",
+    "PAPER_WHEEL_SLEEVE_ENABLED": "false",
+    "WHEEL_SLEEVE_CAP_PCT": "0.08",
+    "WHEEL_BACKTEST_ENABLED": "true",
+    "PAPER_POLITICIAN_COPY_ENABLED": "false",
+    "POLITICIAN_COPY_CAP_PCT": "0.05",
+    "POLITICIAN_COPY_BACKTEST_ENABLED": "true",
     "CATALYST_SCORING_ENABLED": "true",
     "CATALYST_MIN_SCORE": "65",
     "CATALYST_BOOST_FACTOR": "0.20",
@@ -4810,10 +5083,11 @@ def is_realistic_research_active() -> bool:
 
 
 def format_paper_live_profile_line() -> str:
-    """Cross-book startup line: paper v1.5 aggressive vs live conservative."""
+    """Cross-book startup line: paper v1.5.4 FINAL LOCK vs Live Conservative."""
     return (
-        f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive) | "
-        f"{REALISTIC_RESEARCH_TAGLINE} | Live Bot: Conservative {LIVE_VTI_CORE_PCT:.0%} VTI"
+        f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive FINAL LOCK) | "
+        f"{REALISTIC_RESEARCH_TAGLINE} | Live Bot: {LIVE_CONSERVATIVE_LABEL} "
+        f"{LIVE_VTI_CORE_PCT:.0%} VTI + SPY trend + GARCH/ATR/exits/corr/tail"
     )
 
 
@@ -4930,6 +5204,22 @@ def format_realistic_research_startup_lines() -> list[str]:
     except Exception:
         pass
     try:
+        from modules.wheel_sleeve import format_wheel_banner
+
+        wheel_line = format_wheel_banner()
+        if wheel_line:
+            lines.append(wheel_line)
+    except Exception:
+        pass
+    try:
+        from modules.politician_copy_sleeve import format_politician_copy_banner
+
+        pol_line = format_politician_copy_banner()
+        if pol_line:
+            lines.append(pol_line)
+    except Exception:
+        pass
+    try:
         from modules.catalyst_scoring import format_catalyst_scanner_banner
 
         catalyst_line = format_catalyst_scanner_banner()
@@ -5024,11 +5314,17 @@ def format_realistic_research_startup_lines() -> list[str]:
         garch_line = format_garch_vol_banner()
         if garch_line:
             lines.append(f">>> {garch_line} <<<")
-        if GARCH_VOL_ENABLED and not GARCH_VOL_LIVE_ENABLED:
-            lines.append(
-                ">>> GARCH vol lock: paper ON | live OFF "
-                "(GARCH_VOL_LIVE_ENABLED=false) <<<"
-            )
+        if GARCH_VOL_ENABLED:
+            if GARCH_VOL_LIVE_ENABLED:
+                lines.append(
+                    ">>> GARCH vol: paper ON | Live Conservative ON "
+                    "(GARCH_VOL_LIVE_ENABLED via enforce_live_conservative_profile) <<<"
+                )
+            else:
+                lines.append(
+                    ">>> GARCH vol: paper ON | live OFF until Live Conservative enforce "
+                    "(set GARCH_VOL_LIVE_ENABLED=true or run live book) <<<"
+                )
     except Exception:
         pass
     try:
@@ -5081,6 +5377,14 @@ def format_realistic_research_startup_lines() -> list[str]:
             strat_line = format_strategy_health_banner()
             if strat_line:
                 lines.append(strat_line)
+        except Exception:
+            pass
+        try:
+            from modules.strategy_rating import format_strategy_rating_banner
+
+            rating_line = format_strategy_rating_banner()
+            if rating_line:
+                lines.append(rating_line)
         except Exception:
             pass
         try:
@@ -5733,9 +6037,11 @@ def effective_historical_news_enabled() -> bool:
 
 
 def effective_atr_sizing_enabled() -> bool:
-    """ATR-based position sizing — paper/research only."""
+    """ATR-based position sizing — paper/research + Live Conservative lock."""
     if not ATR_SIZING_ENABLED:
         return False
+    if live_conservative_lock_active():
+        return True
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
         return False
     if ALLOW_LIVE_TRADING and not PAPER_TRADING:
@@ -5784,9 +6090,11 @@ def effective_multi_timeframe_enabled() -> bool:
 
 
 def effective_exit_optimization_enabled() -> bool:
-    """Dynamic exits (partial, trail, time) — paper/research only."""
+    """Dynamic exits (partial, trail, time) — paper/research + Live Conservative lock."""
     if not EXIT_OPTIMIZATION_ENABLED:
         return False
+    if live_conservative_lock_active():
+        return True
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
         return False
     if ALLOW_LIVE_TRADING and not PAPER_TRADING:
@@ -5805,9 +6113,11 @@ def effective_partial_exit_enabled() -> bool:
 
 
 def effective_correlation_guard_enabled() -> bool:
-    """Portfolio correlation sizing guard — paper/research only."""
+    """Portfolio correlation sizing guard — paper/research + Live Conservative lock."""
     if not CORRELATION_GUARD_ENABLED:
         return False
+    if live_conservative_lock_active():
+        return True
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
         return False
     if ALLOW_LIVE_TRADING and not PAPER_TRADING:
@@ -5853,6 +6163,26 @@ def effective_paper_dynamic_universe_strict() -> bool:
     """Strict quality screener (8–12 names, 30d momentum) — paper aggressive only."""
     return bool(
         effective_paper_dynamic_universe() and PAPER_DYNAMIC_UNIVERSE_STRICT
+    )
+
+
+def effective_nyse_pick_rotation() -> bool:
+    """Rolling per-symbol pick cap for NYSE momentum — paper/research only."""
+    return bool(
+        NYSE_PICK_ROTATION_ENABLED
+        and (
+            paper_aggressive_context()
+            or paper_chase_mode_enabled()
+            or paper_only_sleeves_active()
+        )
+    )
+
+
+def effective_nyse_strict_intersect_candidates() -> bool:
+    """Intersect MA50 candidates with strict screener universe — paper strict mode only."""
+    return bool(
+        NYSE_STRICT_INTERSECT_CANDIDATES
+        and effective_paper_dynamic_universe_strict()
     )
 
 
@@ -5913,6 +6243,11 @@ def effective_paper_profit_protect_enabled() -> bool:
     return PAPER_PROFIT_PROTECT_ENABLED
 
 
+def effective_profit_protect() -> bool:
+    """Alias for callers expecting effective_profit_protect (→ paper profit protect)."""
+    return effective_paper_profit_protect_enabled()
+
+
 def effective_vol_position_sizing_enabled() -> bool:
     """Top1 vol + conviction position sizing — paper opt-in; off on live Profile A."""
     if not PAPER_TRADING:
@@ -5922,6 +6257,20 @@ def effective_vol_position_sizing_enabled() -> bool:
     if not (paper_only_sleeves_active() or paper_aggressive_context()):
         return False
     return PAPER_VOL_POSITION_SIZING_ENABLED
+
+
+def effective_vol_position_sizing() -> bool:
+    """Alias for callers expecting effective_vol_position_sizing (→ *_enabled)."""
+    return effective_vol_position_sizing_enabled()
+
+
+def effective_top1_vol_conservative() -> bool:
+    """Tighten vol-sizing bands (TOP1_VOL_SIZING_CONSERVATIVE env)."""
+    return os.getenv("TOP1_VOL_SIZING_CONSERVATIVE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
 
 def effective_loss_cutting_enabled() -> bool:
@@ -6459,7 +6808,7 @@ def effective_daily_bank_enabled() -> bool:
 
 
 def effective_garch_vol_enabled() -> bool:
-    """GARCH(1,1) vol sizing — locked paper / Realistic Research ON; live opt-in."""
+    """GARCH(1,1) vol sizing — paper ON; Live Conservative ON via GARCH_VOL_LIVE_ENABLED."""
     if not GARCH_VOL_ENABLED:
         return False
     if (
@@ -6468,6 +6817,9 @@ def effective_garch_vol_enabled() -> bool:
         or backtest_paper_sleeves_context()
         or is_realistic_research_active()
     ):
+        return True
+    # Live Conservative enforce sets GARCH_VOL_LIVE_ENABLED=true unless env-explicit.
+    if live_conservative_lock_active() and GARCH_VOL_LIVE_ENABLED:
         return True
     return bool(GARCH_VOL_LIVE_ENABLED)
 
@@ -6484,6 +6836,20 @@ def effective_arima_enabled() -> bool:
     ):
         return True
     return bool(ARIMA_LIVE_ENABLED)
+
+
+def effective_strategy_rating_enabled() -> bool:
+    """Strategy rating → size feedback — paper opt-in; live off unless live flag."""
+    if not STRATEGY_RATING_ENABLED:
+        return False
+    if PAPER_TRADING or (
+        paper_only_sleeves_active()
+        or paper_aggressive_context()
+        or backtest_paper_sleeves_context()
+        or is_realistic_research_active()
+    ):
+        return True
+    return bool(STRATEGY_RATING_LIVE_ENABLED)
 
 
 def effective_smart_stops_enabled() -> bool:
@@ -6603,6 +6969,20 @@ def effective_options_sleeve_enabled() -> bool:
     if not paper_only_sleeves_active():
         return False
     return PAPER_OPTIONS_SLEEVE_ENABLED
+
+
+def effective_wheel_sleeve_enabled() -> bool:
+    """Wheel (CSP→CC) income sleeve — paper aggressive / research only."""
+    if not paper_only_sleeves_active():
+        return False
+    return bool(PAPER_WHEEL_SLEEVE_ENABLED)
+
+
+def effective_politician_copy_enabled() -> bool:
+    """Capitol Trades politician copy — paper aggressive / research only."""
+    if not paper_only_sleeves_active():
+        return False
+    return bool(PAPER_POLITICIAN_COPY_ENABLED)
 
 
 def effective_vol_trading_enabled() -> bool:
