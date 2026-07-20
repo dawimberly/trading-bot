@@ -146,9 +146,12 @@ def read_json_file(path: Path | str) -> dict:
 
 
 def write_json_file(path: Path | str, payload: dict, *, indent: int = 2) -> bool:
-    """Write JSON to disk; return False on I/O failure."""
+    """Write JSON to disk; ensure parent directory exists and return False on I/O failure."""
+    p = Path(path)
     try:
-        Path(path).write_text(json.dumps(payload, indent=indent), encoding="utf-8")
+        # Make parent directories if they don't exist (fixes FileNotFoundError on nested paths)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(payload, indent=indent), encoding="utf-8")
         return True
     except OSError:
         logger.warning("write_json_file failed: %s", path, exc_info=True)
