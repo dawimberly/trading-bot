@@ -875,6 +875,8 @@ def get_conviction_based_notional(
     *,
     data=None,
     regime: str | None = None,
+    strategy_id: str | None = None,
+    sleeve: str | None = None,
 ) -> float:
     """Scale equity × risk_pct by conviction; combine with ATR cap when enabled."""
     equity = float(equity)
@@ -885,9 +887,21 @@ def get_conviction_based_notional(
             try:
                 from modules.dynamic_vti_allocator import spy_like_size_boost
 
-                return round(base_notional * float(spy_like_size_boost(symbol, data)), 2)
+                base_notional = round(
+                    base_notional * float(spy_like_size_boost(symbol, data)), 2
+                )
             except Exception:
                 pass
+        try:
+            from modules.strategy_rating import apply_strategy_rating_to_notional
+
+            rated = apply_strategy_rating_to_notional(
+                base_notional, strategy_id=strategy_id, sleeve=sleeve
+            )
+            if rated is not None:
+                return rated
+        except Exception:
+            pass
         return base_notional
 
     scale = conviction_scale(conviction_score)
@@ -909,6 +923,16 @@ def get_conviction_based_notional(
         adjusted = atr_adjust_notional(notional, equity, symbol, data)
         if adjusted is not None:
             notional = adjusted
+    try:
+        from modules.strategy_rating import apply_strategy_rating_to_notional
+
+        rated = apply_strategy_rating_to_notional(
+            notional, strategy_id=strategy_id, sleeve=sleeve
+        )
+        if rated is not None:
+            notional = rated
+    except Exception:
+        pass
     record_conviction_sample(float(conviction_score))
     return round(notional, 2)
 
@@ -921,6 +945,8 @@ def scale_notional_by_conviction(
     symbol: str | None = None,
     data=None,
     scale_band: tuple[float, float] | None = None,
+    strategy_id: str | None = None,
+    sleeve: str | None = None,
 ) -> float | None:
     """Apply conviction scale to an existing sleeve notional (NYSE / stat arb / shorts).
 
@@ -930,14 +956,25 @@ def scale_notional_by_conviction(
     if notional is None:
         return notional
     if not config.effective_conviction_sizing_enabled():
+        scaled = float(notional)
         if symbol:
             try:
                 from modules.dynamic_vti_allocator import spy_like_size_boost
 
-                return round(float(notional) * float(spy_like_size_boost(symbol, data)), 2)
+                scaled = round(scaled * float(spy_like_size_boost(symbol, data)), 2)
             except Exception:
                 pass
-        return notional
+        try:
+            from modules.strategy_rating import apply_strategy_rating_to_notional
+
+            rated = apply_strategy_rating_to_notional(
+                scaled, strategy_id=strategy_id, sleeve=sleeve
+            )
+            if rated is not None:
+                return rated
+        except Exception:
+            pass
+        return round(scaled, 2)
     equity = float(equity)
     scale = conviction_scale(conviction_score, scale_band=scale_band)
     scaled = round(float(notional) * scale, 2)
@@ -958,6 +995,16 @@ def scale_notional_by_conviction(
         adjusted = atr_adjust_notional(scaled, equity, symbol, data)
         if adjusted is not None:
             scaled = adjusted
+    try:
+        from modules.strategy_rating import apply_strategy_rating_to_notional
+
+        rated = apply_strategy_rating_to_notional(
+            scaled, strategy_id=strategy_id, sleeve=sleeve
+        )
+        if rated is not None:
+            scaled = rated
+    except Exception:
+        pass
     record_conviction_sample(float(conviction_score))
     return round(scaled, 2)
 
@@ -975,18 +1022,21 @@ def record_conviction_sample(score: float) -> None:
     try:
         from datetime import datetime
 
-        from modules.safe_io import read_json_file, write_json_atomic
+        from modules.safe_io import update_json_atomic
 
         path = _conviction_metrics_path()
-        payload = read_json_file(path) or {"samples": []}
-        samples = list(payload.get("samples") or [])
-        samples.append(
-            {"ts": datetime.now().isoformat(timespec="seconds"), "score": round(float(score), 4)}
-        )
-        payload["samples"] = samples[-500:]
-        payload["last_score"] = round(float(score), 4)
-        payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        write_json_atomic(path, payload)
+        ts = datetime.now().isoformat(timespec="seconds")
+        sample = {"ts": ts, "score": round(float(score), 4)}
+
+        def _mutate(payload: dict) -> dict:
+            samples = list(payload.get("samples") or [])
+            samples.append(sample)
+            payload["samples"] = samples[-500:]
+            payload["last_score"] = sample["score"]
+            payload["updated_at"] = ts
+            return payload
+
+        update_json_atomic(path, _mutate, default={"samples": []})
     except Exception as exc:
         logger.warning("failed to persist conviction metrics: %s", exc)
 
@@ -1175,14 +1225,18 @@ def _save_correlation_snapshot(corr: float | None, mult: float) -> None:
     try:
         from datetime import datetime
 
-        from modules.safe_io import read_json_file, write_json_atomic
+        from modules.safe_io import update_json_atomic
 
         path = _correlation_metrics_path()
-        payload = read_json_file(path) or {}
-        payload["last_corr"] = corr
-        payload["last_multiplier"] = mult
-        payload["updated_at"] = datetime.now().isoformat(timespec="seconds")
-        write_json_atomic(path, payload)
+        ts = datetime.now().isoformat(timespec="seconds")
+
+        def _mutate(payload: dict) -> dict:
+            payload["last_corr"] = corr
+            payload["last_multiplier"] = mult
+            payload["updated_at"] = ts
+            return payload
+
+        update_json_atomic(path, _mutate, default={})
     except Exception as exc:
         logger.warning("failed to persist correlation snapshot: %s", exc)
 

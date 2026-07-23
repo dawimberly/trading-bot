@@ -23,6 +23,7 @@ Core engine: modules/backtester_core.py (data cache, metrics, slippage, walk-for
 """
 
 import argparse
+import json
 import os
 import sys
 import warnings
@@ -1028,6 +1029,9 @@ def _resolve_backtest_vti_pct(
     regime: str | None = None,
     insider_state: dict | None = None,
 ) -> float:
+    # Explicit fixed core (A/B legs with paper_dynamic_vti=False + vti_core_pct).
+    if paper_aggressive and not config.PAPER_DYNAMIC_VTI_ENABLED and fixed_vti_core_pct > 0:
+        return float(fixed_vti_core_pct)
     if paper_aggressive and config.PAPER_DYNAMIC_VTI_ENABLED:
         if data is not None or regime is not None:
             try:
@@ -1345,6 +1349,12 @@ def run_backtest(
         reset_garch_vol_state()
     except Exception:
         pass
+    try:
+        from modules.pipeline_strategies import reset_nyse_pick_rotation
+
+        reset_nyse_pick_rotation()
+    except Exception:
+        pass
     if paper_aggressive and config.effective_dynamic_core_enabled():
         from modules.core_allocator import maybe_refresh_core_allocation
 
@@ -1412,6 +1422,22 @@ def run_backtest(
         "calm_days": 0,
         "premium_days": 0,
     }
+    wheel_state: dict = {
+        "puts": [],
+        "shares": [],
+        "last_manage_i": -999,
+        "total_premium": 0.0,
+        "assignment_drag": 0.0,
+        "manage_cycles": 0,
+        "premium_days": 0,
+    }
+    politician_state: dict = {
+        "total_copies": 0,
+        "total_notional": 0.0,
+        "copy_days": 0,
+        "copies_today": 0,
+    }
+    politician_trades = None
     vol_state: dict = {
         "mode": "flat",
         "notional": 0.0,
@@ -2304,6 +2330,46 @@ def run_backtest(
                 options_state["calm_days"] = int(options_state.get("calm_days", 0)) + 1
             if opt_meta.get("premium", 0) > 0:
                 options_state["premium_days"] = int(options_state.get("premium_days", 0)) + 1
+        if (
+            config.effective_wheel_sleeve_enabled()
+            and getattr(config, "WHEEL_BACKTEST_ENABLED", True)
+        ):
+            from modules.wheel_sleeve import run_wheel_backtest_day
+
+            _, wheel_meta = run_wheel_backtest_day(
+                portfolio,
+                prices,
+                bar_i=i,
+                state=wheel_state,
+                volatility=vol,
+                vol_score=vol_score,
+                ts=data.index[i],
+                market_open=True,
+            )
+            if wheel_meta.get("premium", 0) > 0:
+                wheel_state["premium_days"] = int(wheel_state.get("premium_days", 0)) + 1
+        if (
+            config.effective_politician_copy_enabled()
+            and getattr(config, "POLITICIAN_COPY_BACKTEST_ENABLED", True)
+        ):
+            from modules.politician_copy_sleeve import (
+                ensure_seed_trades,
+                run_politician_copy_backtest_day,
+            )
+
+            if politician_trades is None:
+                politician_trades = ensure_seed_trades()
+            _, pol_meta = run_politician_copy_backtest_day(
+                portfolio,
+                prices,
+                bar_i=i,
+                state=politician_state,
+                ts=data.index[i],
+                trades=politician_trades,
+                market_open=True,
+            )
+            if pol_meta.get("copies", 0) > 0:
+                politician_state["copy_days"] = int(politician_state.get("copy_days", 0)) + 1
         if config.effective_vol_trading_enabled() and not paper_vol_live_parity:
             from modules.volatility_sleeve import run_volatility_backtest_day
             from modules.risk_parity_sleeve import pod_entries_allowed
@@ -2569,6 +2635,30 @@ def run_backtest(
                 - float(options_state.get("assignment_drag", 0)),
                 2,
             ),
+        }
+    if config.effective_wheel_sleeve_enabled() or wheel_state.get("total_premium", 0) > 0:
+        result["wheel_sleeve"] = {
+            "enabled": bool(config.effective_wheel_sleeve_enabled()),
+            "total_premium": round(float(wheel_state.get("total_premium", 0)), 2),
+            "assignment_drag": round(float(wheel_state.get("assignment_drag", 0)), 2),
+            "manage_cycles": int(wheel_state.get("manage_cycles", 0)),
+            "premium_days": int(wheel_state.get("premium_days", 0)),
+            "net_income": round(
+                float(wheel_state.get("total_premium", 0))
+                - float(wheel_state.get("assignment_drag", 0)),
+                2,
+            ),
+        }
+    if (
+        config.effective_politician_copy_enabled()
+        or int(politician_state.get("total_copies", 0) or 0) > 0
+    ):
+        result["politician_copy"] = {
+            "enabled": bool(config.effective_politician_copy_enabled()),
+            "total_copies": int(politician_state.get("total_copies", 0)),
+            "total_notional": round(float(politician_state.get("total_notional", 0)), 2),
+            "copy_days": int(politician_state.get("copy_days", 0)),
+            "top_traders": list(politician_state.get("top_traders") or []),
         }
     if track_metrics:
         init = portfolio.initial_capital
@@ -7415,8 +7505,16 @@ def run_profit_target_compare(days=None, refresh=False, use_max=False) -> None:
 
 
 def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
-    """Compare fixed passive core vs Smart Dynamic VTI 35-75% on paper aggressive profile."""
+    """Compare fixed 20% VTI vs Dynamic VTI (≥40% floor) on paper aggressive."""
     config.enforce_realistic_research_profile()
+    # Force evaluation tiers (ignore stale .env mid-band experiments).
+    config.DYNAMIC_VTI_PAPER_FLOOR = 0.40
+    config.DYNAMIC_VTI_PAPER_CEILING = 0.75
+    config.DYNAMIC_VTI_DEFAULT_PCT = 0.65
+    config.DYNAMIC_VTI_CALM_PCT = 0.50
+    config.DYNAMIC_VTI_STRESS_PCT = 0.75
+    config.DYNAMIC_VTI_FLOOR_MIN = 0.40
+    config.DYNAMIC_VTI_ALLOW_ZERO = False
     if use_max:
         data = _ensure_daily_data(0, refresh=refresh, use_max=True)
     else:
@@ -7427,22 +7525,21 @@ def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
         return
 
     bench = _benchmark_return(data, MIN_HISTORY)
-    fixed_pct = config.PAPER_VTI_CORE_PCT
-    if config.effective_core_allocator_locked():
-        from modules.core_allocator import CORE_VTI_PCT, current_core_choice
-
-        fixed_pct = float(CORE_VTI_PCT.get(current_core_choice(), fixed_pct))
     configs = [
         (
-            f"Fixed {fixed_pct:.0%} core (paper)",
-            {"paper_aggressive": True, "paper_dynamic_vti": False},
+            "Fixed 20% VTI (legacy)",
+            {
+                "paper_aggressive": True,
+                "paper_dynamic_vti": False,
+                "vti_core_pct": 0.20,
+            },
         ),
         (
-            "Smart Dynamic VTI (paper)",
+            "Dynamic VTI ≥40% (paper)",
             {"paper_aggressive": True, "paper_dynamic_vti": True},
         ),
     ]
-    print("--- PAPER DYNAMIC VTI A/B (social/macro off, sleeve flags on) ---")
+    print("--- PAPER DYNAMIC VTI A/B (vs fixed 20% VTI) ---")
     print(
         f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
         f"({len(data) - MIN_HISTORY} sim bars)"
@@ -7450,9 +7547,10 @@ def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
     if bench is not None:
         print(f"VTI buy & hold benchmark: {bench:+.2f}%")
     print(
-        f"Paper boost: {config.PAPER_ACTIVE_SLEEVE_BOOST:.0%}x | "
-        f"social {config.PAPER_SOCIAL_SLEEVE_CAP_PCT:.0%} | "
-        f"PAPER_DYNAMIC_VTI default={config.PAPER_DYNAMIC_VTI_ENABLED}"
+        f"Tiers: stress={config.DYNAMIC_VTI_STRESS_PCT:.0%} | "
+        f"default={config.DYNAMIC_VTI_DEFAULT_PCT:.0%} | "
+        f"calm={config.DYNAMIC_VTI_CALM_PCT:.0%} | "
+        f"floor={config.DYNAMIC_VTI_PAPER_FLOOR:.0%}-{config.DYNAMIC_VTI_PAPER_CEILING:.0%}"
     )
     print(
         f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
@@ -7460,17 +7558,54 @@ def run_dynamic_vti_compare(days=None, refresh=False, use_max=False) -> None:
     )
     print("-" * 72)
 
+    rows = []
     for label, kwargs in configs:
         result = run_backtest(data, track_active_exposure=True, **kwargs)
+        vti_avg = float(result.get("vti_core_pct") or 0.0)
+        if 0.0 < vti_avg <= 1.5:
+            vti_avg *= 100.0
         print(
             f"{label:<28} "
             f"{result['total_return_pct']:>+7.2f}% "
             f"{result['sharpe']:>7.2f} "
             f"{result['max_drawdown_pct']:>7.2f}% "
             f"{result['avg_active_exposure_pct']:>6.1f}% "
-            f"{result['vti_core_pct'] * 100:>6.1f}%"
+            f"{vti_avg:>6.1f}%"
+        )
+        rows.append(
+            {
+                "label": label,
+                "return_pct": result["total_return_pct"],
+                "sharpe": result["sharpe"],
+                "max_dd_pct": result["max_drawdown_pct"],
+                "avg_active_pct": result["avg_active_exposure_pct"],
+                "avg_vti_pct": round(vti_avg, 1),
+            }
         )
     print("-" * 72)
+    out = Path("scripts/analysis") / f"dynamic_vti_ab_{days or 'max'}.json"
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(
+                {
+                    "days": days,
+                    "tiers": {
+                        "stress": config.DYNAMIC_VTI_STRESS_PCT,
+                        "default": config.DYNAMIC_VTI_DEFAULT_PCT,
+                        "calm": config.DYNAMIC_VTI_CALM_PCT,
+                        "floor": config.DYNAMIC_VTI_PAPER_FLOOR,
+                        "ceiling": config.DYNAMIC_VTI_PAPER_CEILING,
+                    },
+                    "rows": rows,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Saved: {out.resolve()}")
+    except OSError as exc:
+        print(f"Could not save A/B JSON: {exc}")
 
 
 def run_paper_aggressive_compare(days=None, refresh=False, use_max=False) -> None:
@@ -7979,6 +8114,17 @@ def run_performance_test(
     print(f"SPY signals:      {total_spy}")
     print(f"Crypto signals:   {total_crypto}")
     print(f"NYSE signals:     {total_equity}")
+    pick_counts = result.get("nyse_pick_counts") or {}
+    if pick_counts:
+        top = sorted(pick_counts.items(), key=lambda x: -x[1])[:12]
+        total_picks = sum(int(v) for _, v in pick_counts.items())
+        top2 = sum(int(v) for _, v in top[:2])
+        share = (100.0 * top2 / total_picks) if total_picks else 0.0
+        print(
+            f"NYSE pick counts: {len(pick_counts)} symbols | "
+            f"top2 share {share:.0f}% | "
+            + ", ".join(f"{s}={n}" for s, n in top)
+        )
     print(f"Total orders:     {total_orders}")
     skip_bd = result.get("entry_skip_breakdown") or {}
     if skip_bd:
@@ -8014,6 +8160,22 @@ def run_performance_test(
         print("                  (XOM proxies XLE when XLE daily bars missing)")
     elif config.SOCIAL_SLEEVE_ENABLED:
         print("Social sleeve:    enabled (no trades)")
+    wheel = result.get("wheel_sleeve")
+    if wheel:
+        print(
+            f"Wheel sleeve:     premium ${wheel.get('total_premium', 0):,.2f} | "
+            f"drag ${wheel.get('assignment_drag', 0):,.2f} | "
+            f"net ${wheel.get('net_income', 0):,.2f} | "
+            f"cycles {wheel.get('manage_cycles', 0)}"
+        )
+    pol = result.get("politician_copy")
+    if pol:
+        tops = ", ".join(str(t) for t in (pol.get("top_traders") or [])[:3]) or "-"
+        print(
+            f"Politician copy:  {pol.get('total_copies', 0)} buys | "
+            f"${pol.get('total_notional', 0):,.0f} | "
+            f"days {pol.get('copy_days', 0)} | top {tops}"
+        )
     print("Regime distribution:")
     for name, count in sorted(regime_counts.items(), key=lambda x: -x[1]):
         print(f"  {name}: {count}")

@@ -84,6 +84,12 @@ logger = logging.getLogger(__name__)
 
 def _warn_nonfatal(context: str, exc: BaseException) -> None:
     log_subsystem_warning("run_all", context, exc)
+    try:
+        from modules import error_watcher
+
+        error_watcher.log_exception(exc, context=context)
+    except Exception:
+        pass
 
 
 def _social_alpaca_credentials():
@@ -312,6 +318,19 @@ def _record_cycle_error(error: str) -> None:
     payload["last_cycle_error"] = str(error)[:500]
     payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
     write_json_atomic(path, payload)
+    try:
+        from modules import error_watcher
+
+        error_watcher.log_action("cycle_error", error=str(error)[:500])
+        # Promote to error queue without fabricating a traceback.
+        error_watcher.log_failed_order(
+            symbol="CYCLE",
+            side="n/a",
+            reason="cycle_error",
+            error=str(error)[:1000],
+        )
+    except Exception:
+        pass
 
 
 def _write_heartbeat(
@@ -514,6 +533,30 @@ def main():
     equity_scans = schedule.get("equity_scans", market_open)
     executor.equity_session_open = market_open
     executor.refresh_cache()
+
+    try:
+        from modules import error_watcher
+
+        error_watcher.cycle_tick(cycle=_main_cycle_count, equity=None)
+    except Exception:
+        pass
+
+    try:
+        guard_summary = executor.enforce_portfolio_guards(dry_run=bool(executor.dry_run))
+        if _main_cycle_count <= 2 or guard_summary.get("concentration_trims") or any(
+            a.get("status") in ("dry_run", "closed", "submitted")
+            for a in (guard_summary.get("dust_actions") or [])
+        ):
+            print(
+                f"--- Portfolio guards: active {guard_summary['active_count']}/"
+                f"{guard_summary['max_active_tickers']} | "
+                f"conc trims {len(guard_summary.get('concentration_trims') or [])} | "
+                f"dust {len(guard_summary.get('dust_actions') or [])} "
+                f"(thresh ${guard_summary['auto_dust_max_notional']:.0f})"
+                f"{' [DRY_RUN]' if guard_summary.get('dry_run') else ''} ---"
+            )
+    except Exception as exc:
+        _warn_nonfatal("portfolio guards", exc)
 
     account = executor._get_account()
     equity = float(account.equity)
@@ -971,22 +1014,54 @@ def main():
     insider_boost = None
     if config.effective_insider_signal_boost_enabled():
         try:
-            from modules.insider_signal_handler import apply_insider_signals_to_strategies
-
-            bubble_100 = None
             try:
-                from modules.bubble_risk import compute_bubble_risk
-
-                bubble_100 = float(compute_bubble_risk(data, regime).get("score_100") or 0.0)
-            except Exception as exc:
-                logger.debug("bubble risk score unavailable for insider gating: %s", exc)
-            insider_boost = apply_insider_signals_to_strategies(
-                bubble_score_100=bubble_100,
-                regime=regime,
+                from modules import insider_signal_handler as _insider_mod
+            except ImportError as exc:
+                logger.warning(
+                    "insider_signal_handler import failed; skipping boost this cycle: %s",
+                    exc,
+                )
+                _insider_mod = None
+            apply_insider = (
+                getattr(_insider_mod, "apply_insider_signals_to_strategies", None)
+                if _insider_mod is not None
+                else None
             )
-            summary = insider_boost.get("summary") or ""
-            if summary and summary != "insider signal boost off":
-                print(f"--- Insider signal boost: {summary} ---")
+            if apply_insider is None and _insider_mod is not None:
+                # Empty/partial module can linger in sys.modules after a bad deploy;
+                # reload so a restored file works without waiting for process restart.
+                try:
+                    import importlib
+
+                    _insider_mod = importlib.reload(_insider_mod)
+                    apply_insider = getattr(
+                        _insider_mod, "apply_insider_signals_to_strategies", None
+                    )
+                except Exception as exc:
+                    logger.warning("insider_signal_handler reload failed: %s", exc)
+            if apply_insider is None:
+                logger.warning(
+                    "apply_insider_signals_to_strategies missing; skipping boost this cycle"
+                )
+            else:
+                bubble_100 = None
+                try:
+                    from modules.bubble_risk import compute_bubble_risk
+
+                    bubble_100 = float(
+                        compute_bubble_risk(data, regime).get("score_100") or 0.0
+                    )
+                except Exception as exc:
+                    logger.debug(
+                        "bubble risk score unavailable for insider gating: %s", exc
+                    )
+                insider_boost = apply_insider(
+                    bubble_score_100=bubble_100,
+                    regime=regime,
+                )
+                summary = (insider_boost or {}).get("summary") or ""
+                if summary and summary != "insider signal boost off":
+                    print(f"--- Insider signal boost: {summary} ---")
         except Exception as exc:
             _warn_nonfatal("Insider signal boost error", exc)
 
@@ -1276,6 +1351,32 @@ def main():
             vix=current_vix_level(),
             market_open=market_open,
         )
+
+    if config.effective_wheel_sleeve_enabled() and market_open:
+        try:
+            from modules.options_sleeve import current_vix_level
+            from modules.wheel_sleeve import run_wheel_sleeve_cycle
+
+            run_wheel_sleeve_cycle(
+                executor,
+                volatility=vol_label,
+                vix=current_vix_level(),
+                market_open=market_open,
+            )
+        except Exception as exc:
+            _warn_nonfatal("Wheel sleeve", exc)
+
+    if config.effective_politician_copy_enabled() and market_open and config.PAPER_TRADING:
+        try:
+            from modules.politician_copy_sleeve import run_politician_copy_cycle
+
+            run_politician_copy_cycle(
+                executor,
+                data,
+                market_open=market_open,
+            )
+        except Exception as exc:
+            _warn_nonfatal("Politician copy sleeve", exc)
 
     if config.effective_vol_trading_enabled() and market_open:
         from modules.options_sleeve import current_vix_level
@@ -1975,6 +2076,9 @@ def _print_account_startup_summary(equity: float, cash: float | None = None) -> 
                 f"max order ${config.effective_max_notional_per_order(equity):,.2f} | "
                 f"VTI {vti:.0%} ---"
             )
+    elif config.live_conservative_lock_active():
+        print(f"--- {config.format_live_conservative_headline()} ---")
+        print(f"--- {config.format_live_conservative_banner()} ---")
 
 
 def _print_startup_banner(startup_equity: float | None = None):
@@ -2162,6 +2266,9 @@ def _print_startup_banner(startup_equity: float | None = None):
                 f"--- Small account safety: max ${config.effective_max_notional_per_order():,.2f}/order | "
                 f"VTI {config.vti_core_allocation_pct():.0%} core ---"
             )
+    elif config.live_conservative_lock_active():
+        print(f"--- {config.format_live_conservative_headline()} ---")
+        print(f"--- {config.format_live_conservative_banner()} ---")
     print(
         f"--- Order sizing: scales with equity (ref ${config.REFERENCE_EQUITY:,.0f} -> "
         f"min ${config.MIN_NOTIONAL:.0f}; $100 account -> min "
@@ -2253,6 +2360,7 @@ def _print_startup_banner(startup_equity: float | None = None):
                 f"when SPCX/SPCXx appears on Kraken Pro API ---"
             )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
+    print(f"--- {config.format_telegram_automation_banner()} ---")
     if alerts.alerts_configured():
         print(f"--- Alerts: on - {config.telegram_alert_policy_summary()} ---")
         if config.telegram_weekly_summary_enabled():
@@ -2295,6 +2403,9 @@ def _confirm_live_trading_startup(equity: float) -> None:
                 f"max ${profile['max_notional_per_order']:,.2f}/order | "
                 f"VTI {profile['vti_core_pct']:.0%} ---"
             )
+    elif profile.get("live_conservative_lock"):
+        print(f"--- {config.format_live_conservative_headline()} ---")
+        print(f"--- {config.format_live_conservative_banner()} ---")
     print("--- Press Ctrl+C within 10 seconds to abort ---")
     for remaining in range(10, 0, -1):
         print(f"Starting live trading loop in {remaining}s...")
@@ -2341,6 +2452,8 @@ if __name__ == "__main__":
     chase_extras = config.init_paper_chase_if_enabled()
     if chase_extras:
         print(f"--- Paper chase extras: {', '.join(chase_extras)} ---")
+    if not config.PAPER_TRADING:
+        config.enforce_live_conservative_profile()
     startup_equity = None
     startup_cash = None
     try:

@@ -120,17 +120,37 @@ def is_auth_alpaca_error(exc: BaseException) -> bool:
     if not isinstance(exc, APIError):
         return False
     status = getattr(exc, "status_code", None)
-    if status == 403 and "insufficient qty" in str(exc).lower():
+    msg = str(exc).lower()
+    # Insufficient qty / missing asset are order/asset issues, not credential auth.
+    if status == 403 and "insufficient qty" in msg:
+        return False
+    if is_unknown_asset_error(exc):
         return False
     return status in AUTH_HTTP_STATUS
 
 
-def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation or insufficient-qty 403 — do not crash the cycle."""
+def is_unknown_asset_error(exc: BaseException) -> bool:
+    """True when Alpaca rejects an unknown/untradable symbol (e.g. SKY-USD)."""
     if not isinstance(exc, APIError):
-        return False
+        text = str(exc).lower()
+        return "asset" in text and "not found" in text
     status = getattr(exc, "status_code", None)
     msg = str(exc).lower()
+    if "asset" in msg and "not found" in msg:
+        return True
+    if status == 404:
+        return True
+    return False
+
+
+def is_skippable_order_error(exc: BaseException) -> bool:
+    """422 notional/qty validation, unknown asset, or insufficient-qty 403 — do not crash the cycle."""
+    if not isinstance(exc, APIError):
+        return is_unknown_asset_error(exc)
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    if is_unknown_asset_error(exc):
+        return True
     if status == 422:
         return True
     if status == 403 and "insufficient qty" in msg:

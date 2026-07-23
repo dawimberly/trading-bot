@@ -87,6 +87,7 @@ EQUITY_SECTOR_MAP: dict[str, str] = {
     "PLTR": "Tech",
     "COIN": "Tech",
     "SPCX": "Tech",
+    "ONDS": "Tech",
     "XOM": "Energy",
     "CVX": "Energy",
     "LNG": "Energy",
@@ -175,6 +176,14 @@ def apply_sector_balance(
                 break
             selected.append(row)
     return selected
+
+
+def strict_screener_symbol_set() -> frozenset[str]:
+    """Tickers from the weekly screener JSON (strict 8–12 when strict mode active)."""
+    tickers = config.load_screener_universe_tickers() or []
+    if not tickers:
+        return frozenset()
+    return frozenset(config.normalize_symbol(t) for t in tickers if str(t).strip())
 
 
 def screener_momentum_order(symbols: list[str]) -> list[str] | None:
@@ -507,6 +516,7 @@ def build_offline_screener_seed() -> dict:
     priority = [
         "NVDA", "TSLA", "AMD", "AAPL", "MSFT", "GOOGL", "AMZN", "META",
         "SPCX", "PLTR", "NFLX", "INTC", "MU", "SMCI", "COIN", "CRM", "SHOP",
+        "ONDS",
         "SNOW", "OKTA", "HPE", "BB", "ARM",
     ]
     from_universe = [

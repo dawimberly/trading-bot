@@ -204,6 +204,7 @@ UNIVERSE = [
     "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
     "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "AMZN", "TSLA", "META",
     "SPCX", "PLTR", "NFLX", "INTC", "MU", "SMCI", "COIN", "CRM", "SHOP",
+    "ONDS",
     "VTI", "QQQ", "SPY", "IWM",
     "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX",
     "XOM", "CVX", "LNG",
@@ -453,7 +454,8 @@ REALISTIC_RESEARCH_VERSION = "1.5.4"
 REALISTIC_RESEARCH_PROFILE_VERSION = REALISTIC_RESEARCH_VERSION
 REALISTIC_RESEARCH_TAGLINE = "v1.5.4 - Sector-Aware Portfolio Constructor"
 REALISTIC_RESEARCH_FEATURE_DETAIL = (
-    "FINAL LOCK (365d tune): Smart Dynamic VTI (35-75%, optional floor 20%/0%) + "
+    "FINAL LOCK (365d tune): Smart Dynamic VTI LOCKED (40-75%, hard floor >=40%; "
+    "tiers stress 75% / default 65% / calm 50%) + "
     "SPY-like boosts (paper ON) + Sector Rotation (top 2-3 SPDRs) + "
     "ATR Vol Breakout (RVOL+MTF, <=1% risk) + "
     "Sector-Aware Portfolio Constructor + "
@@ -475,8 +477,8 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "Insider monitor + boosts",
     "Protective shorts (8-18%) + sector shorts",
     "Stat arb quality ON (8-12 pairs, Z 2.1-2.7, RR 1.7, trail 45/30, partial@1.2) — 365d locked",
-    "Smart Dynamic VTI core (35-75%: NYSE/metals, insider, bubble, regime)",
-    "Optional VTI floor ON paper (20%/0% on SPY-like strength; live OFF unless opt-in)",
+    "Smart Dynamic VTI LOCKED paper default (40-75%: stress 75% / default 65% / calm 50%; hard floor >=40%)",
+    "Dynamic VTI zero-core path OFF paper (DYNAMIC_VTI_ALLOW_ZERO=false; floor_min=40%)",
     "SPY-like boost ON paper (1.05-1.2x; live OFF unless opt-in)",
     "ARIMA / ARIMA-GARCH hybrid OFF by default (ARIMA_ENABLED=false; hybrid stays true when ARIMA on)",
     "Sector rotation (top 2-3 SPDRs, max 25%/sector, monthly/regime)",
@@ -665,7 +667,8 @@ DEEP_HISTORY_ENABLED = _env_bool_first("DEEP_HISTORY_ENABLED", default="true")
 DEEP_HISTORY_INDICATORS_ONLY = _env_bool_first(
     "DEEP_HISTORY_INDICATORS_ONLY", default="true"
 )
-# When True, VTI core floats 35–75% via Smart Dynamic VTI (vol/stress + sleeve/insider/bubble/regime).
+# When True, VTI core floats 40–75% via Smart Dynamic VTI (vol/stress + sleeve/insider/bubble/regime).
+# Paper default LOCKED ON (PAPER_DYNAMIC_VTI=true); fixed core only if explicitly set false.
 PAPER_SOFT_PAUSE_ENABLED = os.getenv("PAPER_SOFT_PAUSE", "false").lower() in (
     "1",
     "true",
@@ -767,6 +770,16 @@ PAPER_DD_RISK_MULT_7 = float(os.getenv("PAPER_DD_RISK_MULT_7", str(PAPER_DD_RISK
 PAPER_POSITION_MAX_HOLD_BARS = int(os.getenv("PAPER_POSITION_MAX_HOLD_BARS", "30"))
 PER_NAME_MAX_PCT = float(os.getenv("PER_NAME_MAX_PCT", "0.08"))
 PAPER_MAX_POSITION_PCT = float(os.getenv("PAPER_MAX_POSITION_PCT", str(PER_NAME_MAX_PCT)))
+# Executor portfolio guards (buys + periodic cleanup).
+CONCENTRATION_GUARD_ENABLED = _env_bool_first(
+    "CONCENTRATION_GUARD_ENABLED", default="true"
+)
+MAX_ACTIVE_TICKERS = int(os.getenv("MAX_ACTIVE_TICKERS", "25"))
+# Auto-dust cleaner: sell positions with market value below this (USD).
+AUTO_DUST_MAX_NOTIONAL = float(os.getenv("AUTO_DUST_MAX_NOTIONAL", "10"))
+AUTO_DUST_CLEANER_ENABLED = _env_bool_first(
+    "AUTO_DUST_CLEANER_ENABLED", default="true"
+)
 # Tail-risk overlay (Realistic Research v1.1) — portfolio vol cap, panic buffers, sector safety.
 # Default ON for paper/research; set TAIL_RISK_CONTROLS_ENABLED=false to disable.
 TAIL_RISK_CONTROLS_ENABLED = _env_bool_first("TAIL_RISK_CONTROLS_ENABLED", default="true")
@@ -798,17 +811,17 @@ PAPER_CRYPTO_MAX_EXPOSURE_PCT = float(os.getenv("PAPER_CRYPTO_MAX_EXPOSURE_PCT",
 PAPER_HALT_RESUME_DRAWDOWN_PCT = float(os.getenv("PAPER_HALT_RESUME_DRAWDOWN_PCT", "0.06"))
 PAPER_HALT_RECOVERY_RISK_MULT = float(os.getenv("PAPER_HALT_RECOVERY_RISK_MULT", "0.65"))
 PAPER_HALT_RECOVERY_CLEAR_PCT = float(os.getenv("PAPER_HALT_RECOVERY_CLEAR_PCT", "0.03"))
-DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.35"))
+DYNAMIC_VTI_PAPER_FLOOR = float(os.getenv("DYNAMIC_VTI_PAPER_FLOOR", "0.40"))
 DYNAMIC_VTI_PAPER_CEILING = float(os.getenv("DYNAMIC_VTI_PAPER_CEILING", "0.75"))
 # Optional VTI floor reduction when SPY-like confluence is strong (paper-first).
-# Normal floor stays DYNAMIC_VTI_PAPER_FLOOR (~35%); reduced floor / zero only when strength clears thresholds.
+# Hard safety rail: never below DYNAMIC_VTI_PAPER_FLOOR (default 40%).
 DYNAMIC_VTI_OPTIONAL_ENABLED = _env_bool_first(
     "DYNAMIC_VTI_OPTIONAL_ENABLED", "VTI_OPTIONAL_FLOOR", default="true"
 )
 DYNAMIC_VTI_ALLOW_ZERO = _env_bool_first(
     "DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL", default="false"
 )
-DYNAMIC_VTI_FLOOR_MIN = float(os.getenv("DYNAMIC_VTI_FLOOR_MIN", "0.20"))
+DYNAMIC_VTI_FLOOR_MIN = float(os.getenv("DYNAMIC_VTI_FLOOR_MIN", "0.40"))
 _DEFAULT_SPY_LIKE_UNIVERSE = (
     "SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO"
 )
@@ -835,8 +848,8 @@ SPY_LIKE_STRENGTH_ALLOW_ZERO = float(
 SPY_LIKE_CONFLUENCE_MIN = int(os.getenv("SPY_LIKE_CONFLUENCE_MIN", "3"))
 # Paper aggressive dynamic VTI tiers (fund_config.get_vti_core_pct; live unchanged)
 DYNAMIC_VTI_STRESS_PCT = float(os.getenv("DYNAMIC_VTI_STRESS_PCT", "0.75"))
-DYNAMIC_VTI_DEFAULT_PCT = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.60"))
-DYNAMIC_VTI_CALM_PCT = float(os.getenv("DYNAMIC_VTI_CALM_PCT", "0.45"))
+DYNAMIC_VTI_DEFAULT_PCT = float(os.getenv("DYNAMIC_VTI_DEFAULT_PCT", "0.65"))
+DYNAMIC_VTI_CALM_PCT = float(os.getenv("DYNAMIC_VTI_CALM_PCT", "0.50"))
 DYNAMIC_VTI_VOL_STRESS = float(os.getenv("DYNAMIC_VTI_VOL_STRESS", "0.025"))
 DYNAMIC_VTI_VOL_CALM = float(os.getenv("DYNAMIC_VTI_VOL_CALM", "0.015"))
 PAPER_SMALL_ACCOUNT_VTI_PCT = float(os.getenv("PAPER_SMALL_ACCOUNT_VTI_PCT", "0.90"))
@@ -1346,9 +1359,10 @@ OPTIONS_VTI_ALLOC_PCT = float(os.getenv("OPTIONS_VTI_ALLOC_PCT", "0.70"))
 PAPER_WHEEL_SLEEVE_ENABLED = _parse_env_bool("PAPER_WHEEL_SLEEVE_ENABLED", default="false")
 WHEEL_SLEEVE_ENABLED = _parse_env_bool("WHEEL_SLEEVE_ENABLED", default="false")
 WHEEL_SLEEVE_CAP_PCT = float(os.getenv("WHEEL_SLEEVE_CAP_PCT", "0.08"))
-WHEEL_OTM_PCT = float(os.getenv("WHEEL_OTM_PCT", "0.05"))
-WHEEL_MANAGE_BARS = int(os.getenv("WHEEL_MANAGE_BARS", "5"))
-WHEEL_DTE_BARS = int(os.getenv("WHEEL_DTE_BARS", "21"))
+# Tuned: slightly closer strikes → more premium; still OTM to limit assignment.
+WHEEL_OTM_PCT = float(os.getenv("WHEEL_OTM_PCT", "0.04"))
+WHEEL_MANAGE_BARS = int(os.getenv("WHEEL_MANAGE_BARS", "7"))
+WHEEL_DTE_BARS = int(os.getenv("WHEEL_DTE_BARS", "14"))
 WHEEL_VIX_CALM_MAX = float(os.getenv("WHEEL_VIX_CALM_MAX", "22"))
 WHEEL_UNDERLYINGS = os.getenv("WHEEL_UNDERLYINGS", "SPY,QQQ")
 WHEEL_MIN_NOTIONAL = float(os.getenv("WHEEL_MIN_NOTIONAL", "100"))
@@ -1362,9 +1376,11 @@ POLITICIAN_COPY_CAP_PCT = float(os.getenv("POLITICIAN_COPY_CAP_PCT", "0.05"))
 POLITICIAN_COPY_MAX_NAME_PCT = float(os.getenv("POLITICIAN_COPY_MAX_NAME_PCT", "0.02"))
 POLITICIAN_COPY_TOP_TRADERS = int(os.getenv("POLITICIAN_COPY_TOP_TRADERS", "5"))
 POLITICIAN_COPY_MAX_PER_DAY = int(os.getenv("POLITICIAN_COPY_MAX_PER_DAY", "2"))
-POLITICIAN_COPY_LOOKBACK_DAYS = int(os.getenv("POLITICIAN_COPY_LOOKBACK_DAYS", "45"))
-POLITICIAN_COPY_MIN_AMOUNT_USD = float(os.getenv("POLITICIAN_COPY_MIN_AMOUNT_USD", "15000"))
-POLITICIAN_COPY_SIZE_SCALE = float(os.getenv("POLITICIAN_COPY_SIZE_SCALE", "0.02"))
+POLITICIAN_COPY_LOOKBACK_DAYS = int(os.getenv("POLITICIAN_COPY_LOOKBACK_DAYS", "60"))
+POLITICIAN_COPY_MIN_AMOUNT_USD = float(os.getenv("POLITICIAN_COPY_MIN_AMOUNT_USD", "10000"))
+POLITICIAN_COPY_SIZE_SCALE = float(os.getenv("POLITICIAN_COPY_SIZE_SCALE", "0.025"))
+# Fill disclosed trades on the trade date or within N calendar days (next sessions).
+POLITICIAN_COPY_FILL_LAG_DAYS = int(os.getenv("POLITICIAN_COPY_FILL_LAG_DAYS", "3"))
 POLITICIAN_COPY_CACHE_HOURS = float(os.getenv("POLITICIAN_COPY_CACHE_HOURS", "12"))
 POLITICIAN_COPY_SOURCE_URL = os.getenv(
     "POLITICIAN_COPY_SOURCE_URL", "https://www.capitoltrades.com/trades"
@@ -2458,7 +2474,16 @@ TELEGRAM_ALERT_DRAWDOWN_MAJOR = _parse_env_bool("TELEGRAM_ALERT_DRAWDOWN_MAJOR",
 TELEGRAM_MAJOR_DRAWDOWN_PCT = float(os.getenv("TELEGRAM_MAJOR_DRAWDOWN_PCT", "0.05"))
 TELEGRAM_ALERT_DAILY_SUMMARY = _parse_env_bool("TELEGRAM_ALERT_DAILY_SUMMARY", default="true")
 TELEGRAM_DAILY_SUMMARY_TIME = os.getenv("TELEGRAM_DAILY_SUMMARY_TIME", "16:30").strip()
-TELEGRAM_ALERT_YIELD_GATE = _parse_env_bool("TELEGRAM_ALERT_YIELD_GATE", default="true")
+# Yield-gate Telegram: change-only + cooldown. Default OFF to avoid spam
+# (alias TELEGRAM_ALERT_YIELD_GATE kept for older .env files).
+TELEGRAM_ALERT_YIELDS = _parse_env_bool(
+    "TELEGRAM_ALERT_YIELDS",
+    default=os.getenv("TELEGRAM_ALERT_YIELD_GATE", "false"),
+)
+TELEGRAM_ALERT_YIELD_GATE = TELEGRAM_ALERT_YIELDS  # backward-compatible alias
+TELEGRAM_YIELD_GATE_COOLDOWN_MIN = float(
+    os.getenv("TELEGRAM_YIELD_GATE_COOLDOWN_MIN", "30")
+)
 TELEGRAM_ALERT_PERIODIC_SUMMARY = _parse_env_bool(
     "TELEGRAM_ALERT_PERIODIC_SUMMARY", default="true"
 )
@@ -2472,13 +2497,39 @@ TELEGRAM_ALERT_LIVE_DAILY_SUMMARY = _parse_env_bool(
 TELEGRAM_LIVE_DAILY_SUMMARY_TIME = os.getenv(
     "TELEGRAM_LIVE_DAILY_SUMMARY_TIME", "16:00"
 ).strip()
-TELEGRAM_ALERT_LIVE_FILLS = _parse_env_bool("TELEGRAM_ALERT_LIVE_FILLS", default="true")
-TELEGRAM_LIVE_FILL_MIN_USD = float(os.getenv("TELEGRAM_LIVE_FILL_MIN_USD", "5"))
+# Fill alerts (paper + live). Alias TELEGRAM_ALERT_LIVE_FILLS kept for older .env.
+TELEGRAM_ALERT_FILLS = _parse_env_bool(
+    "TELEGRAM_ALERT_FILLS",
+    default=os.getenv("TELEGRAM_ALERT_LIVE_FILLS", "true"),
+)
+TELEGRAM_ALERT_LIVE_FILLS = TELEGRAM_ALERT_FILLS  # alias
+TELEGRAM_FILL_MIN_USD = float(
+    os.getenv(
+        "TELEGRAM_FILL_MIN_USD",
+        os.getenv("TELEGRAM_LIVE_FILL_MIN_USD", "5"),
+    )
+)
+TELEGRAM_LIVE_FILL_MIN_USD = TELEGRAM_FILL_MIN_USD  # alias
+# Error / action watcher (structured JSONL + optional Telegram + Cursor queue).
+ERROR_WATCHER_ENABLED = _parse_env_bool("ERROR_WATCHER_ENABLED", default="true")
+TELEGRAM_ALERT_ERRORS = _parse_env_bool("TELEGRAM_ALERT_ERRORS", default="true")
+# Optional once-per-day Telegram digest of bot_errors.jsonl (default OFF).
+TELEGRAM_DAILY_ERROR_DIGEST = _parse_env_bool(
+    "TELEGRAM_DAILY_ERROR_DIGEST", default="false"
+)
+TELEGRAM_DAILY_ERROR_DIGEST_TIME = os.getenv(
+    "TELEGRAM_DAILY_ERROR_DIGEST_TIME", "16:45"
+).strip()
 TELEGRAM_ALERT_SPACEX = _parse_env_bool("TELEGRAM_ALERT_SPACEX", default="false")
 TELEGRAM_ALERT_BTC = _parse_env_bool("TELEGRAM_ALERT_BTC", default="false")
 TELEGRAM_ALERT_SOCIAL = _parse_env_bool("TELEGRAM_ALERT_SOCIAL", default="false")
 TELEGRAM_WEEKLY_SUMMARY_TIME = os.getenv("TELEGRAM_WEEKLY_SUMMARY_TIME", "16:30").strip()
 TELEGRAM_WEEKLY_LIVE_ENABLED = _parse_env_bool("TELEGRAM_WEEKLY_LIVE_ENABLED", default="false")
+
+
+def telegram_fill_min_usd() -> float:
+    """Minimum fill notional for Telegram (default $5; never below ALPACA_MIN_NOTIONAL)."""
+    return max(float(ALPACA_MIN_NOTIONAL), float(TELEGRAM_FILL_MIN_USD))
 
 
 def telegram_weekly_summary_enabled() -> bool:
@@ -2510,8 +2561,20 @@ def telegram_alert_policy_summary() -> str:
         bits.append("halt/resume")
     if TELEGRAM_ALERT_DRAWDOWN_MAJOR:
         bits.append(f"drawdown>{TELEGRAM_MAJOR_DRAWDOWN_PCT:.0%}")
-    if TELEGRAM_ALERT_YIELD_GATE:
-        bits.append("yield gate")
+    if TELEGRAM_ALERT_YIELDS:
+        bits.append(
+            f"yield change-only/{TELEGRAM_YIELD_GATE_COOLDOWN_MIN:g}m"
+        )
+    else:
+        bits.append("yield alerts=off")
+    if TELEGRAM_ALERT_FILLS:
+        bits.append(f"fills≥${telegram_fill_min_usd():.0f}")
+    if TELEGRAM_ALERT_ERRORS:
+        bits.append("errors")
+    if ERROR_WATCHER_ENABLED:
+        bits.append("error-watcher+daily-log")
+    if TELEGRAM_DAILY_ERROR_DIGEST:
+        bits.append(f"error-digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET")
     if TELEGRAM_ALERT_DAILY_SUMMARY:
         bits.append(f"daily@{TELEGRAM_DAILY_SUMMARY_TIME} ET")
     if TELEGRAM_ALERT_PERIODIC_SUMMARY:
@@ -2520,9 +2583,27 @@ def telegram_alert_policy_summary() -> str:
         bits.append(f"live daily@{TELEGRAM_LIVE_DAILY_SUMMARY_TIME} ET")
     if telegram_weekly_summary_enabled():
         bits.append(f"weekly Fri@{TELEGRAM_WEEKLY_SUMMARY_TIME} ET")
-    if TELEGRAM_ALERT_LIVE_FILLS and not PAPER_TRADING:
-        bits.append(f"live fills>${TELEGRAM_LIVE_FILL_MIN_USD:.0f}")
     return ", ".join(bits) if bits else "all high-signal alerts off"
+
+
+def format_telegram_automation_banner() -> str:
+    """Startup line: Yield alerts=change-only | Fills ON | Error watcher ON."""
+    if TELEGRAM_ALERT_YIELDS:
+        yield_s = f"Yield alerts=change-only ({TELEGRAM_YIELD_GATE_COOLDOWN_MIN:g}m cd)"
+    else:
+        yield_s = "Yield alerts=OFF"
+    fills_s = (
+        f"Fills ON (>=${telegram_fill_min_usd():.0f})"
+        if TELEGRAM_ALERT_FILLS
+        else "Fills OFF"
+    )
+    if ERROR_WATCHER_ENABLED:
+        err_s = "Error watcher ON | daily log + TG per error"
+        if TELEGRAM_DAILY_ERROR_DIGEST:
+            err_s += f" | digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET"
+    else:
+        err_s = "Error watcher OFF"
+    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} <<<"
 
 
 def get_smtp_config():
@@ -2966,6 +3047,25 @@ def effective_risk_per_trade(
 def effective_per_name_max_pct() -> float:
     """Strict per-name ceiling (default 8%)."""
     return min(float(PER_NAME_MAX_PCT), float(PAPER_MAX_POSITION_PCT))
+
+
+def effective_concentration_guard_enabled() -> bool:
+    """Per-name concentration guard in the executor (default ON)."""
+    return bool(CONCENTRATION_GUARD_ENABLED)
+
+
+def effective_max_active_tickers() -> int:
+    """Max distinct non-core open tickers (default 25)."""
+    return max(1, int(MAX_ACTIVE_TICKERS))
+
+
+def effective_auto_dust_max_notional() -> float:
+    """Auto-dust sell threshold in USD (default $10)."""
+    return max(0.01, float(AUTO_DUST_MAX_NOTIONAL))
+
+
+def effective_auto_dust_cleaner_enabled() -> bool:
+    return bool(AUTO_DUST_CLEANER_ENABLED)
 
 
 def effective_tail_risk_controls() -> bool:
@@ -3893,8 +3993,9 @@ def print_paper_research_stack_flags() -> None:
         )
         print(
             f"  dynamic_vti:          "
-            f"{'on' if stack['dynamic_vti'] else 'off'} "
-            f"(Smart {DYNAMIC_VTI_PAPER_FLOOR:.0%}-{DYNAMIC_VTI_PAPER_CEILING:.0%})"
+            f"{'LOCKED on' if stack['dynamic_vti'] else 'off'} "
+            f"(Smart {DYNAMIC_VTI_PAPER_FLOOR:.0%}-{DYNAMIC_VTI_PAPER_CEILING:.0%}, "
+            f"floor>={DYNAMIC_VTI_FLOOR_MIN:.0%})"
         )
         print(
             f"  dynamic_risk:         "
@@ -4080,11 +4181,11 @@ def enforce_realistic_research_profile() -> None:
     365d tune recommendations locked as paper defaults:
     - Stat Arb quality ON (beats fill-rate baseline)
     - ARIMA / ARIMA–GARCH hybrid OFF unless ARIMA_ENABLED is env-explicit
-    - Dynamic VTI optional floor ON paper; live OFF unless DYNAMIC_VTI_OPTIONAL_LIVE
+    - Smart Dynamic VTI LOCKED paper default (40-75%, hard floor >=40%; zero-core OFF)
     - SPY-like boost ON paper; live OFF unless SPY_LIKE_BOOST_LIVE_ENABLED
     Existing locks kept: RHYME primary, HMM soft-only, GARCH paper ON
     (Live Conservative separately enables GARCH via GARCH_VOL_LIVE_ENABLED),
-    Daily Banking, scanners, shorts, Smart Dynamic VTI 35-75%, etc.
+    Daily Banking, scanners, shorts, etc.
     See REALISTIC_RESEARCH_LOCKED_FEATURES for the banner summary.
     Live Profile A uses ``enforce_live_conservative_profile()`` — do not weaken
     that path from here; paper stays aggressive research.
@@ -4095,6 +4196,10 @@ def enforce_realistic_research_profile() -> None:
     global REBALANCE_ENABLED
     global POSITIONING_OVERLAY_ENABLED
     global PAPER_DYNAMIC_VTI_ENABLED
+    global DYNAMIC_VTI_PAPER_FLOOR
+    global DYNAMIC_VTI_DEFAULT_PCT
+    global DYNAMIC_VTI_CALM_PCT
+    global DYNAMIC_VTI_STRESS_PCT
     global DYNAMIC_VTI_OPTIONAL_ENABLED
     global DYNAMIC_VTI_ALLOW_ZERO
     global DYNAMIC_VTI_FLOOR_MIN
@@ -4312,20 +4417,28 @@ def enforce_realistic_research_profile() -> None:
         POSITIONING_OVERLAY_ENABLED = False
     if not _env_explicit("PAPER_DYNAMIC_VTI", "PAPER_DYNAMIC_VTI_ENABLED"):
         PAPER_DYNAMIC_VTI_ENABLED = True
+    if not _env_explicit("DYNAMIC_VTI_PAPER_FLOOR"):
+        DYNAMIC_VTI_PAPER_FLOOR = 0.40
+    if not _env_explicit("DYNAMIC_VTI_DEFAULT_PCT"):
+        DYNAMIC_VTI_DEFAULT_PCT = 0.65
+    if not _env_explicit("DYNAMIC_VTI_CALM_PCT"):
+        DYNAMIC_VTI_CALM_PCT = 0.50
+    if not _env_explicit("DYNAMIC_VTI_STRESS_PCT"):
+        DYNAMIC_VTI_STRESS_PCT = 0.75
     if not _env_explicit("DYNAMIC_VTI_OPTIONAL_ENABLED", "VTI_OPTIONAL_FLOOR"):
         DYNAMIC_VTI_OPTIONAL_ENABLED = True
     if not _env_explicit("DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL"):
-        # Optional VTI: paper may drop floor to 0% on strong SPY-like confluence.
-        DYNAMIC_VTI_ALLOW_ZERO = True
+        # Safety rail: paper Dynamic VTI never below 40% (no zero-core path).
+        DYNAMIC_VTI_ALLOW_ZERO = False
     if not _env_explicit("DYNAMIC_VTI_FLOOR_MIN"):
-        DYNAMIC_VTI_FLOOR_MIN = 0.20
+        DYNAMIC_VTI_FLOOR_MIN = 0.40
     if not _env_explicit("SPY_LIKE_BOOST_ENABLED", "PAPER_SPY_LIKE_BOOST_ENABLED"):
         SPY_LIKE_BOOST_ENABLED = True
     if not _env_explicit("PORTFOLIO_CONSTRUCTOR_ENABLED"):
         # Sector-aware sleeve/short tilts on top of Smart Dynamic VTI (v1.5.4, paper research).
         PORTFOLIO_CONSTRUCTOR_ENABLED = True
     if not _env_explicit("CORE_ALLOCATOR_LOCKED"):
-        # Smart Dynamic VTI (35-75%) is the research default; lock is opt-in.
+        # Smart Dynamic VTI (40-75%) is the research default; lock is opt-in.
         CORE_ALLOCATOR_LOCKED = False
     if not _env_explicit("CORE_ALLOCATOR_LOCKED_CHOICE"):
         CORE_ALLOCATOR_LOCKED_CHOICE = "spy"
@@ -4813,11 +4926,14 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_VTI_CORE_PCT": "0.40",
     "PAPER_DYNAMIC_VTI": "true",
     "PAPER_DYNAMIC_VTI_ENABLED": "true",
-    "DYNAMIC_VTI_PAPER_FLOOR": "0.35",
+    "DYNAMIC_VTI_PAPER_FLOOR": "0.40",
     "DYNAMIC_VTI_PAPER_CEILING": "0.75",
+    "DYNAMIC_VTI_DEFAULT_PCT": "0.65",
+    "DYNAMIC_VTI_CALM_PCT": "0.50",
+    "DYNAMIC_VTI_STRESS_PCT": "0.75",
     "DYNAMIC_VTI_OPTIONAL_ENABLED": "true",
-    "DYNAMIC_VTI_ALLOW_ZERO": "true",
-    "DYNAMIC_VTI_FLOOR_MIN": "0.20",
+    "DYNAMIC_VTI_ALLOW_ZERO": "false",
+    "DYNAMIC_VTI_FLOOR_MIN": "0.40",
     "SPY_LIKE_UNIVERSE": (
         "SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO"
     ),
@@ -4851,6 +4967,10 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_REGIME_B_CASH_BUFFER_BOOST": "0.12",
     "PAPER_MAX_POSITION_PCT": "0.08",
     "PER_NAME_MAX_PCT": "0.08",
+    "CONCENTRATION_GUARD_ENABLED": "true",
+    "MAX_ACTIVE_TICKERS": "25",
+    "AUTO_DUST_CLEANER_ENABLED": "true",
+    "AUTO_DUST_MAX_NOTIONAL": "10",
     "SECTOR_HIGH_VOL_CEILING_PCT": "0.18",
     "SECTOR_HIGH_VOL_EXPANSION_CAP": "10",
     "SECTOR_HIGH_VOL_MAX_ACTIVE_SECTORS": "1",
@@ -5130,7 +5250,7 @@ def format_realistic_research_headline() -> str:
     """Prominent version line for paper bot startup (v1.5.4 FINAL LOCK)."""
     features = (
         "FINAL LOCK | RHYME primary | HMM soft | GARCH vol | Daily Banking | "
-        "Stat Arb quality | Dynamic VTI 35-75% + optional floor | SPY-like ON | "
+        "Stat Arb quality | Dynamic VTI LOCKED 40-75% (>=40% floor) | SPY-like ON | "
         "ARIMA OFF | RVOL/ORB/Catalyst/ATR | Shorts 8-18%"
     )
     return (
@@ -5716,13 +5836,15 @@ def effective_regime_dynamic_sizing() -> bool:
 
 def format_smart_dynamic_vti_lock_banner() -> str:
     """Static lock banner for Realistic Research paper-aggressive startup."""
-    opt = ""
-    if effective_dynamic_vti_optional():
-        zero = "->0%" if effective_dynamic_vti_allow_zero() else f"->{DYNAMIC_VTI_FLOOR_MIN:.0%}"
-        opt = f" | optional floor {DYNAMIC_VTI_PAPER_FLOOR:.0%}{zero} on SPY-like strength"
+    floor_note = (
+        f"hard floor >={DYNAMIC_VTI_FLOOR_MIN:.0%}"
+        if not effective_dynamic_vti_allow_zero()
+        else "zero-core allowed on SPY-like strength"
+    )
     return (
-        f">>> SMART DYNAMIC VTI DEFAULT — {DYNAMIC_VTI_PAPER_FLOOR:.0%}-{DYNAMIC_VTI_PAPER_CEILING:.0%} {VTI_CORE_SYMBOL}"
-        f"{opt} | "
+        f">>> SMART DYNAMIC VTI LOCKED — {DYNAMIC_VTI_PAPER_FLOOR:.0%}-{DYNAMIC_VTI_PAPER_CEILING:.0%} {VTI_CORE_SYMBOL} "
+        f"(paper default) | tiers stress {DYNAMIC_VTI_STRESS_PCT:.0%} / "
+        f"default {DYNAMIC_VTI_DEFAULT_PCT:.0%} / calm {DYNAMIC_VTI_CALM_PCT:.0%} | {floor_note} | "
         "drivers: NYSE/metals, insider, bubble/Buffett, regime, VTI vs SPY, SPY-like confluence"
     )
 
@@ -5933,19 +6055,13 @@ def effective_dynamic_vti_optional() -> bool:
 
 
 def effective_dynamic_vti_allow_zero() -> bool:
-    """Permit 0% VTI floor when SPY-like strength is very high (paper-first)."""
+    """Permit 0% VTI floor when SPY-like strength is very high (paper-first).
+
+    Default is False (hard ≥40% VTI safety rail). Opt in via DYNAMIC_VTI_ALLOW_ZERO=true.
+    """
     if not effective_dynamic_vti_optional():
         return False
-    if _env_explicit("DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL"):
-        return bool(DYNAMIC_VTI_ALLOW_ZERO)
-    # Paper / Realistic Research: allow zero by default when optional floor is on.
-    return bool(
-        paper_aggressive_context()
-        or backtest_paper_sleeves_context()
-        or paper_only_sleeves_active()
-        or is_realistic_research_active()
-        or (PAPER_TRADING and PAPER_AGGRESSIVE_ENABLED)
-    )
+    return bool(DYNAMIC_VTI_ALLOW_ZERO)
 
 
 def effective_spy_like_boost_enabled() -> bool:
@@ -5964,19 +6080,19 @@ def effective_spy_like_boost_enabled() -> bool:
 
 
 def resolve_dynamic_vti_floor(spy_like_strength: float | None = None) -> float:
-    """Effective VTI floor: normal ~35%, or reduced/zero when SPY-like strength is high."""
+    """Effective VTI floor: normal band floor, optionally reduced (never below FLOOR_MIN)."""
     base = float(DYNAMIC_VTI_PAPER_FLOOR)
+    hard = max(0.40, float(DYNAMIC_VTI_FLOOR_MIN))
     if not effective_dynamic_vti_optional():
-        return base
+        return max(hard, base)
     strength = float(spy_like_strength or 0.0)
     if effective_dynamic_vti_allow_zero() and strength >= float(SPY_LIKE_STRENGTH_ALLOW_ZERO):
+        # Explicit opt-in only.
         return 0.0
     if strength >= float(SPY_LIKE_STRENGTH_REDUCE_FLOOR):
         reduced = float(DYNAMIC_VTI_FLOOR_MIN)
-        # Keep reduced floor in a sensible 20–30% band unless allow-zero path already returned.
-        return max(0.0, min(base, reduced))
-    return base
-
+        return max(hard, min(base, reduced))
+    return max(hard, base)
 
 def clamp_spy_like_boost_mult(mult: float) -> float:
     lo = float(SPY_LIKE_BOOST_MULT_MIN)

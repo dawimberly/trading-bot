@@ -674,6 +674,8 @@ def pair_leg_notional(
             scale_band=(
                 None if is_crypto else config.effective_stat_arb_conviction_scale_band()
             ),
+            sleeve="STAT_ARB",
+            strategy_id="stat_arb",
         )
     # Markov × time-of-day Stat Arb soft boost (paper research)
     try:
@@ -1267,6 +1269,18 @@ def crypto_stat_arb_intents(
     if len(crypto_cols) < 2:
         return []
 
+    try:
+        from modules.crypto_universe import crypto_trading_columns
+
+        tradable = crypto_trading_columns(data)
+        if tradable:
+            crypto_cols = [c for c in crypto_cols if c in set(tradable)]
+    except Exception as exc:
+        logger.debug("crypto_trading_columns filter skipped: %s", exc)
+
+    if len(crypto_cols) < 2:
+        return []
+
     open_keys: set[str] = set()
     slots = config.effective_crypto_max_pairs()
     if executor is not None:
@@ -1519,7 +1533,12 @@ def run_crypto_stat_arb(
         executor=executor,
     )
     if att:
-        crypto_cols = [c for c in data.columns if config.is_crypto(c)]
+        try:
+            from modules.crypto_universe import crypto_trading_columns
+
+            crypto_cols = crypto_trading_columns(data)
+        except Exception:
+            crypto_cols = [c for c in data.columns if config.is_crypto(c)]
         raw_count = 0
         if len(crypto_cols) >= 2:
             raw = _scan_pair_candidates(

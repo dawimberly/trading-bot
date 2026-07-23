@@ -29,11 +29,14 @@ _CATEGORY_FLAGS: dict[str, str] = {
     "halt": "TELEGRAM_ALERT_HALT",
     "resume": "TELEGRAM_ALERT_HALT",
     "drawdown_major": "TELEGRAM_ALERT_DRAWDOWN_MAJOR",
-    "yield_gate": "TELEGRAM_ALERT_YIELD_GATE",
+    "yield_gate": "TELEGRAM_ALERT_YIELDS",
     "daily_summary": "TELEGRAM_ALERT_DAILY_SUMMARY",
     "periodic_summary": "TELEGRAM_ALERT_PERIODIC_SUMMARY",
     "live_daily_summary": "TELEGRAM_ALERT_LIVE_DAILY_SUMMARY",
-    "live_fill": "TELEGRAM_ALERT_LIVE_FILLS",
+    "live_fill": "TELEGRAM_ALERT_FILLS",
+    "fill": "TELEGRAM_ALERT_FILLS",
+    "error": "TELEGRAM_ALERT_ERRORS",
+    "daily_error_digest": "TELEGRAM_DAILY_ERROR_DIGEST",
     "spacex": "TELEGRAM_ALERT_SPACEX",
     "btc": "TELEGRAM_ALERT_BTC",
     "social": "TELEGRAM_ALERT_SOCIAL",
@@ -412,11 +415,19 @@ def maybe_major_drawdown_alert(
 
 
 def maybe_yield_gate_alert(active: bool) -> None:
-    """Alert on yield-gate ON/OFF transitions with a 30-minute cooldown.
+    """Telegram only on yield-gate ON↔OFF changes; identical state never re-pings.
 
-    Always keeps the first ON and first OFF alerts; later flips are throttled
-    via ``data/yield_gate_last_alert.json`` so paper override chatter does not spam.
+    Cooldown (default 30 min) between identical yield-gate messages suppresses
+    rapid flip-flops. Daily / periodic summaries are separate categories.
     """
+    if not getattr(config, "TELEGRAM_ALERT_YIELDS", False):
+        # Still track state so enabling later does not spam a false transition.
+        state = _load_state()
+        if state.get("yield_gate_active") != bool(active):
+            state["yield_gate_active"] = bool(active)
+            _save_state(state)
+        return
+
     state = _load_state()
     prev = state.get("yield_gate_active")
     if prev is None:
@@ -424,6 +435,7 @@ def maybe_yield_gate_alert(active: bool) -> None:
         _save_state(state)
         return
     if bool(prev) == bool(active):
+        # Same state — never re-send (suppress repeated same-state pings).
         return
 
     state["yield_gate_active"] = bool(active)
@@ -442,6 +454,11 @@ def maybe_yield_gate_alert(active: bool) -> None:
     )
     if broadcast(subject, body, category="yield_gate"):
         _mark_yield_gate_alert_sent(bool(active))
+
+
+def _yield_gate_cooldown() -> timedelta:
+    minutes = float(getattr(config, "TELEGRAM_YIELD_GATE_COOLDOWN_MIN", 30) or 30)
+    return timedelta(minutes=max(1.0, minutes))
 
 
 def _load_yield_gate_alert_cache() -> dict:
@@ -465,19 +482,29 @@ def _save_yield_gate_alert_cache(payload: dict) -> None:
 
 
 def _yield_gate_alert_allowed(active: bool) -> bool:
-    """True for first ON/OFF ever, or when 30+ minutes since last yield-gate alert."""
+    """Allow first ever ON/OFF; throttle identical-state repeats within cooldown."""
     cache = _load_yield_gate_alert_cache()
-    first_key = "first_on_sent" if active else "first_off_sent"
-    if not cache.get(first_key):
-        return True
+    last_state = cache.get("last_state")
     raw = cache.get("last_alert_at")
-    if not raw:
+    if last_state is None or not raw:
         return True
+    # Identical message (same ON/OFF as last Telegram) within cooldown → suppress.
+    if bool(last_state) == bool(active):
+        try:
+            last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=_ET)
+            if datetime.now(_ET) - last.astimezone(_ET) < _yield_gate_cooldown():
+                return False
+        except (TypeError, ValueError):
+            pass
+        return True
+    # Different state (true transition): still enforce min gap between any yield TGs.
     try:
         last = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         if last.tzinfo is None:
             last = last.replace(tzinfo=_ET)
-        return datetime.now(_ET) - last.astimezone(_ET) >= _YIELD_GATE_COOLDOWN
+        return datetime.now(_ET) - last.astimezone(_ET) >= _yield_gate_cooldown()
     except (TypeError, ValueError):
         return True
 

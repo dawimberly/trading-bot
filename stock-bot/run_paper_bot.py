@@ -228,6 +228,7 @@ def main() -> None:
     except Exception:
         pass
     print("-" * width)
+    print(config.format_telegram_automation_banner())
     u = config.get_nyse_universe()
     print(
         f"NYSE universe: {len(u)} tickers "

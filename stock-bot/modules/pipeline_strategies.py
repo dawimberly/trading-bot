@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import date, datetime, time
 from pathlib import Path
 
@@ -18,6 +19,35 @@ PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline"
 
 # In-session NYSE momentum entries for one-per-day (backtest + live gate).
 _nyse_mom_entries_by_day: dict[str, set[str]] = {}
+# Rolling per-symbol pick history keyed by backtest bar index.
+_nyse_pick_history: dict[str, deque[int]] = {}
+
+
+def reset_nyse_pick_rotation() -> None:
+    """Clear pick-rotation state (backtests / clean restarts)."""
+    _nyse_pick_history.clear()
+
+
+def _nyse_pick_bar_index(now, cooldown_bars=None) -> int | None:
+    if cooldown_bars is not None and isinstance(now, (int, np.integer)):
+        return int(now)
+    return None
+
+
+def _nyse_pick_rotation_blocked(symbol: str, bar_index: int) -> bool:
+    if not config.effective_nyse_pick_rotation():
+        return False
+    window = max(1, int(getattr(config, "NYSE_PICK_WINDOW_BARS", 20)))
+    max_picks = max(1, int(getattr(config, "NYSE_MAX_PICKS_PER_SYMBOL_WINDOW", 5)))
+    hist = _nyse_pick_history.setdefault(config.normalize_symbol(symbol), deque())
+    while hist and (bar_index - hist[0]) >= window:
+        hist.popleft()
+    return len(hist) >= max_picks
+
+
+def _record_nyse_pick(symbol: str, bar_index: int) -> None:
+    hist = _nyse_pick_history.setdefault(config.normalize_symbol(symbol), deque())
+    hist.append(bar_index)
 
 
 def _et_now_time(now=None) -> time | None:
@@ -292,6 +322,7 @@ NYSE_SECTOR_MAP = {
     "RTX": "Defense",
     "LMT": "Defense",
     "KTOS": "Defense",
+    "ONDS": "Tech",
     "JPM": "Financials",
     "BAC": "Financials",
     "GS": "Financials",
@@ -824,6 +855,49 @@ def run_crypto_strategy(
     return trades
 
 
+def _apply_strict_candidate_intersection(cols: list[str], data) -> list[str]:
+    """Intersect MA50 pool with strict screener tickers; widen slightly if too thin."""
+    try:
+        from modules.dynamic_universe import screener_momentum_order, strict_screener_symbol_set
+    except ImportError:
+        return cols
+    strict_set = strict_screener_symbol_set()
+    if not strict_set:
+        return cols
+    intersected = [c for c in cols if config.normalize_symbol(c) in strict_set]
+    min_names = max(1, int(getattr(config, "NYSE_STRICT_INTERSECT_MIN", 3)))
+    if len(intersected) >= min_names:
+        logger.debug(
+            "[UNIVERSE] strict-at-candidate intersect: %d -> %d names",
+            len(cols),
+            len(intersected),
+        )
+        return intersected
+    order = screener_momentum_order(cols) or []
+    widened = list(
+        dict.fromkeys(
+            [
+                *intersected,
+                *[s for s in order if config.normalize_symbol(s) in strict_set],
+            ]
+        )
+    )
+    if len(widened) >= min_names:
+        logger.debug(
+            "[UNIVERSE] strict-at-candidate widened: %d -> %d names (min=%d)",
+            len(cols),
+            len(widened),
+            min_names,
+        )
+        return widened
+    logger.debug(
+        "[UNIVERSE] strict-at-candidate fallback — overlap %d < min %d",
+        len(intersected),
+        min_names,
+    )
+    return cols
+
+
 def _nyse_equity_columns(data):
     """NYSE momentum sleeve symbols (static columns or dynamic screener)."""
     # Live Profile A: never use screener / USE_DYNAMIC_UNIVERSE (fixed pool only).
@@ -852,8 +926,27 @@ def _nyse_equity_columns(data):
                 len(cols),
                 ", ".join(cols[:10]),
             )
+    elif config.effective_dynamic_sector_screener():
+        try:
+            from modules.sector_screener import get_expanded_universe
+
+            expanded = get_expanded_universe(data.columns, data)
+            cols = [
+                c
+                for c in expanded
+                if c in data.columns and config._nyse_eligible_symbol(c)
+            ]
+        except Exception as exc:
+            logger.debug("sector expanded universe skipped: %s", exc)
+            cols = config.nyse_momentum_universe(data.columns)
+        min_cols = int(getattr(config, "STAT_ARB_MIN_UNIVERSE", 20) or 20)
+        if len(cols) < min_cols:
+            fallback = config.nyse_momentum_universe(data.columns)
+            cols = list(dict.fromkeys([*cols, *fallback]))
     else:
         cols = config.nyse_momentum_universe(data.columns)
+    if config.effective_nyse_strict_intersect_candidates():
+        cols = _apply_strict_candidate_intersection(cols, data)
     if config.effective_rvol_scanner_enabled():
         try:
             from modules.volume_analysis import apply_rvol_universe_boost
@@ -1574,14 +1667,25 @@ def run_equity_strategy(
     if not ranked:
         return 0
 
+    bar_index = _nyse_pick_bar_index(now, cooldown_bars)
     trades = 0
     equity = _executor_equity(executor)
     min_n = config.effective_min_notional(equity)
     for symbol in ranked:
         if trades >= max_trades:
             break
+        if bar_index is not None and _nyse_pick_rotation_blocked(symbol, bar_index):
+            logger.debug(
+                "[NYSE] Skipping %s — pick rotation cap (%d/%d bars)",
+                symbol,
+                config.NYSE_MAX_PICKS_PER_SYMBOL_WINDOW,
+                config.NYSE_PICK_WINDOW_BARS,
+            )
+            continue
         if pick_log is not None:
             pick_log.append(symbol)
+        if bar_index is not None:
+            _record_nyse_pick(symbol, bar_index)
         skip = _nyse_momentum_quality_skip(symbol, data, now=now)
         if skip:
             logger.info("[NYSE] Skipping %s — %s", symbol, skip)
@@ -1603,10 +1707,33 @@ def run_equity_strategy(
         except Exception as exc:
             logger.debug("NYSE entry tag classification skipped for %s: %s", symbol, exc)
         notional = None
+        garch_multiplier = 1.0
         if hasattr(executor, "compute_nyse_notional"):
             notional = executor.compute_nyse_notional()
             if notional is None:
                 continue
+            min_n = config.effective_min_notional(float(executor._get_account().equity))
+            # Paper-only GARCH vol-target sizing (PAPER_GARCH_SIZING=true)
+            try:
+                from modules.garch_sizer import (
+                    get_multiplier,
+                    paper_garch_sizing_enabled,
+                    spy_series_from_data,
+                )
+
+                if paper_garch_sizing_enabled():
+                    spy_px = spy_series_from_data(data)
+                    garch_multiplier = float(get_multiplier(spy_px) if spy_px is not None else 1.0)
+                    notional = round(float(notional) * garch_multiplier, 2)
+                    if notional < min_n:
+                        continue
+                    logger.info(
+                        "[NYSE] garch_multiplier=%.3f notional=%.2f",
+                        garch_multiplier,
+                        notional,
+                    )
+            except Exception:
+                garch_multiplier = 1.0
             if config.NYSE_BETA_SCALING_ENABLED:
                 _, beta = _spy_vs_equity_metrics(data, symbol)
                 scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
@@ -1636,6 +1763,8 @@ def run_equity_strategy(
                     conviction,
                     symbol=symbol,
                     data=data,
+                    sleeve="NYSE",
+                    strategy_id="nyse_momentum_base",
                 )
                 if notional is None or notional < min_n:
                     continue
@@ -1693,7 +1822,11 @@ def run_equity_strategy(
         if log_fn:
             if notional is None:
                 notional = getattr(executor, "compute_notional", lambda: "")()
-            log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+            # Embed garch_multiplier in pair_key so it lands in trade journal notes
+            log_key = pair_key
+            if garch_multiplier != 1.0:
+                log_key = f"{pair_key}|garch_multiplier={garch_multiplier:.3f}"
+            log_fn(symbol, "buy", regime, log_key, 0.0, notional)
     return trades
 
 
