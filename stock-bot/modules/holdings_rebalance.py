@@ -111,7 +111,7 @@ def _reduce_sleeve(
         if mv <= 0 or total <= 0:
             continue
         sell_notional = round(min(remaining, excess * (mv / total), mv), 2)
-        if sell_notional < min_n:
+        if sell_notional <= 0 or sell_notional < min_n:
             continue
         sym = normalize_symbol(pos.symbol)
         action = {
@@ -152,12 +152,15 @@ def _deploy_spy(
     if room < min_n:
         return []
 
-    notional = min(
-        room,
-        executor.compute_spy_notional() or 0,
-        round(float(executor.client.get_account().cash) * 0.95, 2),
+    notional = round(
+        min(
+            room,
+            executor.compute_spy_notional() or 0,
+            round(float(executor.client.get_account().cash) * 0.95, 2),
+        ),
+        2,
     )
-    if notional < min_n:
+    if notional <= 0 or notional < min_n:
         return []
 
     action = {
@@ -211,7 +214,7 @@ def _deploy_nyse(
         if per is None:
             break
         notional = round(min(remaining_room, per, cash * 0.95), 2)
-        if notional < min_n:
+        if notional <= 0 or notional < min_n:
             break
         action = {
             "phase": "buy",

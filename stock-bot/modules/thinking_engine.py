@@ -275,12 +275,27 @@ def _consolidate_news_deltas(
     max_per_sleeve: float,
 ) -> dict[str, float]:
     """Merge news-driven multi-sleeve deltas to <=3 before safety guard."""
-    from modules.thinking_news import consolidate_news_deltas
+    from modules.thinking_news import consolidate_news_deltas, _clamp_cap_deltas
 
     return consolidate_news_deltas(
         deltas,
         market_summary,
         max_per_sleeve=max_per_sleeve,
+    )
+
+
+def _clamp_tilt_deltas(
+    deltas: dict[str, float],
+    *,
+    max_per_sleeve: float,
+    max_total: float = THINKING_MAX_TOTAL_DELTA,
+) -> dict[str, float]:
+    from modules.thinking_news import _clamp_cap_deltas
+
+    return _clamp_cap_deltas(
+        deltas,
+        max_per_sleeve=max_per_sleeve,
+        max_total=max_total,
     )
 
 
@@ -2415,34 +2430,17 @@ def apply_thinking_tilt_to_caps(
                 after={k: round(v, 4) for k, v in cap_deltas.items() if abs(v) > 0.001},
             )
 
-    merged = _merge_caps_from_deltas(base, cap_deltas)
+    cap_deltas = _clamp_tilt_deltas(cap_deltas, max_per_sleeve=max_delta)
+    ok, reason = _tilt_deltas_reasonable(cap_deltas)
+    if not ok:
+        logger.info("Thinking engine: tilt rejected (%s)", reason)
+        _audit_thinking("tilt_rejected", reason=reason, deltas=cap_deltas)
+        return dict(base_caps), {}, f"Thinking blocked: {reason}"
 
+    merged = _merge_caps_from_deltas(base, cap_deltas)
     actual_deltas = {
         k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
     }
-    if _material_sleeve_count(actual_deltas) > THINKING_MAX_ACTIVE_SLEEVES:
-        before_act = dict(actual_deltas)
-        actual_deltas = _consolidate_news_deltas(
-            actual_deltas,
-            market_summary,
-            max_per_sleeve=max_delta,
-        )
-        merged = _merge_caps_from_deltas(base, actual_deltas)
-        actual_deltas = {
-            k: round(merged[k] - base.get(k, 0.0), 6) for k in _CAP_KEYS
-        }
-        if actual_deltas != before_act:
-            _audit_thinking(
-                "post_merge_deltas_consolidated",
-                news_impact_score=_news_impact(market_summary) if market_summary else 0.0,
-                before={k: round(v, 4) for k, v in before_act.items() if abs(v) > 0.001},
-                after={k: round(v, 4) for k, v in actual_deltas.items() if abs(v) > 0.001},
-            )
-    ok, reason = _tilt_deltas_reasonable(actual_deltas)
-    if not ok:
-        logger.info("Thinking engine: tilt rejected (%s)", reason)
-        _audit_thinking("tilt_rejected", reason=reason, deltas=actual_deltas)
-        return dict(base_caps), {}, f"Thinking blocked: {reason}"
 
     log_line = _format_thinking_log(_infer_narrative(market_summary), actual_deltas)
     if any(v != 0 for v in actual_deltas.values()):

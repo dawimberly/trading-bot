@@ -1520,7 +1520,7 @@ def main():
             except Exception as exc:
                 logger.debug("IPO safety trims unavailable: %s", exc)
 
-                def run_ipo_safety_trims(_data, _executor):  # type: ignore
+                def run_ipo_safety_trims(_data, _executor, **_kw):  # type: ignore
                     return 0
 
             from modules.pipeline_strategies import run_nyse_momentum_and_stat_arb

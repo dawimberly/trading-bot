@@ -730,7 +730,7 @@ def run_crypto_strategy(
     spacex_snapshot=None,
 ):
     """Z-score pairs; paper aggressive uses cointegration stat arb when enabled."""
-    if not config.crypto_sleeve_enabled():
+    if not config.effective_crypto_enabled():
         return 0
 
     if config.effective_crypto_v2_enabled():
@@ -747,6 +747,8 @@ def run_crypto_strategy(
             log_fn=log_fn,
             portfolio_manager=portfolio_manager,
             volatility=volatility,
+        full_data=full_data,
+        bar_idx=bar_idx,
             spacex_snapshot=spacex_snapshot,
         )
 
@@ -862,19 +864,41 @@ def _nyse_equity_columns(data):
     return cols
 
 
-def _equity_momentum_candidates(data, equity_cols, executor=None, now=None):
+def _equity_momentum_candidates(
+    data, equity_cols, executor=None, now=None, *, bar_idx: int | None = None, full_data=None
+):
+    from modules.dynamic_universe import IPO_MIN_TRADING_DAYS, is_ipo_symbol, is_ipo_trading_days
+
+    src = full_data if full_data is not None else data
     rows = []
     # v1.5.1: allow entries within a small band below MA (flexibility) to reduce drag.
     tol = max(0.0, float(getattr(config, "NYSE_MA_ENTRY_TOLERANCE_PCT", 0.0)))
     entry_floor = 1.0 - tol
     for symbol in equity_cols:
-        prices = data[symbol].dropna()
-        if len(prices) < 20:
+        if bar_idx is not None and full_data is not None and symbol in full_data.columns:
+            prices = full_data[symbol].iloc[: bar_idx + 1].dropna()
+            ipo = is_ipo_symbol(symbol, data=full_data, bar_idx=bar_idx)
+        elif full_data is not None and symbol in full_data.columns:
+            first = full_data[symbol].first_valid_index()
+            end = data.index[-1] if len(data.index) else None
+            if first is not None and end is not None:
+                prices = full_data[symbol].loc[first:end].dropna()
+                ipo = is_ipo_trading_days(len(prices))
+            else:
+                prices = data[symbol].dropna()
+                ipo = is_ipo_symbol(symbol, data=src)
+        else:
+            prices = data[symbol].dropna()
+            ipo = is_ipo_symbol(symbol, data=src)
+        min_bars = IPO_MIN_TRADING_DAYS if ipo else 20
+        ma_window = 20 if ipo else 50
+        if len(prices) < min_bars:
             continue
-        ma50 = prices.rolling(window=min(50, len(prices))).mean().iloc[-1]
+        window = min(ma_window, len(prices))
+        ma = prices.rolling(window=window).mean().iloc[-1]
         current = prices.iloc[-1]
-        if ma50 > 0 and current > ma50 * entry_floor:
-            rows.append((current / ma50 - 1, symbol))
+        if ma > 0 and current > ma * entry_floor:
+            rows.append((current / ma - 1, symbol))
     rows.sort(reverse=True)
     # v1.5.1: amplify scanner-driven rank boosts (RVOL/ORB/Catalyst) so high-signal
     # names rise in the momentum ranking without changing base momentum economics.
@@ -1041,6 +1065,118 @@ def _apply_screener_momentum_order(ranked):
     return sorted(ranked, key=lambda s: order_index.get(s, len(order_index)))
 
 
+def _executor_equity(executor) -> float:
+    if hasattr(executor, "portfolio"):
+        return float(executor.portfolio.equity(executor.prices))
+    return float(executor._get_account().equity)
+
+
+def _apply_ipo_buy_notional(
+    symbol: str,
+    notional: float,
+    equity: float,
+    *,
+    data=None,
+    bar_idx: int | None = None,
+) -> float:
+    from modules.dynamic_universe import cap_ipo_buy_notional
+
+    return cap_ipo_buy_notional(symbol, notional, equity, data=data, bar_idx=bar_idx)
+
+
+def _record_ipo_buy(executor, symbol, *, data=None, bar_idx: int | None = None) -> None:
+    from modules.dynamic_universe import is_ipo_symbol
+
+    if not is_ipo_symbol(symbol, data=data, bar_idx=bar_idx):
+        return
+    stats = getattr(executor, "ipo_stats", None)
+    if stats is None:
+        executor.ipo_stats = {"buys": 0, "trims": 0, "trim_notional": 0.0}
+        stats = executor.ipo_stats
+    stats["buys"] += 1
+
+
+def _is_nyse_momentum_position(symbol: str) -> bool:
+    sym = config.normalize_symbol(symbol)
+    if config.is_crypto(sym):
+        return False
+    if sym == config.SPY_BOT_SYMBOL:
+        return False
+    if config.is_metal_symbol(sym):
+        return False
+    if sym == config.VTI_CORE_SYMBOL:
+        return False
+    return True
+
+
+def run_ipo_safety_trims(
+    data,
+    executor,
+    *,
+    log_fn=None,
+    bar_idx: int | None = None,
+) -> int:
+    """Trim IPO positions at +20% unrealized gain down to 1% of equity."""
+    from modules.cost_basis import _position_cost
+    from modules.dynamic_universe import ipo_safety_enabled, ipo_trim_reduce_notional, is_ipo_symbol
+
+    if not ipo_safety_enabled():
+        return 0
+
+    equity = _executor_equity(executor)
+    min_n = config.effective_min_notional(equity)
+    trims = 0
+
+    if hasattr(executor, "portfolio"):
+        symbols = [
+            sym
+            for sym, qty in executor.portfolio.positions.items()
+            if float(qty) > 0 and _is_nyse_momentum_position(sym)
+        ]
+        positions = [executor._find_position(sym) for sym in symbols]
+    else:
+        positions = [
+            pos
+            for pos in executor._get_positions()
+            if float(pos.qty) > 0 and _is_nyse_momentum_position(pos.symbol)
+        ]
+
+    for pos in positions:
+        if pos is None:
+            continue
+        sym = config.normalize_symbol(pos.symbol)
+        if not is_ipo_symbol(sym, data=data, bar_idx=bar_idx):
+            continue
+        cost, value, _ = _position_cost(pos)
+        reduce_n = ipo_trim_reduce_notional(equity, cost, value)
+        if reduce_n is None:
+            continue
+        reduce_n = round(float(reduce_n), 2)
+        if reduce_n <= 0 or reduce_n < min_n:
+            continue
+        if hasattr(executor, "execute_reduce_notional"):
+            order = executor.execute_reduce_notional(
+                sym, reduce_n, reason="ipo_trim", sleeve="NYSE"
+            )
+        else:
+            order = executor.execute_order(
+                sym, "sell", notional=reduce_n, reason="ipo_trim", sleeve="NYSE"
+            )
+        if not _count_if_filled(executor, order):
+            continue
+        trims += 1
+        stats = getattr(executor, "ipo_stats", None)
+        if stats is None:
+            executor.ipo_stats = {"buys": 0, "trims": 0, "trim_notional": 0.0}
+            stats = executor.ipo_stats
+        stats["trims"] += 1
+        stats["trim_notional"] = round(float(stats["trim_notional"]) + reduce_n, 2)
+        if log_fn:
+            log_fn(sym, "ipo_trim", "", "ipo_trim", 0.0, reduce_n)
+
+    return trims
+
+
 def _equity_momentum_ranked(
     data,
     equity_cols,
@@ -1049,9 +1185,11 @@ def _equity_momentum_ranked(
     regime=None,
     executor=None,
     now=None,
+    bar_idx: int | None = None,
+    full_data=None,
 ):
     ranked = _equity_momentum_candidates(
-        data, equity_cols, executor=executor, now=now
+        data, equity_cols, executor=executor, now=now, bar_idx=bar_idx, full_data=full_data
     )
     if not ranked:
         return ranked
@@ -1255,7 +1393,7 @@ def resolve_cycle_deploy(
             rooms["spy"] = room
 
     if (
-        config.crypto_sleeve_enabled()
+        config.effective_crypto_enabled()
         and _crypto_buy_intent(
         data,
         regime,
@@ -1415,10 +1553,13 @@ def run_equity_strategy(
     yield_gated=False,
     pick_log=None,
     volatility=None,
+    full_data=None,
+    bar_idx: int | None = None,
 ):
     """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
     if regime_entries_paused(regime, data):
         return 0
+    ipo_data = full_data if full_data is not None else data
     equity_cols = _nyse_equity_columns(data)
     ranked = _equity_momentum_ranked(
         data,
@@ -1427,11 +1568,15 @@ def run_equity_strategy(
         regime=regime,
         executor=executor,
         now=now,
+        bar_idx=bar_idx,
+        full_data=ipo_data,
     )
     if not ranked:
         return 0
 
     trades = 0
+    equity = _executor_equity(executor)
+    min_n = config.effective_min_notional(equity)
     for symbol in ranked:
         if trades >= max_trades:
             break
@@ -1462,14 +1607,15 @@ def run_equity_strategy(
             notional = executor.compute_nyse_notional()
             if notional is None:
                 continue
-            min_n = config.effective_min_notional(float(executor._get_account().equity))
             if config.NYSE_BETA_SCALING_ENABLED:
                 _, beta = _spy_vs_equity_metrics(data, symbol)
                 scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
                 if scaled < min_n:
                     continue
                 notional = scaled
-            vol_scale = config.dynamic_equity_position_scale(symbol)
+            vol_scale = config.dynamic_equity_position_scale(
+                symbol, data=ipo_data, bar_idx=bar_idx
+            )
             if vol_scale < 1.0:
                 notional = round(float(notional) * vol_scale, 2)
                 if notional < min_n:
@@ -1519,6 +1665,11 @@ def run_equity_strategy(
                         continue
                 except Exception as exc:
                     logger.debug("insider notional cap skipped for %s: %s", symbol, exc)
+            notional = _apply_ipo_buy_notional(
+                symbol, notional, equity, data=ipo_data, bar_idx=bar_idx
+            )
+            if notional < min_n:
+                continue
         order = executor.execute_order(
             symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
         )
@@ -1534,6 +1685,7 @@ def run_equity_strategy(
                     record_insider_boost_trade("momentum")
             except Exception as exc:
                 logger.debug("insider boost trade record skipped: %s", exc)
+        _record_ipo_buy(executor, symbol, data=ipo_data, bar_idx=bar_idx)
         pair_cooldown[pair_key] = now
         trades += 1
         if portfolio_manager:
@@ -1561,6 +1713,7 @@ def run_nyse_momentum_and_stat_arb(
     pick_log=None,
     volatility=None,
     full_data=None,
+    bar_idx=None,
 ) -> int:
     """NYSE MA50 momentum plus stat-arb pairs (default paper path when PAPER_EQUITY_PAIRS=false)."""
     if max_trades is None:
@@ -1582,6 +1735,8 @@ def run_nyse_momentum_and_stat_arb(
         yield_gated=yield_gated,
         pick_log=pick_log,
         volatility=volatility,
+        full_data=full_data,
+        bar_idx=bar_idx,
     )
     if config.effective_stat_arb_enabled() and not config.effective_equity_pairs_enabled():
         from modules.stat_arb_sleeve import run_equity_stat_arb

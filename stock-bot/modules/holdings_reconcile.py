@@ -129,7 +129,7 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
             if mv <= 0 or total <= 0:
                 continue
             sell_notional = round(min(remaining, excess * (mv / total), mv), 2)
-            if sell_notional < min_n:
+            if sell_notional <= 0 or sell_notional < min_n:
                 continue
             sym = normalize_symbol(pos.symbol)
             order = executor.execute_reduce_notional(sym, sell_notional)

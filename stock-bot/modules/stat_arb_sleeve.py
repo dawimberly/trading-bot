@@ -254,6 +254,14 @@ def reconcile_stat_arb_book(executor) -> dict:
                 orphans.append(sym)
 
     resolved = _prune_stale_pair_symbols(executor, tracked_symbols)
+    if not crypto_enabled:
+        crypto_orphans = [s for s in orphans if config.is_crypto(s)]
+        if crypto_orphans:
+            logger.info(
+                "reconcile_stat_arb_book ignoring crypto orphans (sleeve disabled)",
+                extra={"orphans": crypto_orphans},
+            )
+            orphans = [s for s in orphans if not config.is_crypto(s)]
 
     if removed or orphans:
         _save_book(executor)

@@ -1,4 +1,4 @@
-﻿"""Trailing profit targets for normal NYSE/SPY longs (paper optional)."""
+"""Trailing profit targets for normal NYSE/SPY longs (paper optional)."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def profit_target_enabled() -> bool:
 def is_eligible_symbol(
     symbol: str, *, data=None, bar_idx: int | None = None
 ) -> bool:
-    """Normal NYSE/SPY longs only ΓÇö not IPO, crypto, VTI core, or metals."""
+    """Normal NYSE/SPY longs only — not IPO, crypto, VTI core, or metals."""
     sym = config.normalize_symbol(symbol)
     if sym == config.VTI_CORE_SYMBOL:
         return False

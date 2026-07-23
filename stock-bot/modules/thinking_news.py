@@ -299,28 +299,18 @@ def _redirect_cap_to_priority(key: str, top3: tuple[str, ...], summary: dict) ->
     return top3[0]
 
 
-def _sleeve_rank_score(
-    key: str,
-    delta: float,
-    summary: dict,
-    *,
-    impact: float,
-    top3: tuple[str, ...],
-) -> float:
-    """Rank sleeves by |delta| scaled by news_impact and theme priority."""
-    themes = summary.get("news_themes") or {}
-    boost = 1.0
-    if key in top3:
-        boost += 0.35 * (3 - top3.index(key))
-    if key == "nyse" and (_theme_active(themes, "geopolitics") or _theme_active(themes, "sector_energy")):
-        boost += 0.45
-    if key == "spy" and (_theme_active(themes, "liquidity") or _theme_active(themes, "policy")):
-        boost += 0.40
-    if key in ("vti_core", "cash_buffer") and (
-        _theme_active(themes, "geopolitics") or float(summary.get("vix") or 0) >= 20
-    ):
-        boost += 0.35
-    return abs(float(delta)) * boost * (1.0 + 0.5 * impact)
+def _news_impact_from_summary(summary: dict | None) -> float:
+    if not summary:
+        return 0.0
+    return float(summary.get("news_impact_score") or 0.0)
+
+
+def _sleeve_rank_score(delta: float, impact: float) -> float:
+    """Rank sleeves by |delta| * news_impact_score (fallback to |delta| when no news)."""
+    magnitude = abs(float(delta))
+    if impact > 0:
+        return magnitude * impact
+    return magnitude
 
 
 def _clamp_cap_deltas(
@@ -348,79 +338,58 @@ def consolidate_news_deltas(
     max_sleeves: int = _THINKING_MAX_ACTIVE_SLEEVES,
 ) -> dict[str, float]:
     """
-    Rank sleeves by impact_score + |delta|, keep top custodians, merge smallest moves.
+    Rank sleeves by |delta| * news_impact_score, keep top custodians, merge smallest.
 
-    Outputs at most ``max_sleeves`` non-zero sleeves so live 3-sleeve safety can pass.
+    Minor sleeves redirect: metal/gold -> cash_buffer, minor crypto -> spy.
+    Outputs at most ``max_sleeves`` material sleeves so live 3-sleeve safety can pass.
     """
     raw = {k: float(deltas.get(k, 0.0)) for k in _CAP_KEYS}
+    # Canonical redirects before ranking: gold/metal -> cash_buffer.
+    if abs(raw.get("metal", 0.0)) >= 0.005:
+        raw["cash_buffer"] = raw.get("cash_buffer", 0.0) + raw["metal"]
+        raw["metal"] = 0.0
+    # Minor crypto nudges fold into SPY (active sleeve on live profile).
+    crypto_d = float(raw.get("crypto", 0.0))
+    if abs(crypto_d) >= 0.005 and abs(crypto_d) < 0.035:
+        raw["spy"] = raw.get("spy", 0.0) + crypto_d
+        raw["crypto"] = 0.0
     material = {k: v for k, v in raw.items() if abs(v) >= 0.005}
 
     if len(material) <= max_sleeves:
         return _clamp_cap_deltas(raw, max_per_sleeve=max_per_sleeve)
 
-    if not market_summary:
-        scored = sorted(material.items(), key=lambda kv: abs(kv[1]), reverse=True)
-        keep_ordered = [k for k, _ in scored[:max_sleeves]]
-        keep_set = set(keep_ordered)
-        consolidated = {k: 0.0 for k in _CAP_KEYS}
-        for key, val in sorted(material.items(), key=lambda kv: abs(kv[1])):
-            if key in keep_set:
-                consolidated[key] += val
-            else:
-                target = min(keep_ordered, key=lambda k: abs(consolidated[k]))
-                consolidated[target] += val
-        for key in _CAP_KEYS:
-            if key not in keep_set:
-                consolidated[key] = 0.0
-        return _clamp_cap_deltas(consolidated, max_per_sleeve=max_per_sleeve)
-
-    impact = float(market_summary.get("news_impact_score") or 0.0)
+    impact = _news_impact_from_summary(market_summary)
     has_news = bool(
-        market_summary.get("news_headlines")
-        or market_summary.get("news_digest")
-        or market_summary.get("news_theme_summary")
+        market_summary
+        and (
+            market_summary.get("news_headlines")
+            or market_summary.get("news_digest")
+            or market_summary.get("news_theme_summary")
+        )
     )
-    theme_top3 = _news_priority_sleeves(market_summary) if has_news else []
-    if not theme_top3:
-        theme_top3 = ["vti_core", "cash_buffer", "nyse"]
+    theme_top3 = (
+        _news_priority_sleeves(market_summary)
+        if has_news and market_summary
+        else ("vti_core", "cash_buffer", "nyse")
+    )
 
     scored: list[tuple[str, float, float]] = []
     for key, val in material.items():
-        score = _sleeve_rank_score(
-            key,
-            val,
-            market_summary,
-            impact=impact,
-            top3=theme_top3,
-        )
+        score = _sleeve_rank_score(val, impact)
         scored.append((key, val, score))
     scored.sort(key=lambda row: row[2], reverse=True)
 
-    keep_ordered: list[str] = []
-    for key, _, _ in scored:
-        if key not in keep_ordered:
-            keep_ordered.append(key)
-        if len(keep_ordered) >= max_sleeves:
-            break
-    for pref in theme_top3:
-        if pref not in keep_ordered and abs(raw.get(pref, 0.0)) >= 0.005:
-            keep_ordered.append(pref)
-        elif pref not in keep_ordered and len(keep_ordered) < max_sleeves:
-            keep_ordered.append(pref)
-        if len(keep_ordered) >= max_sleeves:
-            break
-
-    keep_set = set(keep_ordered[:max_sleeves])
+    keep_ordered = [key for key, _, _ in scored[:max_sleeves]]
+    keep_set = set(keep_ordered)
     consolidated = {k: 0.0 for k in _CAP_KEYS}
 
-    # Largest moves stay on their sleeve; smallest merge into best custodian.
-    for key, val, score in sorted(scored, key=lambda row: row[2]):
+    # Smallest impact-weighted moves merge into custodian sleeves first.
+    for key, val, _ in sorted(scored, key=lambda row: row[2]):
         if key in keep_set:
             consolidated[key] += val
             continue
-        target = _redirect_cap_to_priority(key, tuple(keep_ordered), market_summary)
+        target = _redirect_cap_to_priority(key, tuple(keep_ordered), market_summary or {})
         if target not in keep_set:
-            # Fall back to highest-scored keeper
             target = keep_ordered[0] if keep_ordered else theme_top3[0]
         consolidated[target] += val
 

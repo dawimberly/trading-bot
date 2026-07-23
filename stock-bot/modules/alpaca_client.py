@@ -138,6 +138,19 @@ def is_skippable_order_error(exc: BaseException) -> bool:
     return False
 
 
+def is_skippable_order_error(exc: BaseException) -> bool:
+    """422 notional/qty validation or insufficient-qty 403 — do not crash the cycle."""
+    if not isinstance(exc, APIError):
+        return False
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    if status == 422:
+        return True
+    if status == 403 and "insufficient qty" in msg:
+        return True
+    return False
+
+
 def call_with_retry(
     func: Callable[..., T],
     /,

@@ -1291,3 +1291,9 @@ def correlation_dashboard_status() -> str:
     flag = "ACTIVE" if mult < 1.0 else "ok"
     return f"Portfolio corr {corr:.2f} ({flag} x{mult:.2f})"
 
+
+def run_profit_target_exits(executor, **kwargs):
+    """Delegate to modules.profit_target (paper optional trailing stops)."""
+    from modules.profit_target import run_profit_target_exits as _run
+
+    return _run(executor, **kwargs)
