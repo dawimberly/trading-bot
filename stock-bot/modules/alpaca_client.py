@@ -12,6 +12,13 @@ from alpaca.trading.client import TradingClient
 
 import config
 
+try:
+    from modules.ssl_certs import configure_ssl_certificates
+
+    configure_ssl_certificates()
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -84,12 +91,17 @@ def build_trading_client(
 def get_trading_client(
     paper: bool | None = None,
     credentials_fn: Callable[[], tuple[str, str]] | None = None,
+    *,
+    allow_live: bool | None = None,
 ) -> TradingClient:
     """Return a cached TradingClient using config credentials."""
-    cred_fn = credentials_fn or config.get_alpaca_credentials
-    api_key, secret_key = cred_fn()
     use_paper = config.PAPER_TRADING if paper is None else bool(paper)
-    if not use_paper and not config.ALLOW_LIVE_TRADING:
+    if credentials_fn is not None:
+        api_key, secret_key = credentials_fn()
+    else:
+        api_key, secret_key = config.get_alpaca_credentials(paper=use_paper)
+    use_allow_live = config.ALLOW_LIVE_TRADING if allow_live is None else bool(allow_live)
+    if not use_paper and not use_allow_live:
         raise RuntimeError(
             "Live trading is disabled. Use Alpaca paper keys with PAPER_TRADING=true, "
             "or set ALLOW_LIVE_TRADING=yes to acknowledge live risk."
@@ -105,7 +117,45 @@ def is_transient_alpaca_error(exc: BaseException) -> bool:
 
 
 def is_auth_alpaca_error(exc: BaseException) -> bool:
-    return isinstance(exc, APIError) and getattr(exc, "status_code", None) in AUTH_HTTP_STATUS
+    if not isinstance(exc, APIError):
+        return False
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    # Insufficient qty / missing asset are order/asset issues, not credential auth.
+    if status == 403 and "insufficient qty" in msg:
+        return False
+    if is_unknown_asset_error(exc):
+        return False
+    return status in AUTH_HTTP_STATUS
+
+
+def is_unknown_asset_error(exc: BaseException) -> bool:
+    """True when Alpaca rejects an unknown/untradable symbol (e.g. SKY-USD)."""
+    if not isinstance(exc, APIError):
+        text = str(exc).lower()
+        return "asset" in text and "not found" in text
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    if "asset" in msg and "not found" in msg:
+        return True
+    if status == 404:
+        return True
+    return False
+
+
+def is_skippable_order_error(exc: BaseException) -> bool:
+    """422 notional/qty validation, unknown asset, or insufficient-qty 403 — do not crash the cycle."""
+    if not isinstance(exc, APIError):
+        return is_unknown_asset_error(exc)
+    status = getattr(exc, "status_code", None)
+    msg = str(exc).lower()
+    if is_unknown_asset_error(exc):
+        return True
+    if status == 422:
+        return True
+    if status == 403 and "insufficient qty" in msg:
+        return True
+    return False
 
 
 def is_skippable_order_error(exc: BaseException) -> bool:
@@ -137,12 +187,27 @@ def call_with_retry(
         except APIError as exc:
             last_exc = exc
             if is_auth_alpaca_error(exc):
-                logger.critical(
-                    "Alpaca auth failed during %s (HTTP %s): %s",
-                    op_name,
-                    getattr(exc, "status_code", "?"),
-                    exc,
-                )
+                try:
+                    st = config.alpaca_credentials_status()
+                    logger.critical(
+                        "Alpaca auth failed during %s (HTTP %s): %s | mode=%s "
+                        "endpoint=%s key_source=%s key_suffix=…%s loaded_env=%s",
+                        op_name,
+                        getattr(exc, "status_code", "?"),
+                        exc,
+                        st.get("mode"),
+                        st.get("base_url"),
+                        st.get("key_source"),
+                        st.get("key_suffix"),
+                        st.get("loaded_env"),
+                    )
+                except Exception:
+                    logger.critical(
+                        "Alpaca auth failed during %s (HTTP %s): %s",
+                        op_name,
+                        getattr(exc, "status_code", "?"),
+                        exc,
+                    )
                 raise AlpacaAuthError(str(exc)) from exc
             if is_transient_alpaca_error(exc) and attempt < max_attempts:
                 delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))

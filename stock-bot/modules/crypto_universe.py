@@ -72,22 +72,39 @@ def fetch_alpaca_tradable_crypto(*, refresh: bool = False) -> list[str]:
 
     symbols: list[str] = []
     try:
+        from alpaca.common.exceptions import APIError
         from alpaca.trading.client import TradingClient
         from alpaca.trading.enums import AssetClass, AssetStatus
         from alpaca.trading.requests import GetAssetsRequest
 
         key, secret = config.get_alpaca_credentials()
         client = TradingClient(key, secret, paper=config.PAPER_TRADING)
-        assets = client.get_all_assets(
-            GetAssetsRequest(asset_class=AssetClass.CRYPTO, status=AssetStatus.ACTIVE)
-        )
+        try:
+            assets = client.get_all_assets(
+                GetAssetsRequest(asset_class=AssetClass.CRYPTO, status=AssetStatus.ACTIVE)
+            )
+        except APIError as exc:
+            status = getattr(exc, "status_code", None)
+            if status in (401, 403, 404):
+                logger.warning(
+                    "Alpaca crypto asset list auth/lookup failed (HTTP %s): %s — using static fallback",
+                    status,
+                    exc,
+                )
+            else:
+                logger.warning("Alpaca crypto asset fetch failed: %s", exc)
+            assets = []
         for asset in assets:
-            if not getattr(asset, "tradable", True):
+            try:
+                if not getattr(asset, "tradable", True):
+                    continue
+                sym = config.normalize_symbol(str(asset.symbol))
+                if not sym or _skip_symbol(sym):
+                    continue
+                symbols.append(sym)
+            except Exception as exc:
+                logger.debug("skip crypto asset row: %s", exc)
                 continue
-            sym = config.normalize_symbol(str(asset.symbol))
-            if _skip_symbol(sym):
-                continue
-            symbols.append(sym)
     except Exception as exc:
         logger.warning("Alpaca crypto asset fetch failed: %s", exc)
 

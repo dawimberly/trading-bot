@@ -1,43 +1,26 @@
 @echo off
-REM PythonTrading — launch the PyInstaller monitor (.exe) from project root.
-REM Use this for desktop shortcuts (not the raw .exe in dist\).
-
 cd /d "%~dp0"
-set "PYTHONTRADING_ROOT=%CD%"
+set PYTHONTRADING_ROOT=%CD%
 
-set "MONITOR_EXE=dist\PythonTradingMonitor\PythonTradingMonitor.exe"
-if not exist "%MONITOR_EXE%" set "MONITOR_EXE=..\dist\PythonTradingMonitor\PythonTradingMonitor.exe"
-if not exist "%MONITOR_EXE%" (
-    echo [ERROR] Monitor exe not found in stock-bot\dist or repo dist\
-    echo Run build_dashboard.bat in stock-bot to rebuild it.
-    pause
-    exit /b 1
-)
+echo [INFO] Launching PythonTrading Monitor...
 
-if not exist "logs" mkdir logs
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\dashboard_running.ps1"
-if errorlevel 1 (
-    echo.
-    echo Dashboard is already running. Check the taskbar or system tray ^(near the clock^).
-    echo To force restart: run stop_dashboard.bat, then try again.
-    pause
+if exist "dist\PythonTradingMonitor\PythonTradingMonitor.exe" (
+    start "" "dist\PythonTradingMonitor\PythonTradingMonitor.exe"
+    echo [INFO] Started PythonTradingMonitor.exe
+    echo [INFO] Sign in when the window appears. Check logs\dashboard_crash.log if it closes.
     exit /b 0
 )
 
-for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%t"
-set "LAUNCH_LOG=logs\monitor_%STAMP%.log"
+set "PYW=pythonw"
+if exist "%~dp0.venv\Scripts\pythonw.exe" set "PYW=%~dp0.venv\Scripts\pythonw.exe"
+if exist "%~dp0..\.venv\Scripts\pythonw.exe" set "PYW=%~dp0..\.venv\Scripts\pythonw.exe"
 
-start "" "%MONITOR_EXE%" --launch-bot 1>>"%LAUNCH_LOG%" 2>&1
-
-timeout /t 2 /nobreak >nul
-tasklist /FI "IMAGENAME eq PythonTradingMonitor.exe" 2>nul | find /I "PythonTradingMonitor.exe" >nul
-if errorlevel 1 (
-    echo.
-    echo Monitor failed to start. See %LAUNCH_LOG%
-    if exist "%LAUNCH_LOG%" type "%LAUNCH_LOG%"
-    pause
-    exit /b 1
+if exist "dashboard_app.py" (
+    echo [INFO] Monitor EXE not found — using source: %PYW% dashboard_app.py
+    start "" "%PYW%" "%~dp0dashboard_app.py"
+    exit /b 0
 )
 
-echo PythonTrading Monitor started.
+echo [ERROR] No monitor found. Build with build_dashboard.bat or ensure dashboard_app.py exists.
+pause
+exit /b 1

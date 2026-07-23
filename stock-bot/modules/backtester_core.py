@@ -220,6 +220,9 @@ def ensure_daily_data_cached(
     if len(data) < min_history:
         fetch_daily_history(use_max=True)
         data = load_close_matrix(interval="1d")
+    need_rows = min_rows_for_backtest(sim_days, min_history=min_history)
+    if len(data) > need_rows:
+        data = data.iloc[-need_rows:].copy()
     _DATA_CACHE[mem_key] = data.copy()
     _trim_data_cache()
     _save_disk_cache(disk_key, data)
@@ -409,6 +412,129 @@ def compute_performance_metrics(
         out["benchmark_return_pct"] = round(benchmark_return_pct, 2)
         out["vs_benchmark_pp"] = round(total_ret - benchmark_return_pct, 2)
     return out
+
+
+RHYME_REGIME_LABELS: tuple[str, ...] = (
+    "RHYME_A: Euphoric_Volatility",
+    "RHYME_B: Panic_Volatility",
+    "RHYME_C: Steady_Bullish_Growth",
+    "RHYME_D: Range_Bound_Neutral",
+    "RHYME_E: Steady_Bearish_Decline",
+)
+
+
+def resolve_regime_name(name: str) -> str | None:
+    """Map CLI shorthand (RHYME_D, D, full label) to canonical regime string."""
+    key = (name or "").strip().upper().replace(" ", "_")
+    if not key:
+        return None
+    for full in RHYME_REGIME_LABELS:
+        short = full.split(":")[0].strip()
+        letter = short.rsplit("_", 1)[-1] if "_" in short else ""
+        if (
+            full.upper() == key
+            or full.upper().startswith(key + ":")
+            or short == key
+            or key == f"RHYME_{letter}"
+            or key == letter
+        ):
+            return full
+    return None
+
+
+def regime_matches(current: str, filter_spec: str | None) -> bool:
+    if not filter_spec:
+        return True
+    resolved = resolve_regime_name(filter_spec)
+    if resolved:
+        return (current or "") == resolved
+    return filter_spec.upper() in (current or "").upper()
+
+
+def _regime_sort_key(label: str) -> tuple[int, str]:
+    for i, full in enumerate(RHYME_REGIME_LABELS):
+        if label == full or label.startswith(full.split(":")[0]):
+            return (i, label)
+    return (99, label)
+
+
+def compute_regime_breakdown(
+    equity_curve: list[float] | pd.Series,
+    regime_labels: list[str],
+    *,
+    initial_capital: float,
+) -> list[dict[str, Any]]:
+    """Attribute daily PnL and return stats to each RHYME regime label."""
+    curve = list(equity_curve)
+    if len(curve) != len(regime_labels) or len(curve) < 2:
+        return []
+
+    pnl_by_regime: dict[str, float] = {}
+    returns_by_regime: dict[str, list[float]] = {}
+    trade_days = len(curve) - 1
+
+    for i in range(1, len(curve)):
+        reg = regime_labels[i]
+        prev_eq = curve[i - 1]
+        day_ret = curve[i] / prev_eq - 1.0 if prev_eq else 0.0
+        day_pnl = curve[i] - prev_eq
+        pnl_by_regime[reg] = pnl_by_regime.get(reg, 0.0) + day_pnl
+        returns_by_regime.setdefault(reg, []).append(day_ret)
+
+    total_pnl = curve[-1] - initial_capital
+    rows: list[dict[str, Any]] = []
+    for reg in sorted(returns_by_regime.keys(), key=_regime_sort_key):
+        rets = pd.Series(returns_by_regime[reg], dtype=float)
+        pnl = pnl_by_regime.get(reg, 0.0)
+        days = len(rets)
+        sharpe = (
+            float(rets.mean() / rets.std() * SHARPE_SCALE)
+            if rets.std() > 0
+            else 0.0
+        )
+        contrib = (
+            round(100.0 * pnl / total_pnl, 1)
+            if abs(total_pnl) > 0.01
+            else 0.0
+        )
+        short = reg.split(":")[0].strip() if ":" in reg else reg
+        rows.append(
+            {
+                "regime": reg,
+                "short": short,
+                "days": days,
+                "pct_days": round(100.0 * days / trade_days, 1),
+                "pnl_usd": round(pnl, 2),
+                "contrib_pct": contrib,
+                "avg_daily_pct": round(float(rets.mean()) * 100.0, 3),
+                "sharpe": round(sharpe, 2),
+                "win_rate_pct": round(float((rets > 0).mean()) * 100.0, 1),
+            }
+        )
+    return rows
+
+
+def format_regime_breakdown_table(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "--- Regime breakdown ---\n(no data)"
+    lines = ["--- Regime breakdown ---"]
+    lines.append(
+        f"{'Regime':<38} {'Days':>5} {'%Days':>6} {'Win%':>6} "
+        f"{'AvgDay%':>8} {'Sharpe':>7} {'PnL $':>10} {'Contrib%':>9}"
+    )
+    lines.append("-" * 95)
+    for row in rows:
+        pnl = row["pnl_usd"]
+        pnl_s = f"{pnl:+,.2f}" if pnl >= 0 else f"{pnl:,.2f}"
+        label = row.get("short") or row["regime"]
+        if len(label) > 38:
+            label = label[:35] + "..."
+        lines.append(
+            f"{label:<38} {row['days']:>5} {row['pct_days']:>5.1f}% "
+            f"{row['win_rate_pct']:>5.1f}% {row['avg_daily_pct']:>7.3f}% "
+            f"{row['sharpe']:>7.2f} {pnl_s:>10} {row['contrib_pct']:>8.1f}%"
+        )
+    return "\n".join(lines)
 
 
 def walk_forward_purged(
@@ -740,7 +866,8 @@ def apply_run_options_to_config() -> None:
     if opts.no_thinking or opts.fast_mode:
         config.PAPER_THINKING_ENGINE_ENABLED = False
     if opts.fast_mode:
-        config.PAPER_STAT_ARB_ENABLED = False
+        if not config.effective_stat_arb_sleeve_cap_enabled():
+            config.PAPER_STAT_ARB_ENABLED = False
         config.PAPER_DYNAMIC_UNIVERSE_ENABLED = False
         config.PAPER_VOL_TRADING_ENABLED = False
         config.PAPER_OPTIONS_SLEEVE_ENABLED = False

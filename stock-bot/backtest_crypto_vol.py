@@ -4,10 +4,12 @@ Universe v3: WIF, BONK, RENDER, ARB, SOL, AVAX (USD pairs via Alpaca).
 Universe v4: same minus ARB/USD, plus correlation filters (SPY gate, hours, RSI band, cooldown).
 
 Run:  python backtest_crypto_vol.py
+      python backtest_crypto_vol.py --render-only
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sqlite3
 import warnings
@@ -26,6 +28,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 ROOT = Path(__file__).resolve().parent
 OUT_CSV_V4 = ROOT / "crypto_vol_backtest_v4_results.csv"
+OUT_CSV_RENDER_ONLY = ROOT / "scripts" / "research" / "crypto_render_only_results.csv"
 DB_PATH = ROOT / "market_data.db"
 
 # Display label → Alpaca crypto symbol
@@ -38,6 +41,7 @@ UNIVERSE_V3 = {
     "AVAX/USD": "AVAX/USD",
 }
 UNIVERSE_V4 = {k: v for k, v in UNIVERSE_V3.items() if k != "ARB/USD"}
+UNIVERSE_RENDER_ONLY = {"RENDER/USD": "RENDER/USD"}
 
 # v4 filter constants
 SPY_GATE_PCT = -1.0
@@ -840,21 +844,165 @@ def save_trades_csv(trades: list[Trade], path: Path) -> None:
     print(f"\nSaved trade log: {path}")
 
 
-def main() -> None:
-    _load_env()
-    resolve_virtual_equity()
+def _v4_config(universe: dict[str, str], label: str) -> BacktestConfig:
+    return BacktestConfig(
+        label=label,
+        universe=universe,
+        drop_pct=DROP_PCT,
+        rsi_min=RSI_MIN_V4,
+        rsi_max=RSI_MAX_V4,
+        spy_gate=True,
+        hour_filter=True,
+        loss_cooldown=True,
+        allow_relaxed_retry=False,
+    )
 
+
+def print_render_only_comparison(v4_metrics: dict, render_metrics: dict) -> None:
+    print("\n=== v4 (5 coins) vs RENDER only ===")
+    header = (
+        f"{'Metric':<12} {'v4 (5 coins)':>14} {'RENDER only':>14}"
+    )
+    print(header)
+    print("-" * len(header))
+    rows = [
+        ("Trades", f"{v4_metrics['total_trades']}", f"{render_metrics['total_trades']}"),
+        (
+            "Return",
+            f"{v4_metrics['total_return_pct']:.2f}%",
+            f"{render_metrics['total_return_pct']:.2f}%",
+        ),
+        (
+            "Sharpe",
+            f"{v4_metrics['sharpe']:.2f}",
+            f"{render_metrics['sharpe']:.2f}",
+        ),
+        (
+            "Max DD",
+            f"{v4_metrics['max_drawdown_pct']:.2f}%",
+            f"{render_metrics['max_drawdown_pct']:.2f}%",
+        ),
+        (
+            "Win rate",
+            f"{v4_metrics['win_rate_pct']:.2f}%",
+            f"{render_metrics['win_rate_pct']:.2f}%",
+        ),
+    ]
+    for metric, left, right in rows:
+        print(f"{metric:<12} {left:>14} {right:>14}")
+
+
+def save_render_only_comparison_csv(
+    v4_metrics: dict, render_metrics: dict, path: Path
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame(
+        [
+            {
+                "Metric": "Trades",
+                "v4 (5 coins)": v4_metrics["total_trades"],
+                "RENDER only": render_metrics["total_trades"],
+            },
+            {
+                "Metric": "Return",
+                "v4 (5 coins)": v4_metrics["total_return_pct"],
+                "RENDER only": render_metrics["total_return_pct"],
+            },
+            {
+                "Metric": "Sharpe",
+                "v4 (5 coins)": v4_metrics["sharpe"],
+                "RENDER only": render_metrics["sharpe"],
+            },
+            {
+                "Metric": "Max DD",
+                "v4 (5 coins)": v4_metrics["max_drawdown_pct"],
+                "RENDER only": render_metrics["max_drawdown_pct"],
+            },
+            {
+                "Metric": "Win rate",
+                "v4 (5 coins)": v4_metrics["win_rate_pct"],
+                "RENDER only": render_metrics["win_rate_pct"],
+            },
+        ]
+    )
+    df.to_csv(path, index=False)
+    print(f"\nSaved comparison: {path}")
+
+
+def load_universe_data(universe: dict[str, str]) -> dict[str, pd.DataFrame]:
     print("\nLoading crypto 1h OHLCV from Alpaca paper market data...")
     data: dict[str, pd.DataFrame] = {}
-    for label, alpaca_symbol in UNIVERSE_V3.items():
+    for label, alpaca_symbol in universe.items():
         df = load_coin_data(alpaca_symbol)
         if df is None or df.empty:
             print(f"  WARNING: skipping {label}")
             continue
         data[label] = df
-
     if not data:
         raise SystemExit("No coins with sufficient Alpaca hourly history.")
+    return data
+
+
+def run_render_only_mode() -> None:
+    """Compare baseline v4 (5 coins) vs RENDER-only under identical v4 filters."""
+    data = load_universe_data(UNIVERSE_V4)
+
+    v4_config = _v4_config(UNIVERSE_V4, "v4")
+    print("\n" + "=" * 60)
+    print("Running v4 (5 coins) baseline for comparison")
+    print("=" * 60)
+    print_v4_filter_header()
+    v4_trades, _, v4_signal_stats, v4_filter_skips, v4_metrics = run_version_backtest(
+        data, v4_config
+    )
+    print_summary(
+        v4_metrics,
+        per_coin_breakdown(v4_trades),
+        v4_signal_stats,
+        version_label="v4 (5 coins)",
+        filter_skips=v4_filter_skips,
+    )
+
+    render_config = _v4_config(UNIVERSE_RENDER_ONLY, "render-only")
+    print("\n" + "=" * 60)
+    print("Running RENDER only (same v4 filters)")
+    print("=" * 60)
+    print_v4_filter_header()
+    render_trades, _, render_signal_stats, render_filter_skips, render_metrics = (
+        run_version_backtest(data, render_config)
+    )
+    print_summary(
+        render_metrics,
+        per_coin_breakdown(render_trades),
+        render_signal_stats,
+        version_label="RENDER only",
+        filter_skips=render_filter_skips,
+    )
+
+    print_render_only_comparison(v4_metrics, render_metrics)
+    save_render_only_comparison_csv(v4_metrics, render_metrics, OUT_CSV_RENDER_ONLY)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Crypto vol mean-reversion backtest")
+    parser.add_argument(
+        "--render-only",
+        action="store_true",
+        help=(
+            "Compare v4 (5 coins) vs RENDER/USD only under identical v4 filters; "
+            "write scripts/research/crypto_render_only_results.csv"
+        ),
+    )
+    args = parser.parse_args()
+
+    _load_env()
+    resolve_virtual_equity()
+
+    if args.render_only:
+        run_render_only_mode()
+        return
+
+    data = load_universe_data(UNIVERSE_V3)
 
     v3_config = BacktestConfig(
         label="v3",
@@ -871,17 +1019,7 @@ def main() -> None:
     v3_breakdown = per_coin_breakdown(v3_trades)
     print_summary(v3_metrics, v3_breakdown, v3_signal_stats, version_label="v3")
 
-    v4_config = BacktestConfig(
-        label="v4",
-        universe=UNIVERSE_V4,
-        drop_pct=DROP_PCT,
-        rsi_min=RSI_MIN_V4,
-        rsi_max=RSI_MAX_V4,
-        spy_gate=True,
-        hour_filter=True,
-        loss_cooldown=True,
-        allow_relaxed_retry=False,
-    )
+    v4_config = _v4_config(UNIVERSE_V4, "v4")
     print("\n" + "=" * 60)
     print("Running v4 (correlation filters)")
     print("=" * 60)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -11,6 +12,8 @@ import pandas as pd
 import yfinance as yf
 
 import config
+
+logger = logging.getLogger(__name__)
 
 OIL_SYMBOLS = ("XOM", "USO")
 GLD_SYMBOL = "GLD"
@@ -49,7 +52,8 @@ def _load_daily_close(col: str) -> pd.Series:
         conn = sqlite3.connect(config.DB_PATH)
         df = pd.read_sql(f'SELECT * FROM "{table}"', conn)
         conn.close()
-    except Exception:
+    except Exception as exc:
+        logger.debug("macro daily series read failed for %s: %s", col, exc)
         return pd.Series(dtype=float)
     if df.empty:
         return pd.Series(dtype=float)
@@ -82,8 +86,8 @@ def _fetch_and_store_daily(yf_ticker: str, col: str) -> None:
         conn = sqlite3.connect(config.DB_PATH)
         df[["Date", "Close"]].to_sql(f"{col}_daily", conn, if_exists="replace", index=False)
         conn.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("macro daily series persist failed for %s: %s", col, exc)
 
 
 def ensure_macro_regime_daily() -> None:

@@ -24,8 +24,19 @@ thinking_engine_last.json
 trading_safety_state.json
 **/thinking_engine_analysis_output.json
 
-# PyInstaller one-dir output (use build/ or rebuild locally)
+# Consolidated runtime dirs (stock-bot)
+stock-bot/data/
+stock-bot/archive/
+stock-bot/data/**
+stock-bot/archive/**
+
+# Root purge backup (reversible)
+backup_root_purge_*/
+
+# PyInstaller / frozen EXE output (rebuild locally)
 dist/
+stock-bot/dist/
+stock-bot/build/
 pod_risk_state.json
 bot_heartbeat.log
 bot_logs.log

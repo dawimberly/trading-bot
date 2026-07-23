@@ -9,7 +9,12 @@ import numpy as np
 import pandas as pd
 
 import config
-from modules.market_context import get_market_regime, get_price_sentiment, get_volatility
+from modules.market_context import (
+    get_market_regime,
+    get_price_sentiment,
+    get_regime_inputs,
+    get_volatility,
+)
 from modules.wayback_sentiment import normalize_price_sentiment, web_sentiment_for_date
 from modules.felix_sentiment import apply_felix_web_blend
 from modules.web_sentiment_live import get_live_web_sentiment
@@ -46,9 +51,12 @@ def regime_sentiment(
     mode: str = "baseline",
     gap_threshold: float = 0.25,
     web_override: float | None = None,
+    *,
+    price_override: float | None = None,
+    vol_override: str | None = None,
 ) -> tuple[float, float | None, float | None]:
     """Return (sentiment_for_regime, web_sentiment or None, gap or None)."""
-    price = get_price_sentiment(data)
+    price = price_override if price_override is not None else get_price_sentiment(data)
     if web_override is not None:
         web = web_override
     elif monthly_web is not None and not monthly_web.empty:
@@ -63,7 +71,7 @@ def regime_sentiment(
         return price, (None if np.isnan(web) else web), gap
 
     if mode == "dynamic":
-        vol = get_volatility(data)
+        vol = vol_override if vol_override is not None else get_volatility(data)
         dyn = get_dynamic_wisdom_signal(
             data,
             price_sentiment=price,
@@ -89,6 +97,20 @@ def regime_sentiment(
 
 def _gap_exceeds(gap, gap_threshold: float) -> bool:
     return gap is not None and not np.isnan(gap) and abs(gap) >= gap_threshold
+
+
+def entries_pause_regime(classified: str, vol: str) -> str:
+    """
+    When wisdom pauses new entries, align with PAUSED_REGIMES by vol.
+
+    Preserves the classified label when it is already bear/panic; otherwise
+    uses panic on high vol and steady bear on low vol (not always RHYME_E).
+    """
+    if classified in (BEAR_REGIME, PANIC_REGIME):
+        return classified
+    if vol == "High":
+        return PANIC_REGIME
+    return BEAR_REGIME
 
 
 def governor_stress_confirmed(data, vol: str) -> bool:
@@ -183,8 +205,13 @@ def resolve_wisdom_regime(
     gap_threshold = gap_threshold if gap_threshold is not None else config.WISDOM_GAP_THRESHOLD
     ts = pd.Timestamp(ts or datetime.datetime.now())
 
-    vol = get_volatility(data)
-    price_sent = get_price_sentiment(data)
+    # Regime uses daily bars when live (5m matrix passed in); backtests use daily windows.
+    regime_inputs = get_regime_inputs(data)
+    vol = regime_inputs["volatility"]
+    price_sent = regime_inputs["price_sentiment"]
+    regime_data = regime_inputs["data"]
+    if regime_data is None or regime_data.empty:
+        regime_data = data
 
     web: float | None = None
     headline_web: float | None = None
@@ -200,12 +227,14 @@ def resolve_wisdom_regime(
             web, felix_meta = apply_felix_web_blend(headline_web)
 
     sent, web_used, gap = regime_sentiment(
-        data,
+        regime_data,
         ts,
         monthly_web if monthly_web is not None else pd.Series(dtype=float),
         mode=mode,
         gap_threshold=gap_threshold,
         web_override=web,
+        price_override=price_sent,
+        vol_override=vol,
     )
 
     dynamic_signal = None
@@ -222,7 +251,7 @@ def resolve_wisdom_regime(
         gap_tier = dynamic_signal["gap_tier"]
         macro_stress = dynamic_signal["macro_stress"]
 
-    regime = get_market_regime(sent, vol)
+    classified_regime = get_market_regime(sent, vol, apply_hysteresis=True)
     stress_confirmed = (
         governor_stress_confirmed(data, vol) if mode == "governor" else None
     )
@@ -236,11 +265,18 @@ def resolve_wisdom_regime(
         stress_confirmed=stress_confirmed,
         dynamic_signal=dynamic_signal,
     )
-    if paused:
-        regime = PAUSE_REGIME
+    if paused and (
+        config.effective_paper_soft_pause() or config.effective_regime_dynamic_sizing()
+    ):
+        entries_regime = classified_regime
+    else:
+        entries_regime = (
+            entries_pause_regime(classified_regime, vol) if paused else classified_regime
+        )
 
     return {
-        "regime": regime,
+        "regime": classified_regime,
+        "entries_regime": entries_regime,
         "volatility": vol,
         "price_sentiment": price_sent,
         "web_sentiment": web_used,
@@ -267,12 +303,19 @@ def resolve_backtest_regime(
     *,
     wisdom_mode: str | None = None,
     gap_threshold: float | None = None,
-) -> tuple[str, str, bool, float]:
-    """Regime for daily backtests (optional Wayback web + wisdom pause)."""
+) -> tuple[str, str, bool, float, str]:
+    """Regime for daily backtests (optional Wayback web + wisdom pause).
+
+    Returns (entries_regime, vol, wisdom_paused, sizing_mult, classified_regime).
+    """
     vol = get_volatility(data)
     if not wisdom_mode:
         price_sent = get_price_sentiment(data)
-        return get_market_regime(price_sent, vol), vol, False, 1.0
+        classified = get_market_regime(price_sent, vol, apply_hysteresis=True)
+        from modules.regime_sizing import effective_regime_sizing_multiplier
+
+        mult = effective_regime_sizing_multiplier(classified)
+        return classified, vol, False, mult, classified
 
     mode = wisdom_mode.strip().lower()
     if mode not in MODES:
@@ -280,9 +323,20 @@ def resolve_backtest_regime(
     gap_threshold = gap_threshold if gap_threshold is not None else config.WISDOM_GAP_THRESHOLD
     web_series = monthly_web if monthly_web is not None else pd.Series(dtype=float)
 
-    price_sent = get_price_sentiment(data)
+    regime_inputs = get_regime_inputs(data)
+    vol = regime_inputs["volatility"]
+    price_sent = regime_inputs["price_sentiment"]
+    regime_data = regime_inputs["data"]
+    if regime_data is None or regime_data.empty:
+        regime_data = data
     sent, web, gap = regime_sentiment(
-        data, ts, web_series, mode=mode, gap_threshold=gap_threshold
+        regime_data,
+        ts,
+        web_series,
+        mode=mode,
+        gap_threshold=gap_threshold,
+        price_override=price_sent,
+        vol_override=vol,
     )
 
     dynamic_signal = None
@@ -294,7 +348,7 @@ def resolve_backtest_regime(
         sent = dynamic_signal["effective_sentiment"]
         sizing_multiplier = dynamic_signal["sizing_multiplier"]
 
-    regime = get_market_regime(sent, vol)
+    classified_regime = get_market_regime(sent, vol, apply_hysteresis=True)
     stress_confirmed = governor_stress_confirmed(data, vol) if mode == "governor" else None
     paused = entries_paused(
         mode,
@@ -306,6 +360,30 @@ def resolve_backtest_regime(
         stress_confirmed=stress_confirmed,
         dynamic_signal=dynamic_signal,
     )
-    if paused:
-        regime = PAUSE_REGIME
-    return regime, vol, paused, sizing_multiplier
+    if paused and (
+        config.effective_paper_soft_pause() or config.effective_regime_dynamic_sizing()
+    ):
+        entries_regime = classified_regime
+    else:
+        entries_regime = (
+            entries_pause_regime(classified_regime, vol) if paused else classified_regime
+        )
+    from modules.regime_sizing import (
+        effective_regime_sizing_multiplier,
+        regime_dynamic_sizing_multiplier,
+    )
+
+    if config.effective_regime_dynamic_sizing():
+        regime_mult = regime_dynamic_sizing_multiplier(classified_regime)
+        if paused:
+            regime_mult = round(regime_mult * config.PAPER_WISDOM_SIZING_FLOOR, 3)
+        sizing_multiplier = round(float(sizing_multiplier) * regime_mult, 3)
+    else:
+        sizing_multiplier = round(
+            float(sizing_multiplier)
+            * effective_regime_sizing_multiplier(
+                classified_regime, wisdom_paused=paused
+            ),
+            3,
+        )
+    return entries_regime, vol, paused, sizing_multiplier, classified_regime

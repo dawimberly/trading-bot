@@ -7,9 +7,9 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
-from modules.trading_books import BOOKS
 from modules.portal_paths import (
     PROJECT_ROOT,
     book_bot_log_path,
@@ -26,56 +26,107 @@ from modules.portal_paths import (
     user_journal_path,
     user_pid_path,
 )
+from modules.runtime_paths import (
+    BOT_EXE_NAME,
+    find_bot_exe_pids,
+    find_script_pids,
+    resolve_bot_executable,
+    resolve_bot_workdir,
+)
+from modules.trading_books import BOOKS, book_enabled
 
 WISDOM_SCORECARD = PROJECT_ROOT / "wisdom_scorecard.json"
 WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
 
 
 def _python() -> str:
-    """Interpreter for run_all.py (venv or PATH python when dashboard is frozen)."""
-    for venv in (
-        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+    """Interpreter for run_all.py — prefer a venv that has project deps (dotenv)."""
+    candidates = [
         PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
-    ):
-        if venv.is_file():
-            return str(venv)
+        PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT.parent / ".venv" / "bin" / "python",
+        PROJECT_ROOT / ".venv" / "bin" / "python",
+    ]
+    existing = [p for p in candidates if p.is_file()]
+    for path in existing:
+        try:
+            probe = subprocess.run(
+                [str(path), "-c", "import dotenv"],
+                capture_output=True,
+                timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            if probe.returncode == 0:
+                return str(path)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    if existing:
+        return str(existing[0])
     if getattr(sys, "frozen", False):
         import shutil
 
         for name in ("python", "python3", "python.exe"):
             found = shutil.which(name)
-            if found:
+            if found and Path(found).name.lower() != "python":
+                # Skip zero-byte decoy files named "python" with no extension.
                 return found
+            if found and Path(found).suffix.lower() in (".exe", ""):
+                try:
+                    if Path(found).stat().st_size > 0:
+                        return found
+                except OSError:
+                    continue
     return sys.executable
+
+
+def _bot_subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """Child bot env without inherited TLS paths from the monitor EXE."""
+    env = dict(base or os.environ)
+    for var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        env.pop(var, None)
+    return env
 
 
 def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]:
     migrate_user_to_books(username)
-    env = os.environ.copy()
+    env = _bot_subprocess_env()
     bd = book_dir(username, book_id)
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
+    env["PORTAL_MANAGED_BOT"] = "1"
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
     env["WISDOM_SCORECARD_FILE"] = str(bd / "wisdom_scorecard.json")
     env["WISDOM_JOURNAL_FILE"] = str(bd / "wisdom_journal.csv")
     spec = BOOKS.get(book_id) or {}
     prefs = read_user_env_prefs(username, book_id)
-    if spec.get("paper_chase") or (prefs.get("paper") and book_id == "alpaca_paper"):
+    paper = bool(prefs.get("paper", spec.get("default_paper", True)))
+    allow_live = bool(prefs.get("allow_live", spec.get("allow_live_default", False)))
+    env["PAPER_TRADING"] = "true" if paper else "false"
+    env["ALLOW_LIVE_TRADING"] = "yes" if allow_live else "no"
+    if spec.get("paper_chase") or (paper and book_id == "alpaca_paper"):
         env["PAPER_CHASE_MODE"] = "1"
-        env["PAPER_TRADING"] = "true"
+        from config import apply_realistic_research_env
+
+        env = apply_realistic_research_env(env)
+    else:
+        env.pop("PAPER_CHASE_MODE", None)
+        if book_id == "alpaca_live":
+            from config import clear_paper_research_env
+
+            env = clear_paper_research_env(env)
     return env
 
 
-def _find_script_pids(script_name: str) -> list[int]:
-    """PIDs for python processes running script_name."""
-    pids: list[int] = []
+def _child_pids(pid: int) -> list[int]:
+    """Direct child process IDs (Windows WMI)."""
+    if not _pid_alive(pid):
+        return []
     try:
         if sys.platform == "win32":
             cmd = (
-                f"Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | "
-                f"Where-Object {{ $_.CommandLine -like '*{script_name}*' }} | "
+                f"Get-CimInstance Win32_Process -Filter \"ParentProcessId={pid}\" | "
                 "Select-Object -ExpandProperty ProcessId"
             )
             out = subprocess.check_output(
@@ -84,13 +135,108 @@ def _find_script_pids(script_name: str) -> list[int]:
                 stderr=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
-            pids = [int(x.strip()) for x in out.splitlines() if x.strip().isdigit()]
-        else:
-            out = subprocess.check_output(["pgrep", "-f", script_name], text=True)
-            pids = [int(x) for x in out.split() if x.strip().isdigit()]
+            return [int(x.strip()) for x in out.splitlines() if x.strip().isdigit()]
     except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
-        pass
-    return pids
+        return []
+    return []
+
+
+def _parent_pid(pid: int) -> int | None:
+    try:
+        if sys.platform == "win32":
+            cmd = (
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").ParentProcessId"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", cmd],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).strip()
+            return int(out) if out.isdigit() else None
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError, ValueError):
+        return None
+    return None
+
+
+def _is_descendant_of(pid: int, ancestor: int) -> bool:
+    current = _parent_pid(pid)
+    depth = 0
+    while current is not None and depth < 32:
+        if current == ancestor:
+            return True
+        current = _parent_pid(current)
+        depth += 1
+    return False
+
+
+def _descendant_pids(root: int) -> set[int]:
+    seen: set[int] = set()
+    stack = [root]
+    while stack:
+        pid = stack.pop()
+        if pid in seen:
+            continue
+        seen.add(pid)
+        stack.extend(_child_pids(pid))
+    seen.discard(root)
+    return seen
+
+
+def _portal_launched(cmd: str) -> bool:
+    return " -u " in f" {cmd} "
+
+
+def _paper_run_all_child(username: str) -> int | None:
+    supervisor = bot_pid(username, "alpaca_paper")
+    if supervisor is None:
+        return None
+    for pid in sorted(_descendant_pids(supervisor)):
+        cmd = _process_cmdline(pid) or ""
+        if "run_all.py" in cmd and not _portal_launched(cmd):
+            return pid
+    return None
+
+
+def _paper_allowed_descendants(supervisor: int) -> set[int]:
+    """Only the paper supervisor's single run_all.py worker (not nested dup supervisors)."""
+    allowed: set[int] = set()
+    for pid in sorted(_descendant_pids(supervisor)):
+        cmd = _process_cmdline(pid) or ""
+        if "run_paper_bot.py" in cmd:
+            continue
+        if "run_all.py" in cmd:
+            allowed.add(pid)
+            break
+    return allowed
+
+
+def _managed_bot_pids(username: str) -> set[int]:
+    """PIDs that may run for this user (supervisors, live chain, one paper run_all)."""
+    allowed: set[int] = set()
+    live = bot_pid(username, "alpaca_live")
+    if live is not None:
+        allowed.add(live)
+        walk = live
+        for _ in range(32):
+            parent = _parent_pid(walk)
+            if parent is None:
+                break
+            cmd = _process_cmdline(parent) or ""
+            if "run_all.py" not in cmd:
+                break
+            allowed.add(parent)
+            walk = parent
+    paper = bot_pid(username, "alpaca_paper")
+    if paper is not None:
+        allowed.add(paper)
+        allowed |= _paper_allowed_descendants(paper)
+    return allowed
+
+
+def _find_script_pids(script_name: str) -> list[int]:
+    """PIDs for python processes running script_name."""
+    return find_script_pids(script_name)
 
 
 def _process_cmdline(pid: int) -> str | None:
@@ -146,17 +292,98 @@ def _graceful_stop_pid(pid: int, *, wait_sec: float = 6.0) -> tuple[bool, str]:
         return False, f"Could not stop PID {pid}: {exc}"
 
 
-def stop_orphan_project_bots() -> tuple[int, str]:
-    """Stop stray run_paper_bot / run_all processes for this repo (no pid file)."""
+def _tracked_book_pids(username: str) -> set[int]:
+    """Live PIDs from per-book pid files (paper + live may run together)."""
+    pids: set[int] = set()
+    for bid in BOOKS:
+        pid = bot_pid(username, bid)
+        if pid is not None:
+            pids.add(pid)
+    return pids
+
+
+def trim_portal_duplicate_bots(username: str) -> tuple[int, str]:
+    """Remove extra portal-launched supervisors and stray paper run_all workers."""
+    live = bot_pid(username, "alpaca_live")
+    paper = bot_pid(username, "alpaca_paper")
     stopped = 0
     notes: list[str] = []
-    for script in ("run_paper_bot.py", "run_all.py"):
-        for pid in _find_script_pids(script):
+    for pid in _find_script_pids("run_paper_bot.py"):
+        if paper is not None and pid == paper:
+            continue
+        cmd = _process_cmdline(pid) or ""
+        if not _portal_launched(cmd):
+            continue
+        ok, msg = _graceful_stop_pid(pid)
+        if ok:
+            stopped += 1
+        else:
+            notes.append(msg)
+    paper_supervisor = paper
+    for pid in _find_script_pids("run_all.py"):
+        if live is not None and pid == live:
+            continue
+        if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
+            parent = _parent_pid(pid)
+            pcmd = _process_cmdline(parent) or "" if parent else ""
+            if parent and "run_all.py" in pcmd:
+                ok, msg = _graceful_stop_pid(pid)
+                if ok:
+                    stopped += 1
+                else:
+                    notes.append(msg)
+            continue
+        cmd = _process_cmdline(pid) or ""
+        if _portal_launched(cmd):
             ok, msg = _graceful_stop_pid(pid)
             if ok:
                 stopped += 1
             else:
                 notes.append(msg)
+    summary = f"Trimmed {stopped} duplicate bot process(es)." if stopped else "No duplicate bot processes."
+    if notes:
+        summary += " " + "; ".join(notes)
+    return stopped, summary
+
+
+def stop_orphan_project_bots(
+    preserve_pids: set[int] | None = None,
+    *,
+    username: str | None = None,
+) -> tuple[int, str]:
+    """Stop stray run_paper_bot / run_all processes for this repo (no pid file)."""
+    preserve = set(preserve_pids or set())
+    if username:
+        preserve |= _managed_bot_pids(username)
+    stopped = 0
+    notes: list[str] = []
+    for script in ("run_paper_bot.py", "run_all.py"):
+        pids = _find_script_pids(script)
+        if pids:
+            print(f"Found {len(pids)} {script} process(es)...", flush=True)
+        for pid in pids:
+            if pid in preserve:
+                continue
+            live_supervisor = bot_pid(username, "alpaca_live") if username else None
+            paper_supervisor = bot_pid(username, "alpaca_paper") if username else None
+            if live_supervisor is not None and _is_descendant_of(live_supervisor, pid):
+                continue
+            if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
+                continue
+            print(f"Stopping orphan {script} PID {pid}...", flush=True)
+            ok, msg = _graceful_stop_pid(pid)
+            if ok:
+                stopped += 1
+            else:
+                notes.append(msg)
+    for pid in find_bot_exe_pids():
+        if pid in preserve:
+            continue
+        ok, msg = _graceful_stop_pid(pid)
+        if ok:
+            stopped += 1
+        else:
+            notes.append(msg)
     summary = f"Stopped {stopped} orphan bot process(es)." if stopped else "No orphan bot processes."
     if notes:
         summary += " " + "; ".join(notes)
@@ -176,24 +403,32 @@ def _bot_entry_script(username: str, book_id: str) -> Path:
         cmd = _process_cmdline(pid) or ""
         if "run_paper_bot" in cmd:
             return PROJECT_ROOT / "run_paper_bot.py"
-    if _find_script_pids("run_paper_bot.py"):
-        return PROJECT_ROOT / "run_paper_bot.py"
     if _is_paper_book(username, book_id):
         return PROJECT_ROOT / "run_paper_bot.py"
     return PROJECT_ROOT / "run_all.py"
+
+
+def _bot_launch_command(bot_script: Path) -> tuple[list[str], Path]:
+    """Argv + cwd for portal-managed bots — always Python source (not the frozen EXE).
+
+    The Weinstein EXE is for standalone/manual use only; portal books need per-book
+    .env and heartbeat paths that are reliable only via python run_all/run_paper_bot.
+    """
+    return [_python(), "-u", str(bot_script)], PROJECT_ROOT
 
 
 def bot_status_label(username: str, book_id: str = "alpaca_paper") -> str:
     """Short status for dashboard header: Running (PID n) · script · mode."""
     pid = bot_pid(username, book_id)
     if pid is None:
-        orphans = _find_script_pids("run_all.py") + _find_script_pids("run_paper_bot.py")
-        if orphans:
-            pid = orphans[0]
-        else:
-            return "Bot: Stopped"
+        return "Bot: Stopped"
     cmd = _process_cmdline(pid) or ""
-    script = "run_paper_bot" if "run_paper_bot" in cmd else "run_all"
+    if BOT_EXE_NAME.replace(".exe", "") in cmd or BOT_EXE_NAME in cmd:
+        script = BOT_EXE_NAME
+    elif "run_paper_bot" in cmd:
+        script = "run_paper_bot"
+    else:
+        script = "run_all"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
     return f"Bot: Running · PID {pid} · {script} ({mode})"
 
@@ -228,6 +463,75 @@ def bot_pid(username: str, book_id: str = "alpaca_paper") -> int | None:
         return pid
     path.unlink(missing_ok=True)
     return None
+
+
+def _write_startup_heartbeat(username: str, book_id: str) -> None:
+    """Fresh timestamp so status/dashboard do not show stale heartbeat after restart."""
+    try:
+        from modules.safe_io import write_json_atomic
+
+        path = book_heartbeat_path(username, book_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        write_json_atomic(
+            path,
+            {
+                "timestamp": now,
+                "status": "starting",
+                "bot_restarted_at": now,
+                "book_id": book_id,
+                "paper": _is_paper_book(username, book_id),
+            },
+        )
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "startup heartbeat write failed for %s: %s", book_id, exc
+        )
+
+
+def _book_has_keys(username: str, book_id: str) -> bool:
+    try:
+        from modules.portal_paths import has_alpaca_config
+
+        return has_alpaca_config(username, book_id)
+    except Exception:
+        return False
+
+
+def restart_all_bots(username: str) -> tuple[bool, str]:
+    """Gracefully restart every configured book that has API keys."""
+    messages: list[str] = []
+    ok_all = True
+    restarted_any = False
+
+    # Stop every book first, then one orphan sweep — avoids killing live run_all
+    # while starting paper (both use run_all.py on disk).
+    for book_id in BOOKS:
+        if not book_enabled(book_id) or not _book_has_keys(username, book_id):
+            continue
+        if bot_running(username, book_id):
+            stop_bot(username, book_id)
+    stopped, orphan_msg = stop_orphan_project_bots(username=username)
+    if stopped:
+        time.sleep(1.0)
+
+    for book_id in BOOKS:
+        if not book_enabled(book_id) or not _book_has_keys(username, book_id):
+            continue
+        restarted_any = True
+        ok, msg = start_bot(username, book_id, skip_orphan_stop=True)
+        prefix = "Bot restarted successfully" if ok else "Bot failed to start"
+        mode = "paper" if _is_paper_book(username, book_id) else "live"
+        messages.append(f"--- {book_id} ---\n{prefix} ({mode} mode).\n{msg}")
+        ok_all = ok_all and ok
+    if not restarted_any:
+        return False, "No books with API keys found to restart."
+    if stopped:
+        messages.insert(0, f"(Pre-start cleanup: {orphan_msg})")
+    prefix = "All bots restarted" if ok_all else "Restart finished with errors"
+    return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
 
 
 def bot_running(username: str, book_id: str = "alpaca_paper") -> bool:
@@ -281,7 +585,7 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
     stop_orphan_project_bots()
     time.sleep(1.0)
 
-    env = os.environ.copy()
+    env = _bot_subprocess_env()
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(env_file)
@@ -290,6 +594,9 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
     env["WISDOM_SCORECARD_FILE"] = str(slot_dir / "wisdom_scorecard.json")
     env["WISDOM_JOURNAL_FILE"] = str(slot_dir / "wisdom_journal.csv")
     if paper_chase:
+        from config import apply_realistic_research_env
+
+        env = apply_realistic_research_env(env)
         env["PAPER_CHASE_MODE"] = "1"
         env["PAPER_TRADING"] = "true"
 
@@ -298,15 +605,31 @@ def start_bot_env(env_file: Path, slot: str, *, paper_chase: bool) -> tuple[bool
     log_file.write(f"\n--- bot start {slot} {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
     log_file.flush()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    launch_argv, launch_cwd = _bot_launch_command(PROJECT_ROOT / "run_all.py")
     proc = subprocess.Popen(
-        [_python(), "-u", str(PROJECT_ROOT / "run_all.py")],
-        cwd=str(PROJECT_ROOT),
+        launch_argv,
+        cwd=str(launch_cwd),
         env=env,
         stdout=log_file,
         stderr=subprocess.STDOUT,
         creationflags=flags,
     )
     pid_path.write_text(str(proc.pid), encoding="utf-8")
+    try:
+        from modules.safe_io import write_json_atomic
+
+        now = time.strftime("%Y-%m-%dT%H:%M:%S")
+        write_json_atomic(
+            slot_dir / "bot_heartbeat.json",
+            {
+                "timestamp": now,
+                "status": "starting",
+                "bot_restarted_at": now,
+                "slot": slot,
+            },
+        )
+    except Exception:
+        pass
     time.sleep(2)
     if proc.poll() is not None:
         log_file.flush()
@@ -359,14 +682,23 @@ def bot_env_running(slot: str) -> bool:
     return False
 
 
-def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
+def start_bot(username: str, book_id: str = "alpaca_paper", *, skip_orphan_stop: bool = False) -> tuple[bool, str]:
     if bot_running(username, book_id):
         return False, f"Bot is already running for {book_id}."
-    orphans_stopped, orphan_msg = stop_orphan_project_bots()
-    if orphans_stopped:
-        time.sleep(1.0)
+    orphan_msg = ""
+    if not skip_orphan_stop:
+        preserve = _tracked_book_pids(username)
+        orphans_stopped, orphan_msg = stop_orphan_project_bots(preserve_pids=preserve)
+        if orphans_stopped:
+            time.sleep(1.0)
     bot_script = _bot_entry_script(username, book_id)
-    if not bot_script.is_file():
+    launch_argv, launch_cwd = _bot_launch_command(bot_script)
+    if bot_script.name != "run_all.py" and not bot_script.is_file():
+        return False, f"{bot_script.name} not found in project root."
+    if bot_script.name == "run_all.py" and launch_argv[0].endswith(BOT_EXE_NAME):
+        if not Path(launch_argv[0]).is_file():
+            return False, f"{BOT_EXE_NAME} not found beside dist/ runtime data."
+    elif not bot_script.is_file():
         return False, f"{bot_script.name} not found in project root."
     log_path = book_bot_log_path(username, book_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,14 +710,15 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     log_file.flush()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
     proc = subprocess.Popen(
-        [_python(), "-u", str(bot_script)],
-        cwd=str(PROJECT_ROOT),
+        launch_argv,
+        cwd=str(launch_cwd),
         env=user_bot_env(username, book_id),
         stdout=log_file,
         stderr=subprocess.STDOUT,
         creationflags=flags,
     )
     book_pid_path(username, book_id).write_text(str(proc.pid), encoding="utf-8")
+    _write_startup_heartbeat(username, book_id)
     time.sleep(2)
     if proc.poll() is not None:
         log_file.flush()
@@ -399,10 +732,10 @@ def start_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
                 "\n\nAlpaca returned 401 — check API keys in the portal menu "
                 "(paper vs live keys must match PAPER_TRADING in your book .env)."
             )
-        orphan_note = f"\n{orphan_msg}" if orphans_stopped else ""
+        orphan_note = f"\n{orphan_msg}" if orphan_msg else ""
         return False, f"Bot exited immediately (code {proc.returncode}).{hint}{orphan_note}{detail}"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
-    orphan_note = f" ({orphan_msg})" if orphans_stopped else ""
+    orphan_note = f" ({orphan_msg})" if orphan_msg else ""
     return True, (
         f"{mode} bot started via {bot_script.name} (PID {proc.pid}){orphan_note}. "
         "First heartbeat may take up to 60s."
@@ -418,7 +751,7 @@ def stop_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     if not ok:
         return False, msg
     # run_paper_bot.py supervises a child run_all.py — clean up stragglers
-    stop_orphan_project_bots()
+    stop_orphan_project_bots(preserve_pids=_tracked_book_pids(username), username=username)
     return True, f"Bot stopped for {book_id} ({msg})"
 
 
@@ -432,10 +765,67 @@ def restart_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str
             return False, stop_msg
     else:
         stop_msg = "Bot was not running."
-        stop_orphan_project_bots()
-    time.sleep(1.5)
     ok, start_msg = start_bot(username, book_id)
     if not ok:
         return False, start_msg
     prefix = "Bot restarted successfully" if was_running else "Bot started successfully"
     return True, f"{prefix} ({mode} mode).\n{stop_msg}\n{start_msg}"
+
+
+def refresh_bot_daily_data(*, daily_days: int | None = None) -> tuple[bool, str]:
+    """Download daily bars into market_data.db (same as fetch_data.py --daily)."""
+    import config as _config
+
+    days = int(daily_days or _config.BACKTEST_DAYS)
+    try:
+        from fetch_data import fetch_daily_history
+        from modules.data_loader import clear_close_matrix_cache
+
+        fetch_daily_history(days=days, use_max=False)
+        clear_close_matrix_cache()
+        return True, f"Daily market data refreshed ({days} calendar days)."
+    except Exception as exc:
+        return False, f"Daily data refresh failed: {exc}"
+
+
+def refresh_bot(
+    username: str,
+    book_id: str = "alpaca_paper",
+    *,
+    daily_days: int | None = None,
+    progress: Callable[[str], None] | None = None,
+) -> tuple[bool, str]:
+    """Stop bot, refresh daily DB, restart — full 'Refresh Bot' cycle."""
+    mode = "paper" if _is_paper_book(username, book_id) else "live"
+    steps: list[str] = []
+
+    def _notify(msg: str) -> None:
+        if progress:
+            progress(msg)
+
+    was_running = bot_running(username, book_id)
+    if was_running:
+        _notify("Stopping bot…")
+        ok, stop_msg = stop_bot(username, book_id)
+        if not ok:
+            return False, stop_msg
+        steps.append(stop_msg)
+    else:
+        steps.append("Bot was not running.")
+
+    _notify("Refreshing daily market data…")
+    ok, data_msg = refresh_bot_daily_data(daily_days=daily_days)
+    if not ok:
+        if was_running:
+            start_bot(username, book_id)
+        return False, "\n".join(steps + [data_msg])
+    steps.append(data_msg)
+
+    _notify("Restarting bot…")
+    ok, start_msg = start_bot(username, book_id)
+    if not ok:
+        return False, "\n".join(steps + [start_msg])
+    steps.append(start_msg)
+    return True, (
+        f"Refresh Bot complete ({mode} / {book_id}).\n" + "\n".join(steps)
+    )

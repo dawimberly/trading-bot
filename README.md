@@ -1,6 +1,11 @@
-# trading-bot
+# PythonTrading
 
-Monorepo for local trading and betting tools. Clone once, run what you need on your own PC.
+Monorepo for local trading tools. **Only `stock-bot/` is the active trading project.**
+
+| Folder | Purpose |
+|--------|---------|
+| [`stock-bot/`](stock-bot/) | Alpaca stock/crypto fund bot + portal (active) |
+| [`ufc-predictor/`](ufc-predictor/) | UFC fight model + data pipeline (separate project) |
 
 **Repo (personal):** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)  
 **Repo (group / infinite-robots):** [github.com/infinite-robots/python-trading](https://github.com/infinite-robots/python-trading)
@@ -17,24 +22,35 @@ Both remotes were synced to the same commits on `main` and all cursor branches (
 
 Add the org remote once: `git remote add infinite-robots https://github.com/infinite-robots/python-trading.git`
 
-| Folder | What it is | Get started |
-|--------|------------|-------------|
-| [`stock-bot/`](stock-bot/) | Alpaca stock/crypto fund bot + portal | `cd stock-bot` → `friend_setup.bat` |
-| [`ufc-predictor/`](ufc-predictor/) | UFC fight model + data pipeline | Used by UFC betting bot |
-| [`ufc_betting_bot/`](ufc_betting_bot/) | UFC value betting (dry-run) | `cd ufc_betting_bot` → `friend_setup.bat` |
+## Quick start
 
-**Friend setup guide:** [FRIENDS.md](FRIENDS.md)
+**Daily routine (owner, Live + Paper):** double-click **`Start_Bot_and_Dashboard.bat`** at the repo root. See [stock-bot/README.md — Daily usage](stock-bot/README.md#daily-usage-recommended).
 
 **Environment:** copy [`stock-bot/.env.example`](stock-bot/.env.example) → `stock-bot/.env` (placeholders only — never commit real keys).
 
-## Quick start (stock bot)
+First-time / manual launch:
 
-```powershell
-git clone https://github.com/dawimberly/trading-bot.git
-cd trading-bot\stock-bot
-friend_setup.bat
+```bat
+cd stock-bot
+copy .env.example .env
+python scripts\account\preflight.py
 ```
 
-Root launchers (`launch.bat`, `friend_setup.bat`) forward into `stock-bot/` for backward compatibility.
+**Python 3.11 venv (owner):** from `stock-bot/`, run `scripts\setup_venv.bat` once → `C:\Users\Owner\PythonTrading\venv311`; daily `scripts\activate_venv.bat`. Details: [stock-bot/README — First-time setup](stock-bot/README.md#first-time-setup).
 
-Full docs: [stock-bot/README.md](stock-bot/README.md) — see **“What the bot is set to do (runtime defaults)”** for live vs paper vs research-only features (good to paste into Grok with `python status.py` output).
+**Do not use for daily ops:** `start.bat`, `launch.bat`, `launch_both.bat`, or `Weinstein-Trading-Bot.exe` — they start a single bot with the wrong heartbeat paths for the portal dashboard.
+
+Build frozen EXEs (optional): `stock-bot\build_all.bat`
+
+Friend setup: [FRIENDS.md](FRIENDS.md) · Full bot docs: [stock-bot/README.md](stock-bot/README.md) — see **“What the bot is set to do (runtime defaults)”** for live vs paper vs research-only features (good to paste into Grok with `python status.py` output).
+
+**Paper lock (v1.5.4):** Smart Dynamic VTI **40–75%** (≥40% floor) · portfolio guards (≤8%/name, dust &lt;$10, max 25) · equity `run_nyse_momentum_and_stat_arb` · Telegram fills ≥$5 + error watcher ON. Details: [`stock-bot/PAPER_RESEARCH_PROFILE.md`](stock-bot/PAPER_RESEARCH_PROFILE.md). **Live Conservative** stays separate (~85% VTI). Branch `ollama-fallback-test` includes `main` + WIP `f46f4b5`.
+
+## Runtime data layout
+
+Legacy state files from repo root were moved into:
+
+- `stock-bot/data/` — runtime state (heartbeats, journals, Kraken/wisdom state, etc.)
+- `stock-bot/archive/` — backtest CSVs, jsonl backups, build logs, duplicate scripts
+
+A timestamped backup at `backup_root_purge_2026-06-20/` holds copies of everything moved for easy rollback.

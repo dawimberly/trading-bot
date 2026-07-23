@@ -1,46 +1,22 @@
 @echo off
-REM PythonTrading — one-click launcher (dashboard + trading bot)
-REM Double-click this file or create a desktop shortcut to it.
-
 cd /d "%~dp0"
-set "PYTHONTRADING_ROOT=%CD%"
+set PYTHONTRADING_ROOT=%CD%
 
-set "PYW=.venv\Scripts\pythonw.exe"
-if not exist "%PYW%" if exist "..\.venv\Scripts\pythonw.exe" set "PYW=..\.venv\Scripts\pythonw.exe"
+echo [WARN] launch.bat starts ONE bot only (EXE or run_all.py) — NOT your dual Live+Paper setup.
+echo        For daily use, double-click: Start_Bot_and_Dashboard.bat
+echo.
+echo [INFO] Starting Trading Bot...
+REM Dashboard auto-launch: set AUTO_LAUNCH_DASHBOARD=true in stock-bot\.env
 
-if not exist "%PYW%" (
-    echo [ERROR] Virtual environment not found.
-    echo Run friend_setup.bat in stock-bot, or from repo root:
-    echo   cd stock-bot
-    echo   python -m venv .venv
-    echo   pip install -r requirements.txt
-    pause
-    exit /b 1
+if exist "dist\Weinstein-Trading-Bot.exe" (
+    echo [INFO] Using frozen EXE: dist\Weinstein-Trading-Bot.exe
+    "dist\Weinstein-Trading-Bot.exe"
+    exit /b %ERRORLEVEL%
 )
 
-if not exist ".env" if exist "..\.env" set "PYTHONTRADING_ENV_FILE=%~dp0..\.env"
-if not exist ".env" if not defined PYTHONTRADING_ENV_FILE (
-    echo [WARN] No .env file — the dashboard setup wizard will prompt on first launch.
-)
+set "PY=python"
+if exist "%~dp0.venv\Scripts\python.exe" set "PY=%~dp0.venv\Scripts\python.exe"
+if exist "%~dp0..\.venv\Scripts\python.exe" set "PY=%~dp0..\.venv\Scripts\python.exe"
 
-if not exist "logs" mkdir logs
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\dashboard_running.ps1"
-if errorlevel 1 (
-    echo Close the existing window first, or run stop_dashboard.bat
-    pause
-    exit /b 0
-)
-
-for /f %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "STAMP=%%t"
-set "LAUNCH_LOG=logs\dashboard_%STAMP%.log"
-
-start "" "%PYW%" dashboard_app.py --launch-bot 1>>"%LAUNCH_LOG%" 2>&1
-
-if errorlevel 1 (
-    echo Dashboard failed to start. See %LAUNCH_LOG%
-    pause
-    exit /b 1
-)
-
-echo Dashboard started. Log: %LAUNCH_LOG%
+echo [INFO] Using source: %PY% run_all.py
+"%PY%" run_all.py

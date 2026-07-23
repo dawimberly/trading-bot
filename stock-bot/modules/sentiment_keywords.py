@@ -41,7 +41,28 @@ MACRO_BEARISH_UNWIND = (
     "bear market",
     "hard landing",
 )
+# High-salience terms — extra weight when Felix/Andrei speaks them
+MACRO_BEARISH_HIGH_NEGATIVE = frozenset(
+    {
+        "unwind",
+        "crash",
+        "collapse",
+        "correction",
+        "meltdown",
+        "blow off top",
+        "blow-off top",
+        "overvalued",
+        "bubble",
+        "recession",
+        "hard landing",
+    }
+)
 _CREATOR_CHANNEL_HINTS = ("felix", "andrei", "jikh")
+MACRO_CREATOR_HIT_PENALTY = 0.08
+MACRO_DEFAULT_HIT_PENALTY = 0.06
+MACRO_HIGH_TERM_WEIGHT = 3.5
+MACRO_TERM_WEIGHT = 2.5
+MACRO_CREATOR_TERM_WEIGHT = 3.0
 
 # SpaceX IPO ↔ crypto narrative (S-1 disclosed ~18,712 BTC treasury)
 SPACEX_IPO_TOPICS = (
@@ -106,6 +127,33 @@ def macro_bearish_keyword_hits(text: str) -> int:
     return sum(1 for w in MACRO_BEARISH_UNWIND if w in low)
 
 
+def macro_bearish_weighted_hits(text: str, *, creator_boost: bool = False) -> int:
+    """Weighted macro hits — high-negative terms count double; creators add +1."""
+    low = text.lower()
+    weight = 0
+    for term in MACRO_BEARISH_UNWIND:
+        if term not in low:
+            continue
+        weight += 2 if term in MACRO_BEARISH_HIGH_NEGATIVE else 1
+    if creator_boost and weight > 0:
+        weight += 1
+    return weight
+
+
+def _macro_bear_contribution(text: str, *, creator_boost: bool) -> float:
+    low = text.lower()
+    base_w = MACRO_CREATOR_TERM_WEIGHT if creator_boost else MACRO_TERM_WEIGHT
+    high_w = MACRO_HIGH_TERM_WEIGHT if creator_boost else MACRO_TERM_WEIGHT + 0.5
+    total = 0.0
+    for term in MACRO_BEARISH_UNWIND:
+        count = low.count(term)
+        if not count:
+            continue
+        w = high_w if term in MACRO_BEARISH_HIGH_NEGATIVE else base_w
+        total += count * w
+    return total
+
+
 def is_creator_channel(name: str | None) -> bool:
     low = (name or "").lower()
     return any(h in low for h in _CREATOR_CHANNEL_HINTS)
@@ -132,10 +180,19 @@ def score_creator_transcript_sentiment(
     """Score transcript with macro unwind terms; extra bearish pull for Felix/Andrei."""
     boost = is_creator_channel(channel_name) if creator_boost is None else creator_boost
     hits = macro_bearish_keyword_hits(text)
-    base = score_text_sentiment(text, macro_weight=2.5 if boost else 2.0)
-    if boost and hits > 0:
-        adjusted = max(-1.0, round(base - min(0.35, 0.07 * hits), 4))
+    weighted_hits = macro_bearish_weighted_hits(text, creator_boost=boost)
+    low = text.lower()
+    bull = sum(low.count(w) for w in BULLISH)
+    bear = sum(low.count(w) for w in BEARISH) + _macro_bear_contribution(text, creator_boost=boost)
+    total = bull + bear
+    base = round((bull - bear) / total, 4) if total else 0.0
+    if boost and weighted_hits > 0:
+        penalty = min(0.45, MACRO_CREATOR_HIT_PENALTY * weighted_hits)
+        adjusted = max(-1.0, round(base - penalty, 4))
         return adjusted, hits
+    if weighted_hits > 0:
+        penalty = min(0.30, MACRO_DEFAULT_HIT_PENALTY * weighted_hits)
+        return max(-1.0, round(base - penalty, 4)), hits
     return base, hits
 
 

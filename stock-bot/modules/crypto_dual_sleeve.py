@@ -26,7 +26,11 @@ MOMENTUM_MIN = 0.01
 TAKE_PROFIT_PCT = 0.08
 STOP_LOSS_PCT = 0.05
 TIMEOUT_BARS = 10
-MAX_OPEN = 3
+MAX_OPEN = 3  # fallback; paper uses effective_crypto_max_pairs()
+
+
+def _max_open_positions() -> int:
+    return config.effective_crypto_max_pairs()
 MAX_ENTRIES_PER_BAR = 2
 
 
@@ -199,33 +203,46 @@ def run_crypto_dual_sleeve(
     spacex_snapshot=None,
 ):
     """Dual-entry crypto sleeve — paper aggressive only."""
-    del volatility, spacex_snapshot
+    del spacex_snapshot
+    att = getattr(executor, "_attribution", None)
     if not config.effective_crypto_v2_enabled():
         return 0
     if regime_entries_paused(regime, data):
+        if att:
+            att.record_crypto_reject("regime_paused")
         return 0
 
     prices_row = data.iloc[-1]
     trades = _process_exits(executor, data, prices_row, now)
 
     st = _book(executor)
-    if len(st.open_positions) >= MAX_OPEN:
+    max_open = _max_open_positions()
+    if len(st.open_positions) >= max_open:
+        if att:
+            att.record_crypto_reject("max_pairs")
         return trades
 
     notional = None
     if hasattr(executor, "compute_crypto_notional"):
         notional = executor.compute_crypto_notional()
     if notional is None:
+        if att:
+            att.record_crypto_reject("no_room")
         return trades
 
     allowed, gate_reason = crypto_market_filter(data)
     if not allowed:
+        if att:
+            att.record_crypto_reject(gate_reason or "vol_gate")
         return trades
+    if att:
+        att.record_crypto_vol_gate_pass()
 
-    slots = MAX_OPEN - len(st.open_positions)
+    slots = max_open - len(st.open_positions)
     max_new = min(max_trades, slots)
     intents = []
     symbols = crypto_v2_universe(data.columns)
+    scan_count = 0
     for symbol in symbols:
         if len(intents) >= max_new:
             break
@@ -235,22 +252,32 @@ def run_crypto_dual_sleeve(
             ok, meta = signal_fn(data, symbol)
             if not ok:
                 continue
+            scan_count += 1
             key = f"{symbol}:{meta['entry_type']}"
             if cooldown_bars is not None and key in pair_cooldown:
                 if now - pair_cooldown[key] < cooldown_bars:
                     continue
             intents.append({"symbol": symbol, "pair_key": key, **meta})
             break
+    if att:
+        att.record_crypto_scan_signals(scan_count)
+        att.record_crypto_intents(len(intents))
 
     for intent in intents:
         symbol = intent["symbol"]
-        order = executor.execute_order(symbol, "buy", notional=notional)
+        order = executor.execute_order(
+            symbol, "buy", notional=notional, sleeve="Crypto", strategy="crypto"
+        )
         if order is None:
+            if att:
+                att.record_crypto_reject("min_notional")
             continue
         if not hasattr(executor, "portfolio"):
             continue
         qty = executor.portfolio.positions.get(symbol, 0)
         if qty <= 0:
+            if att:
+                att.record_crypto_reject("min_notional")
             continue
         entry_price = float(prices_row.get(symbol) or 0)
         st.open_positions[symbol] = {
@@ -264,6 +291,8 @@ def run_crypto_dual_sleeve(
         }
         pair_cooldown[intent["pair_key"]] = now
         trades += 1
+        if att:
+            att.on_crypto_entry(intent["pair_key"], symbol=symbol)
         if portfolio_manager:
             portfolio_manager.add_position(intent["pair_key"], 0, 0)
         if log_fn:

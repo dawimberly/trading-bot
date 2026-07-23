@@ -11,51 +11,25 @@ from pathlib import Path
 from modules.trading_books import BOOKS, DEFAULT_BOOK_ID
 
 
-def _has_run_all(path: Path) -> bool:
-    return (path / "run_all.py").is_file()
+from modules.runtime_paths import (
+    _has_run_all,
+    _find_runtime_root,
+    _resolve_root_path,
+    resolve_runtime_root,
+)
 
 
 def _find_run_all_root(start: Path, *, max_depth: int = 8) -> Path | None:
-    """Walk parents from start until run_all.py or stock-bot/run_all.py is found."""
-    candidate = start.resolve()
-    for _ in range(max_depth):
-        nested = candidate / "stock-bot"
-        if _has_run_all(nested):
-            return nested
-        if _has_run_all(candidate):
-            return candidate
-        parent = candidate.parent
-        if parent == candidate:
-            break
-        candidate = parent
-    return None
+    return _find_runtime_root(start, max_depth=max_depth)
 
 
 def _resolve_run_all_root(path: Path) -> Path:
-    """Prefer stock-bot/ when monorepo root has no run_all.py beside modules."""
-    resolved = path.resolve()
-    if _has_run_all(resolved):
-        nested = resolved / "stock-bot"
-        if nested.is_dir() and _has_run_all(nested):
-            return nested
-        return resolved
-    nested = resolved / "stock-bot"
-    if _has_run_all(nested):
-        return nested
-    return resolved
+    return _resolve_root_path(path)
 
 
 def resolve_project_root() -> Path:
     """Project root for writable data (users.db, desktop_prefs, per-user .env)."""
-    override = os.getenv("PYTHONTRADING_ROOT", "").strip()
-    if override:
-        return _resolve_run_all_root(Path(override))
-    if getattr(sys, "frozen", False):
-        found = _find_run_all_root(Path(sys.executable).resolve().parent)
-        if found is not None:
-            return found
-        return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parents[1]
+    return resolve_runtime_root()
 
 
 def _sync_roots() -> None:
@@ -133,13 +107,6 @@ def _portal_root_candidates() -> list[Path]:
         if run_all_root is not None:
             candidates.append(run_all_root / "data" / "portal")
 
-    candidates.extend(
-        (
-            PROJECT_ROOT.parent / "stock-bot" / "data" / "portal",
-            PROJECT_ROOT.parent / "data" / "portal",
-            PROJECT_ROOT.parent.parent / "stock-bot" / "data" / "portal",
-        )
-    )
     for path in candidates:
         try:
             resolved = path.resolve()

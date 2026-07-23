@@ -41,8 +41,8 @@ def spacex_crypto_override(spacex_snapshot: dict | None) -> tuple[bool, str]:
 
 
 def crypto_trading_allowed(
-    volatility: str,
-    regime: str,
+    volatility: str | None,
+    regime: str | None,
     *,
     spacex_snapshot: dict | None = None,
     data=None,
@@ -52,50 +52,90 @@ def crypto_trading_allowed(
     Return whether crypto entries are allowed and why.
     Keys: allowed, vol, regime, spacex_override, reason
     """
-    if regime_entries_paused(regime, data, sentiment):
+    vol = str(volatility or "Low")
+    reg = str(regime or "")
+    try:
+        if regime_entries_paused(reg, data, sentiment):
+            return {
+                "allowed": False,
+                "vol": vol,
+                "regime": reg,
+                "spacex_override": False,
+                "reason": "regime_paused",
+            }
+
+        if config.effective_crypto_regime_filter():
+            from modules.pipeline_strategies import PAUSED_REGIMES
+
+            if reg == "RHYME_B: Panic_Volatility":
+                return {
+                    "allowed": False,
+                    "vol": vol,
+                    "regime": reg,
+                    "spacex_override": False,
+                    "reason": "bearish_regime",
+                }
+            if reg == "RHYME_E: Steady_Bearish_Decline":
+                return {
+                    "allowed": False,
+                    "vol": vol,
+                    "regime": reg,
+                    "spacex_override": False,
+                    "reason": "bearish_regime",
+                }
+
+        if not config.effective_crypto_vol_only():
+            return {
+                "allowed": True,
+                "vol": vol,
+                "regime": reg,
+                "spacex_override": False,
+                "reason": "vol_only_off",
+            }
+
+        if not config.crypto_sleeve_enabled():
+            return {
+                "allowed": False,
+                "vol": vol,
+                "regime": reg,
+                "spacex_override": False,
+                "reason": "crypto_sleeve_disabled",
+            }
+
+        if vol == "High":
+            return {
+                "allowed": True,
+                "vol": vol,
+                "regime": reg,
+                "spacex_override": False,
+                "reason": "vol_high",
+            }
+
+        override, override_reason = spacex_crypto_override(spacex_snapshot)
+        if override:
+            return {
+                "allowed": True,
+                "vol": vol,
+                "regime": reg,
+                "spacex_override": True,
+                "reason": override_reason,
+            }
+
         return {
             "allowed": False,
-            "vol": volatility,
-            "regime": regime,
+            "vol": vol,
+            "regime": reg,
             "spacex_override": False,
-            "reason": "regime_paused",
+            "reason": "vol_low",
         }
-
-    if not config.effective_crypto_vol_only():
+    except Exception as exc:
         return {
-            "allowed": True,
-            "vol": volatility,
-            "regime": regime,
+            "allowed": False,
+            "vol": vol,
+            "regime": reg,
             "spacex_override": False,
-            "reason": "vol_only_off",
+            "reason": f"gate_error:{exc.__class__.__name__}",
         }
-
-    if volatility == "High":
-        return {
-            "allowed": True,
-            "vol": volatility,
-            "regime": regime,
-            "spacex_override": False,
-            "reason": "vol_high",
-        }
-
-    override, override_reason = spacex_crypto_override(spacex_snapshot)
-    if override:
-        return {
-            "allowed": True,
-            "vol": volatility,
-            "regime": regime,
-            "spacex_override": True,
-            "reason": override_reason,
-        }
-
-    return {
-        "allowed": False,
-        "vol": volatility,
-        "regime": regime,
-        "spacex_override": False,
-        "reason": "vol_low",
-    }
 
 
 def crypto_target_allowed(

@@ -18,7 +18,12 @@ def ascii_safe(text: str) -> str:
 
 
 def safe_print(text: str = "", *, end: str = "\n", file=None) -> None:
+    from modules.safe_io import ensure_stdio_streams
+
+    ensure_stdio_streams()
     stream = file or sys.stdout
+    if stream is None:
+        return
     enc = getattr(stream, "encoding", None) or ""
     if enc.lower() not in ("utf-8", "utf8", "cp65001"):
         text = ascii_safe(text)

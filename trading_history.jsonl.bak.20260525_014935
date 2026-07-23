@@ -1,6 +1,0 @@
-{"event": "ledger_rebuilt", "at": "2026-05-25T01:40:19", "backup": "trading_history.jsonl.bak.20260525_014019"}
-{"pair": "BTC-USD", "qty": 0.193273706, "price": 76670.075684013, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "ETH-USD", "qty": 1.751129344, "price": 2098.699333333, "status": "open", "source": "alpaca_reconcile"}
-{"pair": "CVX/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "META/MA50", "size": 0, "price": 0, "status": "open"}
-{"pair": "UNH/MA50", "size": 0, "price": 0, "status": "open"}

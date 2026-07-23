@@ -1,9 +1,0 @@
-{
-  "date": "2026-06-12",
-  "crypto_ok": true,
-  "xstock_ok": false,
-  "equity_spot_ok": true,
-  "crypto_error": null,
-  "xstock_error": "API key needs xStocks/tokenized permission",
-  "equity_error": null
-}

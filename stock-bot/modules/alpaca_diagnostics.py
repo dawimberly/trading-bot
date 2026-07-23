@@ -23,10 +23,15 @@ def _env_present(name: str) -> bool:
 def alpaca_env_status(*, paper: bool | None = None) -> dict:
     """Summarize which Alpaca env vars are set (values never returned)."""
     use_paper = config.PAPER_TRADING if paper is None else bool(paper)
-    key_vars = ("APCA_API_KEY_ID", "ALPACA_API_KEY")
-    secret_vars = ("APCA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
+    if use_paper:
+        key_vars = ("PAPER_APCA_API_KEY_ID", "APCA_API_KEY_ID", "ALPACA_API_KEY")
+        secret_vars = ("PAPER_APCA_API_SECRET_KEY", "APCA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
+    else:
+        key_vars = ("APCA_API_KEY_ID", "ALPACA_API_KEY")
+        secret_vars = ("APCA_API_SECRET_KEY", "ALPACA_SECRET_KEY")
     has_key = any(_env_present(v) for v in key_vars)
     has_secret = any(_env_present(v) for v in secret_vars)
+    st = config.alpaca_credentials_status(paper=use_paper)
     return {
         "paper_mode": use_paper,
         "env_file_exists": ENV_FILE.is_file(),
@@ -34,6 +39,9 @@ def alpaca_env_status(*, paper: bool | None = None) -> dict:
         "has_api_secret": has_secret,
         "credentials_ready": has_key and has_secret,
         "base_url": config.get_alpaca_base_url(paper=use_paper),
+        "key_source": st.get("key_source"),
+        "key_suffix": st.get("key_suffix"),
+        "loaded_env": st.get("loaded_env"),
     }
 
 
@@ -48,7 +56,13 @@ def format_missing_env_message(*, paper: bool | None = None) -> str:
         "  APCA_API_SECRET_KEY=your_secret_key",
     ]
     if st["paper_mode"]:
-        lines.append("  PAPER_TRADING=true")
+        lines.extend(
+            [
+                "  PAPER_APCA_API_KEY_ID=your_paper_key_id",
+                "  PAPER_APCA_API_SECRET_KEY=your_paper_secret",
+                "  PAPER_TRADING=true",
+            ]
+        )
     else:
         lines.append("  PAPER_TRADING=false  (live keys required for live account)")
         lines.append("  ALLOW_LIVE_TRADING=yes  (if trading live)")
