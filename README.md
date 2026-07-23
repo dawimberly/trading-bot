@@ -44,6 +44,8 @@ Build frozen EXEs (optional): `stock-bot\build_all.bat`
 
 Friend setup: [FRIENDS.md](FRIENDS.md) · Full bot docs: [stock-bot/README.md](stock-bot/README.md) — see **“What the bot is set to do (runtime defaults)”** for live vs paper vs research-only features (good to paste into Grok with `python status.py` output).
 
+**Paper lock (v1.5.4):** Smart Dynamic VTI **40–75%** (≥40% floor) · portfolio guards (≤8%/name, dust &lt;$10, max 25) · equity `run_nyse_momentum_and_stat_arb` · Telegram fills ≥$5 + error watcher ON. Details: [`stock-bot/PAPER_RESEARCH_PROFILE.md`](stock-bot/PAPER_RESEARCH_PROFILE.md). **Live Conservative** stays separate (~85% VTI). Branch `ollama-fallback-test` includes `main` + WIP `f46f4b5`.
+
 ## Runtime data layout
 
 Legacy state files from repo root were moved into:
