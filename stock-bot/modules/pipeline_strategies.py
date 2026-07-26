@@ -19,6 +19,16 @@ PAUSED_REGIMES = ("RHYME_B: Panic_Volatility", "RHYME_E: Steady_Bearish_Decline"
 
 # In-session NYSE momentum entries for one-per-day (backtest + live gate).
 _nyse_mom_entries_by_day: dict[str, set[str]] = {}
+# Buys counted while a long is open (reset when flat).
+_nyse_open_add_counts: dict[str, int] = {}
+# Same-day sells (backtest + live session); journal also checked live.
+_nyse_sold_today_by_day: dict[str, set[str]] = {}
+# Hygiene skip tallies for backtest A/B reporting.
+_nyse_hygiene_skip_counts: dict[str, int] = {
+    "hygiene_max_adds": 0,
+    "hygiene_same_day": 0,
+    "hygiene_min_notional": 0,
+}
 # Rolling per-symbol pick history keyed by backtest bar index.
 _nyse_pick_history: dict[str, deque[int]] = {}
 
@@ -26,6 +36,33 @@ _nyse_pick_history: dict[str, deque[int]] = {}
 def reset_nyse_pick_rotation() -> None:
     """Clear pick-rotation state (backtests / clean restarts)."""
     _nyse_pick_history.clear()
+
+
+def reset_nyse_entry_hygiene_state() -> None:
+    """Clear add / same-day / skip counters (backtests / clean restarts)."""
+    _nyse_open_add_counts.clear()
+    _nyse_mom_entries_by_day.clear()
+    _nyse_sold_today_by_day.clear()
+    for key in _nyse_hygiene_skip_counts:
+        _nyse_hygiene_skip_counts[key] = 0
+
+
+def get_nyse_hygiene_skip_counts() -> dict[str, int]:
+    """Copy of hygiene skip counters (max adds / same-day / min notional)."""
+    return {k: int(v) for k, v in _nyse_hygiene_skip_counts.items()}
+
+
+def _record_nyse_hygiene_skip(kind: str) -> None:
+    if kind in _nyse_hygiene_skip_counts:
+        _nyse_hygiene_skip_counts[kind] = int(_nyse_hygiene_skip_counts[kind]) + 1
+
+
+def mark_nyse_sold_today(symbol: str, now=None, data=None) -> None:
+    """Record a NYSE sell for same-day reentry block (live session + backtest)."""
+    sym = config.normalize_symbol(symbol)
+    day = _calendar_day_key(now, data=data)
+    bucket = _nyse_sold_today_by_day.setdefault(day, set())
+    bucket.add(sym)
 
 
 def _nyse_pick_bar_index(now, cooldown_bars=None) -> int | None:
@@ -255,6 +292,182 @@ def _nyse_journal_entered_today(symbol: str, now=None, data=None) -> bool:
 def _mark_nyse_entered_today(symbol: str, now=None, data=None) -> None:
     day = _calendar_day_key(now, data=data)
     _nyse_mom_entries_by_day.setdefault(day, set()).add(config.normalize_symbol(symbol))
+
+
+def _nyse_held_qty(executor, symbol: str) -> float:
+    """Signed long qty for symbol on executor (0 if flat / unknown)."""
+    sym = config.normalize_symbol(symbol)
+    if executor is None:
+        return 0.0
+    try:
+        if hasattr(executor, "_find_position"):
+            pos = executor._find_position(sym)
+            if pos is not None and hasattr(executor, "_position_signed_qty"):
+                return float(executor._position_signed_qty(pos) or 0.0)
+        portfolio = getattr(executor, "portfolio", None)
+        if portfolio is not None and hasattr(portfolio, "positions"):
+            return float(portfolio.positions.get(sym, 0) or portfolio.positions.get(symbol, 0) or 0.0)
+    except Exception as exc:
+        logger.debug("nyse held qty check skipped for %s: %s", sym, exc)
+    return 0.0
+
+
+def _nyse_journal_buys_since_flat(symbol: str) -> int | None:
+    """Count buy events after the latest exit in the paper journal (None if unavailable)."""
+    sym = config.normalize_symbol(symbol)
+    try:
+        if config.backtest_paper_sleeves_context():
+            return None
+    except Exception:
+        pass
+    try:
+        import pandas as pd
+        from modules.paper_journal import (
+            ENTRY_EVENTS,
+            EXIT_EVENTS,
+            journal_paths,
+            normalize_journal_df,
+            read_journal,
+        )
+
+        best = 0
+        for path in journal_paths():
+            try:
+                df = read_journal(path=path)
+            except Exception:
+                continue
+            df = normalize_journal_df(df)
+            if df is None or df.empty or "ticker" not in df.columns:
+                continue
+            sub = df[df["ticker"].astype(str).str.upper() == sym].copy()
+            if sub.empty or "timestamp" not in sub.columns:
+                continue
+            sub["_ts"] = pd.to_datetime(sub["timestamp"], errors="coerce")
+            sub = sub.dropna(subset=["_ts"]).sort_values("_ts")
+            if sub.empty:
+                continue
+            last_exit_ts = None
+            if "event" in sub.columns:
+                exits = sub[sub["event"].isin(EXIT_EVENTS)]
+                if not exits.empty:
+                    last_exit_ts = exits["_ts"].iloc[-1]
+            elif "side" in sub.columns:
+                exits = sub[sub["side"].astype(str).str.lower().isin(["sell", "exit"])]
+                if not exits.empty:
+                    last_exit_ts = exits["_ts"].iloc[-1]
+            after = sub if last_exit_ts is None else sub[sub["_ts"] > last_exit_ts]
+            if after.empty:
+                continue
+            if "event" in after.columns:
+                buys = after[after["event"].isin(ENTRY_EVENTS)]
+            elif "side" in after.columns:
+                buys = after[after["side"].astype(str).str.lower().isin(["buy", ""])]
+            else:
+                buys = after
+            best = max(best, int(len(buys)))
+        return best if best > 0 else 0
+    except Exception as exc:
+        logger.debug("journal open-add count skipped for %s: %s", sym, exc)
+        return None
+
+
+def _nyse_open_add_count(executor, symbol: str) -> int:
+    """Number of buys while the current long is open (0 if flat)."""
+    sym = config.normalize_symbol(symbol)
+    qty = _nyse_held_qty(executor, sym)
+    if qty <= 1e-12:
+        _nyse_open_add_counts.pop(sym, None)
+        return 0
+    if sym in _nyse_open_add_counts:
+        return int(_nyse_open_add_counts[sym])
+    journal_n = _nyse_journal_buys_since_flat(sym)
+    if journal_n is not None and journal_n > 0:
+        _nyse_open_add_counts[sym] = int(journal_n)
+        return int(journal_n)
+    # Holding but no journal trail — treat as one open unit.
+    _nyse_open_add_counts[sym] = 1
+    return 1
+
+
+def _mark_nyse_open_add(symbol: str) -> None:
+    sym = config.normalize_symbol(symbol)
+    _nyse_open_add_counts[sym] = int(_nyse_open_add_counts.get(sym, 0)) + 1
+
+
+def _nyse_session_sold_today(symbol: str, now=None, data=None) -> bool:
+    """True if in-session/backtest state recorded a sell for symbol today."""
+    sym = config.normalize_symbol(symbol)
+    day = _calendar_day_key(now, data=data)
+    return sym in _nyse_sold_today_by_day.get(day, set())
+
+
+def _nyse_journal_sold_today(symbol: str, now=None, data=None) -> bool:
+    """True if session state or journal has a sell/exit for symbol this calendar day."""
+    sym = config.normalize_symbol(symbol)
+    if _nyse_session_sold_today(sym, now=now, data=data):
+        return True
+    day = _calendar_day_key(now, data=data)
+    try:
+        if config.backtest_paper_sleeves_context():
+            return False
+    except Exception:
+        pass
+    try:
+        import pandas as pd
+        from modules.paper_journal import (
+            EXIT_EVENTS,
+            journal_paths,
+            normalize_journal_df,
+            read_journal,
+        )
+
+        day_dt = datetime.strptime(day, "%Y-%m-%d").date()
+        for path in journal_paths():
+            try:
+                df = read_journal(path=path)
+            except Exception:
+                continue
+            df = normalize_journal_df(df)
+            if df is None or df.empty or "ticker" not in df.columns:
+                continue
+            mask = df["ticker"].astype(str).str.upper() == sym
+            if "event" in df.columns:
+                mask &= df["event"].isin(EXIT_EVENTS)
+            if "side" in df.columns:
+                mask &= df["side"].astype(str).str.lower().isin(["sell", "exit", ""])
+            if "timestamp" not in df.columns:
+                continue
+            ts = pd.to_datetime(df["timestamp"], errors="coerce")
+            mask &= ts.dt.date == day_dt
+            if mask.any():
+                return True
+    except Exception as exc:
+        logger.debug("journal same-day sell check skipped for %s: %s", sym, exc)
+    return False
+
+
+def _nyse_entry_hygiene_skip(executor, symbol: str, *, now=None, data=None) -> str | None:
+    """Return skip reason for paper NYSE entry hygiene (max adds / same-day reentry)."""
+    if not config.effective_paper_nyse_entry_hygiene():
+        return None
+    sym = config.normalize_symbol(symbol)
+    if config.effective_paper_nyse_same_day_reentry_block():
+        if _nyse_journal_sold_today(sym, now=now, data=data):
+            _record_nyse_hygiene_skip("hygiene_same_day")
+            return "same-day reentry block (sold earlier today)"
+    max_adds = config.effective_paper_nyse_max_adds_per_symbol()
+    open_adds = _nyse_open_add_count(executor, sym)
+    # Flat → this buy would be add #1; held with N buys → next would be N+1.
+    next_add = open_adds + 1 if open_adds >= 0 else 1
+    if open_adds >= max_adds or next_add > max_adds:
+        _record_nyse_hygiene_skip("hygiene_max_adds")
+        return f"max adds/symbol ({open_adds}/{max_adds})"
+    return None
+
+
+def _record_nyse_min_notional_hygiene_skip() -> None:
+    if config.effective_paper_nyse_entry_hygiene():
+        _record_nyse_hygiene_skip("hygiene_min_notional")
 
 
 def _nyse_momentum_quality_skip(symbol: str, data, now=None) -> str | None:
@@ -1670,7 +1883,7 @@ def run_equity_strategy(
     bar_index = _nyse_pick_bar_index(now, cooldown_bars)
     trades = 0
     equity = _executor_equity(executor)
-    min_n = config.effective_min_notional(equity)
+    min_n = config.effective_paper_nyse_min_notional(equity)
     for symbol in ranked:
         if trades >= max_trades:
             break
@@ -1689,6 +1902,10 @@ def run_equity_strategy(
         skip = _nyse_momentum_quality_skip(symbol, data, now=now)
         if skip:
             logger.info("[NYSE] Skipping %s — %s", symbol, skip)
+            continue
+        hygiene = _nyse_entry_hygiene_skip(executor, symbol, now=now, data=data)
+        if hygiene:
+            logger.info("[NYSE] Skipping %s — hygiene: %s", symbol, hygiene)
             continue
         pair_key = symbol + "/MA50"
         if _on_cooldown(
@@ -1712,7 +1929,9 @@ def run_equity_strategy(
             notional = executor.compute_nyse_notional()
             if notional is None:
                 continue
-            min_n = config.effective_min_notional(float(executor._get_account().equity))
+            min_n = config.effective_paper_nyse_min_notional(
+                float(executor._get_account().equity)
+            )
             # Paper-only GARCH vol-target sizing (PAPER_GARCH_SIZING=true)
             try:
                 from modules.garch_sizer import (
@@ -1726,6 +1945,7 @@ def run_equity_strategy(
                     garch_multiplier = float(get_multiplier(spy_px) if spy_px is not None else 1.0)
                     notional = round(float(notional) * garch_multiplier, 2)
                     if notional < min_n:
+                        _record_nyse_min_notional_hygiene_skip()
                         continue
                     logger.info(
                         "[NYSE] garch_multiplier=%.3f notional=%.2f",
@@ -1738,6 +1958,7 @@ def run_equity_strategy(
                 _, beta = _spy_vs_equity_metrics(data, symbol)
                 scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
                 if scaled < min_n:
+                    _record_nyse_min_notional_hygiene_skip()
                     continue
                 notional = scaled
             vol_scale = config.dynamic_equity_position_scale(
@@ -1746,6 +1967,7 @@ def run_equity_strategy(
             if vol_scale < 1.0:
                 notional = round(float(notional) * vol_scale, 2)
                 if notional < min_n:
+                    _record_nyse_min_notional_hygiene_skip()
                     continue
             if config.effective_conviction_sizing_enabled():
                 from modules.risk_management import (
@@ -1767,6 +1989,7 @@ def run_equity_strategy(
                     strategy_id="nyse_momentum_base",
                 )
                 if notional is None or notional < min_n:
+                    _record_nyse_min_notional_hygiene_skip()
                     continue
             if config.effective_correlation_guard_enabled():
                 from modules.risk_management import apply_correlation_guard_notional
@@ -1779,6 +2002,7 @@ def run_equity_strategy(
                     symbol=symbol,
                 )
                 if notional is None or notional < min_n:
+                    _record_nyse_min_notional_hygiene_skip()
                     continue
             if config.effective_insider_signal_boost_enabled():
                 try:
@@ -1791,6 +2015,7 @@ def run_equity_strategy(
                         executor,
                     )
                     if notional is None or notional < min_n:
+                        _record_nyse_min_notional_hygiene_skip()
                         continue
                 except Exception as exc:
                     logger.debug("insider notional cap skipped for %s: %s", symbol, exc)
@@ -1798,6 +2023,15 @@ def run_equity_strategy(
                 symbol, notional, equity, data=ipo_data, bar_idx=bar_idx
             )
             if notional < min_n:
+                if config.effective_paper_nyse_entry_hygiene():
+                    _record_nyse_min_notional_hygiene_skip()
+                    logger.info(
+                        "[NYSE] Skipping %s — hygiene: below min notional "
+                        "($%.2f < $%.2f)",
+                        symbol,
+                        float(notional),
+                        float(min_n),
+                    )
                 continue
         order = executor.execute_order(
             symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
@@ -1805,6 +2039,7 @@ def run_equity_strategy(
         if not _count_if_filled(executor, order):
             continue
         _mark_nyse_entered_today(symbol, now=now, data=data)
+        _mark_nyse_open_add(symbol)
         if config.effective_insider_signal_boost_enabled():
             try:
                 from modules.insider_signal_handler import get_boost_snapshot, record_insider_boost_trade
@@ -1950,6 +2185,10 @@ def nyse_mirror_intent(
         skip = _nyse_momentum_quality_skip(symbol, data, now=now)
         if skip:
             logger.info("[NYSE] Skipping %s — %s", symbol, skip)
+            continue
+        hygiene = _nyse_entry_hygiene_skip(executor, symbol, now=now, data=data)
+        if hygiene:
+            logger.info("[NYSE] Skipping %s — hygiene: %s", symbol, hygiene)
             continue
         pair_key = symbol + "/MA50"
         if _on_cooldown(pair_cooldown, pair_key, now, cooldown_seconds=cooldown_seconds):

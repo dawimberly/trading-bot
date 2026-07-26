@@ -7,6 +7,7 @@ Preflight: python scripts/account/preflight.py
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import os
 import re
@@ -14,12 +15,20 @@ import sys
 import time
 import traceback
 import warnings
+from pathlib import Path
 
 from modules.logging_utils import setup_logging, log_event, log_subsystem_warning
 
 import config
 from modules.safe_io import install_safe_stdout, write_json_atomic, fatal_startup
-from modules.alpaca_client import AlpacaAuthError, AlpacaCriticalError, AlpacaValidationError
+from modules.alpaca_client import (
+    AlpacaAuthError,
+    AlpacaCriticalError,
+    AlpacaTransientNetworkError,
+    AlpacaValidationError,
+    is_transient_network_error,
+    note_network_failure,
+)
 from modules.alpaca_executor import AlpacaExecutor
 from modules.real_time_data import load_live_close_matrix, start_realtime_feed, format_status_line
 from modules.data_refresh import RefreshScheduler
@@ -309,28 +318,198 @@ def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
 _last_equity = 0.0
 
 
-def _record_cycle_error(error: str) -> None:
+def _record_cycle_error(error: str, *, error_class: str | None = None) -> None:
     """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
     from modules.safe_io import read_json_file, write_json_atomic
 
+    try:
+        from modules import error_watcher
+
+        klass = error_class or error_watcher.classify_error_class(error)
+    except Exception:
+        klass = error_class or "other"
+
     path = config.ensure_heartbeat_path_writable()
     payload = read_json_file(path) or {}
+    # Keep heartbeat fresh so dashboard does not show STALE during DNS outages.
+    payload["timestamp"] = datetime.datetime.now().isoformat()
     payload["last_cycle_error"] = str(error)[:500]
     payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
+    payload["last_cycle_error_class"] = klass
+    if klass == "transient_network":
+        payload["status"] = "network_error"
     write_json_atomic(path, payload)
     try:
         from modules import error_watcher
 
-        error_watcher.log_action("cycle_error", error=str(error)[:500])
-        # Promote to error queue without fabricating a traceback.
-        error_watcher.log_failed_order(
-            symbol="CYCLE",
-            side="n/a",
-            reason="cycle_error",
-            error=str(error)[:1000],
+        if klass == "transient_network":
+            error_watcher.log_transient_network(str(error)[:1000], context="cycle")
+        else:
+            error_watcher.log_action(
+                "cycle_error", error=str(error)[:500], error_class=klass
+            )
+            error_watcher.log_failed_order(
+                symbol="CYCLE",
+                side="n/a",
+                reason="cycle_error",
+                error=str(error)[:1000],
+                error_class=klass,
+            )
+    except Exception:
+        pass
+
+
+def _handle_transient_network(exc: BaseException) -> None:
+    """Skip this cycle's orders; refresh heartbeat; soft alert; backoff."""
+    msg = str(exc)
+    note_network_failure()
+    _record_cycle_error(msg, error_class="transient_network")
+    logger.warning(
+        "TRANSIENT_NETWORK — skipping orders this cycle (bot continues): %s",
+        msg[:300],
+    )
+    try:
+        trade_journal.log_event(
+            "error",
+            notes=f"TRANSIENT_NETWORK (not strategy): {msg[:500]}",
         )
     except Exception:
         pass
+    log_event("alpaca_transient_network", error=msg[:500])
+
+
+_LIVE_HEARTBEAT_EQUITY_ANOMALY = 10_000.0
+
+
+def _fetch_fresh_live_alpaca_equity() -> float | None:
+    """Fresh live Alpaca equity (ignores paper keys / cached heartbeat)."""
+    try:
+        from modules.alpaca_client import build_trading_client, reset_trading_client_cache
+
+        key, secret = config.get_alpaca_credentials(paper=False)
+        reset_trading_client_cache()
+        client = build_trading_client(key, secret, paper=False)
+        acct = client.get_account()
+        return float(acct.equity)
+    except Exception as exc:
+        logger.warning("Could not refresh live Alpaca equity for heartbeat: %s", exc)
+        return None
+
+
+def _sanitize_live_heartbeat_equity(equity: float | None) -> float | None:
+    """Reject paper-scale equity on the live book; cap to fresh Alpaca live balance."""
+    if equity is None:
+        return None
+    try:
+        eq = float(equity)
+    except (TypeError, ValueError):
+        return None
+    if config.PAPER_TRADING:
+        return eq
+    if eq <= _LIVE_HEARTBEAT_EQUITY_ANOMALY:
+        return eq
+    logger.warning(
+        "HEARTBEAT_EQUITY_ANOMALY: refusing to write equity $%.2f on live book "
+        "(threshold $%.0f) — fetching fresh Alpaca live balance",
+        eq,
+        _LIVE_HEARTBEAT_EQUITY_ANOMALY,
+    )
+    fresh = _fetch_fresh_live_alpaca_equity()
+    if fresh is not None:
+        return fresh
+    return eq
+
+
+def _clear_stale_live_heartbeat_on_boot(
+    equity: float | None,
+    cash: float | None = None,
+) -> None:
+    """Overwrite paper-scale bot_heartbeat.json before the first live cycle."""
+    if config.PAPER_TRADING or equity is None:
+        return
+    try:
+        live_eq = float(equity)
+    except (TypeError, ValueError):
+        return
+    if live_eq <= 0:
+        return
+
+    paths: list[Path] = []
+    try:
+        paths.append(Path(config.ensure_heartbeat_path_writable()))
+    except Exception:
+        pass
+    paths.append(Path("bot_heartbeat.json"))
+    # De-dupe
+    seen: set[str] = set()
+    unique_paths: list[Path] = []
+    for path in paths:
+        key = str(path.resolve()) if path.exists() or path.parent.exists() else str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_paths.append(path)
+
+    now = datetime.datetime.now().isoformat()
+    for path in unique_paths:
+        needs_write = False
+        if not path.is_file():
+            # Seed configured heartbeat + legacy cwd bot_heartbeat.json on live boot.
+            try:
+                configured = Path(config.HEARTBEAT_FILE).resolve()
+            except Exception:
+                configured = None
+            if path.name == "bot_heartbeat.json" or (
+                configured is not None and path.resolve() == configured
+            ):
+                needs_write = True
+            else:
+                continue
+        else:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                old_eq_raw = data.get("equity")
+                if old_eq_raw is None:
+                    needs_write = True
+                else:
+                    old_eq = float(old_eq_raw)
+                    if old_eq > _LIVE_HEARTBEAT_EQUITY_ANOMALY:
+                        needs_write = True
+            except Exception:
+                needs_write = True
+        if not needs_write:
+            continue
+        payload = {
+            "timestamp": now,
+            "regime": "startup",
+            "equity": live_eq,
+            "cash": float(cash) if cash is not None else None,
+            "cash_pct": (
+                round(float(cash) / live_eq, 6)
+                if cash is not None and live_eq > 0
+                else None
+            ),
+            "halted": False,
+            "paper": False,
+            "book": "live",
+            "status": "startup_cleared_stale_heartbeat",
+            "last_cycle_error": None,
+            "last_cycle_error_at": None,
+        }
+        try:
+            write_json_atomic(str(path), payload)
+            logger.info(
+                "Cleared stale live heartbeat at %s → equity $%.2f (book=live)",
+                path,
+                live_eq,
+            )
+            print(
+                f"--- Cleared stale live heartbeat ({path.name}) → "
+                f"${live_eq:,.2f} book=live ---",
+                flush=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to clear stale heartbeat %s: %s", path, exc)
 
 
 def _write_heartbeat(
@@ -363,6 +542,8 @@ def _write_heartbeat(
     heartbeat_regime=None,
     insider_state=None,
 ):
+    equity = _sanitize_live_heartbeat_equity(equity)
+    book = "paper" if config.PAPER_TRADING else "live"
     macro_stress = bool(
         wisdom
         and (wisdom.get("dynamic_stress") or wisdom.get("governor_stress"))
@@ -396,6 +577,7 @@ def _write_heartbeat(
         "equity_session_open": market_open,
         "halted": halted,
         "paper": config.PAPER_TRADING,
+        "book": book,
         "last_cycle_error": None,
         "last_cycle_error_at": None,
     }
@@ -517,6 +699,15 @@ def _write_heartbeat(
             ),
         }
     write_json_atomic(config.ensure_heartbeat_path_writable(), payload)
+    # Legacy cwd path: status.py / manual verify still read bot_heartbeat.json.
+    if not config.PAPER_TRADING:
+        legacy = Path("bot_heartbeat.json")
+        try:
+            primary = Path(config.HEARTBEAT_FILE).resolve()
+            if legacy.resolve() != primary:
+                write_json_atomic(str(legacy), payload)
+        except Exception as exc:
+            logger.debug("Legacy bot_heartbeat.json mirror skipped: %s", exc)
 
 
 def main():
@@ -2427,7 +2618,6 @@ if __name__ == "__main__":
     cli_args = parser.parse_args()
 
     install_safe_stdout()
-    from pathlib import Path
 
     if getattr(sys, "frozen", False):
         from modules.runtime_paths import resolve_data_root
@@ -2439,7 +2629,12 @@ if __name__ == "__main__":
 
     config.configure_heartbeat_path()
     db_path = config.ensure_market_db()
-    setup_logging(log_dir=Path("logs"))
+    _log_names = (
+        ["run_all_paper.log", "run_all.log"]
+        if config.PAPER_TRADING
+        else ["run_all_live.log", "run_all.log"]
+    )
+    setup_logging(log_dir=Path("logs"), run_log_names=_log_names)
     config.ensure_sentiment_dirs()
     try:
         config.validate_alpaca_config()
@@ -2469,6 +2664,8 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"[WARN] Could not load Alpaca account at startup: {exc}")
         print(f"       {_alpaca_startup_hint(exc)}")
+    if not config.PAPER_TRADING and startup_equity is not None:
+        _clear_stale_live_heartbeat_on_boot(startup_equity, cash=startup_cash)
     if config.effective_real_time_websocket_enabled():
         start_realtime_feed()
         time.sleep(1.5)
@@ -2523,14 +2720,19 @@ if __name__ == "__main__":
             )
             trade_journal.log_event("error", notes=f"Alpaca auth failure: {e}")
             sys.exit(1)
+        except AlpacaTransientNetworkError as e:
+            _handle_transient_network(e)
         except AlpacaCriticalError as e:
-            log_event("alpaca_critical", error=str(e))
-            _record_cycle_error(str(e))
-            logger.warning(
-                "Alpaca API failure after retries (skipping cycle, bot continues): %s",
-                e,
-            )
-            trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
+            if is_transient_network_error(e):
+                _handle_transient_network(e)
+            else:
+                log_event("alpaca_critical", error=str(e))
+                _record_cycle_error(str(e), error_class="other")
+                logger.warning(
+                    "Alpaca API failure after retries (skipping cycle, bot continues): %s",
+                    e,
+                )
+                trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
         except AlpacaValidationError as e:
             log_event("alpaca_validation", error=str(e))
             logger.info("Alpaca order validation skipped (cycle continues): %s", e)
@@ -2540,14 +2742,17 @@ if __name__ == "__main__":
             trade_journal.log_event("shutdown", notes="keyboard interrupt")
             break
         except Exception as e:
-            tb = traceback.format_exc()
-            _record_cycle_error(str(e))
-            log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
-            logger.exception("Cycle error: %s", e)
-            notes = str(e)
-            if tb.strip():
-                notes = f"{notes}\n{tb[-1500:]}"
-            trade_journal.log_event("error", notes=notes)
+            if is_transient_network_error(e):
+                _handle_transient_network(e)
+            else:
+                tb = traceback.format_exc()
+                _record_cycle_error(str(e))
+                log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
+                logger.exception("Cycle error: %s", e)
+                notes = str(e)
+                if tb.strip():
+                    notes = f"{notes}\n{tb[-1500:]}"
+                trade_journal.log_event("error", notes=notes)
         finally:
             if watchdog is not None:
                 watchdog.end_cycle()

@@ -702,6 +702,18 @@ STAT_ARB_MAX_SCAN_UNIVERSE = int(os.getenv("STAT_ARB_MAX_SCAN_UNIVERSE", "80"))
 PAPER_MOMENTUM_QUALITY_FIXES = _parse_env_bool(
     "PAPER_MOMENTUM_QUALITY_FIXES", default="false"
 )
+# Paper-only NYSE entry hygiene (max adds / same-day reentry / min notional).
+# Live Profile A never sees these — gated by effective_paper_nyse_entry_hygiene().
+PAPER_NYSE_ENTRY_HYGIENE_ENABLED = _parse_env_bool(
+    "PAPER_NYSE_ENTRY_HYGIENE_ENABLED", default="true"
+)
+PAPER_NYSE_MAX_ADDS_PER_SYMBOL = int(os.getenv("PAPER_NYSE_MAX_ADDS_PER_SYMBOL", "2"))
+# Default ON for paper: no new buy of X on a calendar day after selling X.
+PAPER_NYSE_SAME_DAY_REENTRY_BLOCK = _parse_env_bool(
+    "PAPER_NYSE_SAME_DAY_REENTRY_BLOCK", default="true"
+)
+# Floor for NYSE momentum clips (on top of effective_min_notional). Avoids $2 dust adds.
+PAPER_NYSE_MIN_NOTIONAL = float(os.getenv("PAPER_NYSE_MIN_NOTIONAL", "25"))
 # NYSE pick rotation — cap per-symbol pick frequency in rolling bar window (paper only).
 NYSE_PICK_ROTATION_ENABLED = _parse_env_bool(
     "NYSE_PICK_ROTATION_ENABLED", default="false"
@@ -5513,6 +5525,12 @@ def format_realistic_research_startup_lines() -> list[str]:
     except Exception:
         pass
     lines.append(format_realistic_research_banner())
+    try:
+        hygiene = format_nyse_entry_hygiene_banner()
+        if hygiene:
+            lines.append(f">>> {hygiene} <<<")
+    except Exception:
+        pass
     if paper_chase_mode_enabled() or paper_aggressive_context():
         try:
             from modules.strategy_performance import format_strategy_health_banner
@@ -6295,6 +6313,47 @@ def effective_paper_momentum_quality_fixes() -> bool:
     return bool(
         PAPER_MOMENTUM_QUALITY_FIXES
         and (paper_aggressive_context() or paper_chase_mode_enabled() or paper_only_sleeves_active())
+    )
+
+
+def effective_paper_nyse_entry_hygiene() -> bool:
+    """Max adds / same-day reentry / NYSE min notional — paper research only."""
+    return bool(
+        PAPER_NYSE_ENTRY_HYGIENE_ENABLED
+        and (
+            paper_aggressive_context()
+            or paper_chase_mode_enabled()
+            or paper_only_sleeves_active()
+        )
+    )
+
+
+def effective_paper_nyse_max_adds_per_symbol() -> int:
+    return max(1, int(PAPER_NYSE_MAX_ADDS_PER_SYMBOL))
+
+
+def effective_paper_nyse_same_day_reentry_block() -> bool:
+    return bool(
+        effective_paper_nyse_entry_hygiene() and PAPER_NYSE_SAME_DAY_REENTRY_BLOCK
+    )
+
+
+def effective_paper_nyse_min_notional(equity: float | None = None) -> float:
+    """NYSE momentum min clip: max(global paper min, PAPER_NYSE_MIN_NOTIONAL). Live unchanged."""
+    base = effective_min_notional(equity)
+    if not effective_paper_nyse_entry_hygiene():
+        return base
+    return max(base, float(PAPER_NYSE_MIN_NOTIONAL))
+
+
+def format_nyse_entry_hygiene_banner() -> str | None:
+    if not effective_paper_nyse_entry_hygiene():
+        return None
+    n = effective_paper_nyse_max_adds_per_symbol()
+    same_day = "same-day block" if PAPER_NYSE_SAME_DAY_REENTRY_BLOCK else "same-day off"
+    return (
+        f"NYSE hygiene ON (max {n} adds | {same_day} | "
+        f"min ${float(PAPER_NYSE_MIN_NOTIONAL):.0f})"
     )
 
 

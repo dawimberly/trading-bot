@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from typing import Any, Callable, TypeVar
@@ -25,11 +26,42 @@ T = TypeVar("T")
 
 MAX_API_ATTEMPTS = 3
 RETRY_BASE_DELAY_SEC = 0.5
+# After DNS/connect failure, pause briefly before the next Alpaca call (no spam).
+NETWORK_BACKOFF_MIN_SEC = 5.0
+NETWORK_BACKOFF_MAX_SEC = 30.0
 TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 AUTH_HTTP_STATUS = frozenset({401, 403})
 
+_NETWORK_MARKERS = (
+    "nameresolutionerror",
+    "getaddrinfo",
+    "failed to resolve",
+    "name or service not known",
+    "nodename nor servname",
+    "temporary failure in name resolution",
+    "max retries exceeded",
+    "connection aborted",
+    "connection reset",
+    "connection refused",
+    "network is unreachable",
+    "timed out",
+    "read timed out",
+    "connect timeout",
+    "winerror 11001",
+    "winerror 10060",
+    "winerror 10054",
+    "errno 11001",
+    "errno -2",
+    "errno -3",
+    "sslerror",
+    "certificate verify failed",
+    "proxyerror",
+)
+
 _client_cache: dict[tuple[str, str, bool, str], TradingClient] = {}
 _cache_lock = threading.Lock()
+_network_backoff_until: float = 0.0
+_network_backoff_lock = threading.Lock()
 
 
 class AlpacaAuthError(RuntimeError):
@@ -42,6 +74,12 @@ class AlpacaCriticalError(RuntimeError):
 
 class AlpacaValidationError(RuntimeError):
     """Order rejected by Alpaca (422/403 validation) — skip order, keep bot running."""
+
+
+class AlpacaTransientNetworkError(RuntimeError):
+    """DNS / connect / timeout — skip cycle orders, keep supervisor running."""
+
+    error_class = "transient_network"
 
 
 def _client_cache_key(
@@ -109,7 +147,70 @@ def get_trading_client(
     return build_trading_client(api_key, secret_key, paper=use_paper)
 
 
+def _exception_chain(exc: BaseException | None) -> list[BaseException]:
+    out: list[BaseException] = []
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        out.append(cur)
+        cur = cur.__cause__ or cur.__context__
+    return out
+
+
+def _exception_text(exc: BaseException) -> str:
+    parts = [f"{type(e).__name__}: {e}" for e in _exception_chain(exc)]
+    return " | ".join(parts).lower()
+
+
+def is_transient_network_error(exc: BaseException) -> bool:
+    """True for DNS / connect / timeout failures (not auth, not order reject)."""
+    if isinstance(exc, AlpacaTransientNetworkError):
+        return True
+    if isinstance(exc, AlpacaAuthError):
+        return False
+
+    for e in _exception_chain(exc):
+        if isinstance(e, APIError):
+            if is_auth_alpaca_error(e):
+                return False
+            status = getattr(e, "status_code", None)
+            if status in TRANSIENT_HTTP_STATUS:
+                continue
+            if status is not None and int(status) < 500 and status not in (408, 429):
+                # Definite application/API response — not a DNS blip.
+                return False
+        name = type(e).__name__.lower()
+        if name in {
+            "nameresolutionerror",
+            "connecttimeout",
+            "readtimeout",
+            "timeout",
+            "timeouterror",
+            "connectionerror",
+            "protocolerror",
+            "newconnectionerror",
+            "maxretryerror",
+            "proxyerror",
+            "sslerror",
+        }:
+            return True
+        if isinstance(e, (TimeoutError, ConnectionError)):
+            return True
+        # OSError covers WinError 11001 getaddrinfo failed, etc.
+        if isinstance(e, OSError):
+            winerr = getattr(e, "winerror", None)
+            errno = getattr(e, "errno", None)
+            if winerr in (11001, 10060, 10054, 10061) or errno in (11001, -2, -3, 101, 111):
+                return True
+
+    text = _exception_text(exc)
+    return any(marker in text for marker in _NETWORK_MARKERS)
+
+
 def is_transient_alpaca_error(exc: BaseException) -> bool:
+    if is_transient_network_error(exc):
+        return True
     if isinstance(exc, APIError):
         status = getattr(exc, "status_code", None)
         return status in TRANSIENT_HTTP_STATUS
@@ -158,17 +259,37 @@ def is_skippable_order_error(exc: BaseException) -> bool:
     return False
 
 
-def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation or insufficient-qty 403 — do not crash the cycle."""
-    if not isinstance(exc, APIError):
-        return False
-    status = getattr(exc, "status_code", None)
-    msg = str(exc).lower()
-    if status == 422:
-        return True
-    if status == 403 and "insufficient qty" in msg:
-        return True
-    return False
+def note_network_failure(*, backoff_sec: float | None = None) -> float:
+    """Schedule a short pause before the next Alpaca call. Returns sleep seconds chosen."""
+    global _network_backoff_until
+    delay = backoff_sec
+    if delay is None:
+        delay = random.uniform(NETWORK_BACKOFF_MIN_SEC, NETWORK_BACKOFF_MAX_SEC)
+    delay = max(float(NETWORK_BACKOFF_MIN_SEC), min(float(NETWORK_BACKOFF_MAX_SEC), float(delay)))
+    with _network_backoff_lock:
+        _network_backoff_until = max(_network_backoff_until, time.time() + delay)
+    return delay
+
+
+def clear_network_backoff() -> None:
+    global _network_backoff_until
+    with _network_backoff_lock:
+        _network_backoff_until = 0.0
+
+
+def _await_network_backoff(op_name: str) -> None:
+    with _network_backoff_lock:
+        until = _network_backoff_until
+    now = time.time()
+    if until <= now:
+        return
+    wait = until - now
+    logger.warning(
+        "Alpaca %s waiting %.1fs after prior DNS/network failure (backoff)",
+        op_name,
+        wait,
+    )
+    time.sleep(wait)
 
 
 def call_with_retry(
@@ -180,10 +301,13 @@ def call_with_retry(
     **kwargs: Any,
 ) -> T:
     """Call an Alpaca SDK method with exponential backoff on transient failures."""
+    _await_network_backoff(op_name)
     last_exc: BaseException | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            return func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            clear_network_backoff()
+            return result
         except APIError as exc:
             last_exc = exc
             if is_auth_alpaca_error(exc):
@@ -236,22 +360,38 @@ def call_with_retry(
                 exc,
             )
             raise AlpacaCriticalError(str(exc)) from exc
-        except (TimeoutError, OSError, ConnectionError) as exc:
+        except Exception as exc:
             last_exc = exc
-            if attempt < max_attempts:
-                delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
-                logger.warning(
-                    "Alpaca %s network error — retry %s/%s in %.1fs: %s",
+            # Never promote DNS/network to auth.
+            if is_auth_alpaca_error(exc):
+                raise AlpacaAuthError(str(exc)) from exc
+            if is_transient_network_error(exc) or isinstance(
+                exc, (TimeoutError, OSError, ConnectionError)
+            ):
+                if attempt < max_attempts:
+                    delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Alpaca %s network error — retry %s/%s in %.1fs: %s",
+                        op_name,
+                        attempt,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+                    continue
+                backoff = note_network_failure()
+                logger.error(
+                    "Alpaca %s TRANSIENT_NETWORK after retries (backoff %.0fs): %s",
                     op_name,
-                    attempt,
-                    max_attempts,
-                    delay,
+                    backoff,
                     exc,
                 )
-                time.sleep(delay)
-                continue
-            logger.error("Alpaca %s network failure after retries: %s", op_name, exc)
-            raise AlpacaCriticalError(str(exc)) from exc
+                raise AlpacaTransientNetworkError(str(exc)) from exc
+            raise
     if last_exc is not None:
+        if is_transient_network_error(last_exc):
+            note_network_failure()
+            raise AlpacaTransientNetworkError(str(last_exc)) from last_exc
         raise AlpacaCriticalError(str(last_exc)) from last_exc
     raise AlpacaCriticalError(f"{op_name} failed with no exception captured")

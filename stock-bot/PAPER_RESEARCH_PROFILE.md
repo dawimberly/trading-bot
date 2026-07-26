@@ -10,7 +10,9 @@
 
 **Tagline:** `v1.5.4 — Sector-Aware Portfolio Constructor`
 
-**Locked stack (confirm at startup):** GARCH paper ON · **Smart Dynamic VTI LOCKED** (40–75%, hard floor ≥40%; tiers stress 75% / default 65% / calm 50%) · Portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core) · SPY-like boost ON paper · Daily Profit Banking ON · RHYME primary · HMM soft-only · Stat Arb quality ON · ARIMA OFF · Equity path `run_nyse_momentum_and_stat_arb` primary
+**Locked stack (confirm at startup):** GARCH paper ON · **Smart Dynamic VTI LOCKED** (40–75%, hard floor ≥40%; tiers stress 75% / default 65% / calm 50%) · Portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core) · SPY-like boost ON paper · Daily Profit Banking ON · RHYME primary · HMM soft-only · Stat Arb quality ON · ARIMA OFF · Equity path `run_nyse_momentum_and_stat_arb` primary · **NYSE entry hygiene ON** (max 2 adds/symbol; same-day reentry block ON; min notional $25)
+
+**NYSE entry hygiene (paper only):** Caps open buy fills per NYSE symbol (`PAPER_NYSE_MAX_ADDS_PER_SYMBOL=2`), blocks same-calendar-day re-buy after a sell of that symbol (`PAPER_NYSE_SAME_DAY_REENTRY_BLOCK=true` by default), and raises the NYSE clip floor (`PAPER_NYSE_MIN_NOTIONAL=25`). Live Profile A unchanged. Banner: `NYSE hygiene ON (max N adds/symbol | …)`. Skips log as `[NYSE] Skipping SYM — hygiene: …`. Does **not** raise conviction floors.
 
 **Telegram (paper ops):** yield alerts **change-only** when enabled (default **OFF**) · fills **≥$5 ON** · error watcher **ON** (daily `logs/daily_errors_YYYY-MM-DD.md` + per-error Telegram)
 
@@ -86,6 +88,7 @@ Keep existing locks: RHYME primary, HMM soft-only, GARCH paper ON (Live Conserva
 | **Smart Dynamic VTI core** | **LOCKED 40–75%** multi-signal allocator (paper default ON); hard floor **≥40%** (zero-core OFF); tiers stress 75% / default 65% / calm 50% | `PAPER_DYNAMIC_VTI=true`, `DYNAMIC_VTI_PAPER_FLOOR=0.40`, `DYNAMIC_VTI_DEFAULT_PCT`, `DYNAMIC_VTI_CALM_PCT`, `DYNAMIC_VTI_STRESS_PCT`, `DYNAMIC_VTI_ALLOW_ZERO=false`, `DYNAMIC_VTI_FLOOR_MIN=0.40` |
 | **Portfolio guards** | Concentration **≤8%** per name · auto-dust **&lt;$10** · max **25** active non-core tickers | `CONCENTRATION_GUARD_ENABLED`, `PER_NAME_MAX_PCT` / `PAPER_MAX_POSITION_PCT`, `AUTO_DUST_*`, `MAX_ACTIVE_TICKERS` |
 | **Equity path** | **`run_nyse_momentum_and_stat_arb`** primary (NYSE momentum + Stat Arb); not a separate live `run_equity_strategy` entry | `modules/pipeline_strategies.py` / `run_all.py` |
+| **NYSE entry hygiene** | **ON** — max **2** buy fills/symbol while open; same-day reentry block **ON**; min notional **$25**. Live off. | `PAPER_NYSE_ENTRY_HYGIENE_ENABLED`, `PAPER_NYSE_MAX_ADDS_PER_SYMBOL`, `PAPER_NYSE_SAME_DAY_REENTRY_BLOCK`, `PAPER_NYSE_MIN_NOTIONAL` |
 | **Telegram / errors** | Yields: change-only or **OFF** · fills **≥$5 ON** · error watcher **ON** (daily MD + per-error TG) | `TELEGRAM_ALERT_YIELDS`, `TELEGRAM_ALERT_FILLS`, `TELEGRAM_FILL_MIN_USD`, `ERROR_WATCHER_ENABLED`, `TELEGRAM_ALERT_ERRORS` |
 | **Portfolio constructor** | Sector-regime tilts on active sleeve / stat arb / short willingness (default ON) | `PORTFOLIO_CONSTRUCTOR_ENABLED`, `PORTFOLIO_ACTIVE_SLEEVE_MULT_FLOOR/CEILING`, `PORTFOLIO_STAT_ARB_MULT_FLOOR/CEILING`, `PORTFOLIO_SHORT_WILLINGNESS_FLOOR/CEILING` |
 | **RVOL Scanner** | ON, min **2.0×**, boost @ **2.5×** | `RVOL_SCANNER_ENABLED`, `RVOL_MIN_THRESHOLD`, `RVOL_MOMENTUM_BOOST_THRESHOLD` |

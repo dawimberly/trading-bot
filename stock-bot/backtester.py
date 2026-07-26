@@ -663,6 +663,17 @@ class BacktestExecutor:
                 if k in kwargs:
                     order[k] = kwargs[k]
             self.orders.append(order)
+            if side.lower() == "sell" and config.effective_paper_nyse_entry_hygiene():
+                try:
+                    from modules.pipeline_strategies import mark_nyse_sold_today
+
+                    mark_nyse_sold_today(
+                        symbol,
+                        now=getattr(self, "_bar_index", None),
+                        data=getattr(self, "_sizing_data", None),
+                    )
+                except Exception:
+                    pass
             if config.paper_aggressive_context():
                 from modules.paper_risk_controls import update_position_meta_on_fill
 
@@ -826,6 +837,152 @@ class BacktestPortfolio:
             self._track_execution_cost(raw_price, price, sell_qty, tx_cost)
             return {"symbol": symbol, "side": "sell", "qty": sell_qty, "notional": sell_notional}
         return None
+
+
+def _opportunistic_short_gross_value(executor, prices) -> float:
+    """Gross notional of naked/opportunistic shorts (excludes pair-short legs)."""
+    portfolio = executor.portfolio
+    meta = getattr(portfolio, "short_position_meta", None) or {}
+    exec_meta = getattr(executor, "_short_position_meta", None) or {}
+    keys = set()
+    for src in (meta, exec_meta):
+        for k in src:
+            keys.add(config.normalize_symbol(k))
+            keys.add(k)
+    pair_syms: set[str] = set()
+    book = getattr(executor, "_stat_arb_open", None) or {}
+    for pos in book.values():
+        for key in ("long_symbol", "short_symbol"):
+            sym = pos.get(key)
+            if sym:
+                pair_syms.add(config.normalize_symbol(sym))
+    reg = getattr(executor, "_pair_symbols", None) or set()
+    pair_syms |= {config.normalize_symbol(s) for s in reg}
+    total = 0.0
+    for symbol, qty in portfolio.positions.items():
+        q = float(qty)
+        if q >= 0:
+            continue
+        sym = config.normalize_symbol(symbol)
+        if sym in pair_syms:
+            continue
+        if keys and sym not in keys and symbol not in keys:
+            pass
+        price = prices.get(symbol)
+        if price is None or not np.isfinite(price) or float(price) <= 0:
+            continue
+        total += abs(q * float(price))
+    return float(total)
+
+
+def _capture_sleeve_path_bar(
+    *,
+    executor,
+    portfolio,
+    prices,
+    equity: float,
+    vti_core_pct: float,
+    include_holdings: bool = False,
+) -> dict:
+    """Marked sleeve exposures for left-tail trough attribution (peak/trough only).
+
+    Avoids disk-backed stat-arb book loads. Holdings listing is optional (slow).
+    """
+    eq = float(equity) if equity and equity > 0 else 0.0
+    cash = float(getattr(portfolio, "cash", 0.0) or 0.0)
+    vti_qty = float(portfolio.positions.get(VTI_CORE_SYMBOL, 0.0) or 0.0)
+    vti_px = prices.get(VTI_CORE_SYMBOL)
+    vti_notional = 0.0
+    if vti_px is not None and np.isfinite(vti_px) and float(vti_px) > 0 and vti_qty > 0:
+        vti_notional = abs(vti_qty * float(vti_px))
+
+    spy = float(executor.spy_sleeve_value())
+    nyse = float(executor.nyse_sleeve_value())
+    book = getattr(executor, "_stat_arb_open", None) or {}
+    pair_syms: set[str] = set()
+    for pos in book.values():
+        for key in ("long_symbol", "short_symbol"):
+            sym = pos.get(key)
+            if sym:
+                pair_syms.add(config.normalize_symbol(sym))
+    reg = getattr(executor, "_pair_symbols", None) or set()
+    pair_syms |= {config.normalize_symbol(s) for s in reg}
+    stat_arb = 0.0
+    excluded_long = 0.0
+    if pair_syms:
+        for symbol, qty in portfolio.positions.items():
+            sym = config.normalize_symbol(symbol)
+            if sym not in pair_syms:
+                continue
+            px = prices.get(symbol)
+            if px is None or not np.isfinite(px) or float(px) <= 0:
+                continue
+            mv = abs(float(qty) * float(px))
+            stat_arb += mv
+            if float(qty) > 0:
+                excluded_long += mv
+    nyse_mom = max(0.0, nyse - excluded_long)
+
+    crypto = float(executor.crypto_sleeve_value())
+    metals = float(executor._sleeve_exposure(executor._is_metal_position))
+    shorts = _opportunistic_short_gross_value(executor, prices)
+    classified = vti_notional + spy + nyse_mom + stat_arb + crypto + metals + shorts
+    other = max(0.0, eq - cash - classified) if eq > 0 else 0.0
+
+    def _pct(usd: float) -> float:
+        return round(100.0 * usd / eq, 2) if eq > 0 else 0.0
+
+    top3: list[dict] = []
+    if include_holdings:
+        holdings: list[tuple[str, float, str]] = []
+        for symbol, qty in portfolio.positions.items():
+            q = float(qty)
+            if abs(q) < 1e-12:
+                continue
+            px = prices.get(symbol)
+            if px is None or not np.isfinite(px) or float(px) <= 0:
+                continue
+            notional = abs(q * float(px))
+            if notional < 1.0:
+                continue
+            holdings.append(
+                (
+                    config.normalize_symbol(symbol),
+                    float(notional),
+                    "short" if q < 0 else "long",
+                )
+            )
+        holdings.sort(key=lambda x: -x[1])
+        top3 = [
+            {"symbol": s, "notional": round(n, 2), "side": side}
+            for s, n, side in holdings[:3]
+        ]
+
+    active_pct = max(0.0, 100.0 - _pct(vti_notional) - _pct(cash))
+    return {
+        "equity": round(eq, 2),
+        "cash": round(cash, 2),
+        "cash_pct": _pct(cash),
+        "vti_target_pct": round(100.0 * float(vti_core_pct), 2),
+        "vti_notional": round(vti_notional, 2),
+        "vti_pct": _pct(vti_notional),
+        "active_pct": round(active_pct, 2),
+        "spy": round(spy, 2),
+        "spy_pct": _pct(spy),
+        "nyse_momentum": round(nyse_mom, 2),
+        "nyse_momentum_pct": _pct(nyse_mom),
+        "stat_arb": round(stat_arb, 2),
+        "stat_arb_pct": _pct(stat_arb),
+        "opportunistic_short": round(shorts, 2),
+        "opportunistic_short_pct": _pct(shorts),
+        "crypto": round(crypto, 2),
+        "crypto_pct": _pct(crypto),
+        "metals": round(metals, 2),
+        "metals_pct": _pct(metals),
+        "other": round(other, 2),
+        "other_pct": _pct(other),
+        "top_holdings": top3,
+    }
 
 
 def _rebalance_vti_core(portfolio, prices, core_pct: float) -> None:
@@ -1126,7 +1283,9 @@ def run_backtest(
     nyse_conditional_on_spy: bool | None = None,
     paper_ipo_safety: bool | None = None,
     paper_profit_target: bool | None = None,
+    paper_nyse_entry_hygiene: bool | None = None,
     track_active_exposure: bool = False,
+    track_sleeve_path: bool = False,
     simulate_live_thinking: bool = False,
     live_thinking_start_equity: float | None = None,
     with_news: bool = False,
@@ -1186,6 +1345,7 @@ def run_backtest(
     saved_paper_dynamic_univ_strict = config.PAPER_DYNAMIC_UNIVERSE_STRICT
     saved_paper_ipo_safety = config.PAPER_IPO_SAFETY_ENABLED
     saved_paper_profit_target = config.PAPER_PROFIT_TARGET_ENABLED
+    saved_paper_nyse_hygiene = config.PAPER_NYSE_ENTRY_HYGIENE_ENABLED
     saved_backtest_paper_sleeves = config.backtest_paper_sleeves_context()
     saved_backtest_vti_ceiling = config.backtest_vti_ceiling()
     saved_live_thinking_ctx = config.live_thinking_sim_context()
@@ -1264,6 +1424,8 @@ def run_backtest(
         config.PAPER_IPO_SAFETY_ENABLED = bool(paper_ipo_safety)
     if paper_profit_target is not None:
         config.PAPER_PROFIT_TARGET_ENABLED = bool(paper_profit_target)
+    if paper_nyse_entry_hygiene is not None:
+        config.PAPER_NYSE_ENTRY_HYGIENE_ENABLED = bool(paper_nyse_entry_hygiene)
     if RUN_OPTIONS.fast_mode:
         apply_run_options_to_config()
     if paper_aggressive and not any(
@@ -1350,9 +1512,13 @@ def run_backtest(
     except Exception:
         pass
     try:
-        from modules.pipeline_strategies import reset_nyse_pick_rotation
+        from modules.pipeline_strategies import (
+            reset_nyse_entry_hygiene_state,
+            reset_nyse_pick_rotation,
+        )
 
         reset_nyse_pick_rotation()
+        reset_nyse_entry_hygiene_state()
     except Exception:
         pass
     if paper_aggressive and config.effective_dynamic_core_enabled():
@@ -1386,6 +1552,17 @@ def run_backtest(
     spy_exposure_samples = []
     nyse_exposure_samples = []
     crypto_exposure_samples = []
+    sleeve_path_series: list[dict] = []
+    sleeve_path_peak_snap: dict | None = None
+    sleeve_path_trough_snap: dict | None = None
+    sleeve_path_peak_bar: int | None = None
+    sleeve_path_trough_bar: int | None = None
+    sleeve_path_running_peak_eq = 0.0
+    sleeve_path_running_peak_snap: dict | None = None
+    sleeve_path_running_peak_bar: int | None = None
+    sleeve_path_worst_dd = 0.0
+    sleeve_path_last_capture_dd = 0.0
+    sleeve_path_last_capture_bar = -999
     cofire_days = 0
     spy_nyse_cofire_days = 0
     nyse_pick_counts: dict[str, int] = {}
@@ -2396,6 +2573,48 @@ def run_backtest(
         prev_bar_equity = float(portfolio.equity(prices))
         if attribution_tracker is not None:
             attribution_tracker.snapshot_mtm(executor, prices)
+        if track_sleeve_path:
+            # Peak + trough only. Rate-limit trough captures on long grinds
+            # (exact trough bar still recorded; sleeve mix within ~10 bars / 25bps).
+            bar_i = len(equity_curve) - 1
+            eq_now = prev_bar_equity
+            if (
+                sleeve_path_running_peak_snap is None
+                or eq_now > sleeve_path_running_peak_eq
+            ):
+                sleeve_path_running_peak_eq = eq_now
+                sleeve_path_running_peak_bar = bar_i
+                sleeve_path_running_peak_snap = _capture_sleeve_path_bar(
+                    executor=executor,
+                    portfolio=portfolio,
+                    prices=prices,
+                    equity=eq_now,
+                    vti_core_pct=vti_core_pct,
+                    include_holdings=False,
+                )
+            if sleeve_path_running_peak_eq > 0:
+                dd_now = eq_now / sleeve_path_running_peak_eq - 1.0
+                if sleeve_path_trough_snap is None or dd_now < sleeve_path_worst_dd:
+                    sleeve_path_worst_dd = dd_now
+                    sleeve_path_trough_bar = bar_i
+                    sleeve_path_peak_snap = sleeve_path_running_peak_snap
+                    sleeve_path_peak_bar = sleeve_path_running_peak_bar
+                    should_capture = (
+                        sleeve_path_trough_snap is None
+                        or dd_now <= sleeve_path_last_capture_dd - 0.0025
+                        or (bar_i - sleeve_path_last_capture_bar) >= 10
+                    )
+                    if should_capture:
+                        sleeve_path_trough_snap = _capture_sleeve_path_bar(
+                            executor=executor,
+                            portfolio=portfolio,
+                            prices=prices,
+                            equity=eq_now,
+                            vti_core_pct=vti_core_pct,
+                            include_holdings=False,
+                        )
+                        sleeve_path_last_capture_dd = dd_now
+                        sleeve_path_last_capture_bar = bar_i
 
         if track_metrics:
             invested = eq - portfolio.cash
@@ -2501,6 +2720,12 @@ def run_backtest(
         "vti_core_pct": round(float(np.mean(vti_core_samples)), 4)
         if vti_core_samples
         else fixed_vti_core_pct,
+        "vti_core_series": [round(float(v), 4) for v in vti_core_samples],
+        "sleeve_path_series": sleeve_path_series if track_sleeve_path else [],
+        "sleeve_path_peak": sleeve_path_peak_snap if track_sleeve_path else None,
+        "sleeve_path_trough": sleeve_path_trough_snap if track_sleeve_path else None,
+        "sleeve_path_peak_bar": sleeve_path_peak_bar if track_sleeve_path else None,
+        "sleeve_path_trough_bar": sleeve_path_trough_bar if track_sleeve_path else None,
         "avg_active_exposure_pct": round(float(np.mean(active_exposure_samples)) * 100, 2)
         if active_exposure_samples
         else round((1.0 - fixed_vti_core_pct) * 100, 2),
@@ -2517,6 +2742,8 @@ def run_backtest(
         "spy_nyse_cofire_days": spy_nyse_cofire_days,
         "nyse_pick_counts": dict(sorted(nyse_pick_counts.items(), key=lambda x: -x[1])),
         "nyse_conditional_on_spy": config.effective_nyse_conditional_on_spy(),
+        "nyse_entry_hygiene": config.effective_paper_nyse_entry_hygiene(),
+        "nyse_hygiene_skips": {},
         "small_account": small_account,
         "cap_scale": cap_scale,
         "equity_index": [data.index[i].isoformat() for i in range(warmup, len(data))],
@@ -2526,6 +2753,16 @@ def run_backtest(
         "daily_bank_days": int(daily_bank_days),
         "garch_high_vol_days": int(garch_high_vol_days),
     }
+    try:
+        from modules.pipeline_strategies import get_nyse_hygiene_skip_counts
+
+        result["nyse_hygiene_skips"] = get_nyse_hygiene_skip_counts()
+    except Exception:
+        result["nyse_hygiene_skips"] = {
+            "hygiene_max_adds": 0,
+            "hygiene_same_day": 0,
+            "hygiene_min_notional": 0,
+        }
     try:
         from modules.smart_atr_stops import smart_stop_stats
 
@@ -2792,6 +3029,7 @@ def run_backtest(
     config.DEEP_HISTORY_INDICATORS_ONLY = saved_deep_indicators_only
     config.PAPER_IPO_SAFETY_ENABLED = saved_paper_ipo_safety
     config.PAPER_PROFIT_TARGET_ENABLED = saved_paper_profit_target
+    config.PAPER_NYSE_ENTRY_HYGIENE_ENABLED = saved_paper_nyse_hygiene
     store_last_result(result)
     return result
 
@@ -5548,10 +5786,14 @@ def _build_final_verdict(windows: list[dict]) -> str:
     sharpes_final = [w["final"]["sharpe"] for w in windows]
     sharpes_legacy = [w["legacy"]["sharpe"] for w in windows]
     avg_delta = sum(f - l for f, l in zip(sharpes_final, sharpes_legacy)) / len(windows)
+    window_bits = ", ".join(
+        f"{w['window']} {w['final']['sharpe']:.2f} vs {w['legacy']['sharpe']:.2f}"
+        for w in windows
+    )
     lines.append(
         f"- **Sharpe vs legacy paper:** current stack improves Sharpe by "
         f"**{avg_delta:+.2f}** on average across windows "
-        f"({', '.join(f'{w['window']} {w['final']['sharpe']:.2f} vs {w['legacy']['sharpe']:.2f}' for w in windows)})."
+        f"({window_bits})."
     )
     for w in windows:
         f, b = w["final"], w["vti_benchmark_pct"]
@@ -6895,6 +7137,104 @@ def run_nyse_conditional_compare(days=None, refresh=False, use_max=False) -> Non
         pick_txt = ", ".join(f"{s}({n})" for s, n in top) if top else "—"
         print(f"{label}: top NYSE picks -> {pick_txt}")
     print("-" * 82)
+
+
+def run_nyse_hygiene_compare(days=None, refresh=False, use_max=False) -> None:
+    """Paper aggressive: NYSE entry hygiene off vs on (max adds / same-day / min $25)."""
+    if use_max:
+        data = _ensure_daily_data(0, refresh=refresh, use_max=True)
+    else:
+        days = days or config.BACKTEST_DAYS
+        data = _ensure_daily_data(days, refresh=refresh, use_max=False)
+    if len(data) < 20:
+        print(f"Need at least 20 daily bars; got {len(data)}.")
+        return
+
+    bench = _benchmark_return(data, MIN_HISTORY)
+    base_kwargs = {
+        "paper_aggressive": True,
+        "paper_sleeve_features": True,
+        "paper_dynamic_vti": True,
+        "track_active_exposure": True,
+        "track_metrics": True,
+    }
+    configs = [
+        ("Baseline (hygiene OFF)", {**base_kwargs, "paper_nyse_entry_hygiene": False}),
+        ("Treatment (hygiene ON)", {**base_kwargs, "paper_nyse_entry_hygiene": True}),
+    ]
+    print("--- NYSE ENTRY HYGIENE A/B (paper aggressive) ---")
+    print(
+        f"Window: {data.index[MIN_HISTORY].date()} -> {data.index[-1].date()} "
+        f"({len(data) - MIN_HISTORY} sim bars)"
+    )
+    if bench is not None:
+        print(f"VTI buy & hold benchmark: {bench:+.2f}%")
+    banner = None
+    try:
+        saved = config.PAPER_NYSE_ENTRY_HYGIENE_ENABLED
+        config.PAPER_NYSE_ENTRY_HYGIENE_ENABLED = True
+        config.set_paper_aggressive_context(True)
+        banner = config.format_nyse_entry_hygiene_banner()
+        config.PAPER_NYSE_ENTRY_HYGIENE_ENABLED = saved
+    except Exception:
+        banner = None
+    if banner:
+        print(f">>> {banner} <<<")
+    print(
+        f"{'Config':<28} {'Return':>8} {'Sharpe':>7} {'MaxDD':>8} "
+        f"{'NYSE fills':>10} {'Hygiene skips':>14} {'Final equity':>12}"
+    )
+    print("-" * 100)
+
+    results: list[tuple[str, dict]] = []
+    for label, kwargs in configs:
+        result = run_backtest(data, **kwargs)
+        results.append((label, result))
+        skips = result.get("nyse_hygiene_skips") or {}
+        skip_total = (
+            int(skips.get("hygiene_max_adds", 0) or 0)
+            + int(skips.get("hygiene_same_day", 0) or 0)
+            + int(skips.get("hygiene_min_notional", 0) or 0)
+        )
+        skip_detail = (
+            f"{skip_total} "
+            f"(adds={skips.get('hygiene_max_adds', 0)} "
+            f"day={skips.get('hygiene_same_day', 0)} "
+            f"min={skips.get('hygiene_min_notional', 0)})"
+        )
+        print(
+            f"{label:<28} "
+            f"{result['total_return_pct']:>+7.2f}% "
+            f"{result['sharpe']:>7.2f} "
+            f"{result['max_drawdown_pct']:>7.2f}% "
+            f"{int(result.get('nyse_signals', 0) or 0):>10} "
+            f"{skip_detail:>14} "
+            f"${float(result.get('final_equity', 0) or 0):>11,.2f}"
+        )
+    print("-" * 100)
+    treatment = results[-1][1] if results else {}
+    skips = treatment.get("nyse_hygiene_skips") or {}
+    skip_total = (
+        int(skips.get("hygiene_max_adds", 0) or 0)
+        + int(skips.get("hygiene_same_day", 0) or 0)
+        + int(skips.get("hygiene_min_notional", 0) or 0)
+    )
+    active = bool(treatment.get("nyse_entry_hygiene")) and skip_total > 0
+    print(
+        f"Treatment hygiene active: {'YES' if treatment.get('nyse_entry_hygiene') else 'NO'} "
+        f"| skip counts > 0: {'YES' if skip_total > 0 else 'NO'} "
+        f"(max_adds={skips.get('hygiene_max_adds', 0)}, "
+        f"same_day={skips.get('hygiene_same_day', 0)}, "
+        f"min_notional={skips.get('hygiene_min_notional', 0)})"
+    )
+    if treatment.get("nyse_entry_hygiene") and skip_total == 0:
+        print(
+            "Note: hygiene flag was ON but no skips fired in this window "
+            "(rules idle / no matching trades)."
+        )
+    elif active:
+        print("Hygiene rules fired on the treatment leg (skip counts > 0).")
+    print("-" * 100)
 
 
 def run_dynamic_universe_compare(days=None, refresh=False, use_max=False) -> None:
@@ -8420,6 +8760,14 @@ if __name__ == "__main__":
         help="Compare paper aggressive with vs without NYSE conditional-on-SPY filter",
     )
     parser.add_argument(
+        "--compare-nyse-hygiene",
+        action="store_true",
+        help=(
+            "Compare paper aggressive with vs without NYSE entry hygiene "
+            "(max 2 adds / same-day block / min $25)"
+        ),
+    )
+    parser.add_argument(
         "--compare-paper-aggressive",
         action="store_true",
         help="Compare live 80/20 vs paper aggressive vs active-only (table)",
@@ -8809,6 +9157,13 @@ if __name__ == "__main__":
             print("--compare-nyse-conditional requires --paper-aggressive")
             sys.exit(1)
         run_nyse_conditional_compare(
+            days=args.days, refresh=args.refresh, use_max=args.max
+        )
+    elif getattr(args, "compare_nyse_hygiene", False):
+        if not args.paper_aggressive:
+            print("--compare-nyse-hygiene requires --paper-aggressive")
+            sys.exit(1)
+        run_nyse_hygiene_compare(
             days=args.days, refresh=args.refresh, use_max=args.max
         )
     elif args.compare_paper_aggressive:

@@ -1,6 +1,6 @@
 """US equity session helpers via Alpaca clock."""
 
-from modules.alpaca_client import call_with_retry
+from modules.alpaca_client import AlpacaTransientNetworkError, call_with_retry
 
 
 def is_equity_market_open(trading_client):
@@ -8,6 +8,9 @@ def is_equity_market_open(trading_client):
     try:
         clock = call_with_retry(trading_client.get_clock, op_name="get_clock")
         return bool(clock.is_open)
+    except AlpacaTransientNetworkError:
+        # Propagate so run_all can skip the cycle without treating as auth.
+        raise
     except Exception as e:
         print(f"Market clock unavailable ({e}); treating equity session as closed")
         return False

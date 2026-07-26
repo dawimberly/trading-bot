@@ -333,6 +333,12 @@ def run_position_exits(
             exits += 1
             peak_cache.pop(symbol, None)
             meta_cache.pop(symbol, None)
+            try:
+                from modules.pipeline_strategies import mark_nyse_sold_today
+
+                mark_nyse_sold_today(symbol)
+            except Exception:
+                pass
 
             if exit_opt:
                 from modules.exit_management import record_exit_event

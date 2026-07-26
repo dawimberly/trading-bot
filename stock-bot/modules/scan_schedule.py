@@ -6,6 +6,7 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import config
+from modules.alpaca_client import call_with_retry
 from modules.market_hours import is_equity_market_open
 
 ET = ZoneInfo("America/New_York")
@@ -21,12 +22,17 @@ def _to_et(dt: datetime.datetime) -> datetime.datetime:
     return _aware(dt).astimezone(ET)
 
 
+def _get_clock(trading_client):
+    """Alpaca clock with shared retry / TRANSIENT_NETWORK classification."""
+    return call_with_retry(trading_client.get_clock, op_name="get_clock")
+
+
 def resolve_session_bounds(
     trading_client,
     now: datetime.datetime | None = None,
 ) -> tuple[datetime.datetime, datetime.datetime]:
     """Return (session_open, session_close) in ET for the active or next session."""
-    clock = trading_client.get_clock()
+    clock = _get_clock(trading_client)
     now_et = _to_et(now or clock.timestamp)
     next_open_et = _to_et(clock.next_open)
     next_close_et = _to_et(clock.next_close)
@@ -68,7 +74,7 @@ def equity_scan_state(
             "orders_start": None,
         }
 
-    clock = trading_client.get_clock()
+    clock = _get_clock(trading_client)
     now_et = _to_et(now or clock.timestamp)
     session_open, session_close = resolve_session_bounds(trading_client, now_et)
 
