@@ -6,11 +6,13 @@
 
 **Status:** Final lock for Monday / production-ready paper. Do not invent version bumps past **1.5.4**.
 
+**Forward freeze (2026-07-29 → ~2–4 weeks):** ops / honesty only — see **[FORWARD_PAPER_FREEZE.md](FORWARD_PAPER_FREEZE.md)**. No new sleeves/exits/overlays until freeze ends. Weekly pack: `weekly_review.py --skip-backtest`. Attribution: `scripts/analysis/forward_sleeve_attribution.py`.
+
 **Version:** `REALISTIC_RESEARCH_VERSION = "1.5.4"` (locked in `config.py` via `enforce_realistic_research_profile()`)
 
 **Tagline:** `v1.5.4 — Sector-Aware Portfolio Constructor`
 
-**Locked stack (confirm at startup):** GARCH paper ON · **Smart Dynamic VTI LOCKED** (40–75%, hard floor ≥40%; tiers stress 75% / default 65% / calm 50%) · Portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core) · SPY-like boost ON paper · Daily Profit Banking ON · RHYME primary · HMM soft-only · Stat Arb quality ON · ARIMA OFF · Equity path `run_nyse_momentum_and_stat_arb` primary · **NYSE entry hygiene ON** (max 2 adds/symbol; same-day reentry block ON; min notional $25)
+**Locked stack (confirm at startup):** GARCH paper ON · **Smart Dynamic VTI LOCKED** (40–75%, hard floor ≥40%; tiers stress 75% / default 65% / calm 50%) · **SPY satellite OFF** (Dyn VTI + NYSE; live SPY unchanged) · Portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core) · SPY-like boost ON paper · Daily Profit Banking ON · RHYME primary · HMM soft-only · Stat Arb quality ON · ARIMA OFF · Equity path `run_nyse_momentum_and_stat_arb` primary · **NYSE entry hygiene ON** (max 2 adds/symbol; same-day reentry block ON; min notional $25)
 
 **NYSE entry hygiene (paper only):** Caps open buy fills per NYSE symbol (`PAPER_NYSE_MAX_ADDS_PER_SYMBOL=2`), blocks same-calendar-day re-buy after a sell of that symbol (`PAPER_NYSE_SAME_DAY_REENTRY_BLOCK=true` by default), and raises the NYSE clip floor (`PAPER_NYSE_MIN_NOTIONAL=25`). Live Profile A unchanged. Banner: `NYSE hygiene ON (max N adds/symbol | …)`. Skips log as `[NYSE] Skipping SYM — hygiene: …`. Does **not** raise conviction floors.
 
@@ -66,9 +68,13 @@ Evidence: `scripts/analysis/_v154_tune_ab_365_recommendations.txt` (365d paper-a
 | **Stat Arb v1.5.4 quality** | **ON (locked)** | +1.45pp return / +0.07 Sharpe vs fill-rate baseline; better DD |
 | **ARIMA / ARIMA–GARCH hybrid** | **OFF** (`ARIMA_ENABLED=false`) | ON worse (−0.25pp / −0.01 Sharpe); hybrid may stay true for later opt-in |
 | **Smart Dynamic VTI** | **LOCKED ON** (40–75%, ≥40% hard floor) | A/B vs fixed 20%: +7.9pp / +0.29 Sharpe (365d); zero-core OFF |
-| **SPY-like boost** | **ON** (paper) | Flat this window; live OFF unless `SPY_LIKE_BOOST_LIVE_ENABLED` |
+| **SPY satellite sleeve** | **OFF** (`SPY_SLEEVE_CAP_PCT=0`) | 365d STRICT confirm: +7.0pp / Sharpe 1.12→1.47 vs baseline; Dyn VTI stays. Live SPY trend unchanged |
+| **Conviction top-N** | **OFF** (`PAPER_NYSE_TOP_N=0`) | STRICT top3/top5 lost to diversified baseline — do not promote |
+| **Exit `exit_h45_tight`** | **NOT promoted** | 365d −1.53pp vs baseline — keep hold=30 / arm=10% / trail=5% |
+| **Live SPY-off** | **Rejected** | 365d live-shaped tied on return — keep live SPY trend ON |
+| **SPY-like boost** | **ON** (paper) | Flat earlier window; live OFF unless `SPY_LIKE_BOOST_LIVE_ENABLED` |
 
-Keep existing locks: RHYME primary, HMM soft-only, GARCH paper ON (Live Conservative separate), Daily Banking, scanners, shorts.
+Keep existing locks: RHYME primary, HMM soft-only, GARCH paper ON (Live Conservative separate), Daily Banking, scanners, shorts. Rejected knobs: `config.REJECTED_STRICT_RESEARCH_KNOBS`.
 
 ```
 >>> PAPER BOT: Realistic Research v1.5.4 (Aggressive FINAL LOCK) | v1.5.4 — Sector-Aware Portfolio Constructor | Live Bot: Conservative 85% VTI

@@ -22,7 +22,7 @@ The bot automatically applies **small-account safety** when equity &lt; $500:
 
 No extra flags required — preflight and `status.py` confirm the stack.
 
-**Paper research** (`paper_aggressive`): **Realistic Research v1.5.4** (locked) — RHYME primary / HMM soft, **Smart Dynamic VTI LOCKED 40–75%** (≥40% hard floor; stress/default/calm), portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core), equity path `run_nyse_momentum_and_stat_arb`, GARCH paper ON, Daily Banking, Stat Arb quality; ARIMA optional OFF. Telegram: yields change-only/OFF, fills ≥$5 ON, error watcher ON. Live uses **Live Conservative** (~85% VTI — separate lock). Branch `ollama-fallback-test` includes `main` + WIP restore `f46f4b5`. See [What's New in v1.5](#whats-new-in-v15), [Profile B](#profile-b-realistic-research-v154-paper_aggressive), and **[Research velocity profile](PAPER_RESEARCH_PROFILE.md)**.
+**Paper research** (`paper_aggressive`): **Realistic Research v1.5.4** (locked) — RHYME primary / HMM soft, **Smart Dynamic VTI LOCKED 40–75%** (≥40% hard floor; stress/default/calm), **SPY satellite OFF** (Dyn VTI + NYSE; live SPY unchanged), portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core), equity path `run_nyse_momentum_and_stat_arb`, GARCH paper ON, Daily Banking, Stat Arb quality; ARIMA optional OFF. Telegram: yields change-only/OFF, fills ≥$5 ON, error watcher ON. Live uses **Live Conservative** (~85% VTI — separate lock). Branch `ollama-fallback-test` includes `main` + WIP restore `f46f4b5`. See [What's New in v1.5](#whats-new-in-v15), [Profile B](#profile-b-realistic-research-v154-paper_aggressive), and **[Research velocity profile](PAPER_RESEARCH_PROFILE.md)**.
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -162,7 +162,7 @@ This section is the **authoritative summary** of what actually runs on **live an
 | **Equity path** | **`run_nyse_momentum_and_stat_arb`** primary |
 | **Portfolio guards** | Concentration **≤8%**/name · auto-dust **&lt;$10** · max **25** active non-core tickers |
 | **Telegram** | Yields **OFF** (change-only if enabled) · fills **≥$5 ON** · error watcher **ON** (daily MD + per-error TG) |
-| **Active sleeves** | SPY / crypto / NYSE at 45/20/20 base caps × **1.40×** boost |
+| **Active sleeves** | SPY **OFF** / crypto / NYSE × **1.40×** boost (365d STRICT confirm) |
 | **Stat arb + vol overlay + options** | **On** |
 | **Overlap / chunk / co-fire** | **On** |
 | **Dynamic universe** | Weekly NYSE+NASDAQ screener refresh — **on** (`PAPER_DYNAMIC_UNIVERSE=true`) |
@@ -344,8 +344,8 @@ Operational hardening for 24/7 live + paper on one PC (no strategy changes on Pr
 | **RAM / I/O bounds** | `dashboard_app.py`, `backtester_core.py`, `portal_bot.py` | Journal/log tail reads, backtest cache cap, refresh debounce — see [Memory & performance](#memory--performance-phase-32) |
 | **Daily breaker false trips** | `modules/trading_safety.py` | Detects **anchor contamination** (live ~$300 vs paper ~$98k in `trading_safety_state.json`), resets stale anchors, auto-clears trips when loss is below limit; live session re-primes on startup |
 | **Stat-arb reconcile** | `modules/stat_arb_sleeve.py` | Startup reconcile ignores VTI/SPY/NYSE longs and crypto when sleeves disabled; purges stale book rows; resolves orphan pair registries — no spurious orphan warnings on Profile A |
-| **Dashboard restart** | `dashboard_app.py`, `modules/portal_bot.py` | **Restart Bot** stops cleanly, clears orphan processes, restarts live + paper when keys configured (positions not closed) |
-| **Dashboard open dual reset** | `dashboard_app.py`, `scripts/owner_reset.py` | On open/reopen (default): `clean_restart_both_bots` — opt out with `DASHBOARD_RESTART_BOTS_ON_OPEN=false`; optional stop-on-quit via `DASHBOARD_STOP_BOTS_ON_CLOSE` |
+| **Dashboard restart** | `dashboard_app.py`, `modules/portal_bot.py`, `scripts/owner_reset.py` | **Restart Both** always clean-restarts `alpaca_paper` + `alpaca_live` (stale PIDs cleared; positions not closed) |
+| **Dashboard open dual reset** | `dashboard_app.py`, `scripts/owner_reset.py` | On open/reopen (default): `clean_restart_both_bots` — opt out with `DASHBOARD_RESTART_BOTS_ON_OPEN=false`; closing the monitor prompts to stop portal bots (paper default; live optional) |
 | **Dashboard refresh bot** | `dashboard_app.py`, `modules/portal_bot.py` | **Refresh Bot** — confirm → stop book → `fetch_data.py --daily` → restart (progress in status bar) |
 | **Heartbeat reporting** | `run_all.py`, `status.py`, `status_metrics.py` | Heartbeats include `last_cycle_error`; `status.py` shows age, **STARTING** / **WARMING UP** / **STALE**, scan phase; prefers fresh Alpaca equity over stale heartbeat |
 | **Crypto vol gate** | `modules/crypto_vol_gate.py` | Centralized allow/deny with regime pause + vol-only check; optional SpaceX narrative override; status surfaces gate reason |
@@ -564,7 +564,7 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()` a
 | **Dynamic universe strict** | **Off** unless opted in — 8–12 quality names | `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
 | **NYSE entry quality** | Opt-in: open cooldown, gap filter, 1-entry/day, 12–14 ET bias, exit `entry_hour` | `PAPER_MOMENTUM_QUALITY_FIXES=true` — [paper only](#nyse-momentum-entry-quality-paper-only) |
 | **IPO safety** | **On** — caps / trim / 0.5× sizing on new listings | `PAPER_IPO_SAFETY_ENABLED=true` |
-| **Active sleeves** | 45/20/20 caps × **1.40×** boost | `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
+| **Active sleeves** | SPY **OFF** / crypto / NYSE × **1.40×** boost | `SPY_SLEEVE_CAP_PCT=0` paper lock; `PAPER_ACTIVE_SLEEVE_BOOST=1.40` |
 
 #### Hard-disabled on bots (research only)
 
@@ -1358,9 +1358,9 @@ python dashboard_app.py
 python dashboard_app.py --launch-bot   # also start run_all.py
 ```
 
-Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate UI update; **Refresh Bot** to stop → refresh daily bars → restart the active book; **Restart Bot** for clean stop + relaunch without a data download; **Stop Bot** ends `run_all.py` without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window.
+Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate UI update; **Refresh Bot** to stop → refresh daily bars → restart the active book; **Restart Both** for a clean stop + relaunch of **both** portal books (paper + live, independent of the dropdown); **Stop Bot** ends the selected book’s loop without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window. Closing the monitor (or tray Quit) prompts to stop portal bots if confirmed — paper by default, live only if you check “Also stop live bot”; choose **Exit UI only** to leave bots running.
 
-**Open / reopen:** by default (`DASHBOARD_RESTART_BOTS_ON_OPEN=true`) signing in runs an `owner_reset`-style clean restart of **both** portal books (clear PID files, kill orphans, relaunch live + paper). Set `DASHBOARD_RESTART_BOTS_ON_OPEN=false` to restore monitor-only open. `Start_Bot_and_Dashboard.bat` / `owner_reset` and `AUTO_LAUNCH_DASHBOARD` already restart bots first, so they launch the monitor with the flag off to avoid a double restart. Optional `DASHBOARD_STOP_BOTS_ON_CLOSE=true` stops both books on real quit (not tray minimize); default **false** so closing the dashboard does not kill overnight / Monday Checklist bots.
+**Open / reopen:** by default (`DASHBOARD_RESTART_BOTS_ON_OPEN=true`) signing in runs an `owner_reset`-style clean restart of **both** portal books (clear PID files, kill orphans, relaunch live + paper). Set `DASHBOARD_RESTART_BOTS_ON_OPEN=false` to restore monitor-only open. `Start_Bot_and_Dashboard.bat` / `owner_reset` and `AUTO_LAUNCH_DASHBOARD` already restart bots first, so they launch the monitor with the flag off to avoid a double restart. Optional `DASHBOARD_STOP_BOTS_ON_CLOSE=true` still auto-stops both books when you pick **Exit UI only**; default **false**.
 
 Auto-refresh every **60 seconds**. Data sources: per-user `bot_heartbeat.json` (portal path or `data/fund/<slot>/`), Alpaca API, `paper_journal.csv`, `wisdom_scorecard.json`, `market_data.db`.
 
@@ -1717,6 +1717,8 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 **Gmail setup:** Use an [app password](https://myaccount.google.com/apppasswords) with `SMTP_HOST=smtp.gmail.com`, port `587` (optional — weekly summary uses Telegram only).
 
 **Friday weekly summary:** With Telegram configured, the bot sends a weekly message after **4:30 PM ET on Fridays** once the market is closed. Manual test: `python scripts/weekly_telegram_summary.py --test`. Live book: `TELEGRAM_WEEKLY_LIVE_ENABLED=true`. Disable: `TELEGRAM_WEEKLY_SUMMARY_ENABLED=false`.
+
+**Forward paper freeze (from 2026-07-29, ~2–4 weeks):** No new paper features — see [FORWARD_PAPER_FREEZE.md](FORWARD_PAPER_FREEZE.md). Sleeve attribution (measure only): `python scripts/analysis/forward_sleeve_attribution.py`. During freeze prefer `weekly_review.py --skip-backtest`.
 
 **Saturday weekly review (paper research):** Advisory IC-style report with controlled 90d A/B backtest — **never** auto-applies `.env` changes. Enable on paper: `WEEKLY_REVIEW_ENABLED=true` (spawned from `run_paper_bot.py` on Saturdays, or Task Scheduler via `scripts/analysis/install_weekly_review_task.ps1`). Immediate test email any day:
 

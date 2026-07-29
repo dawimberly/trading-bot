@@ -456,6 +456,7 @@ REALISTIC_RESEARCH_TAGLINE = "v1.5.4 - Sector-Aware Portfolio Constructor"
 REALISTIC_RESEARCH_FEATURE_DETAIL = (
     "FINAL LOCK (365d tune): Smart Dynamic VTI LOCKED (40-75%, hard floor >=40%; "
     "tiers stress 75% / default 65% / calm 50%) + "
+    "SPY satellite sleeve OFF paper (Dyn VTI + NYSE; live SPY trend unchanged) + "
     "SPY-like boosts (paper ON) + Sector Rotation (top 2-3 SPDRs) + "
     "ATR Vol Breakout (RVOL+MTF, <=1% risk) + "
     "Sector-Aware Portfolio Constructor + "
@@ -479,6 +480,9 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "Stat arb quality ON (8-12 pairs, Z 2.1-2.7, RR 1.7, trail 45/30, partial@1.2) — 365d locked",
     "Smart Dynamic VTI LOCKED paper default (40-75%: stress 75% / default 65% / calm 50%; hard floor >=40%)",
     "Dynamic VTI zero-core path OFF paper (DYNAMIC_VTI_ALLOW_ZERO=false; floor_min=40%)",
+    "SPY satellite sleeve OFF paper (SPY_SLEEVE_CAP_PCT=0 / PAPER_SPY_MAX_EXPOSURE_PCT=0; 365d STRICT confirm)",
+    "Conviction top-N OFF paper (PAPER_NYSE_TOP_N=0; STRICT top3/top5 lost to diversified baseline)",
+    "Exit ladder baseline locked (hold=30 arm=10% trail=5%; exit_h45_tight rejected on 365d)",
     "SPY-like boost ON paper (1.05-1.2x; live OFF unless opt-in)",
     "ARIMA / ARIMA-GARCH hybrid OFF by default (ARIMA_ENABLED=false; hybrid stays true when ARIMA on)",
     "Sector rotation (top 2-3 SPDRs, max 25%/sector, monthly/regime)",
@@ -494,6 +498,27 @@ REALISTIC_RESEARCH_LOCKED_FEATURES: tuple[str, ...] = (
     "Bot Health + strategy performance tracking",
     "Heartbeat watchdog + auto-recovery",
 )
+
+# Failed STRICT experiments — do not promote; enforce keeps baselines (env-explicit
+# overrides still win for deliberate research A/Bs only).
+REJECTED_STRICT_RESEARCH_KNOBS: dict[str, str] = {
+    "paper_nyse_top_n": (
+        "STRICT conviction top3/top5 lost to diversified baseline "
+        "(eval_strict_conviction_last.md) — keep PAPER_NYSE_TOP_N=0"
+    ),
+    "exit_h45_tight": (
+        "365d STRICT −1.53pp vs baseline (exit_spy_ab_365_last.md) — "
+        "keep hold=30 / arm=10% / trail=5%"
+    ),
+    "live_spy_off": (
+        "365d live-shaped A/B tied on return (live_spy_ab_365_last.md) — "
+        "keep live SPY trend ON"
+    ),
+    "overlays_as_alpha": (
+        "STRICT overlay A/B diagnostic only — insider/RVOL/catalyst/news "
+        "are lookahead risks; never promote from overlays alone"
+    ),
+}
 #
 # --- VTI passive core + active satellite ---
 VTI_CORE_ENABLED = os.getenv("VTI_CORE_ENABLED", "true").lower() in (
@@ -608,7 +633,9 @@ PAPER_PATTERN_AWARENESS_ENABLED = _parse_env_bool(
 INTERNATIONAL_SLEEVE_CAP_PCT = float(os.getenv("INTERNATIONAL_SLEEVE_CAP_PCT", "0.10"))
 BOND_SLEEVE_CAP_PCT = float(os.getenv("BOND_SLEEVE_CAP_PCT", "0.15"))
 BOND_SLEEVE_SYMBOL = os.getenv("BOND_SLEEVE_SYMBOL", "TLT").strip().upper() or "TLT"
-STRICT_PIT_BACKTEST = _parse_env_bool("STRICT_PIT_BACKTEST", default="false")
+STRICT_PIT_BACKTEST = _parse_env_bool("STRICT_PIT_BACKTEST", default="false") or _parse_env_bool(
+    "BACKTEST_STRICT_PIT", default="false"
+)
 # Classic crypto pairs sleeve — off by default on live and paper bots
 PAPER_CRYPTO_ENABLED = _parse_env_bool("PAPER_CRYPTO_ENABLED", default="false")
 PAPER_CRYPTO_MAX_PAIRS = int(os.getenv("PAPER_CRYPTO_MAX_PAIRS", "4"))
@@ -787,6 +814,8 @@ CONCENTRATION_GUARD_ENABLED = _env_bool_first(
     "CONCENTRATION_GUARD_ENABLED", default="true"
 )
 MAX_ACTIVE_TICKERS = int(os.getenv("MAX_ACTIVE_TICKERS", "25"))
+# Paper/research conviction: keep only top N NYSE momentum ranks (0 = no truncate).
+PAPER_NYSE_TOP_N = int(os.getenv("PAPER_NYSE_TOP_N", "0"))
 # Auto-dust cleaner: sell positions with market value below this (USD).
 AUTO_DUST_MAX_NOTIONAL = float(os.getenv("AUTO_DUST_MAX_NOTIONAL", "10"))
 AUTO_DUST_CLEANER_ENABLED = _env_bool_first(
@@ -812,7 +841,9 @@ VOL_CEILING_ENABLED = os.getenv("VOL_CEILING_ENABLED", "true").lower() in (
 VOL_CEILING_PCT = float(os.getenv("VOL_CEILING_PCT", "0.18"))
 PAPER_TRAILING_STOP_ARM_PCT = float(os.getenv("PAPER_TRAILING_STOP_ARM_PCT", "0.10"))
 PAPER_TRAILING_STOP_TRAIL_PCT = float(os.getenv("PAPER_TRAILING_STOP_TRAIL_PCT", "0.05"))
-PAPER_SPY_MAX_EXPOSURE_PCT = float(os.getenv("PAPER_SPY_MAX_EXPOSURE_PCT", "0.46"))
+# Paper default OFF (365d STRICT confirm: spy_off +7pp / Sharpe 1.12→1.47 vs baseline).
+# Live Profile A keeps SPY_SLEEVE_CAP_PCT=0.45; paper hard-cap is separate.
+PAPER_SPY_MAX_EXPOSURE_PCT = float(os.getenv("PAPER_SPY_MAX_EXPOSURE_PCT", "0.0"))
 # Paper/research NYSE momentum sleeve: target 18–22% (scaled fund math often lands ~9–16%).
 PAPER_NYSE_SLEEVE_CAP_PCT = float(os.getenv("PAPER_NYSE_SLEEVE_CAP_PCT", "0.20"))
 PAPER_NYSE_HIGH_CASH_CAP_PCT = float(os.getenv("PAPER_NYSE_HIGH_CASH_CAP_PCT", "0.22"))
@@ -2190,6 +2221,8 @@ _backtest_live_conservative_ctx = False
 _backtest_paper_sleeves_ctx = False
 _backtest_vti_ceiling: float | None = None
 _backtest_strict_pit_ctx = False
+# Research-only: overlays allowed through STRICT kill switches (e.g. {"rvol"}).
+_strict_pit_allow: set[str] = set()
 _live_thinking_sim_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
@@ -2670,12 +2703,166 @@ def backtest_vti_ceiling() -> float | None:
 
 
 def set_backtest_strict_pit_context(active: bool) -> None:
+    """Enable STRICT PIT for this process (overlays off; does not rewrite .env)."""
     global _backtest_strict_pit_ctx
     _backtest_strict_pit_ctx = bool(active)
 
 
 def backtest_strict_pit_context() -> bool:
     return _backtest_strict_pit_ctx
+
+
+def set_strict_pit_allow(overlays: list[str] | tuple[str, ...] | set[str] | None) -> None:
+    """Allow named overlays under STRICT PIT (research A/B only).
+
+    Names: insider, rvol, catalyst, hist_news, dyn_univ, buffett.
+    Thinking/LLM is never allowlisted.
+    """
+    global _strict_pit_allow
+    aliases = {
+        "insider": "insider",
+        "insider_monitor": "insider",
+        "rvol": "rvol",
+        "catalyst": "catalyst",
+        "hist_news": "hist_news",
+        "news": "hist_news",
+        "historical_news": "hist_news",
+        "dyn_univ": "dyn_univ",
+        "dynamic_universe": "dyn_univ",
+        "screener": "dyn_univ",
+        "buffett": "buffett",
+        "buffett_indicator": "buffett",
+    }
+    allowed: set[str] = set()
+    for raw in overlays or ():
+        key = aliases.get(str(raw).strip().lower())
+        if key:
+            allowed.add(key)
+    _strict_pit_allow = allowed
+
+
+def clear_strict_pit_allow() -> None:
+    global _strict_pit_allow
+    _strict_pit_allow = set()
+
+
+def strict_pit_allow() -> frozenset[str]:
+    return frozenset(_strict_pit_allow)
+
+
+def strict_pit_allows(overlay: str) -> bool:
+    """True if STRICT is active but this overlay is explicitly allowlisted."""
+    if not effective_strict_pit_backtest():
+        return False
+    name = str(overlay or "").strip().lower()
+    aliases = {
+        "news": "hist_news",
+        "historical_news": "hist_news",
+        "insider_monitor": "insider",
+        "dynamic_universe": "dyn_univ",
+        "screener": "dyn_univ",
+        "buffett_indicator": "buffett",
+    }
+    name = aliases.get(name, name)
+    return name in _strict_pit_allow
+
+
+def effective_strict_pit_backtest() -> bool:
+    """True when STRICT PIT evaluation mode is active (env or run context)."""
+    return bool(STRICT_PIT_BACKTEST or _backtest_strict_pit_ctx)
+
+
+def format_strict_pit_banner() -> str | None:
+    if not effective_strict_pit_backtest():
+        return None
+    if _strict_pit_allow:
+        allow = "+".join(sorted(_strict_pit_allow))
+        return f"STRICT PIT: ON | allow {allow} | other overlays/LLM off"
+    return (
+        "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off"
+    )
+
+
+# Overlays that MUST go through effective_* under STRICT PIT (lookahead risk).
+STRICT_PIT_GATED_OVERLAYS: frozenset[str] = frozenset(
+    {"insider", "rvol", "catalyst", "hist_news", "dyn_univ", "buffett"}
+)
+
+
+def strict_pit_gate_status() -> dict[str, bool]:
+    """Return whether each gated overlay is effectively ON (for hygiene audits).
+
+    Under pure STRICT (empty allowlist) every value should be False. Thinking/LLM
+    is never allowlisted and is reported separately via effective_thinking_engine.
+    """
+    return {
+        "insider": bool(effective_insider_monitor_enabled()),
+        "rvol": bool(effective_rvol_scanner_enabled()),
+        "catalyst": bool(effective_catalyst_scoring_enabled()),
+        "hist_news": bool(effective_historical_news_enabled()),
+        "dyn_univ": bool(effective_paper_dynamic_universe()),
+        "buffett": bool(effective_buffett_indicator_enabled()),
+        "thinking": bool(effective_thinking_engine_enabled()),
+    }
+
+
+def assert_strict_pit_gates_off(*, allow: set[str] | frozenset[str] | None = None) -> None:
+    """Raise if a gated overlay is ON under STRICT without being allowlisted.
+
+    Call after ``apply_strict_pit_kill_switches`` in research scripts so a missing
+    ``effective_*`` wire cannot silently reintroduce lookahead.
+    """
+    if not effective_strict_pit_backtest():
+        raise RuntimeError("assert_strict_pit_gates_off requires STRICT PIT active")
+    allowed = frozenset(allow if allow is not None else strict_pit_allow())
+    status = strict_pit_gate_status()
+    leaks = [
+        name
+        for name in STRICT_PIT_GATED_OVERLAYS
+        if status.get(name) and name not in allowed
+    ]
+    if status.get("thinking"):
+        leaks.append("thinking")
+    if leaks:
+        raise RuntimeError(
+            "STRICT PIT hygiene leak — overlays still effective ON: "
+            + ", ".join(sorted(leaks))
+        )
+
+
+def apply_strict_pit_kill_switches(
+    *,
+    allow: list[str] | tuple[str, ...] | set[str] | None = None,
+) -> None:
+    """Activate STRICT PIT for this process (overlays gated via effective_*).
+
+    Does not rewrite .env. Clears thinking for the run; insider/RVOL/catalyst/news
+    are forced off by effective_strict_pit_backtest() checks unless *allow* lists them.
+    Also clears module-level flags for non-allowlisted overlays (defense in depth)
+    so a missed ``effective_*`` call cannot re-enable lookahead mid-run.
+    """
+    global PAPER_THINKING_ENGINE_ENABLED
+    global RVOL_SCANNER_ENABLED
+    global INSIDER_MONITOR_ENABLED
+    global INSIDER_SIGNAL_BOOST_ENABLED
+    global INSIDER_BOOST_ENABLED
+    global CATALYST_SCORING_ENABLED
+    global HISTORICAL_NEWS_ENABLED
+    global PAPER_DYNAMIC_UNIVERSE_ENABLED
+    global BUFFETT_INDICATOR_ENABLED
+    set_backtest_strict_pit_context(True)
+    set_strict_pit_allow(allow)
+    PAPER_THINKING_ENGINE_ENABLED = False
+    allowed = set(strict_pit_allow())
+    # Explicit True/False so multi-leg A/B can re-enable after a pure-STRICT leg.
+    RVOL_SCANNER_ENABLED = "rvol" in allowed
+    INSIDER_MONITOR_ENABLED = "insider" in allowed
+    INSIDER_SIGNAL_BOOST_ENABLED = "insider" in allowed
+    INSIDER_BOOST_ENABLED = "insider" in allowed
+    CATALYST_SCORING_ENABLED = "catalyst" in allowed
+    HISTORICAL_NEWS_ENABLED = "hist_news" in allowed
+    PAPER_DYNAMIC_UNIVERSE_ENABLED = "dyn_univ" in allowed
+    BUFFETT_INDICATOR_ENABLED = "buffett" in allowed
 
 
 def set_live_thinking_sim_context(active: bool) -> None:
@@ -3069,6 +3256,19 @@ def effective_concentration_guard_enabled() -> bool:
 def effective_max_active_tickers() -> int:
     """Max distinct non-core open tickers (default 25)."""
     return max(1, int(MAX_ACTIVE_TICKERS))
+
+
+def effective_nyse_top_n() -> int:
+    """Conviction truncate: only top N momentum ranks enter (0 = full ranked list).
+
+    Paper enforce locks 0 unless PAPER_NYSE_TOP_N is env-explicit (deliberate A/B only).
+    STRICT conviction A/B may set PAPER_NYSE_TOP_N in-process; do not hard-zero here.
+    """
+    try:
+        n = int(PAPER_NYSE_TOP_N)
+    except (TypeError, ValueError):
+        n = 0
+    return max(0, n)
 
 
 def effective_auto_dust_max_notional() -> float:
@@ -4194,11 +4394,13 @@ def enforce_realistic_research_profile() -> None:
     - Stat Arb quality ON (beats fill-rate baseline)
     - ARIMA / ARIMA–GARCH hybrid OFF unless ARIMA_ENABLED is env-explicit
     - Smart Dynamic VTI LOCKED paper default (40-75%, hard floor >=40%; zero-core OFF)
+    - SPY satellite sleeve OFF paper (365d STRICT confirm vs baseline; Dyn VTI stays)
+    - Conviction top-N OFF (STRICT lost); exit_h45_tight NOT promoted (365d lost)
     - SPY-like boost ON paper; live OFF unless SPY_LIKE_BOOST_LIVE_ENABLED
     Existing locks kept: RHYME primary, HMM soft-only, GARCH paper ON
     (Live Conservative separately enables GARCH via GARCH_VOL_LIVE_ENABLED),
     Daily Banking, scanners, shorts, etc.
-    See REALISTIC_RESEARCH_LOCKED_FEATURES for the banner summary.
+    See REALISTIC_RESEARCH_LOCKED_FEATURES / REJECTED_STRICT_RESEARCH_KNOBS.
     Live Profile A uses ``enforce_live_conservative_profile()`` — do not weaken
     that path from here; paper stays aggressive research.
     """
@@ -4216,6 +4418,11 @@ def enforce_realistic_research_profile() -> None:
     global DYNAMIC_VTI_ALLOW_ZERO
     global DYNAMIC_VTI_FLOOR_MIN
     global SPY_LIKE_BOOST_ENABLED
+    global SPY_SLEEVE_CAP_PCT
+    global PAPER_SPY_MAX_EXPOSURE_PCT
+    global PAPER_NYSE_TOP_N
+    global PAPER_TRAILING_STOP_ARM_PCT
+    global PAPER_TRAILING_STOP_TRAIL_PCT
     global PAPER_VTI_CORE_PCT
     global VTI_CORE_PCT
     global PAPER_RISK_PER_TRADE
@@ -4446,6 +4653,19 @@ def enforce_realistic_research_profile() -> None:
         DYNAMIC_VTI_FLOOR_MIN = 0.40
     if not _env_explicit("SPY_LIKE_BOOST_ENABLED", "PAPER_SPY_LIKE_BOOST_ENABLED"):
         SPY_LIKE_BOOST_ENABLED = True
+    # Paper: disable SPY satellite sleeve (365d STRICT confirm). Live keeps module
+    # default SPY_SLEEVE_CAP_PCT=0.45 when paper_aggressive_context is off.
+    if not _env_explicit("SPY_SLEEVE_CAP_PCT"):
+        SPY_SLEEVE_CAP_PCT = 0.0
+    if not _env_explicit("PAPER_SPY_MAX_EXPOSURE_PCT"):
+        PAPER_SPY_MAX_EXPOSURE_PCT = 0.0
+    # Rejected STRICT knobs — keep baselines unless env-explicit research A/B.
+    if not _env_explicit("PAPER_NYSE_TOP_N"):
+        PAPER_NYSE_TOP_N = 0
+    if not _env_explicit("PAPER_TRAILING_STOP_ARM_PCT"):
+        PAPER_TRAILING_STOP_ARM_PCT = 0.10
+    if not _env_explicit("PAPER_TRAILING_STOP_TRAIL_PCT"):
+        PAPER_TRAILING_STOP_TRAIL_PCT = 0.05
     if not _env_explicit("PORTFOLIO_CONSTRUCTOR_ENABLED"):
         # Sector-aware sleeve/short tilts on top of Smart Dynamic VTI (v1.5.4, paper research).
         PORTFOLIO_CONSTRUCTOR_ENABLED = True
@@ -4962,6 +5182,9 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "RISK_PER_TRADE": "0.018",
     "PAPER_RISK_PER_TRADE": "0.018",
     "PAPER_POSITION_MAX_HOLD_BARS": "30",
+    "PAPER_NYSE_TOP_N": "0",
+    "PAPER_TRAILING_STOP_ARM_PCT": "0.10",
+    "PAPER_TRAILING_STOP_TRAIL_PCT": "0.05",
     "PAPER_REGIME_B_SIZING_MULT": "0.30",
     "PAPER_REGIME_B_RISK_MULT": "0.50",
     "TAIL_RISK_CONTROLS_ENABLED": "true",
@@ -5790,6 +6013,9 @@ def effective_short_bubble_min_for_rhyme_e() -> float:
 
 
 def effective_buffett_indicator_enabled() -> bool:
+    """Buffett Indicator / bubble overlay — off under STRICT unless allowlisted."""
+    if effective_strict_pit_backtest() and not strict_pit_allows("buffett"):
+        return False
     return bool(BUFFETT_INDICATOR_ENABLED)
 
 
@@ -6026,6 +6252,8 @@ def paper_frequency_mode_lines() -> list[str]:
 
 def effective_rvol_scanner_enabled() -> bool:
     """Relative volume filter/boost — paper/research; live when ORB momentum sleeve opted in."""
+    if effective_strict_pit_backtest() and not strict_pit_allows("rvol"):
+        return False
     if not RVOL_SCANNER_ENABLED:
         return False
     if orb_momentum_live_sleeve_enabled() and not PAPER_TRADING:
@@ -6171,6 +6399,8 @@ def effective_vol_breakout_enabled() -> bool:
 
 def effective_catalyst_scoring_enabled() -> bool:
     """Catalyst scoring — paper/research only."""
+    if effective_strict_pit_backtest() and not strict_pit_allows("catalyst"):
+        return False
     if not CATALYST_SCORING_ENABLED:
         return False
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
@@ -6187,7 +6417,9 @@ def effective_catalyst_scoring_enabled() -> bool:
 
 
 def effective_historical_news_enabled() -> bool:
-    """Date-shifted headline proxies for backtests (paper-aggressive only)."""
+    """Date-shifted headline proxies for backtests (paper-aggressive only). Off under STRICT PIT."""
+    if effective_strict_pit_backtest() and not strict_pit_allows("hist_news"):
+        return False
     if not HISTORICAL_NEWS_ENABLED:
         return False
     return bool(backtest_paper_sleeves_context())
@@ -6290,6 +6522,8 @@ def effective_correlation_guard_enabled() -> bool:
 
 def effective_dynamic_sector_screener() -> bool:
     """Sector ETF strength expansion — paper/research only; never live Profile A."""
+    if effective_strict_pit_backtest() and not strict_pit_allows("dyn_univ"):
+        return False
     if not DYNAMIC_SECTOR_SCREENER_ENABLED:
         return False
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
@@ -6304,7 +6538,12 @@ def effective_dynamic_sector_screener() -> bool:
 
 
 def effective_paper_dynamic_universe() -> bool:
-    """Weekly NYSE/screener refresh — paper aggressive only."""
+    """Weekly NYSE/screener refresh — paper aggressive only.
+
+    Under STRICT PIT: OFF unless allowlisted (current screener JSON is not as-of).
+    """
+    if effective_strict_pit_backtest() and not strict_pit_allows("dyn_univ"):
+        return False
     return bool(paper_only_sleeves_active() and PAPER_DYNAMIC_UNIVERSE_ENABLED)
 
 
@@ -6493,6 +6732,8 @@ def effective_loss_cutting_enabled() -> bool:
 
 def effective_thinking_engine_enabled() -> bool:
     """Ollama PM reasoning — paper/research default ON; live default OFF (opt-in)."""
+    if effective_strict_pit_backtest():
+        return False
     if not THINKING_ENGINE_ENABLED:
         return False
     if live_thinking_sim_context() and PAPER_THINKING_ENGINE_ENABLED:
@@ -6529,6 +6770,8 @@ def effective_kimi_deep_thinker_enabled() -> bool:
 
 def effective_insider_monitor_enabled() -> bool:
     """SEC EDGAR insider/filings RSS monitor — paper/research only."""
+    if effective_strict_pit_backtest() and not strict_pit_allows("insider"):
+        return False
     if not INSIDER_MONITOR_ENABLED:
         return False
     if not PAPER_TRADING and not backtest_paper_sleeves_context():
