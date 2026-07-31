@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "purpose": "Labels only — event dating for graded macro windows. Not trade signals.",
+  "disclaimer": "Confirm dates with dual sources before treating as study truth. Wayback capture time != publication time.",
+  "events": [
+    {
+      "id": "gulf_war_1990",
+      "label": "Iraq invades Kuwait / Gulf War start",
+      "event_date": "1990-08-02",
+      "region": "Middle East",
+      "tier": "macro_only",
+      "notes": "Pre-SPY ETF; use equity proxy + oil/VIX if available.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/event/Persian-Gulf-War"},
+        {"name": "US State Department Office of the Historian", "url": "https://history.state.gov/milestones/1989-1992/gulf-war"}
+      ]
+    },
+    {
+      "id": "sep11_2001",
+      "label": "September 11 attacks",
+      "event_date": "2001-09-11",
+      "region": "United States / global",
+      "tier": "partial_strategy_proxy",
+      "notes": "VTI inception ~2001-05; SPY available. Markets closed Sep 11-14.",
+      "sources": [
+        {"name": "911 Memorial & Museum", "url": "https://www.911memorial.org/911-faqs"},
+        {"name": "NYSE historical note (market closure)", "url": "https://www.nyse.com/publicdocs/nyse/historical/NYSE_Timeline.pdf"}
+      ]
+    },
+    {
+      "id": "iraq_invasion_2003",
+      "label": "Iraq War invasion begins",
+      "event_date": "2003-03-20",
+      "region": "Middle East",
+      "tier": "partial_strategy_proxy",
+      "notes": "VTI/SPY/XLE available; GLD not yet listed.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/event/Iraq-War"},
+        {"name": "US Army Center of Military History", "url": "https://history.army.mil/html/bookshelves/resmat/iraq.html"}
+      ]
+    },
+    {
+      "id": "libya_2011",
+      "label": "Libya intervention / oil spike window",
+      "event_date": "2011-03-19",
+      "region": "Middle East / North Africa",
+      "tier": "partial_strategy_proxy",
+      "notes": "NATO operations begin; oil/vol relevant.",
+      "sources": [
+        {"name": "NATO Libya operation timeline", "url": "https://www.nato.int/cps/en/natolive/topics_71652.htm"},
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/event/Libya-Revolt-of-2011"}
+      ]
+    },
+    {
+      "id": "crimea_2014",
+      "label": "Russia annexes Crimea",
+      "event_date": "2014-03-18",
+      "region": "Europe / Black Sea",
+      "tier": "partial_strategy_proxy",
+      "notes": "Geopolitical risk-off; energy secondary vs 2022.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/place/Crimea"},
+        {"name": "Council on Foreign Relations timeline", "url": "https://www.cfr.org/timeline/ukraines-struggle-independence"}
+      ]
+    },
+    {
+      "id": "oil_crash_2014",
+      "label": "Oil price collapse (late 2014)",
+      "event_date": "2014-11-27",
+      "region": "Global energy",
+      "tier": "macro_only",
+      "notes": "OPEC no-cut decision; WTI primary series.",
+      "sources": [
+        {"name": "EIA oil price retrospective", "url": "https://www.eia.gov/todayinenergy/detail.php?id=19451"},
+        {"name": "Reuters OPEC 2014 coverage archive", "url": "https://www.reuters.com/article/us-opec-meeting-idUSKCN0JB1M120141127"}
+      ]
+    },
+    {
+      "id": "soleimani_2020",
+      "label": "Soleimani strike / Iran escalation",
+      "event_date": "2020-01-03",
+      "region": "Middle East",
+      "tier": "partial_strategy_proxy",
+      "notes": "Brief oil/vol spike; useful ME escalation analogue.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/biography/Qassem-Soleimani"},
+        {"name": "CRS report summary", "url": "https://crsreports.congress.gov/product/pdf/IN/IN11212"}
+      ]
+    },
+    {
+      "id": "russia_ukraine_2022",
+      "label": "Russia full-scale invasion of Ukraine",
+      "event_date": "2022-02-24",
+      "region": "Europe",
+      "tier": "partial_strategy_proxy",
+      "notes": "Aligned with 2022 STRICT price-path stress window. Prod VIX incomplete for 2022.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/event/2022-Russian-invasion-of-Ukraine"},
+        {"name": "UN news timeline", "url": "https://news.un.org/en/story/2022/02/1112592"}
+      ]
+    },
+    {
+      "id": "hamas_israel_2023",
+      "label": "Hamas attack on Israel / Gaza war start",
+      "event_date": "2023-10-07",
+      "region": "Middle East",
+      "tier": "partial_strategy_proxy",
+      "notes": "Modern ME flare; oil/vol often muted vs 1990/2022.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/event/Israel-Hamas-War"},
+        {"name": "CFR backgrounder", "url": "https://www.cfr.org/global-conflict-tracker/conflict/israeli-palestinian-conflict"}
+      ]
+    },
+    {
+      "id": "iran_israel_2024",
+      "label": "Iran direct strike on Israel (Apr 2024)",
+      "event_date": "2024-04-13",
+      "region": "Middle East",
+      "tier": "full_freeze_compatible",
+      "notes": "Recent; prod VIX may exist. Still report-only.",
+      "sources": [
+        {"name": "Encyclopaedia Britannica", "url": "https://www.britannica.com/event/Israel-Hamas-War"},
+        {"name": "Reuters timeline coverage", "url": "https://www.reuters.com/world/middle-east/"}
+      ]
+    }
+  ]
+}

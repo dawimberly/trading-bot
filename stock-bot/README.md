@@ -1718,7 +1718,20 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 
 **Friday weekly summary:** With Telegram configured, the bot sends a weekly message after **4:30 PM ET on Fridays** once the market is closed. Manual test: `python scripts/weekly_telegram_summary.py --test`. Live book: `TELEGRAM_WEEKLY_LIVE_ENABLED=true`. Disable: `TELEGRAM_WEEKLY_SUMMARY_ENABLED=false`.
 
-**Forward paper freeze (from 2026-07-29, ~2–4 weeks):** No new paper features — see [FORWARD_PAPER_FREEZE.md](FORWARD_PAPER_FREEZE.md). Sleeve attribution (measure only): `python scripts/analysis/forward_sleeve_attribution.py`. During freeze prefer `weekly_review.py --skip-backtest`.
+**Forward paper freeze (from 2026-07-29, ~2–4 weeks):** No new paper features — see [FORWARD_PAPER_FREEZE.md](FORWARD_PAPER_FREEZE.md). Known-good tag: `paper-v154-spy-off-strict` ([TAG_NOTES.md](TAG_NOTES.md)). Sleeve attribution (measure only): `python scripts/analysis/forward_sleeve_attribution.py`. During freeze prefer `weekly_review.py --skip-backtest`. Geopolitical/war research stays a **sidecar only** (`scripts/research/geopolitical_event_study/`) — never a live/paper sleeve.
+
+**Freeze ops (Telegram + MD popup, never auto-applies):** Daily hygiene anomalies Mon–Fri; Saturday confirm/deny plan (silence = freeze continues).
+
+```powershell
+# Install Task Scheduler (preferred so --open works interactively)
+powershell -ExecutionPolicy Bypass -File scripts\analysis\install_freeze_ops_tasks.ps1
+
+# Smoke test (opens MD; Telegram if configured)
+python scripts/analysis/freeze_daily_hygiene_memo.py --test --open
+python scripts/analysis/freeze_weekly_confirm_deny.py --test --open --force
+```
+
+Outputs: `data/freeze_daily_YYYY-MM-DD.md`, `data/freeze_confirm_deny_YYYY-MM-DD.md` (+ `*_latest.md`). Env: `FREEZE_OPS_ENABLED`, `FREEZE_DAILY_*`, `FREEZE_WEEKLY_*`, `FREEZE_OPS_TELEGRAM` (see `.env.example`). Dig in early only if hygiene flags **bot dead**, **SPY fills while off**, or **auth/network stuck**.
 
 **Saturday weekly review (paper research):** Advisory IC-style report with controlled 90d A/B backtest — **never** auto-applies `.env` changes. Enable on paper: `WEEKLY_REVIEW_ENABLED=true` (spawned from `run_paper_bot.py` on Saturdays, or Task Scheduler via `scripts/analysis/install_weekly_review_task.ps1`). Immediate test email any day:
 
@@ -1792,6 +1805,11 @@ Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
 | `USE_DYNAMIC_UNIVERSE` | No | Paper only: union fixed NYSE list + screener top 75 (~103 tickers); live stays fixed |
 | `PAPER_MOMENTUM_QUALITY_FIXES` | No | Paper only: NYSE open cooldown (9:30–10:00 ET), >2% gap skip, 1 entry/symbol/day, 12–14 ET bias, `exit_reason` + `entry_hour` on exits — default `false` |
 | `WEEKLY_REVIEW_ENABLED` | No | Saturday paper research report + email (default `false`); test: `weekly_review.py --test` |
+| `FREEZE_OPS_ENABLED` | No | Forward-freeze ops memos (default `true` when unset); never auto-applies `.env` |
+| `FREEZE_DAILY_HYGIENE_ENABLED` | No | Mon–Fri hygiene memo (default `true` with freeze ops) |
+| `FREEZE_WEEKLY_PLAN_ENABLED` | No | Saturday confirm/deny plan (default `true` with freeze ops) |
+| `FREEZE_DAILY_OPEN` / `FREEZE_WEEKLY_OPEN` | No | Open MD via OS association (PyCharm if default); tasks pass `--open` |
+| `FREEZE_OPS_TELEGRAM` | No | Telegram snippet for freeze memos (default `true`) |
 
 Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 

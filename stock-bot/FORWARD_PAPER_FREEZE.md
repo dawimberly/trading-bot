@@ -22,9 +22,21 @@ Let the locked book learn in live paper time. No new sleeves, exits, overlays, o
 ## Ops cadence
 
 1. Keep `run_paper_bot.py` running (restart once after SPY-off lock if not already).
-2. **Weekly pack** (Saturday): `python scripts/analysis/weekly_review.py --skip-backtest` during freeze — measure only, no hypothesis A/B.
-3. **Sleeve attribution** (any day): `python scripts/analysis/forward_sleeve_attribution.py` → `scripts/analysis/forward_sleeve_attr_last.md`.
-4. Journal + dashboard: treat short-sample Sharpe as noise; do not retune from 2–3% DD.
+2. **Daily hygiene (automated):** `freeze_daily_hygiene_memo.py` — small cleanup candidates at end of day; Telegram + optional `--open`.
+3. **Weekly confirm/deny (automated):** Saturday `freeze_weekly_confirm_deny.py` — plan for you to CONFIRM / DENY / HOLD; default = freeze continues.
+4. **Weekly pack** (Saturday): `python scripts/analysis/weekly_review.py --skip-backtest` during freeze — measure only, no hypothesis A/B.
+5. **Sleeve attribution** (any day): `python scripts/analysis/forward_sleeve_attribution.py` → `scripts/analysis/forward_sleeve_attr_last.md`.
+6. Journal + dashboard: treat short-sample Sharpe as noise; do not retune from 2–3% DD.
+
+Install Task Scheduler (opens MD like weekly review):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\analysis\install_freeze_ops_tasks.ps1
+```
+
+Env (see `.env.example`): `FREEZE_OPS_ENABLED`, `FREEZE_DAILY_*`, `FREEZE_WEEKLY_*`, `FREEZE_OPS_TELEGRAM`.
+
+**Analyst LLM (optional):** `FREEZE_OPS_OLLAMA=true` adds a non-binding narrative to the weekly plan only — never auto-applies knobs.
 
 ## Promote rule (unchanged)
 

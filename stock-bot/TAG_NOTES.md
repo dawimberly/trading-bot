@@ -26,7 +26,9 @@
 - Conviction top-N reject: `scripts/analysis/eval_strict_conviction_last.md`
 - Rejected knobs registry: `config.REJECTED_STRICT_RESEARCH_KNOBS`
 - Ops freeze: `FORWARD_PAPER_FREEZE.md`
+- Freeze ops (Telegram + MD): `scripts/analysis/freeze_daily_hygiene_memo.py`, `freeze_weekly_confirm_deny.py`, `install_freeze_ops_tasks.ps1`
 - Attribution (measure only): `scripts/analysis/forward_sleeve_attribution.py`
+- Geo research sidecar only: `scripts/research/geopolitical_event_study/`
 
 ## Rollback
 
