@@ -20,6 +20,7 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 
 ## Recent changes
 
+- **2026-08-11** — Enable commit hooks: auto README Recent changes and dual-remote push.
 - **2026-08-11** — Commit hooks: auto README Recent changes + dual-remote push via `origin`.
 
 ## Quick start
