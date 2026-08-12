@@ -10,17 +10,17 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 **Repo (personal):** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)  
 **Repo (group / infinite-robots):** [github.com/infinite-robots/python-trading](https://github.com/infinite-robots/python-trading)
 
-Both remotes were synced to the same commits on `main` and all cursor branches (starting point: `03abb6c`). They are **independent from here on** — updates to one are not automatic on the other.
-
 | Remote | GitHub | Who |
 |--------|--------|-----|
-| `origin` | `dawimberly/trading-bot` | Your sandbox — default `git push` / `git pull` |
-| `infinite-robots` | `infinite-robots/python-trading` | Group clone — push when you want to share |
+| `origin` (fetch) | `dawimberly/trading-bot` | Personal |
+| `origin` (push ×2) | personal **and** `infinite-robots/python-trading` | One Commit/Push hits both |
+| `infinite-robots` | `infinite-robots/python-trading` | Optional explicit group remote |
 
-**You (after clone with both remotes):** `git pull origin main` · `git push origin main` · share to group: `git push infinite-robots main`  
-**Group:** `git clone https://github.com/infinite-robots/python-trading.git` only — do not use the personal URL.
+**Commit button:** `.githooks` updates root `README.md` **Recent changes** from the commit subject, then `post-commit` pushes `origin` (both GitHubs). Skip with `[skip-readme]` / `[no-push]`, or `SKIP_README_HOOK=1` / `SKIP_AUTO_PUSH=1`.
 
-Add the org remote once: `git remote add infinite-robots https://github.com/infinite-robots/python-trading.git`
+## Recent changes
+
+- **2026-08-11** — Commit hooks: auto README Recent changes + dual-remote push via `origin`.
 
 ## Quick start
 

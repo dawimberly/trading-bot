@@ -1,0 +1,5 @@
+# Force LF for files that run on the Linux VPS regardless of desktop OS.
+*.sh text eol=lf
+*.service text eol=lf
+
+.githooks/** text eol=lf

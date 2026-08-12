@@ -1,0 +1,31 @@
+#!/bin/sh
+# post-commit — push current branch to origin (configured with dual push URLs).
+#
+# Skip: SKIP_AUTO_PUSH=1, [no-push] in message, rebase/detached HEAD
+
+if [ -n "$SKIP_AUTO_PUSH" ]; then
+  exit 0
+fi
+
+MSG=$(git log -1 --pretty=%B 2>/dev/null) || exit 0
+case "$MSG" in
+  *"[no-push]"*|*"\[no-push\]"*) exit 0 ;;
+esac
+
+if [ -d "$(git rev-parse --git-path rebase-merge 2>/dev/null)" ] || \
+   [ -d "$(git rev-parse --git-path rebase-apply 2>/dev/null)" ]; then
+  exit 0
+fi
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
+if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+  exit 0
+fi
+
+echo "post-commit: pushing $BRANCH to origin (all push URLs)…" >&2
+if git push -u origin HEAD; then
+  echo "post-commit: push ok" >&2
+else
+  echo "post-commit: push failed (network/auth?) — commit kept locally" >&2
+fi
+exit 0
