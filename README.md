@@ -20,6 +20,8 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 
 ## Recent changes
 
+- **2026-08-28** — Listen for freeze HOLD/CONFIRM on Telegram and stop live banners from advertising a VTI core.
+- **2026-08-20** — Point recon at the portal journal and add AI-burst hedge v1.
 - **2026-08-12** — Update README Recent changes for 2026-08-12.
 - **2026-08-12** — Document commit-hook enablement in README recent changes.
 - **2026-08-11** — Enable commit hooks: auto README Recent changes and dual-remote push.
@@ -53,7 +55,7 @@ Friend setup: [FRIENDS.md](FRIENDS.md) · Full bot docs: [stock-bot/README.md](s
 
 Legacy state files from repo root were moved into:
 
-- `stock-bot/data/` — runtime state (heartbeats, journals, Kraken/wisdom state, etc.)
+- `stock-bot/data/` — runtime state (heartbeats, journals, wisdom state, etc.)
 - `stock-bot/archive/` — backtest CSVs, jsonl backups, build logs, duplicate scripts
 
 A timestamped backup at `backup_root_purge_2026-06-20/` holds copies of everything moved for easy rollback.
