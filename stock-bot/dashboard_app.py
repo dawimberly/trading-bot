@@ -106,7 +106,8 @@ from modules.portal_bot import (  # noqa: E402
     stop_bot,
 )
 
-REFRESH_SECONDS = 45
+REFRESH_SECONDS = 45  # equity session open
+REFRESH_SECONDS_CLOSED = 300  # overnight / session closed (5 min)
 _BOOK_ENV_LOCK = threading.Lock()
 _POSITIONS_CACHE_LOCK = threading.Lock()
 # key -> {"at": monotonic, "df": DataFrame|None, "err": str|None}
@@ -121,7 +122,15 @@ EQUITY_EVENTS = frozenset({"cycle", "startup"})
 CHART_DAYS = 21
 CHART_DPI = 72
 SPARKLINE_POINTS = 48
-ENABLE_SPARKLINE = True  # lightweight; disable if CPU is very slow
+# Quote-style ranges: short windows prefer 5m live tables; 1M uses daily.
+CHART_RANGE_KEYS = ("1D", "5D", "1M")
+CHART_RANGE_SPECS: dict[str, dict] = {
+    "1D": {"prefer": "5m", "calendar_days": 1, "daily_bars": 2, "max_points": 96},
+    "5D": {"prefer": "5m", "calendar_days": 5, "daily_bars": 5, "max_points": 120},
+    "1M": {"prefer": "1d", "calendar_days": 32, "daily_bars": 22, "max_points": 48},
+}
+ENABLE_SPARKLINE = True  # draw from worker-preloaded data only (never journal on UI)
+DASHBOARD_UI_TAG = "2026-08-21-sleeve-pnl"
 
 ENV_PATH = PROJECT_ROOT / ".env"
 ICON_PATH = PROJECT_ROOT / "assets" / "dashboard.ico"
@@ -226,19 +235,54 @@ def _book_running_status(username: str, book_id: str) -> bool:
     return age < 120
 
 
-def _format_book_status_block(username: str, book_id: str) -> list[str]:
+def _et_equity_session_open_guess() -> bool:
+    """Cheap local clock fallback (weekdays 09:30–16:00 ET) when heartbeat lacks flags."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return True
+    if now.weekday() >= 5:
+        return False
+    minutes = now.hour * 60 + now.minute
+    return (9 * 60 + 30) <= minutes < (16 * 60)
+
+
+def _equity_session_open_from_heartbeat(heartbeat: dict | None) -> bool | None:
+    """Return True/False from heartbeat, or None if unknown."""
+    if not heartbeat:
+        return None
+    if "equity_session_open" in heartbeat:
+        return bool(heartbeat.get("equity_session_open"))
+    scan = heartbeat.get("scan_schedule") or {}
+    if "market_open" in scan:
+        return bool(scan.get("market_open"))
+    return None
+
+
+def _format_book_status_block(
+    username: str,
+    book_id: str,
+    *,
+    running: bool | None = None,
+    heartbeat: dict | None = None,
+    hb_path: Path | None = None,
+) -> list[str]:
     """Compact status lines for one Alpaca book (live or paper)."""
     lbl = book_label(book_id)
     mode = "paper" if _book_is_paper(book_id) else "live"
-    running = _book_running_status(username, book_id)
-    hb, hb_path = _load_active_heartbeat(username, book_id)
+    if running is None:
+        running = _book_running_status(username, book_id)
+    if heartbeat is None or hb_path is None:
+        heartbeat, hb_path = _load_active_heartbeat(username, book_id)
     run_txt = "running" if running else "stopped"
-    age = _heartbeat_age_minutes(hb)
+    age = _heartbeat_age_minutes(heartbeat)
     age_txt = f"{age:.0f} min ago" if age is not None else "no timestamp"
-    stale = _heartbeat_is_stale(hb, running=running)
-    regime = (hb or {}).get("regime") or "—"
-    phase = _scan_phase_label(hb)
-    eq = float((hb or {}).get("equity") or 0)
+    stale = _heartbeat_is_stale(heartbeat, running=running)
+    regime = (heartbeat or {}).get("regime") or "—"
+    phase = _scan_phase_label(heartbeat)
+    eq = float((heartbeat or {}).get("equity") or 0)
     eq_s = f"${eq:,.2f}" if eq > 0 else "n/a"
     try:
         hb_rel = os.path.relpath(str(hb_path), resolve_data_root(PROJECT_ROOT))
@@ -524,13 +568,17 @@ def _positions_fingerprint(
         except (TypeError, ValueError):
             entry = 0.0
         try:
-            current = round(float(r.get("Current") or 0), 4)
+            cost = round(float(r.get("Cost $") or 0), 4)
         except (TypeError, ValueError):
-            current = 0.0
+            cost = 0.0
         try:
             pnl = round(float(r.get("P&L $") or 0), 4)
         except (TypeError, ValueError):
             pnl = 0.0
+        try:
+            total = round(float(r.get("Total $") or 0), 4)
+        except (TypeError, ValueError):
+            total = 0.0
         try:
             value = round(float(r.get("Value $") or 0), 4)
         except (TypeError, ValueError):
@@ -540,11 +588,13 @@ def _positions_fingerprint(
                 str(r.get("Ticker") or ""),
                 qty,
                 entry,
-                current,
+                cost,
                 pnl,
+                total,
                 value,
                 str(r.get("Opened") or ""),
                 str(r.get("ATR Stop") or "") if has_atr else "",
+                DASHBOARD_UI_TAG,
             )
         )
     return tuple(rows)
@@ -607,24 +657,6 @@ def _resolve_equity_cash(
     return 0.0, hb_cash, acct_err
 
 
-def _fetch_book_equity(username: str, book_id: str, *, retries: int = 2) -> tuple[float, float, str | None]:
-    """Synchronous Alpaca equity/cash for the selected book (caller may hold _BOOK_ENV_LOCK)."""
-    with _BOOK_ENV_LOCK:
-        _apply_user_paths(username, book_id)
-        _reset_equity_cache()
-        acct_eq, acct_cash, acct_err = _fetch_account_summary(
-            username=username, book_id=book_id, retries=retries
-        )
-        return _resolve_equity_cash(
-            acct_eq,
-            acct_cash,
-            acct_err,
-            None,
-            username=username,
-            book_id=book_id,
-        )
-
-
 def _format_position_opened(opened: datetime | None) -> str:
     if opened is None:
         return "—"
@@ -661,7 +693,79 @@ def _position_opened_at(pos, client, journal_df, sym: str) -> datetime | None:
     return None
 
 
-def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, str | None]:
+def _open_pnl_from_heartbeat(heartbeat: dict | None) -> tuple[float, float, str]:
+    """Fallback Open P&L from heartbeat sleeve marks when positions aren't loaded yet."""
+    if not heartbeat:
+        return 0.0, 0.0, ""
+    try:
+        sleeves = heartbeat.get("sleeve_pnl") or {}
+        upl = 0.0
+        for v in sleeves.values():
+            if isinstance(v, dict):
+                upl += float(v.get("unrealized_pnl") or 0)
+            else:
+                try:
+                    upl += float(v or 0)
+                except (TypeError, ValueError):
+                    continue
+        equity = float(heartbeat.get("equity") or 0)
+        cash = float(heartbeat.get("cash") or 0)
+        invested = max(0.0, equity - cash) if equity > 0 else 0.0
+        cost = max(invested - upl, 1e-6) if invested > 0 else 0.0
+        pct = 100.0 * upl / cost if cost > 1e-6 else 0.0
+        if abs(upl) < 1e-9:
+            return 0.0, 0.0, ""
+        return upl, pct, "from heartbeat"
+    except Exception:  # noqa: BLE001
+        return 0.0, 0.0, ""
+
+
+def _open_pnl_from_positions(positions_df: pd.DataFrame | None) -> tuple[float, float, str]:
+    """Portfolio open P&L $ and % weighted by position size (biggest holdings dominate %).
+
+    Returns (upl_usd, upl_pct, top_note). pct uses cost basis (value - pnl) so it
+    matches how Alpaca reports each row's P&L % — not a disconnected day/form metric.
+    """
+    if positions_df is None or getattr(positions_df, "empty", True):
+        return 0.0, 0.0, ""
+    try:
+        work = positions_df.copy()
+        if "Value $" not in work.columns or "P&L $" not in work.columns:
+            return 0.0, 0.0, ""
+        work["_value"] = pd.to_numeric(work["Value $"], errors="coerce").fillna(0.0)
+        work["_pnl"] = pd.to_numeric(work["P&L $"], errors="coerce").fillna(0.0)
+        if "P&L %" in work.columns:
+            work["_pct"] = pd.to_numeric(work["P&L %"], errors="coerce").fillna(0.0)
+        else:
+            work["_pct"] = 0.0
+        upl = float(work["_pnl"].sum())
+        # Cost basis ≈ market value − unrealized (longs); keep abs for shorts.
+        cost = float((work["_value"] - work["_pnl"]).abs().sum())
+        if cost > 1e-6:
+            pct = 100.0 * upl / cost
+        else:
+            total_v = float(work["_value"].abs().sum())
+            pct = 100.0 * upl / total_v if total_v > 1e-6 else 0.0
+        # Largest holding by |value| — show its % so the hero reads correlated.
+        top = work.reindex(work["_value"].abs().sort_values(ascending=False).index)
+        top_note = ""
+        if not top.empty:
+            row = top.iloc[0]
+            ticker = str(row.get("Ticker") or "?")
+            top_pct = float(row["_pct"])
+            top_note = f"{ticker} {top_pct:+.2f}%"
+        return upl, pct, top_note
+    except Exception:  # noqa: BLE001
+        return 0.0, 0.0, ""
+
+
+def _fetch_positions(
+    username: str,
+    book_id: str,
+    *,
+    detail: bool = True,
+) -> tuple[pd.DataFrame | None, str | None]:
+    """Fetch Alpaca positions. detail=False skips slow journal Opened + ATR columns."""
     try:
         client = _book_trading_client(username, book_id)
         positions = client.get_all_positions()
@@ -670,19 +774,20 @@ def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, 
     except Exception as exc:  # noqa: BLE001
         return None, str(exc)
 
-    cols = ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %"]
-    if config.effective_atr_sizing_enabled() and _book_is_paper(book_id):
+    cols = ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Cost $", "Value $", "P&L $", "P&L %"]
+    if detail and config.effective_atr_sizing_enabled() and _book_is_paper(book_id):
         cols.append("ATR Stop")
     if not positions:
         return pd.DataFrame(columns=cols), None
 
     journal_df = None
-    try:
-        from modules.paper_journal import read_journal
+    if detail:
+        try:
+            from modules.paper_journal import read_journal
 
-        journal_df = read_journal(path=book_journal_path(username, book_id))
-    except Exception:
-        journal_df = None
+            journal_df = read_journal(path=book_journal_path(username, book_id))
+        except Exception:
+            journal_df = None
 
     rows = []
     for pos in positions:
@@ -702,18 +807,38 @@ def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, 
             current = 0.0
         if current != current:  # NaN
             current = 0.0
-        market_value = qty * current if qty else 0.0
-        opened = _position_opened_at(pos, client, journal_df, sym)
+        try:
+            market_value = float(getattr(pos, "market_value", 0) or 0)
+        except (TypeError, ValueError):
+            market_value = 0.0
+        if not market_value and qty and current:
+            market_value = qty * current
+        try:
+            cost_basis = float(getattr(pos, "cost_basis", 0) or 0)
+        except (TypeError, ValueError):
+            cost_basis = 0.0
+        if not cost_basis and qty and entry:
+            cost_basis = abs(qty) * entry
+        # Prefer Alpaca avg entry; fall back to cost/qty so Buy $ never blanks when Cost $ is known.
+        if (not entry or entry != entry) and qty and cost_basis:
+            try:
+                entry = abs(cost_basis) / abs(qty)
+            except ZeroDivisionError:
+                pass
+        opened = None
+        if detail:
+            opened = _position_opened_at(pos, client, journal_df, sym)
         rows.append(
             {
                 "Ticker": sym,
                 "Sleeve": _infer_sleeve(sym),
-                "Opened": _format_position_opened(opened),
+                "Opened": _format_position_opened(opened) if detail else "—",
                 "_opened": opened,
                 "Qty": qty,
                 "Entry": entry,
-                "Current": current,
+                "Cost $": cost_basis,
                 "Value $": market_value,
+                "Current": current,
                 "P&L $": float(getattr(pos, "unrealized_pl", 0) or 0),
                 "P&L %": float(getattr(pos, "unrealized_plpc", 0) or 0) * 100,
             }
@@ -721,7 +846,7 @@ def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, 
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values("Value $", ascending=False)
-    if "ATR Stop" in cols and not df.empty:
+    if detail and "ATR Stop" in cols and not df.empty:
         try:
             from modules.pipeline_strategies import load_pipeline_data
             from modules.risk_management import atr_stop_price
@@ -959,6 +1084,7 @@ def _collect_refresh_snapshot(
     *,
     fast: bool = False,
     fetch_positions: bool = True,
+    positions_detail: bool = True,
 ) -> dict:
     """Network / disk work for dashboard refresh (safe off UI thread)."""
 
@@ -982,92 +1108,152 @@ def _collect_refresh_snapshot(
         except Exception as exc:  # noqa: BLE001
             hb_exc = str(exc)
 
+        # Cheap local JSON — always load so Wisdom tab populates on fast refresh too.
         scorecard, scorecard_src = None, ""
-        if not fast:
-            try:
-                scorecard, scorecard_src = _load_scorecard(username, book_id)
-            except Exception as exc:  # noqa: BLE001
-                snap["partial_errors"].append(f"scorecard: {exc}")
+        try:
+            scorecard, scorecard_src = _load_scorecard(username, book_id)
+        except Exception as exc:  # noqa: BLE001
+            snap["partial_errors"].append(f"scorecard: {exc}")
 
         acct_eq, acct_cash, acct_err = 0.0, 0.0, hb_exc
-        try:
-            acct_eq, acct_cash, acct_err = _fetch_account_summary(
-                username=username, book_id=book_id, retries=1 if fast else 2
-            )
-        except Exception as exc:  # noqa: BLE001
-            acct_err = str(exc)
-
-        positions_df, pos_err = None, None
-        if fetch_positions:
-            try:
-                positions_df, pos_err = _fetch_positions(username, book_id)
-            except Exception as exc:  # noqa: BLE001
-                pos_err = str(exc)
-            _positions_cache_put(username, book_id, positions_df, pos_err)
-            snap["positions_fetched"] = True
-        else:
-            _, positions_df, pos_err = _positions_cache_peek(username, book_id)
-
-        journal_df = None
-        try:
-            journal_df = _load_trade_history(username, book_id)
-        except Exception as exc:  # noqa: BLE001
-            snap["partial_errors"].append(f"journal: {exc}")
-
-        recent_orders_df = None
-        if not fast:
-            try:
-                recent_orders_df = _fetch_alpaca_fills(username, book_id, limit=12)
-            except Exception as exc:  # noqa: BLE001
-                snap["partial_errors"].append(f"fills: {exc}")
-
-        try:
-            running = _book_running_status(username, book_id)
-        except Exception:
-            running = False
-
-        other_book = _other_book_id(book_id)
-        try:
-            other_book_running = _book_running_status(username, other_book)
-        except Exception:
-            other_book_running = False
-
-        try:
-            heartbeat_stale = _heartbeat_is_stale(heartbeat, running=running)
-        except Exception:
-            heartbeat_stale = False
+        # Alpaca network outside lock — holding lock during HTTP made book switches wait.
         try:
             heartbeat_mismatch = _heartbeat_on_disk_mismatch(username, book_id)
         except Exception:
             heartbeat_mismatch = False
 
+    try:
+        acct_eq, acct_cash, acct_err = _fetch_account_summary(
+            username=username, book_id=book_id, retries=1 if fast else 2
+        )
+    except Exception as exc:  # noqa: BLE001
+        acct_err = str(exc)
+
+    positions_df, pos_err = None, None
+    if fetch_positions:
         try:
-            equity, cash, acct_err = _resolve_equity_cash(
-                acct_eq,
-                acct_cash,
-                acct_err,
-                heartbeat,
-                username=username,
-                book_id=book_id,
+            positions_df, pos_err = _fetch_positions(
+                username, book_id, detail=positions_detail
             )
         except Exception as exc:  # noqa: BLE001
-            equity, cash = float(acct_eq or 0), float(acct_cash or 0)
-            acct_err = str(exc)
+            pos_err = str(exc)
+        _positions_cache_put(username, book_id, positions_df, pos_err)
+        snap["positions_fetched"] = True
+    else:
+        _, positions_df, pos_err = _positions_cache_peek(username, book_id)
 
-        insider_rows, insider_err = [], None
-        short_rows, short_err, short_snap = [], None, None
-        rvol_rows, rvol_err = [], None
-        orb_mom_rows, orb_mom_err = [], None
-        sector_rot_rows, sector_rot_err = [], None
-        vol_bo_rows, vol_bo_err = [], None
-        strategy_rows, strategy_err, strategy_mtf = [], None, None
-        exit_rows, exit_err = [], None
-        conviction_snap, conviction_err = None, None
-        sharpe_hist, sharpe_hist_err = None, None
-        thinking_snap, thinking_err = None, None
-        bot_health = None
+    try:
+        equity, cash, acct_err = _resolve_equity_cash(
+            acct_eq,
+            acct_cash,
+            acct_err,
+            heartbeat,
+            username=username,
+            book_id=book_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        equity, cash = float(acct_eq or 0), float(acct_cash or 0)
+        acct_err = str(exc)
 
-        if not fast:
+    # --- heavy I/O outside _BOOK_ENV_LOCK (UI may need that lock for book switch) ---
+    journal_df = None
+    if not fast:
+        try:
+            # Extra fill history so Positions "Total $" (realized+open) is less truncated.
+            journal_df = _load_trade_history(username, book_id, limit=max(TRADES_LIMIT, 200))
+        except Exception as exc:  # noqa: BLE001
+            snap["partial_errors"].append(f"journal: {exc}")
+
+    chart_equity_df = None
+    sparkline_df = None
+    # Journal equity is heavy — only on full refresh; UI reuses last sparkline on fast.
+    if not fast:
+        try:
+            chart_equity_df = _load_equity_sparkline(
+                username,
+                book_id,
+                # Dense enough for 1D/5D account charts without re-reading on UI.
+                max_points=max(SPARKLINE_POINTS, CHART_DAYS * 3, 240),
+            )
+            if chart_equity_df is not None and len(chart_equity_df) > SPARKLINE_POINTS:
+                step = max(1, len(chart_equity_df) // SPARKLINE_POINTS)
+                sparkline_df = (
+                    chart_equity_df.iloc[::step].tail(SPARKLINE_POINTS).reset_index(drop=True)
+                )
+            else:
+                sparkline_df = chart_equity_df
+        except Exception as exc:  # noqa: BLE001
+            snap["partial_errors"].append(f"sparkline: {exc}")
+
+    recent_orders_df = None
+    if not fast:
+        try:
+            recent_orders_df = _fetch_alpaca_fills(username, book_id, limit=12)
+        except Exception as exc:  # noqa: BLE001
+            snap["partial_errors"].append(f"fills: {exc}")
+
+    try:
+        running = _book_running_status(username, book_id)
+    except Exception:
+        running = False
+
+    mode = "paper" if _book_is_paper(book_id) else "live"
+    if not running:
+        bot_label = "Bot: Stopped"
+    elif fast:
+        # Skip WMI/cmdline on fast path — PID detail only on full refresh.
+        bot_label = f"Bot: Running · {book_label(book_id)} ({mode})"
+    else:
+        try:
+            bot_label = bot_status_label(username, book_id)
+        except Exception:
+            bot_label = f"Bot: Running · {book_label(book_id)} ({mode})"
+
+    this_book_status: list[str] = []
+    other_book_status: list[str] = []
+    try:
+        this_book_status = _format_book_status_block(
+            username,
+            book_id,
+            running=running,
+            heartbeat=heartbeat,
+            hb_path=Path(heartbeat_path) if heartbeat_path else None,
+        )
+    except Exception as exc:  # noqa: BLE001
+        this_book_status = [f"status error: {exc}"]
+
+    other_book = _other_book_id(book_id)
+    try:
+        other_book_running = _book_running_status(username, other_book)
+    except Exception:
+        other_book_running = False
+    try:
+        other_book_status = _format_book_status_block(
+            username, other_book, running=other_book_running
+        )
+    except Exception as exc:  # noqa: BLE001
+        other_book_status = [f"status error: {exc}"]
+    try:
+        heartbeat_stale = _heartbeat_is_stale(heartbeat, running=running)
+    except Exception:
+        heartbeat_stale = False
+
+    insider_rows, insider_err = [], None
+    short_rows, short_err, short_snap = [], None, None
+    rvol_rows, rvol_err = [], None
+    orb_mom_rows, orb_mom_err = [], None
+    sector_rot_rows, sector_rot_err = [], None
+    vol_bo_rows, vol_bo_err = [], None
+    strategy_rows, strategy_err, strategy_mtf = [], None, None
+    exit_rows, exit_err = [], None
+    conviction_snap, conviction_err = None, None
+    sharpe_hist, sharpe_hist_err = None, None
+    thinking_snap, thinking_err = None, None
+    bot_health = None
+
+    if not fast:
+        with _BOOK_ENV_LOCK:
+            _apply_user_paths(username, book_id)
             try:
                 insider_rows, insider_err = _fetch_insider_signals_snapshot()
             except Exception as exc:  # noqa: BLE001
@@ -1133,6 +1319,28 @@ def _collect_refresh_snapshot(
                 except Exception:
                     bot_health = None
 
+    sleeve_pnl = None
+    sleeve_pnl_text = ""
+    if _book_is_paper(book_id):
+        try:
+            from modules.paper_journal import (
+                compute_paper_sleeve_pnl,
+                format_paper_sleeve_pnl_table,
+                positions_from_dashboard_df,
+            )
+
+            sleeve_pnl = compute_paper_sleeve_pnl(
+                journal_path=book_journal_path(username, book_id),
+                positions=positions_from_dashboard_df(positions_df),
+                equity=equity,
+                cash=cash,
+                spy_off=True,
+                write_snapshot=True,
+            )
+            sleeve_pnl_text = format_paper_sleeve_pnl_table(sleeve_pnl, compact=True)
+        except Exception as exc:  # noqa: BLE001
+            snap["partial_errors"].append(f"sleeve_pnl: {exc}")
+
     snap.update(
         {
             "other_book": other_book,
@@ -1150,6 +1358,11 @@ def _collect_refresh_snapshot(
             "pos_err": pos_err,
             "journal_df": journal_df,
             "recent_orders_df": recent_orders_df,
+            "sparkline_df": sparkline_df,
+            "chart_equity_df": chart_equity_df,
+            "bot_label": bot_label,
+            "this_book_status": this_book_status,
+            "other_book_status": other_book_status,
             "running": running,
             "equity": equity,
             "cash": cash,
@@ -1180,6 +1393,8 @@ def _collect_refresh_snapshot(
             "thinking_snap": thinking_snap,
             "thinking_err": thinking_err,
             "bot_health": bot_health,
+            "sleeve_pnl": sleeve_pnl,
+            "sleeve_pnl_text": sleeve_pnl_text,
         }
     )
     return snap
@@ -1448,6 +1663,28 @@ def _closed_trades_from_fills(
     return closed[:limit]
 
 
+def _realized_pnl_by_ticker(
+    journal_df: pd.DataFrame | None,
+    *,
+    limit: int = 5000,
+) -> dict[str, float]:
+    """Sum FIFO-matched closed-trade P&L by ticker (realized only)."""
+    if journal_df is None or getattr(journal_df, "empty", True):
+        return {}
+    closed = _closed_trades_from_fills(journal_df, limit=limit)
+    out: dict[str, float] = {}
+    for trade in closed:
+        sym = config.normalize_symbol(str(trade.get("Ticker") or trade.get("symbol") or ""))
+        if not sym:
+            continue
+        try:
+            pnl = float(trade.get("_pnl") or trade.get("P&L $") or 0)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        out[sym] = out.get(sym, 0.0) + pnl
+    return out
+
+
 def _load_trade_history(
     username: str,
     book_id: str,
@@ -1553,6 +1790,21 @@ def _load_equity_sparkline(
 
 def _load_daily_closes(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | None:
     table = f"{config.normalize_symbol(symbol)}_daily"
+    return _load_price_table(table, limit=max(2, int(days)))
+
+
+def _load_intraday_closes(symbol: str, *, calendar_days: int) -> pd.DataFrame | None:
+    """5m (live) table for symbol — last N calendar days by bar timestamp."""
+    table = config.normalize_symbol(symbol)
+    # Pull enough 5m bars for ~N sessions (RTH ~78 bars/day).
+    limit = max(80, int(calendar_days) * 100)
+    df = _load_price_table(table, limit=limit)
+    if df is None or df.empty:
+        return None
+    return _slice_bars_by_calendar_days(df, calendar_days=calendar_days, ts_col="Date")
+
+
+def _load_price_table(table: str, *, limit: int) -> pd.DataFrame | None:
     db_path = _resolve_db_path()
     if not db_path.is_file():
         return None
@@ -1573,7 +1825,7 @@ def _load_daily_closes(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | No
         df = pd.read_sql(
             f'SELECT Date, Close FROM "{table}" ORDER BY Date DESC LIMIT ?',
             conn,
-            params=(days,),
+            params=(int(limit),),
         )
     except (sqlite3.Error, pd.errors.DatabaseError, ValueError):
         return None
@@ -1582,10 +1834,170 @@ def _load_daily_closes(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | No
     if df.empty or "Date" not in df.columns or "Close" not in df.columns:
         return None
     df = df.sort_values("Date").reset_index(drop=True)
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce", utc=True)
+    try:
+        df["Date"] = df["Date"].dt.tz_convert("America/New_York").dt.tz_localize(None)
+    except Exception:
+        try:
+            df["Date"] = df["Date"].dt.tz_localize(None)
+        except Exception:
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
     df["Close"] = pd.to_numeric(df["Close"], errors="coerce")
     out = df.dropna(subset=["Date", "Close"])
     return out if not out.empty else None
+
+
+def _slice_bars_by_calendar_days(
+    df: pd.DataFrame, *, calendar_days: int, ts_col: str
+) -> pd.DataFrame | None:
+    if df is None or df.empty or ts_col not in df.columns:
+        return None
+    work = df.copy()
+    work[ts_col] = pd.to_datetime(work[ts_col], errors="coerce")
+    work = work.dropna(subset=[ts_col]).sort_values(ts_col)
+    if work.empty:
+        return None
+    if calendar_days <= 1:
+        last_day = work[ts_col].iloc[-1].normalize()
+        sliced = work[work[ts_col] >= last_day]
+    else:
+        cutoff = work[ts_col].iloc[-1] - pd.Timedelta(days=max(1, int(calendar_days)))
+        sliced = work[work[ts_col] >= cutoff]
+    if sliced.empty:
+        sliced = work.tail(min(len(work), 40))
+    return sliced.reset_index(drop=True)
+
+
+def _downsample_chart_df(df: pd.DataFrame, max_points: int) -> pd.DataFrame:
+    if df is None or len(df) <= max_points:
+        return df
+    step = max(1, len(df) // max_points)
+    return df.iloc[::step].tail(max_points).reset_index(drop=True)
+
+
+def _load_chart_closes(symbol: str, range_key: str) -> pd.DataFrame | None:
+    """Broker-style range: 1D/5D prefer 5m live bars; 1M uses daily."""
+    key = range_key if range_key in CHART_RANGE_SPECS else "1M"
+    spec = CHART_RANGE_SPECS[key]
+    max_points = int(spec["max_points"])
+    if spec["prefer"] == "5m":
+        intra = _load_intraday_closes(symbol, calendar_days=int(spec["calendar_days"]))
+        if intra is not None and len(intra) >= 2:
+            return _downsample_chart_df(intra, max_points)
+    daily = _load_daily_closes(symbol, days=int(spec["daily_bars"]))
+    if daily is None or daily.empty:
+        return None
+    return _downsample_chart_df(daily, max_points)
+
+
+def _slice_equity_for_chart_range(
+    eq_df: pd.DataFrame | None, range_key: str
+) -> pd.DataFrame | None:
+    if eq_df is None or getattr(eq_df, "empty", True):
+        return None
+    key = range_key if range_key in CHART_RANGE_SPECS else "1M"
+    spec = CHART_RANGE_SPECS[key]
+    work = eq_df.copy()
+    ts_col = "ts" if "ts" in work.columns else ("Date" if "Date" in work.columns else None)
+    val_col = "equity" if "equity" in work.columns else ("Close" if "Close" in work.columns else None)
+    if ts_col is None or val_col is None:
+        return None
+    sliced = _slice_bars_by_calendar_days(
+        work.rename(columns={ts_col: "Date"})[["Date", val_col]].rename(
+            columns={val_col: "Close"}
+        ),
+        calendar_days=int(spec["calendar_days"]),
+        ts_col="Date",
+    )
+    if sliced is None or len(sliced) < 2:
+        # Fall back to densest available tail.
+        tail_n = min(len(work), int(spec["max_points"]))
+        tail = work.tail(tail_n)
+        return pd.DataFrame(
+            {
+                "Date": pd.to_datetime(tail[ts_col], errors="coerce"),
+                "Close": pd.to_numeric(tail[val_col], errors="coerce"),
+            }
+        ).dropna()
+    return _downsample_chart_df(sliced, int(spec["max_points"]))
+
+
+def _pct_change_title(base_title: str, df: pd.DataFrame, *, value_col: str = "Close") -> str:
+    if df is None or len(df) < 2:
+        return base_title
+    try:
+        start = float(df[value_col].iloc[0])
+        end = float(df[value_col].iloc[-1])
+        if abs(start) < 1e-9:
+            return base_title
+        pct = 100.0 * (end / start - 1.0)
+        return f"{base_title}  {pct:+.1f}%"
+    except Exception:  # noqa: BLE001
+        return base_title
+
+
+def _charts_panel_specs(
+    *,
+    positions_df: pd.DataFrame | None,
+    book_paper: bool,
+) -> list[dict]:
+    """Six panels: paper book shows account + largest holdings; live uses market mix."""
+    holding_colors = (
+        COLORS["accent"],
+        "#38bdf8",
+        "#fbbf24",
+        "#a78bfa",
+        "#34d399",
+        COLORS["amber"],
+    )
+    market_fallbacks: list[tuple[str, str, str]] = [
+        ("SPY", "Whole market (SPY)", COLORS["amber"]),
+        ("VTI", "All stocks (VTI)", COLORS["blue"]),
+        ("QQQ", "Big tech (QQQ)", "#38bdf8"),
+        ("GLD", "Gold (GLD)", "#fbbf24"),
+        ("BTC-USD", "Bitcoin", "#a78bfa"),
+    ]
+
+    panels: list[dict] = [
+        {"kind": "equity", "title": "Your account", "color": COLORS["green"]},
+    ]
+    used_syms: set[str] = set()
+
+    if book_paper and positions_df is not None and not getattr(positions_df, "empty", True):
+        work = positions_df.copy()
+        if "Value $" in work.columns and "Ticker" in work.columns:
+            work["_value"] = pd.to_numeric(work["Value $"], errors="coerce").fillna(0.0)
+            top = work.reindex(work["_value"].abs().sort_values(ascending=False).index)
+            for i, (_, row) in enumerate(top.head(5).iterrows()):
+                sym = str(row.get("Ticker") or "").strip().upper()
+                if not sym or sym in used_syms:
+                    continue
+                used_syms.add(sym)
+                panels.append(
+                    {
+                        "kind": "symbol",
+                        "symbol": sym,
+                        "title": sym,
+                        "color": holding_colors[i % len(holding_colors)],
+                    }
+                )
+
+    for sym, label, color in market_fallbacks:
+        if len(panels) >= 6:
+            break
+        if sym in used_syms:
+            continue
+        panels.append({"kind": "symbol", "symbol": sym, "title": label, "color": color})
+        used_syms.add(sym)
+
+    while len(panels) < 6:
+        sym, label, color = market_fallbacks[(len(panels) - 1) % len(market_fallbacks)]
+        if sym in used_syms:
+            break
+        panels.append({"kind": "symbol", "symbol": sym, "title": label, "color": color})
+        used_syms.add(sym)
+
+    return panels[:6]
 
 
 def _market_open_countdown(heartbeat: dict | None) -> str:
@@ -1781,10 +2193,10 @@ def _light_line_chart(
     *,
     title: str,
     color: str,
-    height: float = 1.35,
+    height: float = 1.45,
     show_axis: bool = False,
 ) -> Figure:
-    fig = Figure(figsize=(4.0, height), dpi=CHART_DPI, facecolor=COLORS["surface"])
+    fig = Figure(figsize=(3.6, height), dpi=CHART_DPI, facecolor=COLORS["surface"])
     ax = fig.add_subplot(111)
     ax.set_facecolor(COLORS["surface"])
     y = df["Close"].values
@@ -1811,7 +2223,7 @@ def _light_line_chart(
 
 
 class MetricCard(ctk.CTkFrame):
-    """Metric tile with optional hero sizing and subtle hover highlight."""
+    """Compact metric tile: value left of descriptor (saves vertical space)."""
 
     def __init__(
         self,
@@ -1822,13 +2234,13 @@ class MetricCard(ctk.CTkFrame):
         **kwargs,
     ):
         self._hero = hero
-        pad_x = 12 if hero else 10
-        pad_y = 7 if hero else 8
+        pad_x = 10 if hero else 8
+        pad_y = 4 if hero else 5
         if hero:
-            kwargs.setdefault("height", 64)
+            kwargs.setdefault("height", 36)
         super().__init__(
             master,
-            corner_radius=14,
+            corner_radius=12,
             fg_color=COLORS["card"],
             border_width=1,
             border_color=COLORS["border"],
@@ -1836,24 +2248,31 @@ class MetricCard(ctk.CTkFrame):
         )
         if hero:
             self.pack_propagate(False)
-        self._title = ctk.CTkLabel(
-            self,
-            text=title.upper(),
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-        )
-        self._title.pack(anchor="w", padx=pad_x, pady=(pad_y, 0))
-        value_size = 22 if hero else 16
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="both", expand=True, padx=pad_x, pady=pad_y)
+
+        value_size = 18 if hero else 14
         self._value = ctk.CTkLabel(
-            self,
+            row,
             text="—",
             font=ctk.CTkFont(family="Segoe UI", size=value_size, weight="bold"),
             text_color=COLORS["text"],
+            anchor="w",
         )
-        self._value.pack(anchor="w", padx=pad_x, pady=(2, pad_y))
+        self._value.pack(side="left", padx=(0, 8))
+        self._title = ctk.CTkLabel(
+            row,
+            text=title.upper(),
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        self._title.pack(side="left", fill="x", expand=True)
+
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
-        for w in (self._title, self._value):
+        for w in (row, self._title, self._value):
             w.bind("<Enter>", self._on_enter)
             w.bind("<Leave>", self._on_leave)
 
@@ -1864,21 +2283,43 @@ class MetricCard(ctk.CTkFrame):
         self.configure(fg_color=COLORS["card"], border_color=COLORS["border"])
 
     def set(self, text: str, color: str | None = None) -> None:
-        self._value.configure(text=text, text_color=color or COLORS["text"])
+        # Long Open P&L lines need a smaller font so value + label stay one row.
+        size = 18 if self._hero else 14
+        if self._hero and len(text) > 16:
+            size = 13 if len(text) > 28 else 15
+        elif not self._hero and len(text) > 14:
+            size = 12
+        self._value.configure(
+            text=text,
+            text_color=color or COLORS["text"],
+            font=ctk.CTkFont(family="Segoe UI", size=size, weight="bold"),
+        )
 
 
 class DataTable(ctk.CTkFrame):
     """Lightweight dark table via ttk.Treeview."""
 
-    def __init__(self, master, columns: list[str], *, height: int = 8, large: bool = False):
-        super().__init__(master, fg_color="transparent")
+    def __init__(
+        self,
+        master,
+        columns: list[str],
+        *,
+        height: int = 8,
+        large: bool = False,
+        fit_height: bool = False,
+    ):
+        super().__init__(master, fg_color=COLORS["surface"] if fit_height else "transparent")
+        self._fit_height = fit_height
+        self._fit_min_rows = max(4, int(height))
         style = ttk.Style()
         style.theme_use("clam")
         # ttk only auto-builds Treeview layouts when the style name ends with ".Treeview".
         style_name = "Dash.Large.Treeview" if large else "Dash.Treeview"
-        row_h = 34 if large else 26
+        self._row_height = 34 if large else 26
+        row_h = self._row_height
         font = ("Segoe UI", 12) if large else ("Segoe UI", 10)
         head_font = ("Segoe UI", 11, "bold") if large else ("Segoe UI", 10, "bold")
+        self._heading_pad = 34 if large else 28
         style.configure(
             style_name,
             background=COLORS["surface"],
@@ -1905,11 +2346,15 @@ class DataTable(ctk.CTkFrame):
         self._sort_keys = {
             "Qty": "_qty",
             "Entry": "_entry",
+            "Buy $": "_entry",
             "Exit": "_exit",
             "Current": "_current",
+            "Current $": "_current",
+            "Cost $": "_cost",
             "Value $": "_value",
             "P&L $": "_pnl",
             "P&L %": "_pnl_pct",
+            "Total $": "_total",
             "Bought": "Bought",
             "Sold": "Sold",
             "Score": "_score",
@@ -1936,11 +2381,15 @@ class DataTable(ctk.CTkFrame):
                     "sleeve": 88,
                     "Qty": 80,
                     "Entry": 88,
+                    "Buy $": 96,
                     "Exit": 88,
                     "Current": 92,
+                    "Current $": 96,
+                    "Cost $": 100,
                     "Value $": 100,
                     "P&L $": 88,
                     "P&L %": 72,
+                    "Total $": 100,
                     "Bought": 118,
                     "Sold": 118,
                     "Time": 118,
@@ -1968,11 +2417,15 @@ class DataTable(ctk.CTkFrame):
             right_cols = (
                 "Qty",
                 "Entry",
+                "Buy $",
                 "Exit",
                 "Current",
+                "Current $",
+                "Cost $",
                 "Value $",
                 "P&L $",
                 "P&L %",
+                "Total $",
                 "Notional",
             )
             if col in left_cols:
@@ -1991,14 +2444,60 @@ class DataTable(ctk.CTkFrame):
         self._tree.tag_configure("rvol_strong", foreground=COLORS["green"])
         self._tree.tag_configure("orb_up", foreground=COLORS["green"])
         self._tree.tag_configure("catalyst_high", foreground=COLORS["green"])
-        scroll = ctk.CTkScrollbar(self, command=self._tree.yview)
-        self._tree.configure(yscrollcommand=scroll.set)
-        self._tree.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
+        self._tree.tag_configure("blank", foreground=COLORS["surface"])
+        scroll_y = ctk.CTkScrollbar(self, command=self._tree.yview)
+        scroll_x = ctk.CTkScrollbar(self, orientation="horizontal", command=self._tree.xview)
+        self._tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        self._tree.grid(row=0, column=0, sticky="nsew")
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
+        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        if self._fit_height:
+            self.bind("<Configure>", self._on_fit_configure)
 
-    def clear(self) -> None:
+    def _on_fit_configure(self, event=None) -> None:
+        if not self._fit_height:
+            return
+        try:
+            avail = int(event.height) if event is not None else int(self.winfo_height())
+        except Exception:
+            return
+        if avail < 40:
+            return
+        usable = max(40, avail - 18 - self._heading_pad)
+        rows = max(self._fit_min_rows, usable // max(1, self._row_height))
+        rows = min(rows, 60)
+        try:
+            if int(self._tree.cget("height")) != rows:
+                self._tree.configure(height=rows)
+                self._pad_blank_rows()
+        except Exception:
+            pass
+
+    def _pad_blank_rows(self) -> None:
+        """Fill unused Treeview slots with dark blank rows (avoids Windows white void)."""
+        if not self._fit_height:
+            return
+        try:
+            target = int(self._tree.cget("height"))
+        except Exception:
+            return
+        data_rows = len(self._tree.get_children())
+        for item in self._tree.get_children():
+            tags = self._tree.item(item, "tags")
+            if tags and "blank" in tags:
+                self._tree.delete(item)
+        data_rows = len(self._tree.get_children())
+        blank_vals = [""] * len(self._columns)
+        for _ in range(max(0, target - data_rows)):
+            self._tree.insert("", "end", values=blank_vals, tags=("blank",))
+
+    def clear(self, *, keep_rows: bool = False) -> None:
         for item in self._tree.get_children():
             self._tree.delete(item)
+        if not keep_rows:
+            self._rows = []
 
     def set_rows(self, rows: list[dict], *, pnl_col: str | None = None, tag_col: str | None = None) -> None:
         self._rows = list(rows)
@@ -2045,7 +2544,7 @@ class DataTable(ctk.CTkFrame):
         self._render_rows()
 
     def _render_rows(self) -> None:
-        self.clear()
+        self.clear(keep_rows=True)
         for row in self._rows:
             values = [row.get(c, "") for c in self._columns]
             tag = ""
@@ -2059,6 +2558,7 @@ class DataTable(ctk.CTkFrame):
                 except (TypeError, ValueError):
                     tag = ""
             self._tree.insert("", "end", values=values, tags=(tag,) if tag else ())
+        self._pad_blank_rows()
 
     def selected_row(self) -> dict | None:
         sel = self._tree.selection()
@@ -2264,9 +2764,10 @@ class LoginApp(ctk.CTk):
 
     def _finish(self, username: str) -> None:
         save_last_username(username, remember=self._remember_var.get())
-        self.withdraw()
+        # Do not open the dashboard inside this mainloop — nesting CTk roots
+        # leaves orphan Sign-in windows when launching repeatedly.
         self._on_success(username)
-        self.destroy()
+        self.quit()
 
 
 def _book_dropdown_values() -> list[str]:
@@ -2538,7 +3039,8 @@ class TradingDashboardApp(ctk.CTk):
         self._book_id = book_id or get_last_book_id()
         save_last_book_id(self._book_id)
         self._apply_user_paths(username, self._book_id)
-        self.title(f"PythonTrading — {book_label(self._book_id)}")
+        self.title(f"PythonTrading - {book_label(self._book_id)}"
+                   + (f" - {DASHBOARD_UI_TAG}" if DASHBOARD_UI_TAG else ""))
         self.geometry("1000x780")
         self.minsize(960, 680)
         self.configure(fg_color=COLORS["bg"])
@@ -2560,6 +3062,13 @@ class TradingDashboardApp(ctk.CTk):
         self._status_restore_job: str | None = None
         self._last_positions_df: pd.DataFrame | None = None
         self._last_positions_fp: object | None = None
+        self._last_realized_by_ticker: dict[str, float] = {}
+        self._last_sparkline_df: pd.DataFrame | None = None
+        self._last_sparkline_fp: object | None = None
+        self._last_chart_equity_df: pd.DataFrame | None = None
+        self._last_heartbeat: dict | None = None
+        self._refresh_interval_sec_cached = REFRESH_SECONDS
+        self._chart_range = "5D"
 
         if ICON_PATH.is_file():
             try:
@@ -2575,16 +3084,16 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        header_bar.pack(fill="x", padx=14, pady=(12, 6))
+        header_bar.pack(fill="x", padx=10, pady=(8, 4))
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
         header_inner = ctk.CTkFrame(header_bar, fg_color="transparent")
-        header_inner.pack(fill="x", padx=12, pady=10)
+        header_inner.pack(fill="x", padx=10, pady=6)
         header_inner.grid_columnconfigure(0, weight=1)
         header_inner.grid_columnconfigure(1, weight=0)
 
         header_left = ctk.CTkFrame(header_inner, fg_color="transparent")
-        header_left.grid(row=0, column=0, sticky="ew", padx=(0, 12))
+        header_left.grid(row=0, column=0, sticky="nw", padx=(0, 10))
         header_left.grid_columnconfigure(1, weight=1)
 
         ctk.CTkButton(
@@ -2629,13 +3138,13 @@ class TradingDashboardApp(ctk.CTk):
         self._live_equity_label = ctk.CTkLabel(
             title_block,
             text="Live Equity: —",
-            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
             text_color=COLORS["green"],
             anchor="w",
             wraplength=520,
             justify="left",
         )
-        self._live_equity_label.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self._live_equity_label.grid(row=2, column=0, sticky="w", pady=(4, 0))
         self._since_start_label = ctk.CTkLabel(
             title_block,
             text="Since Start: —",
@@ -2645,7 +3154,7 @@ class TradingDashboardApp(ctk.CTk):
             wraplength=520,
             justify="left",
         )
-        self._since_start_label.grid(row=3, column=0, sticky="w", pady=(2, 0))
+        self._since_start_label.grid(row=3, column=0, sticky="w", pady=(0, 0))
         self._equity_error_label = ctk.CTkLabel(
             title_block,
             text="",
@@ -2660,35 +3169,35 @@ class TradingDashboardApp(ctk.CTk):
         header_right = ctk.CTkFrame(header_inner, fg_color="transparent")
         header_right.grid(row=0, column=1, sticky="ne")
 
-        self._bot_badge = ctk.CTkLabel(
-            header_right,
-            text="Bot: —",
-            font=_ctk_font("body_sm"),
-            text_color=COLORS["muted"],
-            anchor="e",
-            justify="right",
-            wraplength=420,
-        )
-        self._bot_badge.pack(anchor="e", fill="x")
-
         controls_shell = ctk.CTkFrame(
             header_right,
             fg_color=COLORS["surface2"],
-            corner_radius=12,
+            corner_radius=10,
             border_width=1,
             border_color=COLORS["amber"],
         )
-        controls_shell.pack(anchor="e", pady=(6, 0))
+        controls_shell.pack(anchor="e")
         controls_row = ctk.CTkFrame(controls_shell, fg_color="transparent")
-        controls_row.pack(padx=8, pady=6)
+        controls_row.pack(padx=6, pady=3)
+
+        self._bot_badge = ctk.CTkLabel(
+            controls_row,
+            text="Bot: —",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="e",
+            justify="right",
+            wraplength=140,
+        )
+        self._bot_badge.grid(row=0, column=0, padx=(0, 8), pady=2, sticky="e")
 
         self._book_menu = ctk.CTkOptionMenu(
             controls_row,
             variable=self._book_var,
             values=_book_dropdown_values(),
             command=self._on_header_book_selected,
-            width=156,
-            height=32,
+            width=148,
+            height=30,
             font=_ctk_font("body_sm"),
             fg_color=COLORS["accent"],
             button_color=COLORS["surface"],
@@ -2696,67 +3205,67 @@ class TradingDashboardApp(ctk.CTk):
             dropdown_fg_color=COLORS["surface2"],
             text_color=COLORS["text"],
         )
-        self._book_menu.grid(row=0, column=0, padx=(0, 6), pady=2, sticky="e")
+        self._book_menu.grid(row=0, column=1, padx=(0, 4), pady=2, sticky="e")
 
         _header_btn_style = dict(
-            height=32,
+            height=30,
             corner_radius=10,
-            font=_ctk_font("body_sm"),
+            font=_ctk_font("caption"),
             border_width=1,
             border_color=COLORS["border"],
         )
         self._refresh_btn = ctk.CTkButton(
             controls_row,
             text="Refresh",
-            width=76,
+            width=72,
             fg_color=COLORS["surface"],
             hover_color=COLORS["accent"],
             text_color=COLORS["text"],
             command=self._on_manual_refresh,
             **_header_btn_style,
         )
-        self._refresh_btn.grid(row=0, column=1, padx=3, pady=2, sticky="e")
+        self._refresh_btn.grid(row=0, column=2, padx=2, pady=2, sticky="e")
         self._refresh_bot_btn = ctk.CTkButton(
             controls_row,
             text="Refresh Bot",
-            width=98,
+            width=92,
             fg_color=COLORS["card"],
             hover_color=COLORS["accent"],
             text_color=COLORS["blue"],
             command=self._on_refresh_bot,
             **_header_btn_style,
         )
-        self._refresh_bot_btn.grid(row=0, column=2, padx=3, pady=2, sticky="e")
+        self._refresh_bot_btn.grid(row=0, column=3, padx=2, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
             text="Start",
-            width=70,
+            width=64,
             fg_color=COLORS["paper_ok_bg"],
             hover_color=COLORS["green_dim"],
             text_color=COLORS["green"],
             command=self._on_start_bot,
             **_header_btn_style,
-        ).grid(row=0, column=3, padx=3, pady=2, sticky="e")
+        ).grid(row=0, column=4, padx=2, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
             text="Stop",
-            width=66,
+            width=58,
             fg_color=COLORS["live_bg"],
             hover_color=COLORS["live"],
             text_color=COLORS["red"],
             command=self._on_stop_bot,
             **_header_btn_style,
-        ).grid(row=0, column=4, padx=3, pady=2, sticky="e")
+        ).grid(row=0, column=5, padx=2, pady=2, sticky="e")
         ctk.CTkButton(
             controls_row,
             text="Restart Bot",
-            width=96,
+            width=88,
             fg_color=COLORS["small_bg"],
             hover_color=COLORS["small"],
             text_color=COLORS["amber"],
             command=self._on_restart_bot,
             **_header_btn_style,
-        ).grid(row=0, column=5, padx=(3, 0), pady=2, sticky="e")
+        ).grid(row=0, column=6, padx=(2, 0), pady=2, sticky="e")
 
         def _resize_header_labels(_event=None) -> None:
             avail = max(240, header_left.winfo_width() - 56)
@@ -2786,7 +3295,7 @@ class TradingDashboardApp(ctk.CTk):
         )
         status_row.pack(fill="x", pady=(0, 8))
         status_inner = ctk.CTkFrame(status_row, fg_color="transparent")
-        status_inner.pack(fill="x", padx=12, pady=10)
+        status_inner.pack(fill="x", padx=10, pady=6)
 
         def _pill(parent, text: str, fg: str, text_color: str) -> ctk.CTkLabel:
             lbl = ctk.CTkLabel(
@@ -2835,9 +3344,9 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        stats_banner.pack(fill="x", pady=(0, 8))
+        stats_banner.pack(fill="x", pady=(0, 4))
         stats_inner = ctk.CTkFrame(stats_banner, fg_color="transparent")
-        stats_inner.pack(fill="x", padx=14, pady=10)
+        stats_inner.pack(fill="x", padx=12, pady=6)
         self._stats_line1 = ctk.CTkLabel(
             stats_inner,
             text="Account Total: —",
@@ -2856,6 +3365,14 @@ class TradingDashboardApp(ctk.CTk):
             justify="left",
         )
         self._stats_line2.pack(fill="x", pady=(4, 0))
+        self._sleeve_pnl_body = ctk.CTkLabel(
+            stats_inner,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["text_dim"],
+            anchor="w",
+            justify="left",
+        )
 
         self._small_panel = ctk.CTkFrame(top_stack, fg_color="transparent")
         self._small_body = ctk.CTkLabel(
@@ -2881,23 +3398,26 @@ class TradingDashboardApp(ctk.CTk):
         spark_wrap = ctk.CTkFrame(
             hero_row,
             fg_color=COLORS["card"],
-            corner_radius=14,
+            corner_radius=12,
             border_width=1,
             border_color=COLORS["border"],
-            width=260,
-            height=64,
+            width=220,
+            height=36,
         )
         spark_wrap.pack(side="right")
         spark_wrap.pack_propagate(False)
+        spark_row = ctk.CTkFrame(spark_wrap, fg_color="transparent")
+        spark_row.pack(fill="both", expand=True, padx=8, pady=4)
+        self._spark_frame = ctk.CTkFrame(spark_row, fg_color="transparent", width=140)
+        self._spark_frame.pack(side="left", fill="both", expand=True)
+        self._spark_frame.pack_propagate(False)
         ctk.CTkLabel(
-            spark_wrap,
+            spark_row,
             text="EQUITY TREND",
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
-        ).pack(anchor="w", padx=12, pady=(6, 0))
-        self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent", height=42)
-        self._spark_frame.pack(fill="both", expand=True, padx=8, pady=(2, 6))
-        self._spark_frame.pack_propagate(False)
+            anchor="w",
+        ).pack(side="left", padx=(6, 0))
 
         metrics = ctk.CTkFrame(top_stack, fg_color="transparent")
         metrics.pack(fill="x", pady=(0, 4))
@@ -2931,33 +3451,45 @@ class TradingDashboardApp(ctk.CTk):
             pass
 
         self._tab_positions = self._tabs.add("Positions")
-        pos_head = ctk.CTkFrame(self._tab_positions, fg_color="transparent")
-        pos_head.pack(fill="x", padx=12, pady=(10, 4))
+        self._tab_positions.grid_rowconfigure(1, weight=1)
+        self._tab_positions.grid_columnconfigure(0, weight=1)
+
+        pos_actions = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["surface2"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        pos_actions.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 4))
+        pos_actions.grid_columnconfigure(0, weight=1)
+        pos_top = ctk.CTkFrame(pos_actions, fg_color="transparent")
+        pos_top.grid(row=0, column=0, sticky="ew", padx=10, pady=(6, 2))
         ctk.CTkLabel(
-            pos_head,
+            pos_top,
             text="Open Positions",
             font=_ctk_font("heading"),
             text_color=COLORS["text"],
         ).pack(side="left")
         ctk.CTkLabel(
-            pos_head,
+            pos_top,
             text="Select a row, then Sell",
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
         ).pack(side="left", padx=(12, 0))
         self._pos_total = ctk.CTkLabel(
-            pos_head,
+            pos_top,
             text="",
             font=_ctk_font("body_sm"),
             text_color=COLORS["muted"],
         )
         self._pos_total.pack(side="right")
-        pos_btn_row = ctk.CTkFrame(pos_head, fg_color="transparent")
-        pos_btn_row.pack(side="right", padx=(0, 10))
+        pos_btn_row = ctk.CTkFrame(pos_actions, fg_color="transparent")
+        pos_btn_row.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 6))
         ctk.CTkButton(
             pos_btn_row,
-            text="Sell all",
-            width=72,
+            text="Close all",
+            width=84,
             height=28,
             corner_radius=10,
             fg_color=COLORS["small"],
@@ -2968,8 +3500,8 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left", padx=(0, 6))
         ctk.CTkButton(
             pos_btn_row,
-            text="Sell",
-            width=64,
+            text="Sell stock",
+            width=84,
             height=28,
             corner_radius=10,
             fg_color=COLORS["live_bg"],
@@ -2977,13 +3509,42 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("caption"),
             command=self._on_sell_selected_position,
         ).pack(side="left")
+
         self._positions_table = DataTable(
             self._tab_positions,
-            ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %", "ATR Stop"],
-            height=11,
+            [
+                "Ticker",
+                "Sleeve",
+                "Opened",
+                "Qty",
+                "Buy $",
+                "Current $",
+                "Cost $",
+                "Value $",
+                "P&L $",
+                "P&L %",
+                "Total $",
+                "ATR Stop",
+            ],
+            height=8,
             large=True,
+            fit_height=True,
         )
-        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+        # Keep money columns readable (Treeview can crush mid columns on narrow widths).
+        try:
+            for col, width in (
+                ("Buy $", 100),
+                ("Current $", 100),
+                ("Cost $", 108),
+                ("Value $", 108),
+                ("P&L $", 96),
+                ("P&L %", 80),
+                ("Total $", 108),
+            ):
+                self._positions_table._tree.column(col, width=width, minwidth=80, stretch=False)
+        except Exception:
+            pass
+        self._positions_table.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 6))
         self._positions_empty_label = ctk.CTkLabel(
             self._tab_positions,
             text="No open positions\nCash idle until the next rebalance cycle.",
@@ -2992,9 +3553,18 @@ class TradingDashboardApp(ctk.CTk):
             justify="center",
         )
 
-        self._insider_expanded = True
+        self._tab_signals = self._tabs.add("Signals")
+        self._signals_scroll = ctk.CTkScrollableFrame(
+            self._tab_signals,
+            fg_color=COLORS["surface"],
+            scrollbar_button_color=COLORS["surface2"],
+            scrollbar_button_hover_color=COLORS["accent"],
+        )
+        self._signals_scroll.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self._insider_expanded = False
         self._insider_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3005,7 +3575,7 @@ class TradingDashboardApp(ctk.CTk):
         insider_head.pack(fill="x", padx=10, pady=(8, 4))
         self._insider_toggle_btn = ctk.CTkButton(
             insider_head,
-            text="▼ Insider Signals",
+            text="▶ Insider Signals",
             width=160,
             height=28,
             corner_radius=8,
@@ -3025,7 +3595,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._insider_status.pack(side="left", padx=(10, 0))
         self._insider_body = ctk.CTkFrame(self._insider_section, fg_color="transparent")
-        self._insider_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._insider_table = DataTable(
             self._insider_body,
             ["Ticker", "Type", "Score", "Description", "Filing Date"],
@@ -3040,9 +3609,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._rvol_expanded = True
+        self._rvol_expanded = False
         self._rvol_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3053,7 +3622,7 @@ class TradingDashboardApp(ctk.CTk):
         rvol_head.pack(fill="x", padx=10, pady=(8, 4))
         self._rvol_toggle_btn = ctk.CTkButton(
             rvol_head,
-            text="▼ RVOL & ORB",
+            text="▶ RVOL & ORB",
             width=180,
             height=28,
             corner_radius=8,
@@ -3073,7 +3642,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._rvol_status.pack(side="left", padx=(10, 0))
         self._rvol_body = ctk.CTkFrame(self._rvol_section, fg_color="transparent")
-        self._rvol_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._rvol_table = DataTable(
             self._rvol_body,
             ["Symbol", "RVOL", "ORB", "Signal"],
@@ -3088,9 +3656,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._orb_mom_expanded = True
+        self._orb_mom_expanded = False
         self._orb_mom_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3101,7 +3669,7 @@ class TradingDashboardApp(ctk.CTk):
         orb_mom_head.pack(fill="x", padx=10, pady=(8, 4))
         self._orb_mom_toggle_btn = ctk.CTkButton(
             orb_mom_head,
-            text="▼ ORB Momentum",
+            text="▶ ORB Momentum",
             width=160,
             height=28,
             corner_radius=8,
@@ -3121,7 +3689,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._orb_mom_status.pack(side="left", padx=(10, 0))
         self._orb_mom_body = ctk.CTkFrame(self._orb_mom_section, fg_color="transparent")
-        self._orb_mom_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._orb_mom_table = DataTable(
             self._orb_mom_body,
             ["Symbol", "Status", "RVOL", "Stop", "Target", "Conv"],
@@ -3136,9 +3703,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._sector_rot_expanded = True
+        self._sector_rot_expanded = False
         self._sector_rot_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3149,7 +3716,7 @@ class TradingDashboardApp(ctk.CTk):
         sector_rot_head.pack(fill="x", padx=10, pady=(8, 4))
         self._sector_rot_toggle_btn = ctk.CTkButton(
             sector_rot_head,
-            text="▼ Sector Rotation",
+            text="▶ Sector Rotation",
             width=160,
             height=28,
             corner_radius=8,
@@ -3169,7 +3736,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._sector_rot_status.pack(side="left", padx=(10, 0))
         self._sector_rot_body = ctk.CTkFrame(self._sector_rot_section, fg_color="transparent")
-        self._sector_rot_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._sector_rot_table = DataTable(
             self._sector_rot_body,
             ["Sector", "ETF", "Score", "RS vs SPY", "Target", "Status"],
@@ -3184,9 +3750,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._vol_bo_expanded = True
+        self._vol_bo_expanded = False
         self._vol_bo_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3197,7 +3763,7 @@ class TradingDashboardApp(ctk.CTk):
         vol_bo_head.pack(fill="x", padx=10, pady=(8, 4))
         self._vol_bo_toggle_btn = ctk.CTkButton(
             vol_bo_head,
-            text="▼ Vol Breakout",
+            text="▶ Vol Breakout",
             width=150,
             height=28,
             corner_radius=8,
@@ -3217,7 +3783,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._vol_bo_status.pack(side="left", padx=(10, 0))
         self._vol_bo_body = ctk.CTkFrame(self._vol_bo_section, fg_color="transparent")
-        self._vol_bo_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._vol_bo_table = DataTable(
             self._vol_bo_body,
             ["Symbol", "Status", "ATR×", "RVOL", "Stop", "Target", "Conv"],
@@ -3232,9 +3797,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._strategy_expanded = True
+        self._strategy_expanded = False
         self._strategy_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3245,7 +3810,7 @@ class TradingDashboardApp(ctk.CTk):
         strategy_head.pack(fill="x", padx=10, pady=(8, 4))
         self._strategy_toggle_btn = ctk.CTkButton(
             strategy_head,
-            text="▼ Strategy Performance",
+            text="▶ Strategy Performance",
             width=200,
             height=28,
             corner_radius=8,
@@ -3265,7 +3830,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._strategy_status.pack(side="left", padx=(10, 0))
         self._strategy_body = ctk.CTkFrame(self._strategy_section, fg_color="transparent")
-        self._strategy_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._strategy_table = DataTable(
             self._strategy_body,
             ["Strategy", "Rating", "Score", "Return%", "Sharpe", "Win%", "Trades", "PnL", "AvgHold"],
@@ -3280,9 +3844,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._sharpe_expanded = True
+        self._sharpe_expanded = False
         self._sharpe_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3293,7 +3857,7 @@ class TradingDashboardApp(ctk.CTk):
         sharpe_head.pack(fill="x", padx=10, pady=(8, 4))
         self._sharpe_toggle_btn = ctk.CTkButton(
             sharpe_head,
-            text="▼ Sharpe History",
+            text="▶ Sharpe History",
             width=160,
             height=28,
             corner_radius=8,
@@ -3313,7 +3877,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._sharpe_status.pack(side="left", padx=(10, 0))
         self._sharpe_body = ctk.CTkFrame(self._sharpe_section, fg_color="transparent")
-        self._sharpe_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._sharpe_summary = ctk.CTkLabel(
             self._sharpe_body,
             text="",
@@ -3337,9 +3900,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
 
-        self._short_expanded = True
+        self._short_expanded = False
         self._short_section = ctk.CTkFrame(
-            self._tab_positions,
+            self._signals_scroll,
             fg_color=COLORS["surface"],
             corner_radius=10,
             border_width=1,
@@ -3350,7 +3913,7 @@ class TradingDashboardApp(ctk.CTk):
         short_head.pack(fill="x", padx=10, pady=(8, 4))
         self._short_toggle_btn = ctk.CTkButton(
             short_head,
-            text="▼ Short Activity",
+            text="▶ Short Activity",
             width=160,
             height=28,
             corner_radius=8,
@@ -3370,7 +3933,6 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._short_status.pack(side="left", padx=(10, 0))
         self._short_body = ctk.CTkFrame(self._short_section, fg_color="transparent")
-        self._short_body.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._short_table = DataTable(
             self._short_body,
             ["Type", "Symbol", "Detail", "Notional", "Trigger"],
@@ -3469,7 +4031,7 @@ class TradingDashboardApp(ctk.CTk):
         if _needs_setup(username, self._book_id):
             self.after(200, self._show_setup_wizard)
         else:
-            self.refresh_data()
+            self.refresh_data(full=True)
             self._schedule_refresh()
             if self._auto_start_bot:
                 self.after(800, lambda: self._maybe_auto_start_bot(quiet=True))
@@ -3520,6 +4082,10 @@ class TradingDashboardApp(ctk.CTk):
         self._since_start_label.configure(text="Since Start: —")
         self._last_positions_df = None
         self._last_positions_fp = None
+        self._last_realized_by_ticker = {}
+        self._last_sparkline_df = None
+        self._last_sparkline_fp = None
+        self._last_chart_equity_df = None
 
     def _start_book_async(self, book_id: str) -> None:
         self._status_label.configure(text=f"Starting {book_label(book_id)} bot…")
@@ -3619,12 +4185,16 @@ class TradingDashboardApp(ctk.CTk):
         self._book_id = book_id
         save_last_book_id(book_id)
         self._book_var.set(dropdown_label_for_book(book_id))
-        self.title(f"PythonTrading — {book_label(book_id)}")
+        self.title(
+            f"PythonTrading - {book_label(book_id)}"
+            + (f" - {DASHBOARD_UI_TAG}" if DASHBOARD_UI_TAG else "")
+        )
+        # Abandon in-flight refresh for the old book (apply checks _refresh_seq).
         self._refresh_seq += 1
+        self._refresh_busy = False
+        self._refresh_pending = False
+        self._refresh_pending_force_positions = False
         self._clear_book_panels_for_switch(book_id)
-        paper = _book_is_paper(book_id)
-        equity, cash, err = _fetch_book_equity(self._username, book_id, retries=2)
-        self._apply_equity_cash_ui(equity, cash, err, paper=paper)
         self._status_label.configure(text="Loading account data…")
         self._bot_badge.configure(text="Bot: …", text_color=COLORS["muted"])
         self.update_idletasks()
@@ -3633,7 +4203,17 @@ class TradingDashboardApp(ctk.CTk):
             self._show_setup_wizard()
             return
 
-        self.refresh_data()
+        # Fast path first (equity + positions) — full journal/scanners deferred.
+        # A full refresh on switch was the long paper↔live delay (multi‑MB journal).
+        self.refresh_data(full=False, force_positions=True)
+        switch_seq = self._refresh_seq
+
+        def _deferred_full() -> None:
+            if self._book_id != book_id or self._refresh_seq != switch_seq:
+                return
+            self.refresh_data(full=True)
+
+        self.after(400, _deferred_full)
 
     def _on_logout_click(self) -> None:
         if self._on_logout is None:
@@ -3641,8 +4221,9 @@ class TradingDashboardApp(ctk.CTk):
         if self._refresh_job:
             self.after_cancel(self._refresh_job)
         self._stop_tray()
-        self.destroy()
+        # Signal outer session loop first, then end this mainloop (no nested login).
         self._on_logout()
+        self.destroy()
 
     def _build_overview_tab(self) -> None:
         self._overview_body = ctk.CTkScrollableFrame(
@@ -3777,21 +4358,35 @@ class TradingDashboardApp(ctk.CTk):
 
     def _build_wisdom_tab(self) -> None:
         cards = ctk.CTkFrame(self._tab_wisdom, fg_color="transparent")
-        cards.pack(fill="x", padx=8, pady=8)
+        cards.pack(fill="x", padx=8, pady=(8, 4))
         self._w_sharpe = MetricCard(cards, "Live Sharpe")
         self._w_ret = MetricCard(cards, "Live Return")
-        self._w_vs = MetricCard(cards, "vs Active Sim")
+        self._w_vs = MetricCard(cards, "Live vs Best Sim")
         for i, card in enumerate((self._w_sharpe, self._w_ret, self._w_vs)):
             card.grid(row=0, column=i, padx=4, sticky="nsew")
             cards.grid_columnconfigure(i, weight=1)
         self._wisdom_rec = ctk.CTkLabel(
-            self._tab_wisdom, text="", wraplength=820, justify="left", text_color=COLORS["muted"]
+            self._tab_wisdom, text="", wraplength=900, justify="left", text_color=COLORS["muted"]
         )
-        self._wisdom_rec.pack(fill="x", padx=12, pady=4)
+        self._wisdom_rec.pack(fill="x", padx=12, pady=(2, 4))
+        self._wisdom_chart_frame = ctk.CTkFrame(
+            self._tab_wisdom,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+            height=220,
+        )
+        self._wisdom_chart_frame.pack(fill="x", padx=8, pady=(0, 6))
+        self._wisdom_chart_frame.pack_propagate(False)
+        self._wisdom_chart_canvas: FigureCanvasTkAgg | None = None
         self._wisdom_table = DataTable(
-            self._tab_wisdom, ["Mode", "Return%", "Sharpe", "Orders"], height=8
+            self._tab_wisdom,
+            ["Source", "Return%", "Sharpe", "ΔRet vs Live", "ΔSharpe", "Notes"],
+            height=8,
+            large=True,
         )
-        self._wisdom_table.pack(fill="both", expand=True, padx=8, pady=4)
+        self._wisdom_table.pack(fill="both", expand=True, padx=8, pady=(0, 4))
         self._wisdom_hint = ctk.CTkLabel(
             self._tab_wisdom,
             text="",
@@ -3814,15 +4409,39 @@ class TradingDashboardApp(ctk.CTk):
             hover_color=COLORS["accent_hover"],
             command=self._draw_charts,
         ).pack(side="left")
+        self._chart_range_var = ctk.StringVar(value=getattr(self, "_chart_range", "5D"))
+        range_seg = ctk.CTkSegmentedButton(
+            bar,
+            values=list(CHART_RANGE_KEYS),
+            variable=self._chart_range_var,
+            command=self._on_chart_range_changed,
+            height=32,
+            font=_ctk_font("caption"),
+            fg_color=COLORS["surface2"],
+            selected_color=COLORS["accent"],
+            selected_hover_color=COLORS["accent_hover"],
+            unselected_color=COLORS["surface"],
+            unselected_hover_color=COLORS["card_hover"],
+            text_color=COLORS["text"],
+        )
+        range_seg.pack(side="left", padx=(10, 0))
         self._charts_hint = ctk.CTkLabel(
             bar,
-            text="VTI + SPY · GLD when small account",
+            text="1D / 5D use 5m bars · 1M uses daily",
             text_color=COLORS["muted"],
             font=ctk.CTkFont(size=11),
         )
         self._charts_hint.pack(side="left", padx=10)
         self._charts_frame = ctk.CTkFrame(self._tab_charts, fg_color="transparent")
         self._charts_frame.pack(fill="both", expand=True, padx=8, pady=4)
+        self._tab_charts.grid_rowconfigure(1, weight=1)
+
+    def _on_chart_range_changed(self, value: str | None = None) -> None:
+        key = str(value or self._chart_range_var.get() or "5D").upper()
+        if key not in CHART_RANGE_SPECS:
+            key = "5D"
+        self._chart_range = key
+        self._draw_charts()
 
     def _show_setup_wizard(self) -> None:
         AlpacaKeysDialog(
@@ -4262,6 +4881,9 @@ class TradingDashboardApp(ctk.CTk):
         elif self._active_tab == "Positions":
             if not _positions_cache_fresh(self._username, self._book_id):
                 self.refresh_data(force_positions=True)
+        elif self._active_tab == "Wisdom":
+            # Ensure scorecard/heartbeat paint immediately when opening the tab.
+            self.refresh_data(full=False)
 
     def _clear_frame(self, frame) -> None:
         for child in frame.winfo_children():
@@ -4282,12 +4904,16 @@ class TradingDashboardApp(ctk.CTk):
     ) -> None:
         book_id = snap.get("book_id") or self._book_id
         other_book = snap.get("other_book") or _other_book_id(book_id)
+        this_status = snap.get("this_book_status") or []
+        other_status = snap.get("other_book_status") or []
         lines: list[str] = []
         lines.append("This book")
-        lines.extend(_format_book_status_block(self._username, book_id))
+        lines.extend(this_status if this_status else [f"{book_label(book_id)} · status n/a"])
         lines.append("")
         lines.append("Other book")
-        lines.extend(_format_book_status_block(self._username, other_book))
+        lines.extend(
+            other_status if other_status else [f"{book_label(other_book)} · status n/a"]
+        )
 
         hb_path = snap.get("heartbeat_path") or ""
         try:
@@ -4595,6 +5221,9 @@ class TradingDashboardApp(ctk.CTk):
         vti_val = 0.0
         vti_cap = 0.0
         if heartbeat:
+            caps = heartbeat.get("sleeve_caps") or {}
+            if caps.get("vti_core") is not None:
+                vti_tgt = float(caps.get("vti_core") or 0)
             exp = heartbeat.get("sleeve_exposure") or {}
             vti_val = float(exp.get("vti_core_value") or 0)
             vti_cap = float(exp.get("vti_core_cap") or 0)
@@ -4620,33 +5249,22 @@ class TradingDashboardApp(ctk.CTk):
                 return total / equity * 100
         return max(0.0, (equity - cash) / equity * 100)
 
-    def _apply_equity_cash_ui(
-        self,
-        equity: float,
-        cash: float,
-        acct_err: str | None,
-        *,
-        paper: bool | None = None,
-    ) -> None:
-        """Update header + metric cards from a fresh Alpaca read."""
-        self._last_equity = equity
-        if equity > 0:
-            config.configure_account_profile(equity)
-        self._update_live_equity_header(equity, acct_err, paper=paper)
-        cash_pct = (cash / equity * 100) if equity > 0 else 0.0
-        self._metric_cards["equity"].set(f"${equity:,.2f}" if equity > 0 else "—")
-        self._metric_cards["cash"].set(
-            f"${cash:,.0f} ({cash_pct:.0f}%)" if equity > 0 else "—"
-        )
-
-    def _bootstrap_live_equity(self) -> None:
-        """Force a fresh Alpaca read on startup / book switch before heartbeat fallback."""
-        equity, cash, err = _fetch_book_equity(self._username, self._book_id, retries=3)
-        self._apply_equity_cash_ui(equity, cash, err, paper=_book_is_paper(self._book_id))
-
     def _book_is_paper_chase(self) -> bool:
         spec = BOOKS.get(self._book_id) or {}
         return bool(spec.get("paper_chase"))
+
+    def _update_sleeve_pnl_panel(self, snap: dict) -> None:
+        """Paper-only all-time / since-2026-08-21 sleeve P&L. Hidden on live."""
+        paper = bool(snap.get("book_paper", _book_is_paper(self._book_id)))
+        if not paper:
+            self._sleeve_pnl_body.pack_forget()
+            return
+        text = snap.get("sleeve_pnl_text")
+        if text:
+            self._sleeve_pnl_body.configure(text=str(text))
+        elif not str(self._sleeve_pnl_body.cget("text") or "").strip():
+            self._sleeve_pnl_body.configure(text="Sleeve P&L: loading…")
+        self._sleeve_pnl_body.pack(fill="x", pady=(6, 0))
 
     def _update_stats_banner(
         self, equity: float, heartbeat: dict | None, acct_err: str | None
@@ -4711,10 +5329,10 @@ class TradingDashboardApp(ctk.CTk):
             )
 
     def _on_manual_refresh(self) -> None:
-        self.refresh_data(force_positions=True)
+        self.refresh_data(full=True, force_positions=True)
 
     def _on_f5_refresh(self, _event=None) -> str:
-        self.refresh_data(force_positions=True)
+        self.refresh_data(full=True, force_positions=True)
         return "break"
 
     def _set_refresh_buttons_busy(self, busy: bool) -> None:
@@ -4753,7 +5371,8 @@ class TradingDashboardApp(ctk.CTk):
         mem = _process_rss_mb()
         hb_age = _heartbeat_age_minutes(heartbeat)
         heartbeat_stale = bool(snap.get("heartbeat_stale"))
-        parts = [mode, ts, f"every {REFRESH_SECONDS}s"]
+        interval = int(getattr(self, "_refresh_interval_sec_cached", REFRESH_SECONDS) or REFRESH_SECONDS)
+        parts = [mode, ts, f"every {interval}s"]
         if snap.get("fast"):
             parts.append("fast refresh")
         if mem:
@@ -4782,10 +5401,10 @@ class TradingDashboardApp(ctk.CTk):
         )
         positions_tab = getattr(self, "_active_tab", "") == "Positions"
         cache_fresh = _positions_cache_fresh(self._username, self._book_id)
-        # Full positions fetch only when tab is active (and cache stale) or manual Refresh.
-        fetch_positions = bool(
-            force_positions or (positions_tab and not cache_fresh)
-        )
+        # Open P&L hero needs positions even when Positions tab isn't active.
+        fetch_positions = bool(force_positions or not cache_fresh)
+        # Heavy Opened/ATR enrichment only on Positions tab or manual Refresh.
+        positions_detail = bool(force_positions or positions_tab)
         self._refresh_busy = True
         self._refresh_seq += 1
         seq = self._refresh_seq
@@ -4793,7 +5412,7 @@ class TradingDashboardApp(ctk.CTk):
         book_id = self._book_id
         self._set_refresh_buttons_busy(True)
         self._set_refresh_status_message("Refreshing data…")
-        if fetch_positions:
+        if fetch_positions and positions_detail:
             has_rows = (
                 self._last_positions_df is not None
                 and not getattr(self._last_positions_df, "empty", True)
@@ -4807,6 +5426,7 @@ class TradingDashboardApp(ctk.CTk):
                     book_id,
                     fast=fast,
                     fetch_positions=fetch_positions,
+                    positions_detail=positions_detail,
                 )
             except Exception as exc:  # noqa: BLE001
                 snap = {
@@ -4828,9 +5448,8 @@ class TradingDashboardApp(ctk.CTk):
                 }
 
             def _apply() -> None:
+                # Stale worker after book switch: do not clear busy for the newer refresh.
                 if seq != self._refresh_seq or book_id != self._book_id:
-                    self._refresh_busy = False
-                    self._set_refresh_buttons_busy(False)
                     return
                 try:
                     self._apply_refresh_snapshot(snap, include_charts=include_charts)
@@ -4843,6 +5462,8 @@ class TradingDashboardApp(ctk.CTk):
                         restore_text=footer,
                     )
                 finally:
+                    if seq != self._refresh_seq:
+                        return
                     self._refresh_busy = False
                     self._set_refresh_buttons_busy(False)
                     if self._refresh_pending:
@@ -4863,8 +5484,15 @@ class TradingDashboardApp(ctk.CTk):
     def _apply_refresh_core(self, snap: dict) -> None:
         """Fast UI path: equity, small-account banner, sparkline, positions."""
         heartbeat = snap.get("heartbeat") or {}
+        self._last_heartbeat = heartbeat if isinstance(heartbeat, dict) else {}
         acct_err = snap.get("acct_err")
         positions_df = snap.get("positions_df")
+        if positions_df is None or getattr(positions_df, "empty", True):
+            # Keep last known holdings so Open P&L doesn't blank between refreshes.
+            if self._last_positions_df is not None and not getattr(
+                self._last_positions_df, "empty", True
+            ):
+                positions_df = self._last_positions_df
         pos_err = snap.get("pos_err")
         equity = float(snap.get("equity") or 0)
         cash = float(snap.get("cash") or 0)
@@ -4876,26 +5504,31 @@ class TradingDashboardApp(ctk.CTk):
 
         self._update_live_equity_header(equity, acct_err, paper=snap.get("book_paper"))
         self._update_stats_banner(equity, heartbeat, acct_err)
+        self._update_sleeve_pnl_panel(snap)
         self._update_small_panel(equity, heartbeat)
 
         cash_pct = (cash / equity * 100) if equity > 0 else 0.0
         invested = self._invested_pct(heartbeat, equity, cash)
-        upl = 0.0
-        if positions_df is not None and not getattr(positions_df, "empty", True):
-            try:
-                if "P&L $" in positions_df.columns:
-                    upl = float(positions_df["P&L $"].sum())
-            except Exception:  # noqa: BLE001
-                upl = 0.0
+        upl, upl_pct, top_hold = _open_pnl_from_positions(positions_df)
+        if abs(upl) < 1e-9 and not top_hold:
+            upl, upl_pct, top_hold = _open_pnl_from_heartbeat(heartbeat)
 
         self._metric_cards["equity"].set(f"${equity:,.2f}")
         self._metric_cards["cash"].set(
             f"${cash:,.0f} ({cash_pct:.0f}%)" if equity > 0 else "—"
         )
         self._metric_cards["invested"].set(f"{invested:.1f}%")
-        self._metric_cards["pnl"].set(
-            f"${upl:+,.2f}", color=COLORS["green"] if upl >= 0 else COLORS["red"]
-        )
+        if abs(upl) < 1e-9 and not top_hold:
+            self._metric_cards["pnl"].set("—", color=COLORS["muted"])
+        else:
+            # Keep hero text short so it always fits; top holding is optional.
+            pnl_txt = f"${upl:+,.0f} ({upl_pct:+.2f}%)"
+            if top_hold and top_hold != "from heartbeat" and len(top_hold) <= 14:
+                pnl_txt = f"{pnl_txt} · {top_hold}"
+            self._metric_cards["pnl"].set(
+                pnl_txt,
+                color=COLORS["green"] if upl >= 0 else COLORS["red"],
+            )
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
 
         small_acct = equity > 0 and config.is_small_account(equity)
@@ -4913,32 +5546,47 @@ class TradingDashboardApp(ctk.CTk):
             snap=snap,
         )
 
+        bot_label = snap.get("bot_label")
+        if not bot_label:
+            bot_label = (
+                f"Bot: Running · {snap.get('book_label', book_label(self._book_id))} "
+                f"({'paper' if snap.get('book_paper') else 'live'})"
+                if running
+                else "Bot: Stopped"
+            )
         self._bot_badge.configure(
-            text=(
-                bot_status_label(self._username, self._book_id)
-                if bot_running(self._username, self._book_id)
-                else (
-                    f"Bot: Running · {snap.get('book_label', book_label(self._book_id))} "
-                    f"({'paper' if snap.get('book_paper') else 'live'})"
-                    if running
-                    else "Bot: Stopped"
-                )
-            ),
+            text=str(bot_label),
             text_color=COLORS["green"] if running else COLORS["amber"],
         )
 
         self._update_live_status_panel(snap, heartbeat, running=running)
-        self._fill_positions(positions_df, pos_err, upl)
-        self._fill_trades(snap.get("journal_df"))
+        # Realized-by-ticker for Positions "Total $" (realized + open). Keep last on fast refresh.
+        journal_df = snap.get("journal_df")
+        if journal_df is not None and not getattr(journal_df, "empty", True):
+            try:
+                self._last_realized_by_ticker = _realized_pnl_by_ticker(journal_df)
+            except Exception:
+                pass
+        self._fill_positions(
+            positions_df,
+            pos_err,
+            upl,
+            realized_by_ticker=getattr(self, "_last_realized_by_ticker", None) or {},
+        )
+        # Trades tab needs journal; skip table rebuild on fast refresh when absent.
+        if snap.get("journal_df") is not None or not snap.get("fast"):
+            self._fill_trades(snap.get("journal_df"))
 
+        if snap.get("sparkline_df") is not None:
+            self._last_sparkline_df = snap.get("sparkline_df")
+        if snap.get("chart_equity_df") is not None:
+            self._last_chart_equity_df = snap.get("chart_equity_df")
         if ENABLE_SPARKLINE:
-            self._draw_sparkline()
+            self._draw_sparkline(df=self._last_sparkline_df)
 
     def _apply_refresh_extended(self, snap: dict) -> None:
-        """Slower panels: overview extras, wisdom, scanners, health."""
+        """Slower panels: overview extras, scanners, health."""
         heartbeat = snap.get("heartbeat")
-        scorecard = snap.get("scorecard")
-        scorecard_src = snap.get("scorecard_src") or ""
         acct_err = snap.get("acct_err")
         equity = float(snap.get("equity") or 0)
         running = bool(snap.get("running"))
@@ -5001,10 +5649,16 @@ class TradingDashboardApp(ctk.CTk):
             snap.get("short_snap"),
             book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
         )
-        self._fill_wisdom(scorecard, scorecard_src, heartbeat)
+        # Wisdom filled in _apply_refresh_snapshot (fast + full) so the tab is not empty.
 
     def _apply_refresh_snapshot(self, snap: dict, *, include_charts: bool = False) -> None:
         self._apply_refresh_core(snap)
+        # Wisdom cards/table are light; chart redraw is gated inside _fill_wisdom.
+        self._fill_wisdom(
+            snap.get("scorecard"),
+            snap.get("scorecard_src") or "",
+            snap.get("heartbeat"),
+        )
         if not snap.get("fast"):
             self._apply_refresh_extended(snap)
         else:
@@ -5212,9 +5866,13 @@ class TradingDashboardApp(ctk.CTk):
             self._wisdom_line.configure(text="—")
 
     def _position_rows(
-        self, positions_df: pd.DataFrame
+        self,
+        positions_df: pd.DataFrame,
+        *,
+        realized_by_ticker: dict[str, float] | None = None,
     ) -> list[dict]:
         rows = []
+        realized_map = realized_by_ticker or {}
         for _, r in positions_df.iterrows():
             try:
                 qty = float(r.get("Qty", 0) or 0)
@@ -5224,12 +5882,26 @@ class TradingDashboardApp(ctk.CTk):
                 entry = float(r.get("Entry", 0) or 0)
             except (TypeError, ValueError):
                 entry = 0.0
+            if entry != entry:  # NaN
+                entry = 0.0
             try:
                 current = float(r.get("Current", 0) or 0)
             except (TypeError, ValueError):
                 current = 0.0
             if current != current:
                 current = 0.0
+            try:
+                cost = float(r.get("Cost $", 0) or 0)
+            except (TypeError, ValueError):
+                cost = 0.0
+            if not cost and qty and entry:
+                cost = abs(qty) * entry
+            # Always prefer a usable per-share buy price for the Buy $ column.
+            if (not entry or entry <= 0) and cost and qty:
+                try:
+                    entry = abs(float(cost)) / abs(float(qty))
+                except ZeroDivisionError:
+                    entry = 0.0
             try:
                 market_value = float(r.get("Value $", qty * current))
             except (TypeError, ValueError):
@@ -5244,24 +5916,51 @@ class TradingDashboardApp(ctk.CTk):
                 pnl_pct = float(r.get("P&L %", 0) or 0)
             except (TypeError, ValueError):
                 pnl_pct = 0.0
+            # Prefer live mark; fall back to Value$/qty so Current $ never blanks.
+            if (not current or current <= 0) and market_value and qty:
+                try:
+                    current = abs(float(market_value)) / abs(float(qty))
+                except ZeroDivisionError:
+                    current = 0.0
+            ticker = str(r.get("Ticker") or "?")
+            sym = config.normalize_symbol(ticker)
+            try:
+                realized = float(realized_map.get(sym) or realized_map.get(ticker) or 0)
+            except (TypeError, ValueError):
+                realized = 0.0
+            # Prefer explicit Total $ from frame if present; else realized + open.
+            try:
+                total = float(r.get("Total $")) if "Total $" in positions_df.columns else None
+            except (TypeError, ValueError):
+                total = None
+            if total is None or total != total:
+                total = realized + pnl
+            buy_txt = f"${entry:,.2f}" if entry > 0 else "—"
+            cur_txt = f"${current:,.2f}" if current > 0 else "—"
             rows.append(
                 {
-                    "Ticker": str(r.get("Ticker") or "?"),
+                    "Ticker": ticker,
                     "Sleeve": r.get("Sleeve", ""),
                     "Opened": r.get("Opened", "—"),
                     "Qty": f"{qty:.4f}",
-                    "Entry": f"${entry:,.2f}",
-                    "Current": f"${current:,.2f}" if current else "—",
+                    "Buy $": buy_txt,
+                    "Current $": cur_txt,
+                    "Entry": buy_txt,  # keep alias for any older callers
+                    "Cost $": f"${cost:,.2f}",
                     "Value $": f"${market_value:,.2f}",
                     "P&L $": f"${pnl:+,.2f}",
                     "P&L %": f"{pnl_pct:+.2f}%",
+                    "Total $": f"${total:+,.2f}",
                     "ATR Stop": r.get("ATR Stop", "—"),
                     "_qty": qty,
                     "_entry": entry,
                     "_current": current,
+                    "_cost": cost,
                     "_value": market_value,
                     "_pnl": pnl,
                     "_pnl_pct": pnl_pct,
+                    "_realized": realized,
+                    "_total": total,
                 }
             )
         return rows
@@ -5287,9 +5986,26 @@ class TradingDashboardApp(ctk.CTk):
         positions_df: pd.DataFrame | None,
         pos_err: str | None,
         total_upl: float,
+        *,
+        realized_by_ticker: dict[str, float] | None = None,
     ) -> None:
         try:
-            fp = _positions_fingerprint(positions_df, pos_err)
+            realized_map = dict(realized_by_ticker or {})
+            work_df = positions_df
+            if work_df is not None and not getattr(work_df, "empty", True):
+                work_df = work_df.copy()
+                totals: list[float] = []
+                for _, r in work_df.iterrows():
+                    sym = config.normalize_symbol(str(r.get("Ticker") or ""))
+                    try:
+                        upl = float(r.get("P&L $") or 0)
+                    except (TypeError, ValueError):
+                        upl = 0.0
+                    realized = float(realized_map.get(sym) or 0.0)
+                    totals.append(realized + upl)
+                work_df["Total $"] = totals
+
+            fp = _positions_fingerprint(work_df, pos_err)
             if (
                 fp is not None
                 and fp == getattr(self, "_last_positions_fp", None)
@@ -5298,8 +6014,8 @@ class TradingDashboardApp(ctk.CTk):
                 # Data unchanged — skip tree rebuild; keep total text in sync.
                 color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
                 n = 0
-                if positions_df is not None and not getattr(positions_df, "empty", True):
-                    n = len(positions_df)
+                if work_df is not None and not getattr(work_df, "empty", True):
+                    n = len(work_df)
                 if n:
                     self._pos_total.configure(
                         text=f"{n} position(s) · unrealized P&L ${total_upl:+,.2f}",
@@ -5319,7 +6035,7 @@ class TradingDashboardApp(ctk.CTk):
                 )
                 self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
                 return
-            if positions_df is None or getattr(positions_df, "empty", True):
+            if work_df is None or getattr(work_df, "empty", True):
                 self._last_positions_df = None
                 self._last_positions_fp = fp
                 self._positions_table.clear()
@@ -5333,10 +6049,12 @@ class TradingDashboardApp(ctk.CTk):
                 )
                 self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
                 return
-            self._last_positions_df = positions_df.copy()
-            self._last_positions_fp = fp
-            rows = self._position_rows(positions_df)
+            self._last_positions_df = work_df.copy()
+            rows = self._position_rows(
+                work_df, realized_by_ticker=realized_map
+            )
             self._positions_table.set_rows(rows, pnl_col="_pnl")
+            self._last_positions_fp = fp
             color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
             self._pos_total.configure(
                 text=f"{len(rows)} position(s) · unrealized P&L ${total_upl:+,.2f}",
@@ -5425,13 +6143,126 @@ class TradingDashboardApp(ctk.CTk):
             text_color=color,
         )
 
+    def _clear_wisdom_chart(self) -> None:
+        frame = getattr(self, "_wisdom_chart_frame", None)
+        if frame is None:
+            return
+        for child in frame.winfo_children():
+            child.destroy()
+        self._wisdom_chart_canvas = None
+
+    def _draw_wisdom_compare_chart(self, scorecard: dict) -> None:
+        """Left: real vs backtest equity (indexed 100). Right: return bars Live vs sims.
+
+        UI-thread only — never load/parse journals here (that froze the dashboard).
+        """
+        self._clear_wisdom_chart()
+        frame = getattr(self, "_wisdom_chart_frame", None)
+        if frame is None:
+            return
+        live = scorecard.get("live") or {}
+        sim_modes = scorecard.get("simulated_modes") or {}
+        best = str(scorecard.get("best_sim_mode") or "")
+        active = str(live.get("mode") or "")
+        live_ret = float(live.get("return_pct") or 0)
+
+        labels = ["LIVE"]
+        returns = [live_ret]
+        colors = [COLORS["green"] if live_ret >= 0 else COLORS["red"]]
+        for mode, stats in sim_modes.items():
+            if "return_pct" not in stats or "error" in stats:
+                continue
+            labels.append(str(mode))
+            returns.append(float(stats.get("return_pct") or 0))
+            if mode == best:
+                colors.append(COLORS["amber"])
+            elif mode == active:
+                colors.append(COLORS["blue"])
+            else:
+                colors.append(COLORS["muted"])
+
+        fig = Figure(figsize=(9.2, 2.35), dpi=CHART_DPI, facecolor=COLORS["card"])
+        ax_line = fig.add_subplot(121)
+        ax_bar = fig.add_subplot(122)
+        for ax in (ax_line, ax_bar):
+            ax.set_facecolor(COLORS["card"])
+            ax.tick_params(colors=COLORS["muted"], labelsize=7)
+            for spine in ax.spines.values():
+                spine.set_color(COLORS["chart_grid"])
+
+        curves = scorecard.get("comparison_curves") or {}
+        live_curve = (live.get("curve_norm") or curves.get("live") or {})
+        plotted = False
+        if live_curve.get("values"):
+            y = list(live_curve["values"])
+            ax_line.plot(range(len(y)), y, color=COLORS["green"], linewidth=2.0, label="Real (live)")
+            plotted = True
+        for key, curve in curves.items():
+            if key == "live" or not isinstance(curve, dict):
+                continue
+            vals = curve.get("values") or []
+            if len(vals) < 2:
+                continue
+            label = key.replace("sim:", "BT ")
+            color = COLORS["amber"] if best and best in key else COLORS["blue"]
+            ax_line.plot(range(len(vals)), vals, color=color, linewidth=1.6, label=label)
+            plotted = True
+        if plotted:
+            ax_line.axhline(100.0, color=COLORS["chart_grid"], linewidth=0.8, linestyle="--")
+            ax_line.set_title("Equity indexed to 100", color=COLORS["text"], fontsize=9, pad=4)
+            ax_line.legend(loc="best", fontsize=7, frameon=False, labelcolor=COLORS["text_dim"])
+            ax_line.set_xticks([])
+        else:
+            # No stored curves yet — end-level compare only (keeps UI snappy).
+            best_ret = float((sim_modes.get(best) or {}).get("return_pct") or 0)
+            ax_line.bar(
+                [0, 1],
+                [100.0 + live_ret, 100.0 + best_ret],
+                color=[COLORS["green"], COLORS["amber"]],
+                width=0.55,
+            )
+            ax_line.set_xticks([0, 1])
+            ax_line.set_xticklabels(
+                ["Real end", f"Best BT\n({best or '—'})"],
+                fontsize=7,
+                color=COLORS["muted"],
+            )
+            ax_line.axhline(100.0, color=COLORS["chart_grid"], linewidth=0.8, linestyle="--")
+            ax_line.set_title("End level (100 = start)", color=COLORS["text"], fontsize=9, pad=4)
+
+        x = range(len(labels))
+        ax_bar.bar(x, returns, color=colors, width=0.7)
+        ax_bar.axhline(0.0, color=COLORS["chart_grid"], linewidth=0.8)
+        ax_bar.set_xticks(list(x))
+        ax_bar.set_xticklabels(labels, rotation=35, ha="right", fontsize=7, color=COLORS["muted"])
+        ax_bar.set_title("Return % — Real vs backtest modes", color=COLORS["text"], fontsize=9, pad=4)
+        fig.subplots_adjust(left=0.07, right=0.98, top=0.86, bottom=0.28, wspace=0.28)
+        canvas = FigureCanvasTkAgg(fig, master=frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
+        plt.close(fig)
+        self._wisdom_chart_canvas = canvas
+
     def _fill_wisdom(
         self,
         scorecard: dict | None,
         scorecard_src: str = "",
         heartbeat: dict | None = None,
     ) -> None:
+        # Avoid redrawing matplotlib on every 45s refresh unless data/tab needs it.
+        sc_fp = None
+        if scorecard is not None:
+            sc_fp = (
+                scorecard.get("evaluated_at"),
+                scorecard.get("best_sim_mode"),
+                (scorecard.get("live") or {}).get("return_pct"),
+                (scorecard.get("live") or {}).get("sharpe"),
+                scorecard.get("live_vs_best_sim_return_pp"),
+            )
+        on_wisdom = getattr(self, "_active_tab", "") == "Wisdom"
+        same_scorecard = sc_fp is not None and sc_fp == getattr(self, "_last_wisdom_fp", None)
         if scorecard is None:
+            self._clear_wisdom_chart()
             wisdom = (heartbeat or {}).get("wisdom") or {}
             if wisdom:
                 gap = float(wisdom.get("gap") or 0)
@@ -5469,23 +6300,93 @@ class TradingDashboardApp(ctk.CTk):
             self._wisdom_table.clear()
             self._wisdom_hint.configure(text="")
             return
+
         live = scorecard.get("live") or {}
         sharpe = float(live.get("sharpe") or 0)
         ret = float(live.get("return_pct") or 0)
-        vs_sim = scorecard.get("live_vs_active_sim_return_pp")
+        vs_sim = scorecard.get("live_vs_best_sim_return_pp")
         if vs_sim is None:
-            vs_sim = scorecard.get("live_vs_best_sim_return_pp")
+            vs_sim = scorecard.get("live_vs_active_sim_return_pp")
         vs_val = float(vs_sim or 0)
+        best = str(scorecard.get("best_sim_mode") or "")
+        active = str(live.get("mode") or "")
 
-        self._w_sharpe.set(f"{sharpe:.2f}", color=COLORS["green"] if sharpe >= 0 else COLORS["red"])
+        self._w_sharpe.set(
+            f"{sharpe:.2f}", color=COLORS["green"] if sharpe >= 0 else COLORS["red"]
+        )
         self._w_ret.set(f"{ret:+.2f}%", color=COLORS["green"] if ret >= 0 else COLORS["red"])
         self._w_vs.set(
-            f"{vs_val:+.2f} pp",
+            f"{vs_val:+.2f} pp" + (f" ({best})" if best else ""),
             color=COLORS["green"] if vs_val >= 0 else COLORS["red"],
         )
         rec = scorecard.get("recommendation") or ""
         ev = scorecard.get("evaluated_at", "—")
         self._wisdom_rec.configure(text=f"{rec}  (evaluated {ev})")
+
+        sim_modes = scorecard.get("simulated_modes") or {}
+        rows: list[dict] = [
+            {
+                "Source": f"LIVE · {active or '—'}",
+                "Return%": f"{ret:+.2f}",
+                "Sharpe": f"{sharpe:.3f}",
+                "ΔRet vs Live": "—",
+                "ΔSharpe": "—",
+                "Notes": f"{live.get('from_date', '?')} → {live.get('to_date', '?')}",
+                "_tag": "profit" if ret >= 0 else "loss",
+            }
+        ]
+        distinct_sharpes = {round(float(s.get("sharpe") or 0), 3) for s in sim_modes.values() if "return_pct" in s}
+        for mode, stats in sorted(
+            sim_modes.items(),
+            key=lambda kv: float((kv[1] or {}).get("return_pct") or -999),
+            reverse=True,
+        ):
+            if "return_pct" not in stats or "error" in stats:
+                continue
+            s_ret = float(stats.get("return_pct") or 0)
+            s_sh = float(stats.get("sharpe") or 0)
+            tags = []
+            if mode == best:
+                tags.append("best BT")
+            if mode == active:
+                tags.append("active mode")
+            paused = int(stats.get("paused_days") or 0)
+            metal = int(stats.get("metal_trades") or 0)
+            orders = int(stats.get("orders") or 0)
+            note_bits = []
+            if tags:
+                note_bits.append(", ".join(tags))
+            if orders:
+                note_bits.append(f"{orders} orders")
+            if paused:
+                note_bits.append(f"{paused}d paused")
+            if metal:
+                note_bits.append(f"{metal} metal")
+            rows.append(
+                {
+                    "Source": f"BT · {mode}",
+                    "Return%": f"{s_ret:+.2f}",
+                    "Sharpe": f"{s_sh:.3f}",
+                    "ΔRet vs Live": f"{s_ret - ret:+.2f}",
+                    "ΔSharpe": f"{s_sh - sharpe:+.3f}",
+                    "Notes": " · ".join(note_bits) or "—",
+                    "_tag": "profit" if s_ret >= ret else "loss",
+                }
+            )
+
+        self._wisdom_table.set_rows(rows, tag_col="_tag")
+        need_chart = (not same_scorecard) or (
+            on_wisdom and getattr(self, "_wisdom_chart_canvas", None) is None
+        )
+        if need_chart:
+            try:
+                self._draw_wisdom_compare_chart(scorecard)
+                self._last_wisdom_fp = sc_fp
+            except Exception:  # noqa: BLE001
+                self._clear_wisdom_chart()
+        else:
+            self._last_wisdom_fp = sc_fp
+
         src_note = (
             "per-book scorecard"
             if scorecard_src == "book"
@@ -5494,33 +6395,48 @@ class TradingDashboardApp(ctk.CTk):
             else ""
         )
         window = scorecard.get("window_days", "—")
+        cluster_note = ""
+        if len(distinct_sharpes) <= 1 and len(sim_modes) > 1:
+            cluster_note = " · sim modes nearly identical (compare LIVE vs best BT)"
+        curve_note = (
+            " · equity overlay ready"
+            if scorecard.get("comparison_curves") or (live.get("curve_norm") or {}).get("values")
+            else " · equity overlay after next wisdom eval"
+        )
         self._wisdom_hint.configure(
-            text=f"{book_label(self._book_id)} · {window}-day window · {src_note}".strip(" ·"),
+            text=(
+                f"{book_label(self._book_id)} · {window}-day window · {src_note}"
+                f"{cluster_note}{curve_note}"
+            ).strip(" ·"),
         )
 
-        sim_modes = scorecard.get("simulated_modes") or {}
-        rows = [
-            {
-                "Mode": mode,
-                "Return%": f"{float(stats.get('return_pct') or 0):+.2f}",
-                "Sharpe": f"{float(stats.get('sharpe') or 0):.2f}",
-                "Orders": str(int(stats.get("orders") or 0)),
-            }
-            for mode, stats in sim_modes.items()
-        ]
-        self._wisdom_table.set_rows(rows)
-
-    def _draw_sparkline(self) -> None:
-        self._clear_frame(self._spark_frame)
-        df = _load_equity_sparkline(self._username, self._book_id)
+    def _draw_sparkline(self, df: pd.DataFrame | None = None) -> None:
+        """Draw from worker-preloaded equity only — never read journal on UI thread."""
+        if df is None:
+            df = self._last_sparkline_df
         if df is None or len(df) < 2:
+            if getattr(self, "_last_sparkline_fp", None) == ("empty",):
+                return
+            self._last_sparkline_fp = ("empty",)
+            self._clear_frame(self._spark_frame)
             ctk.CTkLabel(
                 self._spark_frame, text="—", text_color=COLORS["muted"], font=ctk.CTkFont(size=11)
             ).pack(expand=True)
             return
+        try:
+            y0 = float(df["equity"].iloc[0])
+            y1 = float(df["equity"].iloc[-1])
+            n = int(len(df))
+            fp = (n, round(y0, 4), round(y1, 4))
+        except Exception:
+            fp = None
+        if fp is not None and fp == getattr(self, "_last_sparkline_fp", None):
+            return
+        self._last_sparkline_fp = fp
+        self._clear_frame(self._spark_frame)
         start, end = float(df["equity"].iloc[0]), float(df["equity"].iloc[-1])
         color = COLORS["green"] if end >= start else COLORS["red"]
-        fig = Figure(figsize=(2.4, 0.48), dpi=CHART_DPI, facecolor=COLORS["card"])
+        fig = Figure(figsize=(1.8, 0.28), dpi=CHART_DPI, facecolor=COLORS["card"])
         ax = fig.add_subplot(111)
         ax.set_facecolor(COLORS["card"])
         y = df["equity"].values
@@ -5540,35 +6456,86 @@ class TradingDashboardApp(ctk.CTk):
     def _draw_charts(self) -> None:
         self._clear_frame(self._charts_frame)
         self._price_canvases.clear()
-        row = ctk.CTkFrame(self._charts_frame, fg_color="transparent")
-        row.pack(fill="both", expand=True)
-        specs: list[tuple[str, str]] = [
-            (config.VTI_CORE_SYMBOL, COLORS["blue"]),
-            ("SPY", COLORS["amber"]),
-        ]
-        if self._last_equity > 0 and config.is_small_account(self._last_equity):
-            specs.append(("GLD", "#fbbf24"))
-        for idx, (symbol, color) in enumerate(specs):
-            df = _load_daily_closes(symbol, CHART_DAYS)
+        book_paper = _book_is_paper(self._book_id)
+        range_key = str(
+            getattr(self, "_chart_range", None)
+            or (self._chart_range_var.get() if hasattr(self, "_chart_range_var") else "5D")
+            or "5D"
+        ).upper()
+        if range_key not in CHART_RANGE_SPECS:
+            range_key = "5D"
+        self._chart_range = range_key
+        panels = _charts_panel_specs(
+            positions_df=self._last_positions_df,
+            book_paper=book_paper,
+        )
+        source_hint = "5m bars" if CHART_RANGE_SPECS[range_key]["prefer"] == "5m" else "daily bars"
+        self._charts_hint.configure(
+            text=(
+                f"{range_key} · {source_hint} · "
+                + " · ".join(str(p.get("title") or p.get("symbol") or "") for p in panels)
+            )
+        )
+
+        grid = ctk.CTkFrame(self._charts_frame, fg_color="transparent")
+        grid.pack(fill="both", expand=True)
+        for r in range(2):
+            grid.grid_rowconfigure(r, weight=1)
+        for c in range(3):
+            grid.grid_columnconfigure(c, weight=1)
+
+        for idx, spec in enumerate(panels):
+            row_i, col_i = divmod(idx, 3)
             cell = ctk.CTkFrame(
-                row,
+                grid,
                 fg_color=COLORS["card"],
                 corner_radius=12,
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            cell.grid(row=0, column=idx, padx=4, sticky="nsew")
-            row.grid_columnconfigure(idx, weight=1)
-            if df is None or df.empty:
-                ctk.CTkLabel(
-                    cell,
-                    text=f"No data for {symbol}",
-                    text_color=COLORS["muted"],
-                ).pack(pady=30)
-                continue
-            if len(df) > 40:
-                df = df.iloc[:: max(1, len(df) // 40)]
-            fig = _light_line_chart(df, title=symbol, color=color, show_axis=True)
+            cell.grid(row=row_i, column=col_i, padx=4, pady=4, sticky="nsew")
+
+            kind = spec.get("kind")
+            color = spec.get("color", COLORS["accent"])
+            plot_df: pd.DataFrame | None = None
+
+            if kind == "equity":
+                # Worker-preloaded journal only (never read CSV on UI thread).
+                eq_df = self._last_chart_equity_df
+                if eq_df is None or getattr(eq_df, "empty", True):
+                    eq_df = self._last_sparkline_df
+                plot_df = _slice_equity_for_chart_range(eq_df, range_key)
+                if plot_df is None or plot_df.empty:
+                    ctk.CTkLabel(
+                        cell,
+                        text="No account history",
+                        text_color=COLORS["muted"],
+                    ).pack(pady=30)
+                    continue
+                title = _pct_change_title(
+                    f"{spec.get('title') or 'Your account'} ({range_key})", plot_df
+                )
+            else:
+                symbol = str(spec.get("symbol") or "")
+                plot_df = _load_chart_closes(symbol, range_key)
+                if plot_df is None or plot_df.empty:
+                    ctk.CTkLabel(
+                        cell,
+                        text=f"No {range_key} data for {symbol}",
+                        text_color=COLORS["muted"],
+                    ).pack(pady=30)
+                    continue
+                title = _pct_change_title(
+                    f"{spec.get('title') or symbol} ({range_key})", plot_df
+                )
+
+            fig = _light_line_chart(
+                plot_df,
+                title=title,
+                color=color,
+                show_axis=True,
+                height=1.45,
+            )
             canvas = FigureCanvasTkAgg(fig, master=cell)
             canvas.draw()
             canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)
@@ -5822,14 +6789,28 @@ class TradingDashboardApp(ctk.CTk):
             return
         self._refresh_bot_async(self._book_id)
 
+    def _equity_session_is_open(self) -> bool:
+        known = _equity_session_open_from_heartbeat(getattr(self, "_last_heartbeat", None))
+        if known is not None:
+            return known
+        return _et_equity_session_open_guess()
+
+    def _refresh_interval_sec(self) -> int:
+        sec = REFRESH_SECONDS if self._equity_session_is_open() else REFRESH_SECONDS_CLOSED
+        self._refresh_interval_sec_cached = int(sec)
+        return self._refresh_interval_sec_cached
+
     def _schedule_refresh(self) -> None:
         if self._refresh_job:
             self.after_cancel(self._refresh_job)
-        self._refresh_job = self.after(REFRESH_SECONDS * 1000, self._auto_refresh_tick)
+        delay_ms = max(5, self._refresh_interval_sec()) * 1000
+        self._refresh_job = self.after(delay_ms, self._auto_refresh_tick)
 
     def _auto_refresh_tick(self) -> None:
         self._refresh_auto_cycles += 1
-        full = self._refresh_auto_cycles % 6 == 0
+        # Full refresh less often when closed (every ~30 min vs ~4.5 min open).
+        every_n = 6 if self._equity_session_is_open() else 2
+        full = self._refresh_auto_cycles % every_n == 0
         self.refresh_data(full=full)
         self._schedule_refresh()
 
@@ -5887,6 +6868,140 @@ class TradingDashboardApp(ctk.CTk):
         self._shutdown()
 
 
+def _hide_venv_stub_parent_window() -> None:
+    """Hide empty ghost window from Windows venv pythonw launcher (parent of real UI)."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        out = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId={os.getpid()}\").ParentProcessId",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=5,
+        )
+        parent_pid = int((out or "").strip())
+    except Exception:
+        return
+    if parent_pid <= 0 or parent_pid == os.getpid():
+        return
+    try:
+        cmd_out = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId={parent_pid}\").CommandLine",
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=5,
+        )
+        if "dashboard_app" not in (cmd_out or ""):
+            return
+    except Exception:
+        return
+
+    user32 = ctypes.windll.user32
+    SW_HIDE = 0
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _enum(hwnd, _lparam):  # type: ignore[misc]
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if int(pid.value) != parent_pid:
+            return True
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        if user32.GetWindowTextLengthW(hwnd) == 0:
+            user32.ShowWindow(hwnd, SW_HIDE)
+        return True
+
+    user32.EnumWindows(_enum, 0)
+
+
+def _focus_existing_dashboard_window() -> bool:
+    """Bring an existing monitor window to the front (best-effort)."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    me = os.getpid()
+    try:
+        from modules.runtime_paths import find_dashboard_monitor_pids, find_dashboard_script_pids
+
+        targets = set(find_dashboard_script_pids(PROJECT_ROOT) + find_dashboard_monitor_pids(PROJECT_ROOT))
+    except Exception:
+        targets = set()
+    targets.discard(me)
+    if not targets:
+        return False
+
+    found = ctypes.wintypes.HWND(0)
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def _enum(hwnd, _lparam):  # type: ignore[misc]
+        nonlocal found
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if int(pid.value) not in targets:
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buf, length + 1)
+        title = buf.value or ""
+        if "PythonTrading" not in title and "Sign in" not in title:
+            return True
+        found = hwnd
+        return False
+
+    user32.EnumWindows(_enum, 0)
+    if not found:
+        return False
+    SW_RESTORE = 9
+    user32.ShowWindow(found, SW_RESTORE)
+    user32.SetForegroundWindow(found)
+    return True
+
+
+_DASHBOARD_MUTEX_HANDLE = None
+
+
+def _acquire_dashboard_singleton() -> object | None:
+    """One visible monitor at a time (Windows named mutex). Keep handle alive."""
+    if sys.platform != "win32":
+        return True
+    import ctypes
+
+    global _DASHBOARD_MUTEX_HANDLE  # noqa: PLW0603
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.CreateMutexW(None, False, "Local\\PythonTradingDashboardSingleton")
+    if not handle:
+        return True
+    ERROR_ALREADY_EXISTS = 183
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        _focus_existing_dashboard_window()
+        kernel32.CloseHandle(handle)
+        return None
+    _DASHBOARD_MUTEX_HANDLE = handle
+    return handle
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="PythonTrading desktop monitor")
     parser.add_argument(
@@ -5897,7 +7012,35 @@ def main() -> None:
     args = parser.parse_args()
     launch_bot_after_login = args.launch_bot
 
-    def open_dashboard(username: str) -> None:
+    singleton = _acquire_dashboard_singleton()
+    if singleton is None:
+        return
+    _hide_venv_stub_parent_window()
+
+    # Sequential screens — never nest LoginApp.mainloop inside TradingDashboardApp.mainloop.
+    session: dict[str, object] = {"username": None, "screen": "login"}
+
+    def on_login_ok(username: str) -> None:
+        session["username"] = username
+        session["screen"] = "dashboard"
+
+    def on_logout() -> None:
+        session["username"] = None
+        session["screen"] = "login"
+
+    while session["screen"] == "login" or session["screen"] == "dashboard":
+        if session["screen"] == "login":
+            login = LoginApp(on_success=on_login_ok)
+            login.mainloop()
+            try:
+                login.destroy()
+            except Exception:
+                pass
+            if session["screen"] != "dashboard":
+                break
+            continue
+
+        username = str(session["username"] or "")
         migrate_user_to_books(username)
         book_id = get_last_book_id()
         if launch_bot_after_login and has_alpaca_config(username, book_id):
@@ -5908,7 +7051,7 @@ def main() -> None:
             app = TradingDashboardApp(
                 username,
                 book_id,
-                on_logout=show_login,
+                on_logout=on_logout,
                 auto_start_bot=launch_bot_after_login,
             )
         except Exception as exc:
@@ -5925,15 +7068,16 @@ def main() -> None:
                 "PythonTrading Monitor",
                 f"Could not open dashboard:\n{exc}\n\nSee {crash_log}",
             )
-            show_login()
-            return
+            session["screen"] = "login"
+            continue
         app.mainloop()
-
-    def show_login() -> None:
-        login = LoginApp(on_success=open_dashboard)
-        login.mainloop()
-
-    show_login()
+        try:
+            app.destroy()
+        except Exception:
+            pass
+        if session["screen"] == "login":
+            continue
+        break
 
 
 if __name__ == "__main__":

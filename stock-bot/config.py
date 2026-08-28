@@ -203,15 +203,35 @@ UNIVERSE = [
     "APT-USD", "ARB-USD", "OP-USD", "NEAR-USD", "FIL-USD", "AAVE-USD",
     "INJ-USD", "DOGE-USD", "SHIB-USD", "RENDER-USD", "SUI-USD", "PEPE-USD",
     "AAPL", "MSFT", "NVDA", "AMD", "GOOGL", "AMZN", "TSLA", "META",
+    "BRK.B",
     "SPCX", "PLTR", "NFLX", "INTC", "MU", "SMCI", "COIN", "CRM", "SHOP",
     "ONDS",
-    "VTI", "QQQ", "SPY", "IWM",
+    # Quantum / compute theme (owner add 2026-08-14) — strategy ranks/sizes as usual
+    "IBM", "HON", "IONQ", "RGTI", "INFQ", "XNDU", "QBTS",
+    "VTI", "VOO", "VXUS", "VEA", "VWO", "VNQ", "VGT", "VIG", "VYM",
+    "VO", "VB", "VUG", "VTV", "VT", "BND", "BNDX",
+    "QQQ", "SPY", "IWM",
     "GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX",
+    # Metal-related equities (miners / producers) — tradable via equity path when enabled
+    "NEM", "GOLD", "AEM", "WPM", "FCX", "SCCO", "RGLD", "FNV", "PAAS",
+    "AG", "KGC", "AU", "AA", "X", "CLF", "STLD", "NUE", "VALE", "BHP", "RIO",
     "XOM", "CVX", "LNG",
     "RTX", "LMT", "KTOS",
     "JPM", "BAC", "GS",
     "JNJ", "UNH", "PFE",
 ]
+
+# Always keep these in the equity sleeve pool (survive screener refreshes).
+_EQUITY_UNIVERSE_PINNED_DEFAULT = (
+    "IBM,HON,IONQ,RGTI,INFQ,XNDU,QBTS,GOOGL"
+)
+EQUITY_UNIVERSE_PINNED: tuple[str, ...] = tuple(
+    s.strip().upper()
+    for s in os.getenv(
+        "EQUITY_UNIVERSE_PINNED", _EQUITY_UNIVERSE_PINNED_DEFAULT
+    ).split(",")
+    if s.strip()
+)
 
 # --- Dynamic NYSE screener (scripts/analysis/universe_screener.py) ---
 USE_DYNAMIC_UNIVERSE = os.getenv("USE_DYNAMIC_UNIVERSE", "false").lower() in (
@@ -221,22 +241,84 @@ USE_DYNAMIC_UNIVERSE = os.getenv("USE_DYNAMIC_UNIVERSE", "false").lower() in (
 )
 SCREENER_UNIVERSE_PATH = os.getenv("SCREENER_UNIVERSE_PATH", "data/screener_universe.json")
 
-# Sleeve ETFs / metals kept out of NYSE momentum stock picks (still in UNIVERSE for data).
-_SLEEVE_ETFS = frozenset(
+# Index / core ETFs kept out of NYSE momentum unless NYSE_ALLOW_VANGUARD / no VTI core.
+_CORE_INDEX_ETFS = frozenset({"SPY", "QQQ", "IWM", "VTI"})
+_VANGUARD_ETFS = frozenset(
     {
-        "SPY",
-        "QQQ",
-        "IWM",
         "VTI",
-        "GLD",
-        "SLV",
-        "CPER",
-        "URA",
-        "PPLT",
-        "DBB",
-        "GDX",
+        "VOO",
+        "VXUS",
+        "VEA",
+        "VWO",
+        "VNQ",
+        "VGT",
+        "VIG",
+        "VYM",
+        "VO",
+        "VB",
+        "VUG",
+        "VTV",
+        "VT",
+        "BND",
+        "BNDX",
+        "ITOT",
+        "VFH",
+        "VHT",
+        "VDC",
+        "VCR",
+        "VIS",
+        "VPU",
+        "VAW",
+        "VOX",
+        "VDE",
     }
 )
+NYSE_ALLOW_VANGUARD = os.getenv("NYSE_ALLOW_VANGUARD", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+# Metal ETFs — excluded from equity momentum unless METALS_AS_EQUITY_ENABLED.
+_METAL_ETFS = frozenset({"GLD", "SLV", "CPER", "URA", "PPLT", "DBB", "GDX"})
+# Miners / producers treated as metal-related equities.
+METAL_RELATED_STOCKS = frozenset(
+    {
+        "NEM",
+        "GOLD",
+        "AEM",
+        "WPM",
+        "FCX",
+        "SCCO",
+        "RGLD",
+        "FNV",
+        "PAAS",
+        "AG",
+        "KGC",
+        "AU",
+        "AA",
+        "X",
+        "CLF",
+        "STLD",
+        "NUE",
+        "VALE",
+        "BHP",
+        "RIO",
+    }
+)
+# Back-compat alias used by older call sites.
+_SLEEVE_ETFS = _CORE_INDEX_ETFS | _METAL_ETFS
+
+# Trade metal ETFs + related stocks via NYSE/equity momentum (no dedicated metal sleeve).
+METALS_AS_EQUITY_ENABLED = os.getenv("METALS_AS_EQUITY_ENABLED", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+
+def metals_as_equity_enabled() -> bool:
+    """Allow metal ETFs / related equities in the NYSE momentum path (not a forced sleeve)."""
+    return bool(METALS_AS_EQUITY_ENABLED)
 
 
 def _screener_tickers_from_payload(payload) -> list[str]:
@@ -265,9 +347,24 @@ def _screener_tickers_from_payload(payload) -> list[str]:
     return out
 
 
+def nyse_allow_vanguard() -> bool:
+    """Vanguard / index ETFs trade in the NYSE sleeve (no separate VTI core)."""
+    return bool(NYSE_ALLOW_VANGUARD) or (not VTI_CORE_ENABLED)
+
+
+def is_vanguard_or_index_etf(symbol: str) -> bool:
+    sym = normalize_symbol(symbol)
+    return sym in _VANGUARD_ETFS or sym in _CORE_INDEX_ETFS
+
+
 def get_nyse_universe_fixed() -> list[str]:
     """Fixed NYSE momentum candidates only (no screener). Safe for live Profile A."""
-    return [t for t in UNIVERSE if "-USD" not in t and t not in _SLEEVE_ETFS]
+    exclude: set[str] = set()
+    if not nyse_allow_vanguard():
+        exclude |= set(_CORE_INDEX_ETFS)
+    if not metals_as_equity_enabled():
+        exclude |= set(_METAL_ETFS)
+    return [t for t in UNIVERSE if "-USD" not in t and t not in exclude]
 
 
 def get_nyse_universe() -> list[str]:
@@ -553,7 +650,7 @@ PAPER_EXCESS_CASH_HIGH_BOOST = float(os.getenv("PAPER_EXCESS_CASH_HIGH_BOOST", "
 PAPER_EXCESS_CASH_DEPLOY_THRESHOLD_PCT = float(os.getenv("PAPER_EXCESS_CASH_DEPLOY_THRESHOLD_PCT", "0.20"))
 PAPER_AGGRESSIVE_CASH_USE_PCT = float(os.getenv("PAPER_AGGRESSIVE_CASH_USE_PCT", "0.99"))
 # Live deployment floors — conservative defaults for Profile A (~$300) and larger live books.
-LIVE_MIN_NOTIONAL = float(os.getenv("LIVE_MIN_NOTIONAL", "10.0"))
+LIVE_MIN_NOTIONAL = float(os.getenv("LIVE_MIN_NOTIONAL", "1.0"))
 LIVE_DUST_MAX_NOTIONAL = float(os.getenv("LIVE_DUST_MAX_NOTIONAL", "1.0"))
 LIVE_DUST_SKIP_CHUNK_FRAC = float(os.getenv("LIVE_DUST_SKIP_CHUNK_FRAC", "0.05"))
 LIVE_EXCESS_CASH_SLEEVE_BOOST = float(os.getenv("LIVE_EXCESS_CASH_SLEEVE_BOOST", "1.0"))
@@ -565,7 +662,8 @@ PAPER_NO_ROOM_MIN_MULT = float(os.getenv("PAPER_NO_ROOM_MIN_MULT", "0.25"))
 PAPER_STAT_ARB_LEG_MIN_MULT = float(os.getenv("PAPER_STAT_ARB_LEG_MIN_MULT", "1.0"))
 PAPER_DEPLOY_DEBUG = _parse_env_bool("PAPER_DEPLOY_DEBUG", default="true")
 # Paper-only: soften yield gate so mild rate/bond stress does not block deployment.
-# Live stays fully gated. When True, only strong bear/panic regimes keep the gate.
+# Live SPY stays fully gated. Live leftover NYSE uses the same mild-stress
+# softening in code (block only RHYME_B/E / panic / steady bear).
 PAPER_YIELD_GATE_OVERRIDE = _parse_env_bool(
     "PAPER_YIELD_GATE_OVERRIDE", default="false"
 )
@@ -662,6 +760,9 @@ CRYPTO_EXPANDED_MAX_SYMBOLS = int(os.getenv("CRYPTO_EXPANDED_MAX_SYMBOLS", "48")
 CRYPTO_EXPANDED_MIN_BARS = int(os.getenv("CRYPTO_EXPANDED_MIN_BARS", "30"))
 _backtest_crypto_expanded_prefetch = False
 PAPER_VTI_REBALANCE_DRIFT_PCT = float(os.getenv("PAPER_VTI_REBALANCE_DRIFT_PCT", "0.01"))
+# Draft paper VTI reduce gate (cash-need skip). Code flag only — not an .env key.
+# Default OFF: behavior identical to today. Do not flip until measured.
+PAPER_VTI_CASH_NEED_SKIP = False
 PAPER_DYNAMIC_VTI_ENABLED = os.getenv("PAPER_DYNAMIC_VTI", "true").lower() in (
     "1",
     "true",
@@ -730,7 +831,8 @@ PAPER_MOMENTUM_QUALITY_FIXES = _parse_env_bool(
     "PAPER_MOMENTUM_QUALITY_FIXES", default="false"
 )
 # Paper-only NYSE entry hygiene (max adds / same-day reentry / min notional).
-# Live Profile A never sees these — gated by effective_paper_nyse_entry_hygiene().
+# Live Profile A never sees max-adds / $25 min — gated by effective_paper_nyse_entry_hygiene().
+# Live leftover NYSE does use same-day reentry (LIVE_NYSE_SAME_DAY_REENTRY_BLOCK).
 PAPER_NYSE_ENTRY_HYGIENE_ENABLED = _parse_env_bool(
     "PAPER_NYSE_ENTRY_HYGIENE_ENABLED", default="true"
 )
@@ -739,8 +841,18 @@ PAPER_NYSE_MAX_ADDS_PER_SYMBOL = int(os.getenv("PAPER_NYSE_MAX_ADDS_PER_SYMBOL",
 PAPER_NYSE_SAME_DAY_REENTRY_BLOCK = _parse_env_bool(
     "PAPER_NYSE_SAME_DAY_REENTRY_BLOCK", default="true"
 )
+# Live leftover NYSE: block repurchase of a name sold earlier the same session
+# (ATR-stop churn / SPCX 4s loop). Does not flatten overnight.
+LIVE_NYSE_SAME_DAY_REENTRY_BLOCK = _parse_env_bool(
+    "LIVE_NYSE_SAME_DAY_REENTRY_BLOCK", default="true"
+)
 # Floor for NYSE momentum clips (on top of effective_min_notional). Avoids $2 dust adds.
 PAPER_NYSE_MIN_NOTIONAL = float(os.getenv("PAPER_NYSE_MIN_NOTIONAL", "25"))
+# After an ATR (or smart ATR) full stop, block *new* NYSE names for the rest of
+# the ET session. Does not block adds to names already held. Paper hygiene only.
+PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN = _parse_env_bool(
+    "PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN", default="true"
+)
 # NYSE pick rotation — cap per-symbol pick frequency in rolling bar window (paper only).
 NYSE_PICK_ROTATION_ENABLED = _parse_env_bool(
     "NYSE_PICK_ROTATION_ENABLED", default="false"
@@ -809,11 +921,31 @@ PAPER_DD_RISK_MULT_7 = float(os.getenv("PAPER_DD_RISK_MULT_7", str(PAPER_DD_RISK
 PAPER_POSITION_MAX_HOLD_BARS = int(os.getenv("PAPER_POSITION_MAX_HOLD_BARS", "30"))
 PER_NAME_MAX_PCT = float(os.getenv("PER_NAME_MAX_PCT", "0.08"))
 PAPER_MAX_POSITION_PCT = float(os.getenv("PAPER_MAX_POSITION_PCT", str(PER_NAME_MAX_PCT)))
+# Paper NYSE: tighter than book 8% so one name cannot eat the sleeve (CDW-class).
+PAPER_NYSE_PER_NAME_MAX_PCT = float(os.getenv("PAPER_NYSE_PER_NAME_MAX_PCT", "0.025"))
+PAPER_NYSE_MAX_OF_SLEEVE_PCT = float(os.getenv("PAPER_NYSE_MAX_OF_SLEEVE_PCT", "0.15"))
+PAPER_NYSE_FAT_LOSER_ENABLED = _env_bool_first(
+    "PAPER_NYSE_FAT_LOSER_ENABLED", default="true"
+)
+# Open P&L fraction (e.g. -0.01 = -1%) that triggers a tighter target clip.
+PAPER_NYSE_FAT_LOSER_OPEN_PCT = float(os.getenv("PAPER_NYSE_FAT_LOSER_OPEN_PCT", "-0.01"))
+PAPER_NYSE_FAT_LOSER_TARGET_PCT = float(
+    os.getenv("PAPER_NYSE_FAT_LOSER_TARGET_PCT", "0.005")
+)
 # Executor portfolio guards (buys + periodic cleanup).
 CONCENTRATION_GUARD_ENABLED = _env_bool_first(
     "CONCENTRATION_GUARD_ENABLED", default="true"
 )
 MAX_ACTIVE_TICKERS = int(os.getenv("MAX_ACTIVE_TICKERS", "25"))
+# Live small-account non-core cap band (scales with conviction / thinking confidence).
+LIVE_MAX_ACTIVE_TICKERS_MIN = int(os.getenv("LIVE_MAX_ACTIVE_TICKERS_MIN", "6"))
+LIVE_MAX_ACTIVE_TICKERS_MAX = int(os.getenv("LIVE_MAX_ACTIVE_TICKERS_MAX", "8"))
+LIVE_MAX_ACTIVE_CONVICTION_LOW = float(
+    os.getenv("LIVE_MAX_ACTIVE_CONVICTION_LOW", "0.55")
+)
+LIVE_MAX_ACTIVE_CONVICTION_HIGH = float(
+    os.getenv("LIVE_MAX_ACTIVE_CONVICTION_HIGH", "0.80")
+)
 # Paper/research conviction: keep only top N NYSE momentum ranks (0 = no truncate).
 PAPER_NYSE_TOP_N = int(os.getenv("PAPER_NYSE_TOP_N", "0"))
 # Auto-dust cleaner: sell positions with market value below this (USD).
@@ -1452,7 +1584,7 @@ _paper_aggressive_ctx = False
 
 # --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
 FUND_CASH_BUFFER_PCT = 0.15
-SPY_SLEEVE_CAP_PCT = 0.45
+SPY_SLEEVE_CAP_PCT = float(os.getenv("SPY_SLEEVE_CAP_PCT", "0.45"))
 # Base NYSE momentum sleeve; paper/research uses effective_nyse_sleeve_cap_pct() (0.18–0.22).
 NYSE_SLEEVE_CAP_PCT = float(os.getenv("NYSE_SLEEVE_CAP_PCT", "0.20"))
 # Dedicated stat-arb sleeve (paper/research) — independent of NYSE momentum cap.
@@ -2011,73 +2143,6 @@ else:
 # Dollar notional cap (also capped at 25% of equity / 95% of cash in spacex_ipo_buy.py)
 SPACEX_IPO_BUY_NOTIONAL = float(os.getenv("SPACEX_IPO_BUY_NOTIONAL", "2500"))
 
-# Kraken Pro SPCX (xStock or equity pair) when IPO lists on Kraken API
-ALLOW_KRAKEN_TRADING = os.getenv("ALLOW_KRAKEN_TRADING", "").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-KRAKEN_SPCX_BUY_ENABLED = os.getenv("KRAKEN_SPCX_BUY_ENABLED", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-# Legacy alias
-if os.getenv("KRAKEN_IPO_BUY_ENABLED", "").lower() in ("1", "true", "yes"):
-    KRAKEN_SPCX_BUY_ENABLED = True
-KRAKEN_SPCX_BUY_USD = float(
-    os.getenv("KRAKEN_SPCX_BUY_USD", os.getenv("KRAKEN_IPO_BUY_USD", "500"))
-)
-KRAKEN_SPCX_PAIR = os.getenv("KRAKEN_SPCX_PAIR", "").strip().upper()
-
-# Kraken autopilot: cleanup + crypto mirror + paper-bot mirror (wisdom + game plan gates)
-KRAKEN_AUTOPILOT_ENABLED = os.getenv("KRAKEN_AUTOPILOT_ENABLED", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-# Default dry-run: validate orders only until you set KRAKEN_DRY_RUN=false
-KRAKEN_DRY_RUN = os.getenv("KRAKEN_DRY_RUN", "true").lower() in ("1", "true", "yes")
-KRAKEN_AUTOPILOT_CLEANUP = os.getenv("KRAKEN_AUTOPILOT_CLEANUP", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-KRAKEN_AUTOPILOT_CRYPTO_MIRROR = os.getenv(
-    "KRAKEN_AUTOPILOT_CRYPTO_MIRROR", "true"
-).lower() in ("1", "true", "yes")
-KRAKEN_AUTOPILOT_MIRROR = os.getenv("KRAKEN_AUTOPILOT_MIRROR", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-KRAKEN_MAX_ORDER_USD = float(os.getenv("KRAKEN_MAX_ORDER_USD", "25"))
-# Max USD on buys per autopilot cycle (0 = no cycle cap, only KRAKEN_MAX_ORDER_USD)
-KRAKEN_CYCLE_BUDGET_USD = float(os.getenv("KRAKEN_CYCLE_BUDGET_USD", "0"))
-KRAKEN_CRYPTO_NOTIONAL = float(os.getenv("KRAKEN_CRYPTO_NOTIONAL", "15"))
-KRAKEN_CLEANUP_MAX_ACTIONS = int(os.getenv("KRAKEN_CLEANUP_MAX_ACTIONS", "3"))
-# Kraken stocks tab: simplify toward this many names (cleanup mode); not applied to Alpaca
-KRAKEN_MAX_POSITIONS = int(os.getenv("KRAKEN_MAX_POSITIONS", "5"))
-# Min base volume to treat as a real position (skip dust after partial sells)
-KRAKEN_DUST_VOLUME = float(os.getenv("KRAKEN_DUST_VOLUME", "0.1"))
-KRAKEN_REBALANCE_ENABLED = os.getenv("KRAKEN_REBALANCE_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-KRAKEN_REBALANCE_MAX_TRADES = int(os.getenv("KRAKEN_REBALANCE_MAX_TRADES", "6"))
-KRAKEN_REBALANCE_FORCE = os.getenv("KRAKEN_REBALANCE_FORCE", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-# When true, skip Telegram manual stock alerts; run_all logs only
-KRAKEN_NO_MANUAL_ALERTS = os.getenv("KRAKEN_NO_MANUAL_ALERTS", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-)
-
 WISDOM_EVAL_ENABLED = os.getenv("WISDOM_EVAL_ENABLED", "true").lower() in ("1", "true", "yes")
 WISDOM_EVAL_DAYS = int(os.getenv("WISDOM_EVAL_DAYS", "30"))
 WISDOM_MONTHLY_ENABLED = os.getenv("WISDOM_MONTHLY_ENABLED", "true").lower() in (
@@ -2158,6 +2223,11 @@ if _metal_not_in_universe:
     raise ValueError(
         f"METAL_SYMBOLS not in UNIVERSE: {sorted(_metal_not_in_universe)}"
     )
+_metal_related_missing = METAL_RELATED_STOCKS - _universe_set
+if _metal_related_missing:
+    raise ValueError(
+        f"METAL_RELATED_STOCKS not in UNIVERSE: {sorted(_metal_related_missing)}"
+    )
 if not LIVE_METAL_SYMBOLS <= METAL_SYMBOLS:
     raise ValueError("LIVE_METAL_SYMBOLS must be a subset of METAL_SYMBOLS")
 
@@ -2189,7 +2259,7 @@ LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
 }
 # Locked when enforce_live_conservative_profile() runs (live book / Profile A).
 LIVE_CONSERVATIVE_LOCKED_ON: tuple[str, ...] = (
-    "SPY trend (LIVE_ACTIVE_SLEEVE_CHOICE=spy)",
+    "Active sleeve (LIVE_ACTIVE_SLEEVE_CHOICE=spy default; nyse opt-in via env)",
     "High VTI core (LIVE_VTI_CORE_PCT; no optional 0% floor)",
     "GARCH vol sizing (GARCH_VOL_LIVE_ENABLED via live enforce)",
     "Tail-risk controls",
@@ -2497,13 +2567,6 @@ def get_tavily_api_key():
     return os.getenv("TAVILY_API_KEY")
 
 
-def get_kraken_credentials():
-    """Return (api_key, secret). Accepts KRAKEN_SECRET_KEY or KRAKEN_API_SECRET."""
-    key = os.getenv("KRAKEN_API_KEY")
-    secret = os.getenv("KRAKEN_SECRET_KEY") or os.getenv("KRAKEN_API_SECRET")
-    return key, secret
-
-
 def get_telegram_config():
     """Return (bot_token, chat_id) or None if not configured."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -2568,13 +2631,28 @@ TELEGRAM_DAILY_ERROR_DIGEST_TIME = os.getenv(
 TELEGRAM_ALERT_SPACEX = _parse_env_bool("TELEGRAM_ALERT_SPACEX", default="false")
 TELEGRAM_ALERT_BTC = _parse_env_bool("TELEGRAM_ALERT_BTC", default="false")
 TELEGRAM_ALERT_SOCIAL = _parse_env_bool("TELEGRAM_ALERT_SOCIAL", default="false")
+# Noisy per-cycle / regime chatter — OFF by default (freeze-safe alert gating only).
+TELEGRAM_ALERT_THINKING = _parse_env_bool("TELEGRAM_ALERT_THINKING", default="false")
+TELEGRAM_ALERT_REGIME = _parse_env_bool("TELEGRAM_ALERT_REGIME", default="false")
+# Monthly wisdom rollup Telegram (also requires research intent; default OFF).
+TELEGRAM_ALERT_WISDOM = _parse_env_bool(
+    "TELEGRAM_ALERT_WISDOM",
+    default=os.getenv("TELEGRAM_ALERT_SOCIAL", "false"),
+)
 TELEGRAM_WEEKLY_SUMMARY_TIME = os.getenv("TELEGRAM_WEEKLY_SUMMARY_TIME", "16:30").strip()
 TELEGRAM_WEEKLY_LIVE_ENABLED = _parse_env_bool("TELEGRAM_WEEKLY_LIVE_ENABLED", default="false")
 
 
 def telegram_fill_min_usd() -> float:
-    """Minimum fill notional for Telegram (default $5; never below ALPACA_MIN_NOTIONAL)."""
-    return max(float(ALPACA_MIN_NOTIONAL), float(TELEGRAM_FILL_MIN_USD))
+    """Minimum fill notional for Telegram.
+
+    ``TELEGRAM_FILL_MIN_USD=0`` (or negative) = notify on **any** fill.
+    Otherwise floor at ``ALPACA_MIN_NOTIONAL`` so tiny dust does not spam.
+    """
+    raw = float(TELEGRAM_FILL_MIN_USD)
+    if raw <= 0:
+        return 0.0
+    return max(float(ALPACA_MIN_NOTIONAL), raw)
 
 
 def telegram_weekly_summary_enabled() -> bool:
@@ -2611,9 +2689,9 @@ def telegram_alert_policy_summary() -> str:
             f"yield change-only/{TELEGRAM_YIELD_GATE_COOLDOWN_MIN:g}m"
         )
     else:
-        bits.append("yield alerts=off")
+        bits.append("yield=off")
     if TELEGRAM_ALERT_FILLS:
-        bits.append(f"fills≥${telegram_fill_min_usd():.0f}")
+        bits.append(f"fills>=${telegram_fill_min_usd():.0f}")
     if TELEGRAM_ALERT_ERRORS:
         bits.append("errors")
     if ERROR_WATCHER_ENABLED:
@@ -2628,28 +2706,39 @@ def telegram_alert_policy_summary() -> str:
         bits.append(f"live daily@{TELEGRAM_LIVE_DAILY_SUMMARY_TIME} ET")
     if telegram_weekly_summary_enabled():
         bits.append(f"weekly Fri@{TELEGRAM_WEEKLY_SUMMARY_TIME} ET")
+    # Explicit OFF callouts for previously noisy categories
+    bits.append("thinking=" + ("on" if TELEGRAM_ALERT_THINKING else "off"))
+    bits.append("regime=" + ("on" if TELEGRAM_ALERT_REGIME else "off"))
+    if TELEGRAM_ALERT_WISDOM or TELEGRAM_ALERT_SOCIAL:
+        bits.append("wisdom/social=on")
+    else:
+        bits.append("wisdom/social=off")
     return ", ".join(bits) if bits else "all high-signal alerts off"
 
 
 def format_telegram_automation_banner() -> str:
-    """Startup line: Yield alerts=change-only | Fills ON | Error watcher ON."""
+    """Startup line: high-signal ON; thinking/regime OFF by default."""
     if TELEGRAM_ALERT_YIELDS:
-        yield_s = f"Yield alerts=change-only ({TELEGRAM_YIELD_GATE_COOLDOWN_MIN:g}m cd)"
+        yield_s = f"Yield=change-only ({TELEGRAM_YIELD_GATE_COOLDOWN_MIN:g}m cd)"
     else:
-        yield_s = "Yield alerts=OFF"
+        yield_s = "Yield=OFF"
     fills_s = (
         f"Fills ON (>=${telegram_fill_min_usd():.0f})"
         if TELEGRAM_ALERT_FILLS
         else "Fills OFF"
     )
     if ERROR_WATCHER_ENABLED:
-        err_s = "Error watcher ON | daily log + TG per error"
+        err_s = "Errors ON"
         if TELEGRAM_DAILY_ERROR_DIGEST:
             err_s += f" | digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET"
     else:
-        err_s = "Error watcher OFF"
-    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} <<<"
-
+        err_s = "Errors OFF"
+    think_s = "Thinking TG=ON" if TELEGRAM_ALERT_THINKING else "Thinking TG=OFF"
+    reg_s = "Regime TG=ON" if TELEGRAM_ALERT_REGIME else "Regime TG=OFF"
+    return (
+        f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} | "
+        f"{think_s} | {reg_s} <<<"
+    )
 
 def get_smtp_config():
     """SMTP settings for email alerts."""
@@ -3022,8 +3111,8 @@ def enforce_live_conservative_profile() -> None:
     if is_realistic_research_active():
         return
 
-    # --- High VTI + SPY trend sleeve ---
-    if not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
+    # --- High VTI + SPY trend sleeve (skipped when VTI core is explicitly off) ---
+    if VTI_CORE_ENABLED and not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
         SMALL_ACCOUNT_VTI_CORE_PCT = LIVE_VTI_CORE_PCT
     if not _env_explicit("LIVE_ACTIVE_SLEEVE_CHOICE"):
         LIVE_ACTIVE_SLEEVE_CHOICE = "spy"
@@ -3066,6 +3155,13 @@ def enforce_live_small_account_profile() -> None:
     enforce_live_conservative_profile()
 
 
+def _live_banner_vti_pct() -> float:
+    """VTI % for live banners — 0 when core is off (do not advertise 85/95% lock)."""
+    if not VTI_CORE_ENABLED:
+        return 0.0
+    return float(LIVE_VTI_CORE_PCT)
+
+
 def format_live_conservative_banner() -> str:
     sleeve_labels = {
         "spy": "SPY trend",
@@ -3074,13 +3170,15 @@ def format_live_conservative_banner() -> str:
         "cash": "cash buffer",
     }
     sleeve = sleeve_labels.get(LIVE_ACTIVE_SLEEVE_CHOICE, LIVE_ACTIVE_SLEEVE_CHOICE)
+    vti_pct = _live_banner_vti_pct()
     legacy_active = max(
-        0.0, 1.0 - LIVE_VTI_CORE_PCT - LIVE_SMALL_ACTIVE_SLEEVE_PCT
+        0.0, 1.0 - vti_pct - LIVE_SMALL_ACTIVE_SLEEVE_PCT
     )
     garch = "ON" if GARCH_VOL_LIVE_ENABLED and GARCH_VOL_ENABLED else "OFF"
+    vti_bit = "VTI core OFF" if vti_pct <= 0 else f"{vti_pct:.0%} VTI"
     return (
-        f"{LIVE_CONSERVATIVE_LABEL} {LIVE_VTI_CORE_PCT:.0%}/{legacy_active:.0%}: "
-        f"{LIVE_VTI_CORE_PCT:.0%} VTI | {LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {sleeve} | "
+        f"{LIVE_CONSERVATIVE_LABEL} {vti_pct:.0%}/{legacy_active:.0%}: "
+        f"{vti_bit} | {LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {sleeve} | "
         f"{legacy_active:.0%} NYSE/active | "
         f"GARCH {garch} | ATR/exits/corr/tail ON | "
         f"scanners/shorts/stat-arb OFF | "
@@ -3090,10 +3188,15 @@ def format_live_conservative_banner() -> str:
 
 def format_live_conservative_headline() -> str:
     """Prominent Live Conservative FINAL LOCK line (mirrors paper FINAL LOCK headline)."""
+    vti_on = (
+        "VTI core OFF"
+        if _live_banner_vti_pct() <= 0
+        else f"High VTI {_live_banner_vti_pct():.0%}"
+    )
     on = " | ".join(
         (
             "SPY trend",
-            f"High VTI {LIVE_VTI_CORE_PCT:.0%}",
+            vti_on,
             "GARCH",
             "Tail risk",
             "Corr guard",
@@ -3109,8 +3212,10 @@ def format_live_conservative_headline() -> str:
 
 
 def get_live_profile_summary() -> str:
+    vti_pct = _live_banner_vti_pct()
+    vti_bit = "VTI core OFF" if vti_pct <= 0 else f"{vti_pct:.0%} VTI"
     return (
-        f"{LIVE_CONSERVATIVE_LABEL}: {LIVE_VTI_CORE_PCT:.0%} VTI | "
+        f"{LIVE_CONSERVATIVE_LABEL}: {vti_bit} | "
         f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY trend | GARCH ON | "
         f"ATR/exits/corr/tail ON | scanners/shorts/stat-arb OFF | "
         f"crypto OFF | thinking OFF | static universe"
@@ -3248,16 +3353,114 @@ def effective_per_name_max_pct() -> float:
     return min(float(PER_NAME_MAX_PCT), float(PAPER_MAX_POSITION_PCT))
 
 
+def effective_nyse_per_name_max_pct() -> float:
+    """Paper NYSE per-name ceiling as a fraction of book equity.
+
+    Uses the tighter of:
+    - PAPER_NYSE_PER_NAME_MAX_PCT (default 2.5%)
+    - sleeve_cap × PAPER_NYSE_MAX_OF_SLEEVE_PCT (default 20%×15% = 3%)
+    - global per-name max
+    """
+    base = effective_per_name_max_pct()
+    try:
+        sleeve_cap = float(PAPER_NYSE_SLEEVE_CAP_PCT)
+    except (TypeError, ValueError):
+        sleeve_cap = 0.20
+    from_sleeve = sleeve_cap * float(PAPER_NYSE_MAX_OF_SLEEVE_PCT)
+    return min(base, float(PAPER_NYSE_PER_NAME_MAX_PCT), max(0.001, from_sleeve))
+
+
+def effective_per_name_max_pct_for_symbol(symbol: str) -> float:
+    """Per-name buy/hold ceiling; paper NYSE uses the tighter NYSE cap."""
+    base = effective_per_name_max_pct()
+    if not PAPER_TRADING:
+        if nyse_allow_vanguard() and is_vanguard_or_index_etf(symbol):
+            return 1.0
+        return base
+    try:
+        from modules.cost_basis import sleeve_for_symbol
+
+        if nyse_allow_vanguard() and is_vanguard_or_index_etf(symbol):
+            return 1.0
+        if sleeve_for_symbol(symbol) == "nyse":
+            return effective_nyse_per_name_max_pct()
+    except Exception:
+        pass
+    return base
+
+
+def effective_nyse_fat_loser_enabled() -> bool:
+    """Trim underwater NYSE names to free cash for rotation (not Vanguard ETFs)."""
+    if not PAPER_NYSE_FAT_LOSER_ENABLED:
+        return False
+    if PAPER_TRADING:
+        return True
+    return not vti_core_enabled()
+
+
 def effective_concentration_guard_enabled() -> bool:
     """Per-name concentration guard in the executor (default ON)."""
     return bool(CONCENTRATION_GUARD_ENABLED)
 
 
+def _live_conviction_for_ticker_cap() -> float:
+    """Best-effort live conviction in [0,1] for max-active ticker scaling."""
+    # 1) In-process thinking result (if a cycle just ran)
+    try:
+        from modules import thinking_engine
+
+        last = getattr(thinking_engine, "_LAST_RESULT", None) or getattr(
+            thinking_engine, "LAST_THINKING_RESULT", None
+        )
+        if isinstance(last, dict) and last.get("confidence") is not None:
+            return max(0.0, min(1.0, float(last["confidence"])))
+    except Exception:
+        pass
+    # 2) thinking_engine_last.json on disk
+    for rel in ("thinking_engine_last.json", "data/thinking_engine_last.json"):
+        path = Path(rel)
+        if not path.is_file():
+            path = _CONFIG_DIR / rel
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            for key in ("confidence", "conviction", "conviction_score"):
+                if payload.get(key) is not None:
+                    return max(0.0, min(1.0, float(payload[key])))
+        except Exception:
+            continue
+    # 3) Mid-band default
+    return 0.65
+
+
 def effective_max_active_tickers() -> int:
-    """Max distinct non-core open tickers (default 25)."""
-    return max(1, int(MAX_ACTIVE_TICKERS))
+    """Max distinct non-core open tickers.
 
+    Paper/research: ``MAX_ACTIVE_TICKERS`` (default 25).
+    Live book: scale ``LIVE_MAX_ACTIVE_TICKERS_MIN``..``MAX`` (6–8)
+    with thinking/conviction confidence.
+    """
+    use_live_band = (not PAPER_TRADING) or live_conservative_lock_active()
+    if paper_chase_mode_enabled() or is_realistic_research_active():
+        use_live_band = False
+    if not use_live_band:
+        return max(1, int(MAX_ACTIVE_TICKERS))
 
+    lo = int(LIVE_MAX_ACTIVE_TICKERS_MIN)
+    hi = int(LIVE_MAX_ACTIVE_TICKERS_MAX)
+    if hi < lo:
+        lo, hi = hi, lo
+    lo = max(1, lo)
+    hi = max(lo, hi)
+    conv = _live_conviction_for_ticker_cap()
+    low = float(LIVE_MAX_ACTIVE_CONVICTION_LOW)
+    high = float(LIVE_MAX_ACTIVE_CONVICTION_HIGH)
+    if high <= low:
+        return hi if conv >= high else lo
+    t = (conv - low) / (high - low)
+    t = max(0.0, min(1.0, t))
+    return int(round(lo + t * (hi - lo)))
 def effective_nyse_top_n() -> int:
     """Conviction truncate: only top N momentum ranks enter (0 = full ranked list).
 
@@ -3272,9 +3475,18 @@ def effective_nyse_top_n() -> int:
 
 
 def effective_auto_dust_max_notional() -> float:
-    """Auto-dust sell threshold in USD (default $10)."""
-    return max(0.01, float(AUTO_DUST_MAX_NOTIONAL))
+    """Auto-dust sell threshold in USD.
 
+    Must stay **below** ``effective_min_notional()`` so live $1 clips are not
+    immediately wiped by the dust cleaner (AUTO_DUST default is $10).
+    """
+    configured = max(0.01, float(AUTO_DUST_MAX_NOTIONAL))
+    if paper_aggressive_context():
+        return min(configured, max(0.01, float(PAPER_DUST_MAX_NOTIONAL)))
+    # Live: prefer LIVE_DUST floor; never dust at/above the min buy size.
+    live_dust = max(0.01, float(LIVE_DUST_MAX_NOTIONAL))
+    min_buy = max(ALPACA_MIN_NOTIONAL, LIVE_MIN_NOTIONAL)
+    return min(configured, live_dust, max(0.01, min_buy - 0.01))
 
 def effective_auto_dust_cleaner_enabled() -> bool:
     return bool(AUTO_DUST_CLEANER_ENABLED)
@@ -3315,9 +3527,9 @@ def effective_positioning_overlay_enabled() -> bool:
 # dust) and excess-cash sleeve boosts so model targets actually fill — idle
 # cash was the main blocker for SPY/NYSE/stat-arb sleeves.
 #
-# Live Profile A (~$300) keeps $10 min orders and no excess-cash boost to limit
-# partial fills, fee drag, and churn on a small real-money book. Override via
-# LIVE_MIN_NOTIONAL / LIVE_DUST_* env vars if needed.
+# Live Profile A (~$300) uses Alpaca's $1 floor by default (LIVE_MIN_NOTIONAL=1)
+# so single-name clips can clear; raise LIVE_MIN_NOTIONAL if you want fewer micros.
+# Override via LIVE_MIN_NOTIONAL / LIVE_DUST_* env vars if needed.
 #
 # Call sites must use effective_* helpers — never PAPER_* / LIVE_* / MIN_NOTIONAL
 # directly in Alpaca execution (alpaca_executor, deployment_sizing, sleeves).
@@ -3331,9 +3543,8 @@ def effective_min_notional(equity: float | None = None) -> float:
     ~$100k research accounts can deploy idle cash without sub-cap clips blocking
     every sleeve top-up.
 
-    Live: ``LIVE_MIN_NOTIONAL`` ($10 default) — higher floor avoids fee churn,
-    partial-fill noise, and over-trading on Profile A's ~$300 book. Live never
-    scales min-notional down with equity; the floor is absolute.
+    Live: ``LIVE_MIN_NOTIONAL`` ($1 default — Alpaca floor) so Profile A (~$300)
+    can place small single-name clips. Raise via env if you want fewer micro-orders.
 
     Always use this helper (never raw ``MIN_NOTIONAL``) in Alpaca execution paths.
     """
@@ -3473,21 +3684,30 @@ def effective_yield_gate(
     raw_gated: bool,
     *,
     regime: str | None = None,
+    sleeve: str | None = None,
 ) -> bool:
-    """Resolve yield-gate block for this cycle.
+    """Resolve yield-gate block for this cycle and sleeve.
 
-    Live / non-paper: unchanged (fully gated when raw_gated).
-    Paper with ``PAPER_YIELD_GATE_OVERRIDE``: soften mild rate/bond stress so
-    deployment can continue; still block in strong bear/panic (RHYME_B/E).
+    Hard-block every sleeve in RHYME_B/E, panic, or steady bear.
+
+    Live SPY / unspecified sleeves: fully gated when ``raw_gated`` (bond stress
+    blocks the risk-on sleeve). Live leftover NYSE is the exception: the
+    satellite already has allocated room, so mild yield (e.g. RHYME_D) must
+    not idle it the same way SPY is idled.
+
+    Paper with ``PAPER_YIELD_GATE_OVERRIDE``: existing behavior — soften mild
+    stress for all sleeves; still block in strong bear/panic.
     """
     if not raw_gated:
+        return False
+    if _yield_gate_hard_regime(regime):
+        return True
+    sleeve_key = (sleeve or "").strip().lower()
+    if (not PAPER_TRADING) and sleeve_key in {"nyse", "equity"}:
         return False
     if not PAPER_YIELD_GATE_OVERRIDE:
         return True
     if not (paper_aggressive_context() or is_realistic_research_active()):
-        # Live / non-paper books stay fully gated.
-        return True
-    if _yield_gate_hard_regime(regime):
         return True
     return False
 
@@ -3637,14 +3857,25 @@ def is_crypto(symbol: str) -> bool:
 
 
 def normalize_symbol(symbol: str) -> str:
-    """Alpaca (BTCUSD, BTC/USD) -> universe form (BTC-USD)."""
+    """Alpaca (BTCUSD, BTC/USD) -> universe form (BTC-USD). Keeps BRK.B as-is."""
     if symbol is None:
         return ""
     s = str(symbol).strip().replace("/", "-")
     if not s or s.lower() in ("none", "null", "nan"):
         return ""
-    if s.endswith("USD") and "-" not in s:
+    if s.endswith("USD") and "-" not in s and "." not in s:
         return f"{s[:-3]}-USD"
+    return s
+
+
+def yf_symbol(symbol: str) -> str:
+    """Map universe/Alpaca symbols to yfinance tickers (BRK.B -> BRK-B)."""
+    s = normalize_symbol(symbol)
+    if not s:
+        return ""
+    # Yahoo uses '-' for share classes; Alpaca/universe use '.'.
+    if "." in s and not s.startswith("^"):
+        return s.replace(".", "-")
     return s
 
 
@@ -3683,6 +3914,8 @@ def backtest_crypto_expanded_prefetch() -> bool:
 
 
 def equity_universe():
+    if metals_as_equity_enabled():
+        return [t for t in UNIVERSE if not is_crypto(t)]
     return [t for t in UNIVERSE if not is_crypto(t) and t not in METAL_SYMBOLS]
 
 
@@ -3690,26 +3923,44 @@ _screener_fallback_warned = False
 
 
 def load_screener_universe_tickers() -> list[str] | None:
-    """Load ranked tickers from screener JSON; None if missing or invalid."""
+    """Load ranked tickers from screener JSON; None if missing or invalid.
+
+    Owner-pinned equities (``EQUITY_UNIVERSE_PINNED``) are always prepended so
+    they stay eligible after weekly screener refreshes.
+    """
     path = SCREENER_UNIVERSE_PATH
-    if not os.path.isfile(path):
+    tickers: list[str] = []
+    if os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                payload = json.load(f)
+            tickers = [
+                str(t).strip().upper()
+                for t in (payload.get("tickers") or [])
+                if str(t).strip()
+            ]
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            tickers = []
+    pinned = [normalize_symbol(t) for t in EQUITY_UNIVERSE_PINNED if t]
+    if not tickers and not pinned:
         return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            payload = json.load(f)
-        tickers = payload.get("tickers") or []
-        return [str(t).strip().upper() for t in tickers if str(t).strip()]
-    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-        return None
+    return list(dict.fromkeys([*pinned, *tickers]))
 
 
 def _nyse_eligible_symbol(symbol: str) -> bool:
-    return (
-        not is_crypto(symbol)
-        and symbol != SPY_BOT_SYMBOL
-        and symbol != VTI_CORE_SYMBOL
-        and not is_metal_symbol(symbol)
-    )
+    sym = normalize_symbol(symbol)
+    if is_crypto(sym) or sym == SPY_BOT_SYMBOL:
+        return False
+    if nyse_allow_vanguard():
+        if is_vanguard_or_index_etf(sym):
+            if sym in METAL_SYMBOLS or is_metal_symbol(sym):
+                return metals_as_equity_enabled()
+            return True
+    elif sym == VTI_CORE_SYMBOL or sym in _CORE_INDEX_ETFS:
+        return False
+    if sym in METAL_SYMBOLS or is_metal_symbol(sym):
+        return metals_as_equity_enabled()
+    return True
 
 
 def nyse_momentum_universe(data_columns) -> list[str]:
@@ -3784,7 +4035,16 @@ def is_metal_symbol(symbol: str) -> bool:
     return normalize_symbol(symbol) in LIVE_METAL_SYMBOLS
 
 
+def is_metal_related_symbol(symbol: str) -> bool:
+    """Metal ETFs or metal-related equities (miners / producers)."""
+    sym = normalize_symbol(symbol)
+    return sym in METAL_SYMBOLS or sym in METAL_RELATED_STOCKS
+
+
 def live_metal_universe() -> list[str]:
+    """Symbols the live metal path may trade (full metal set when equity metals on)."""
+    if metals_as_equity_enabled():
+        return sorted(METAL_SYMBOLS)
     return sorted(LIVE_METAL_SYMBOLS)
 
 
@@ -3833,6 +4093,11 @@ def validate_metal_weights(
 def metal_sleeve_enabled() -> bool:
     """Full game plan metal sleeve (disabled in yield-gate-only mode)."""
     return GAME_PLAN_ENABLED and not GAME_PLAN_YIELD_GATE_ONLY
+
+
+def metal_counts_as_nyse() -> bool:
+    """When metals trade via equity path (no mandatory sleeve), count them in NYSE caps."""
+    return metals_as_equity_enabled() and not metal_sleeve_enabled()
 
 
 def game_plan_active() -> bool:
@@ -5202,6 +5467,12 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_REGIME_B_CASH_BUFFER_BOOST": "0.12",
     "PAPER_MAX_POSITION_PCT": "0.08",
     "PER_NAME_MAX_PCT": "0.08",
+    "PAPER_NYSE_PER_NAME_MAX_PCT": "0.025",
+    "PAPER_NYSE_MAX_OF_SLEEVE_PCT": "0.15",
+    "PAPER_NYSE_FAT_LOSER_ENABLED": "true",
+    "PAPER_NYSE_FAT_LOSER_OPEN_PCT": "-0.01",
+    "PAPER_NYSE_FAT_LOSER_TARGET_PCT": "0.005",
+    "PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN": "true",
     "CONCENTRATION_GUARD_ENABLED": "true",
     "MAX_ACTIVE_TICKERS": "25",
     "AUTO_DUST_CLEANER_ENABLED": "true",
@@ -5465,7 +5736,8 @@ def format_paper_live_profile_line() -> str:
     return (
         f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive FINAL LOCK) | "
         f"{REALISTIC_RESEARCH_TAGLINE} | Live Bot: {LIVE_CONSERVATIVE_LABEL} "
-        f"{LIVE_VTI_CORE_PCT:.0%} VTI + SPY trend + GARCH/ATR/exits/corr/tail"
+        f"{'VTI core OFF' if _live_banner_vti_pct() <= 0 else f'{_live_banner_vti_pct():.0%} VTI'} "
+        f"+ SPY trend + GARCH/ATR/exits/corr/tail"
     )
 
 
@@ -6577,6 +6849,17 @@ def effective_paper_nyse_same_day_reentry_block() -> bool:
     )
 
 
+def effective_nyse_same_day_reentry_block() -> bool:
+    """No new buy of X on a calendar day after selling X.
+
+    Paper: existing hygiene flag. Live leftover NYSE: on by default so an
+    ATR stop cannot immediately repurchase the same name.
+    """
+    if PAPER_TRADING:
+        return effective_paper_nyse_same_day_reentry_block()
+    return bool(LIVE_NYSE_SAME_DAY_REENTRY_BLOCK)
+
+
 def effective_paper_nyse_min_notional(equity: float | None = None) -> float:
     """NYSE momentum min clip: max(global paper min, PAPER_NYSE_MIN_NOTIONAL). Live unchanged."""
     base = effective_min_notional(equity)
@@ -6585,14 +6868,26 @@ def effective_paper_nyse_min_notional(equity: float | None = None) -> float:
     return max(base, float(PAPER_NYSE_MIN_NOTIONAL))
 
 
+def effective_paper_nyse_atr_stop_sleeve_cooldown() -> bool:
+    """Block new NYSE names after an ATR stop for the rest of the session."""
+    return bool(
+        effective_paper_nyse_entry_hygiene() and PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN
+    )
+
+
 def format_nyse_entry_hygiene_banner() -> str | None:
     if not effective_paper_nyse_entry_hygiene():
         return None
     n = effective_paper_nyse_max_adds_per_symbol()
     same_day = "same-day block" if PAPER_NYSE_SAME_DAY_REENTRY_BLOCK else "same-day off"
+    atr_cd = (
+        "ATR-stop sleeve cooldown"
+        if PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN
+        else "ATR-stop sleeve off"
+    )
     return (
         f"NYSE hygiene ON (max {n} adds | {same_day} | "
-        f"min ${float(PAPER_NYSE_MIN_NOTIONAL):.0f})"
+        f"min ${float(PAPER_NYSE_MIN_NOTIONAL):.0f} | {atr_cd})"
     )
 
 
@@ -6604,15 +6899,8 @@ def effective_paper_dynamic_universe_strict() -> bool:
 
 
 def effective_nyse_pick_rotation() -> bool:
-    """Rolling per-symbol pick cap for NYSE momentum — paper/research only."""
-    return bool(
-        NYSE_PICK_ROTATION_ENABLED
-        and (
-            paper_aggressive_context()
-            or paper_chase_mode_enabled()
-            or paper_only_sleeves_active()
-        )
-    )
+    """Rolling per-symbol pick cap — skip names already picked too often."""
+    return bool(NYSE_PICK_ROTATION_ENABLED)
 
 
 def effective_nyse_strict_intersect_candidates() -> bool:
@@ -7772,10 +8060,16 @@ def _live_small_active_baseline_scale() -> float:
 
 
 def _live_conservative_sleeve_boost(sleeve: str | None) -> float:
+    """Route LIVE_SMALL_ACTIVE_SLEEVE_PCT to the chosen live active sleeve.
+
+    Without this, choice=nyse left NYSE on the tiny baseline scale only → nyse_no_room.
+    """
     if not live_conservative_profile_active():
         return 0.0
     choice = LIVE_ACTIVE_SLEEVE_CHOICE
     if choice == "spy" and sleeve == "spy":
+        return LIVE_SMALL_ACTIVE_SLEEVE_PCT
+    if choice == "nyse" and sleeve == "nyse":
         return LIVE_SMALL_ACTIVE_SLEEVE_PCT
     if choice == "cash" and sleeve == "cash":
         return LIVE_SMALL_ACTIVE_SLEEVE_PCT
