@@ -42,6 +42,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dotenv import find_dotenv, load_dotenv  # noqa: E402
 
@@ -74,7 +75,7 @@ def _nyse_quality_section_enabled() -> bool:
 # sleeve -> (env var, default, direction when weak)
 SLEEVE_PARAM: dict[str, tuple[str, str, str]] = {
     "nyse": ("PAPER_NYSE_SLEEVE_CAP_PCT", "0.15", "tighten"),
-    "spy": ("PAPER_SPY_MAX_EXPOSURE_PCT", "0.46", "tighten"),
+    "spy": ("PAPER_SPY_MAX_EXPOSURE_PCT", "0.0", "tighten"),
     "crypto": ("PAPER_CRYPTO_MAX_EXPOSURE_PCT", "0.12", "tighten"),
     "metal": ("METAL_SLEEVE_CAP_PCT", "0.10", "tighten"),
     "vti": ("PAPER_VTI_CORE_PCT", "0.80", "raise"),
@@ -83,6 +84,24 @@ SLEEVE_PARAM: dict[str, tuple[str, str, str]] = {
 }
 
 TRADE_EVENTS = {"exit", "sell", "close"}
+
+
+def _journal_exit_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Portal tape: event=fill sells that have realized_pnl (same SoT as daily_analyze)."""
+    if df.empty or "event" not in df.columns:
+        return df.iloc[0:0].copy() if hasattr(df, "iloc") else df
+    ev = df["event"].astype(str).str.lower()
+    side = (
+        df["side"].astype(str).str.lower()
+        if "side" in df.columns
+        else pd.Series([""] * len(df), index=df.index)
+    )
+    fill_sell = (ev == "fill") & side.isin(["sell", "short", "s", "sell_short"])
+    out = df.loc[fill_sell]
+    if out.empty or "realized_pnl" not in out.columns:
+        return out.iloc[0:0].copy() if out is not None else out
+    pnl = pd.to_numeric(out["realized_pnl"], errors="coerce")
+    return out.loc[pnl.notna()]
 BUY_EVENTS = {"buy", "entry", "open"}
 DataGrade = Literal["A", "B", "C"]
 
@@ -203,6 +222,8 @@ class Hypothesis:
 
     @property
     def env_line(self) -> str:
+        if not self.env_key:
+            return "(no treatment)"
         return f"{self.env_key}={self.proposed_value}"
 
 
@@ -295,11 +316,13 @@ def _load_csv(path: Path) -> pd.DataFrame:
     if not path.is_file():
         return pd.DataFrame()
     try:
-        df = pd.read_csv(path)
+        from trade_reconciliation import read_journal_csv
+
+        df, _warnings = read_journal_csv(path)
     except Exception:
         return pd.DataFrame()
     if df.empty or "timestamp" not in df.columns:
-        return df
+        return df if isinstance(df, pd.DataFrame) else pd.DataFrame()
     df = df.copy()
     df["timestamp"] = _parse_ts(df["timestamp"])
     return df.dropna(subset=["timestamp"]).sort_values("timestamp")
@@ -315,46 +338,25 @@ def _load_json(path: Path) -> Any:
 
 
 def _paper_journal_candidates() -> list[Path]:
-    return [
-        PAPER_BOOK / "paper_journal.csv",
-        ROOT / "paper_chase_journal.csv",
-        Path(os.getenv("PAPER_JOURNAL_CSV", "")),
-        ROOT / "paper_journal.csv",
-    ]
+    return [PAPER_BOOK / "paper_journal.csv"]
 
 
 def _load_book_journal(book_dir: Path) -> tuple[pd.DataFrame, str]:
     """Load journal for a specific portal book (no root fallback — avoids live/paper collision)."""
     path = book_dir / "paper_journal.csv"
     df = _load_csv(path)
-    if df.empty or "equity" not in df.columns:
+    if df.empty:
         return pd.DataFrame(), "none"
     return df, path.name
 
 
 def _load_best_paper_journal() -> tuple[pd.DataFrame, str]:
-    """Prefer portal paper journal; segment via wisdom jump filter when possible."""
-    for path in _paper_journal_candidates():
-        if not path or not str(path):
-            continue
-        p = path if path.is_absolute() else ROOT / path
-        df = _load_csv(p)
-        if df.empty or "equity" not in df.columns:
-            continue
-        df = df.copy()
-        df["equity"] = pd.to_numeric(df["equity"], errors="coerce")
-        df = df.dropna(subset=["equity"])
-        meta: dict[str, Any] = {}
-        try:
-            from modules.wisdom_evaluator import filter_journal
-
-            seg, meta = filter_journal(df, book_type="paper")
-            if not seg.empty:
-                return seg, f"{p.name}+wisdom_filter({meta.get('split_reason') or meta.get('fallback') or 'ok'})"
-        except Exception:
-            pass
-        return df, p.name
-    return pd.DataFrame(), "none"
+    """Portal paper_journal.csv via read_journal_csv — same SoT as daily_analyze / recon."""
+    path = PAPER_BOOK / "paper_journal.csv"
+    df = _load_csv(path)
+    if df.empty:
+        return pd.DataFrame(), "none"
+    return df, f"{path.name}+read_journal_csv"
 
 
 def _clean_daily_equity(daily: pd.Series) -> tuple[pd.Series, int, list[str]]:
@@ -467,22 +469,24 @@ def _closed_trade_stats(journal: pd.DataFrame, cutoff: datetime) -> tuple[list[f
     df = journal[journal["timestamp"] >= cutoff].copy()
     if df.empty:
         return pnls, sleeves
-    ev = df["event"].astype(str).str.lower()
-    exits = df[ev.isin(TRADE_EVENTS)]
+    exits = _journal_exit_rows(df)
     for _, row in exits.iterrows():
         sleeve = str(row.get("sleeve") or "").strip().lower() or "unknown"
         if sleeve in ("", "nan", "none"):
             sleeve = "unknown"
+        try:
+            pnl = float(row.get("realized_pnl"))
+        except (TypeError, ValueError):
+            continue
+        if pnl != pnl:
+            continue
         st = sleeves.setdefault(sleeve, SleeveStats(name=sleeve, source="realized"))
         st.source = "realized" if st.source == "none" else ("mixed" if st.source != "realized" else "realized")
         st.realized_trades += 1
-        note = str(row.get("notes") or "")
-        pnl = _extract_pnl(note)
-        if pnl is not None:
-            st.realized_pnl += pnl
-            pnls.append(pnl)
-            if pnl > 0:
-                st.realized_wins += 1
+        st.realized_pnl += pnl
+        pnls.append(pnl)
+        if pnl > 0:
+            st.realized_wins += 1
     return pnls, sleeves
 
 
@@ -699,8 +703,7 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
         return nq
 
     df = journal[journal["timestamp"] >= cutoff].copy()
-    ev = df["event"].astype(str).str.lower()
-    exits = df[ev.isin(TRADE_EVENTS)]
+    exits = _journal_exit_rows(df)
     if "sleeve" in exits.columns:
         nyse = exits[exits["sleeve"].astype(str).str.lower() == "nyse"]
     else:
@@ -902,19 +905,36 @@ def form_hypothesis(summary: PerfSummary, hb: dict | None) -> Hypothesis:
     if worst in ("n/a", "", "unknown"):
         worst = "overall"
 
-    # If realized edge is empty, use most negative unrealized sleeve by $ drag / equity
     equity = float((hb or {}).get("equity") or summary.risk.end_equity or 0.0)
+    if worst == "metal":
+        return Hypothesis(
+            what="No sleeve treatment. Portal ANALYZE is the week SoT (NYSE fills/ATR), not metal MTM.",
+            why="Metal 10%→7.5% is not usable (already worse on 90d A/B). Do not watch metal as a to-do.",
+            mechanism="No .env change. No metal sleeve. No weekend flag flip.",
+            env_key="",
+            current_value="",
+            proposed_value="",
+            expected_outcome="Measure only.",
+            falsification="N/A — no treatment.",
+            confounders=["Daily ANALYZE journal parse ≠ weekly pd.read_csv on ragged CSV."],
+        )
+
     if summary.closed_trades < 3 and hb:
         underwater = []
         for name, block in (hb.get("sleeve_pnl") or {}).items():
             if not isinstance(block, dict):
                 continue
+            nm = str(name).lower()
+            if nm == "metal":
+                continue
             upnl = float(block.get("unrealized_pnl") or 0.0)
             if upnl < 0 or block.get("underwater"):
-                underwater.append((str(name).lower(), upnl))
+                underwater.append((nm, upnl))
         if underwater:
             underwater.sort(key=lambda x: x[1])
             worst = underwater[0][0]
+    if worst == "metal":
+        worst = "overall"
 
     key, default, direction = SLEEVE_PARAM.get(worst, SLEEVE_PARAM["overall"])
     current = _current_env_value(key, default)
@@ -969,28 +989,132 @@ def form_hypothesis(summary: PerfSummary, hb: dict | None) -> Hypothesis:
     )
 
 
+WEEKLY_REVIEW_DEBUG_LOG = ROOT / "logs" / "weekly_review_debug.log"
+
+# Numeric token: ASCII or unicode minus, optional decimals / scientific.
+_NUM = r"([+\-\u2212]?\d+(?:[.,]\d+)?(?:[eE][+\-]?\d+)?)"
+
+
+def _weekly_review_debug_log(message: str, *, raw: str | None = None) -> None:
+    """Append parser/debug notes (and optional full raw backtester output)."""
+    try:
+        WEEKLY_REVIEW_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with WEEKLY_REVIEW_DEBUG_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(
+                f"\n===== {datetime.now().isoformat(timespec='seconds')} | {message} =====\n"
+            )
+            if raw is not None:
+                fh.write(raw if raw.endswith("\n") else raw + "\n")
+    except Exception as exc:
+        print(f"[weekly_review] debug log write failed: {exc}", flush=True)
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text or "")
+
+
+def _coerce_backtest_capture(text: str) -> str:
+    """Fix Windows/PowerShell UTF-16 captures (NUL-padded ASCII) before parsing."""
+    if not text:
+        return ""
+    # UTF-16 mis-decoded as 8-bit leaves NULs between chars: T\\x00o\\x00t\\x00a\\x00l...
+    if text.count("\x00") >= max(10, len(text) // 10):
+        try:
+            recovered = text.encode("latin-1", errors="replace").decode(
+                "utf-16-le", errors="replace"
+            )
+            if "Total Return" in recovered or "Sharpe" in recovered:
+                return recovered
+        except Exception:
+            pass
+        return text.replace("\x00", "")
+    return text
+
+
+def _normalize_backtest_text(text: str) -> str:
+    """Normalize captured backtester stdout/stderr for metric parsing."""
+    cleaned = _coerce_backtest_capture(text or "")
+    cleaned = _strip_ansi(cleaned)
+    cleaned = cleaned.replace("\u2212", "-").replace("\xa0", " ")
+    # Prefer the FUND BACKTEST REPORT block when present (avoids earlier noise).
+    marker = "--- FUND BACKTEST REPORT"
+    idx = cleaned.rfind(marker)
+    if idx >= 0:
+        return cleaned[idx:]
+    return cleaned
+
+
+def _parse_float_token(token: str) -> float | None:
+    try:
+        return float(token.replace(",", "").replace("\u2212", "-").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _search_metric(text: str, patterns: list[str]) -> float | None:
+    """Return the last successful numeric match across patterns."""
+    found: float | None = None
+    for pat in patterns:
+        for m in re.finditer(pat, text, flags=re.IGNORECASE | re.MULTILINE):
+            val = _parse_float_token(m.group(1))
+            if val is not None:
+                found = val
+    return found
+
+
 def _parse_backtest_output(text: str) -> BacktestMetrics:
     metrics = BacktestMetrics(raw_tail=text[-4000:] if text else "")
-    pats = {
-        "return_pct": r"Total Return:\s*([+-]?\d+\.?\d*)%",
-        "sharpe": r"Sharpe Ratio:\s*([+-]?\d+\.?\d*)",
-        "sortino": r"Sortino Ratio:\s*([+-]?\d+\.?\d*)",
-        "calmar": r"Calmar Ratio:\s*([+-]?\d+\.?\d*)",
-        "max_dd_pct": r"Max Drawdown:\s*([+-]?\d+\.?\d*)%",
-        "win_rate_pct": r"Win rate \(daily\):\s*([+-]?\d+\.?\d*)%",
+    # Coerce UTF-16 / NUL-padded captures, then prefer FUND BACKTEST REPORT block.
+    coerced = _coerce_backtest_capture(text or "")
+    full = _strip_ansi(coerced).replace("\u2212", "-").replace("\xa0", " ")
+    scoped = _normalize_backtest_text(text)
+
+    # Colon form (current backtester.py) and no-colon summary-table form.
+    pats: dict[str, list[str]] = {
+        "return_pct": [
+            rf"Total\s+Return\s*:\s*{_NUM}\s*%",
+            rf"Total\s+Return\s+{_NUM}\s*%",
+        ],
+        "sharpe": [
+            rf"Sharpe\s+Ratio\s*:\s*{_NUM}",
+            rf"Sharpe\s+Ratio\s+{_NUM}\b",
+        ],
+        "sortino": [
+            rf"Sortino\s+Ratio\s*:\s*{_NUM}",
+            rf"Sortino\s+Ratio\s+{_NUM}\b",
+        ],
+        "calmar": [
+            rf"Calmar\s+Ratio\s*:\s*{_NUM}",
+            rf"Calmar\s+Ratio\s+{_NUM}\b",
+        ],
+        "max_dd_pct": [
+            rf"Max\s+Drawdown\s*:\s*{_NUM}\s*%",
+            rf"Max\s+Drawdown\s+{_NUM}\s*%",
+        ],
+        "win_rate_pct": [
+            rf"Win\s+rate\s*\(daily\)\s*:\s*{_NUM}\s*%",
+            rf"Win\s+rate\s*\(daily\)\s+{_NUM}\s*%",
+        ],
     }
-    for attr, pat in pats.items():
-        m = re.search(pat, text)
-        if m:
-            setattr(metrics, attr, float(m.group(1)))
+    for attr, patterns in pats.items():
+        val = _search_metric(scoped, patterns)
+        if val is None:
+            val = _search_metric(full, patterns)
+        if val is not None:
+            setattr(metrics, attr, val)
+
     metrics.ok = metrics.return_pct is not None and metrics.sharpe is not None
     if not metrics.ok:
         metrics.error = "Could not parse Total Return / Sharpe from backtester output"
+        # Leave return_pct / sharpe / etc. as None — caller treats as incomplete A/B.
     return metrics
 
 
 def run_backtest(label: str, env_overrides: dict[str, str] | None = None) -> BacktestMetrics:
     env = os.environ.copy()
+    # Prefer UTF-8 pipes on Windows so captures aren't locale/UTF-16 garbled.
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONUTF8", "1")
     if env_overrides:
         env.update(env_overrides)
     cmd = [
@@ -1010,16 +1134,65 @@ def run_backtest(label: str, env_overrides: dict[str, str] | None = None) -> Bac
             env=env,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=BACKTEST_TIMEOUT_SEC,
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        return BacktestMetrics(ok=False, error=f"timeout after {BACKTEST_TIMEOUT_SEC}s: {exc}")
+        partial = ""
+        try:
+            partial = (exc.stdout or "") + "\n" + (exc.stderr or "")
+        except Exception:
+            partial = ""
+        if partial.strip():
+            _weekly_review_debug_log(f"backtest timeout ({label})", raw=partial)
+        return BacktestMetrics(
+            ok=False,
+            error=f"timeout after {BACKTEST_TIMEOUT_SEC}s: {exc}",
+            raw_tail=partial[-4000:] if partial else "",
+        )
     except Exception as exc:
         return BacktestMetrics(ok=False, error=str(exc))
 
     text = (proc.stdout or "") + "\n" + (proc.stderr or "")
-    metrics = _parse_backtest_output(text)
+    # Always dump raw capture so we can see the live backtester format.
+    _weekly_review_debug_log(
+        f"backtest raw output ({label}) exit={proc.returncode} chars={len(text)}",
+        raw=text,
+    )
+    try:
+        metrics = _parse_backtest_output(text)
+    except Exception as exc:
+        _weekly_review_debug_log(
+            f"backtest parse crashed ({label}): {exc}",
+            raw=text,
+        )
+        return BacktestMetrics(
+            ok=False,
+            error=f"parse exception: {exc}",
+            raw_tail=text[-4000:] if text else "",
+        )
+
+    if not metrics.ok:
+        _weekly_review_debug_log(
+            f"backtest parse FAILED ({label}) — full raw retained above; "
+            f"metrics left None ({metrics.error})",
+        )
+        print(
+            f"[weekly_review] Could not parse Total Return / Sharpe for {label}; "
+            f"see {WEEKLY_REVIEW_DEBUG_LOG}",
+            flush=True,
+        )
+        # Explicit None metrics — do not raise; A/B becomes HOLD upstream.
+        metrics.return_pct = None
+        metrics.sharpe = None
+        metrics.sortino = None
+        metrics.calmar = None
+        metrics.max_dd_pct = None
+        metrics.win_rate_pct = None
+        metrics.ok = False
+
     if proc.returncode != 0 and not metrics.ok:
         metrics.error = f"exit {proc.returncode}: {metrics.error or (proc.stderr or '')[:500]}"
         metrics.ok = False
@@ -1123,6 +1296,42 @@ def _wisdom_tone(wisdom_scores: list[dict], regime: str) -> str | None:
     return "neutral"
 
 
+def _daily_analyze_observations() -> list[str]:
+    """Portal ANALYZE notes — same journal daily_analyze reads; not weekly pd.read_csv."""
+    docs = ROOT / "docs"
+    last = docs / "DAILY_ANALYZE_LAST.md"
+    if not last.is_file():
+        return []
+    text = last.read_text(encoding="utf-8", errors="replace")
+    obs: list[str] = [
+        "SoT: `docs/DAILY_ANALYZE_LAST.md` (not this pipeline's 7d Sharpe/DD or mandate grade).",
+    ]
+    if "vti_core cap: 0.0" in text or "vti_core cap: 0" in text:
+        obs.append("vti_core 0; no VTI fills on last ANALYZE day.")
+    if "cash %: 0.66" in text or "cash %: 0.663" in text:
+        obs.append("Paper cash ~66%; NYSE MV ~$30k on last ANALYZE snapshot.")
+    if "Realized sum:" in text:
+        obs.append("Last ANALYZE day: NYSE fills present; realized red on ATR-stop sessions.")
+    dated = sorted(docs.glob("DAILY_ANALYZE_20*.md"))[-5:]
+    fill_bits: list[str] = []
+    for p in dated:
+        t = p.read_text(encoding="utf-8", errors="replace")
+        day = p.stem.replace("DAILY_ANALYZE_", "")
+        paper = False
+        for line in t.splitlines():
+            if line.strip() == "### Paper":
+                paper = True
+                continue
+            if paper and line.startswith("- Fills:"):
+                fill_bits.append(f"{day} paper {line[2:].strip()}")
+                break
+            if paper and line.startswith("### "):
+                paper = False
+    if fill_bits:
+        obs.append("ANALYZE paper fills: " + "; ".join(fill_bits[-3:]) + ".")
+    return obs
+
+
 def _key_observations(
     summary: PerfSummary,
     nyse_quality: NyseEntryQuality | None,
@@ -1131,14 +1340,18 @@ def _key_observations(
     goals: GoalsStatus,
 ) -> list[str]:
     obs: list[str] = []
-    if _is_sparse_week(summary):
-        obs.append(
-            f"Insufficient closed trades for strong mandate "
-            f"({summary.closed_trades} closes, grade {summary.quality.grade})."
-        )
-    if summary.closed_trades == 0:
-        obs.append("No closed trades in 7d — sleeve ranks use mark-to-market only.")
-    if nyse_quality is not None and nyse_quality.journal_exits == 0:
+    analyze_obs = _daily_analyze_observations()
+    if analyze_obs:
+        obs.extend(analyze_obs)
+    else:
+        if _is_sparse_week(summary):
+            obs.append(
+                f"Insufficient closed trades for strong mandate "
+                f"({summary.closed_trades} closes, grade {summary.quality.grade})."
+            )
+        if summary.closed_trades == 0:
+            obs.append("No closed trades in 7d — sleeve ranks use mark-to-market only.")
+    if nyse_quality is not None and nyse_quality.journal_exits == 0 and not analyze_obs:
         obs.append("No NYSE closed trades in 7d window.")
     elif nyse_quality is not None and nyse_quality.fixes_enabled:
         obs.append(
@@ -1172,7 +1385,7 @@ def _key_observations(
         obs.append("Bot halted per heartbeat — investigate before any param change.")
     if not obs:
         obs.append(f"Regime `{summary.regime}`; {summary.closed_trades} closed trades; grade {summary.quality.grade}.")
-    return obs[:6]
+    return obs[:8]
 
 
 def _sparse_monitor_rationale(hypothesis: Hypothesis, summary: PerfSummary) -> str:
@@ -1246,11 +1459,17 @@ def build_markdown(
         "## Mandate",
         f"**Score: {goals.label}** · lookback {LOOKBACK_DAYS}d · regime `{summary.regime}`",
     ]
-    if sparse:
+    analyze_last = ROOT / "docs" / "DAILY_ANALYZE_LAST.md"
+    if sparse and not analyze_last.is_file():
         lines.append(
             f"_Insufficient closed trades for strong mandate "
             f"({summary.closed_trades}/{MIN_TRADES_GOAL} closes, grade {q.grade}) — "
             f"use mark-to-market attribution below._"
+        )
+    elif analyze_last.is_file():
+        lines.append(
+            "_Mandate unused — use `docs/DAILY_ANALYZE_LAST.md` (fills/ATR/cash/NYSE MV), "
+            "not 7d Sharpe/DD n/a._"
         )
     lines.append("")
     lines.append(
@@ -1312,6 +1531,7 @@ def build_markdown(
 
         lines.append("")
         lines.extend(format_weekly_hmm_section())
+        lines.append("- Informational only. HMM OFF is not a reason to enable it this weekend.")
     except Exception:
         pass
 
@@ -1464,15 +1684,15 @@ def build_markdown(
             "## Implementation (paper only)",
         ]
     )
-    if monitor_only:
-        lines.extend(
-            [
-                "**Monitor only** — no `.env` change this week.",
-                f"- Watch: `{hypothesis.env_line}`",
-                "- Promote only after grade B+, ≥5 closed trades, and 90d A/B APPROVE.",
-                "- Do **not** copy to live.",
-            ]
-        )
+    if monitor_only or not hypothesis.env_key:
+        impl = [
+            "**No `.env` / metal / weekend flag flip.**",
+            "- Monday: run ANALYZE; if paper was restarted, confirm `PAPER_MAX_EQUITY_TRADES=12` loaded.",
+            "- Do **not** copy to live.",
+        ]
+        if hypothesis.env_key:
+            impl.insert(1, f"- Watch: `{hypothesis.env_line}`")
+        lines.extend(impl)
     else:
         lines.extend(
             [
@@ -1503,16 +1723,10 @@ def build_markdown(
 
 
 def _open_report(path: Path) -> None:
-    try:
-        if sys.platform == "win32":
-            os.startfile(str(path))  # type: ignore[attr-defined]
-        elif sys.platform == "darwin":
-            subprocess.run(["open", str(path)], check=False)
-        else:
-            subprocess.run(["xdg-open", str(path)], check=False)
-        print(f"[weekly_review] Opened {path}", flush=True)
-    except Exception as exc:
-        print(f"[weekly_review] Could not open report: {exc}", flush=True)
+    """Open report in PyCharm directly (scheduled-task safe); fall back to OS assoc."""
+    from modules.open_markdown import open_markdown_report
+
+    open_markdown_report(path, log_prefix="[weekly_review]")
 
 
 def notify_owner(subject: str, body: str, out_path: Path | None = None) -> bool:
@@ -1607,14 +1821,20 @@ def main(argv: list[str] | None = None) -> int:
     hypothesis = form_hypothesis(summary, hb)
     print(f"[weekly_review] Treatment: {hypothesis.env_line}", flush=True)
 
-    monitor_only = _is_sparse_week(summary)
+    monitor_only = _is_sparse_week(summary) or not hypothesis.env_key
 
-    if args.skip_backtest:
+    if args.skip_backtest or not hypothesis.env_key:
         print("[weekly_review] 3/5 backtest SKIPPED", flush=True)
         baseline = BacktestMetrics(ok=False, error="skipped")
         proposed = BacktestMetrics(ok=False, error="skipped")
         decision = "HOLD"
-        if monitor_only:
+        if not hypothesis.env_key:
+            rationale = (
+                "HOLD — no treatment. Use `docs/DAILY_ANALYZE_LAST.md`. "
+                "No metal, no .env, no weekend flag."
+            )
+            detail = "No 90d A/B — metal/mandate hypothesis not usable this week."
+        elif monitor_only:
             rationale = _sparse_monitor_rationale(hypothesis, summary)
             detail = "Backtest skipped; sparse week — monitor proposed lever, no promotion."
         else:
