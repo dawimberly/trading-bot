@@ -382,17 +382,39 @@ def _scan_phase_label(heartbeat: dict | None) -> str:
     return str(scan.get("phase") or scan.get("label") or "").strip()
 
 
+_SSL_MARK = "quotes SSL failed (using last mark)"
+_VANGUARD_LEFTOVER = frozenset({"VTI", "VOO", "VEA", "VWO", "VXUS"})
+_METAL_LEFTOVER = frozenset({"IAU", "GLD", "SLV", "CPER"})
+
+
+def _compact_io_error(exc: BaseException | str) -> str:
+    msg = str(exc or "")
+    low = msg.lower()
+    if any(tok in low for tok in ("ssl", "certificate_verify_failed", "certifi", "certificate verify")):
+        try:
+            from modules.ssl_certs import configure_ssl_certificates
+
+            configure_ssl_certificates(force=True)
+        except Exception:
+            pass
+        return _SSL_MARK
+    first = msg.splitlines()[0].strip() if msg else "error"
+    return first[:160]
+
+
 def _infer_sleeve(symbol: str) -> str:
     sym = config.normalize_symbol(symbol or "")
-    if sym == config.SPY_BOT_SYMBOL:
-        return "SPY"
+    if not sym:
+        return ""
     if config.is_crypto(sym):
-        return "Crypto"
-    if config.is_metal_symbol(sym):
-        return "Metal"
-    if sym:
-        return "NYSE"
-    return ""
+        return "Crypto leftover"
+    if sym in _VANGUARD_LEFTOVER:
+        return "Vanguard leftover"
+    if sym in _METAL_LEFTOVER or (hasattr(config, "is_metal_symbol") and config.is_metal_symbol(sym) and sym in {"GLD", "SLV", "CPER", "IAU"}):
+        return "Metal leftover"
+    if sym == getattr(config, "SPY_BOT_SYMBOL", "SPY") or sym in {"SPY", "QQQ"}:
+        return "SPY leftover"
+    return "NYSE"
 
 
 def _path_for_resolve(path: Path) -> str:
@@ -592,7 +614,7 @@ def _positions_fingerprint(
                 pnl,
                 total,
                 value,
-                str(r.get("Opened") or ""),
+                str(r.get("First fill") or r.get("Opened") or ""),
                 str(r.get("ATR Stop") or "") if has_atr else "",
                 DASHBOARD_UI_TAG,
             )
@@ -615,9 +637,9 @@ def _fetch_account_summary(
                 return equity, cash, None
             last_err = "Account equity is zero"
         except ValueError as exc:
-            last_err = str(exc)
+            last_err = _compact_io_error(exc)
         except Exception as exc:  # noqa: BLE001
-            last_err = str(exc)
+            last_err = _compact_io_error(exc)
         if attempt + 1 < retries:
             time.sleep(0.35)
     return None, None, last_err
@@ -765,16 +787,16 @@ def _fetch_positions(
     *,
     detail: bool = True,
 ) -> tuple[pd.DataFrame | None, str | None]:
-    """Fetch Alpaca positions. detail=False skips slow journal Opened + ATR columns."""
+    """Fetch Alpaca positions. detail=False skips slow journal First fill + ATR columns."""
     try:
         client = _book_trading_client(username, book_id)
         positions = client.get_all_positions()
     except ValueError as exc:
         return None, str(exc)
     except Exception as exc:  # noqa: BLE001
-        return None, str(exc)
+        return None, _compact_io_error(exc)
 
-    cols = ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Cost $", "Value $", "P&L $", "P&L %"]
+    cols = ["Ticker", "Sleeve", "First fill", "Qty", "Entry", "Cost $", "Value $", "P&L $", "P&L %"]
     if detail and config.effective_atr_sizing_enabled() and _book_is_paper(book_id):
         cols.append("ATR Stop")
     if not positions:
@@ -832,7 +854,7 @@ def _fetch_positions(
             {
                 "Ticker": sym,
                 "Sleeve": _infer_sleeve(sym),
-                "Opened": _format_position_opened(opened) if detail else "—",
+                "First fill": _format_position_opened(opened) if detail else "—",
                 "_opened": opened,
                 "Qty": qty,
                 "Entry": entry,
@@ -1162,7 +1184,7 @@ def _collect_refresh_snapshot(
             # Extra fill history so Positions "Total $" (realized+open) is less truncated.
             journal_df = _load_trade_history(username, book_id, limit=max(TRADES_LIMIT, 200))
         except Exception as exc:  # noqa: BLE001
-            snap["partial_errors"].append(f"journal: {exc}")
+            snap["partial_errors"].append(f"journal: {_compact_io_error(exc)}")
 
     chart_equity_df = None
     sparkline_df = None
@@ -1190,7 +1212,7 @@ def _collect_refresh_snapshot(
         try:
             recent_orders_df = _fetch_alpaca_fills(username, book_id, limit=12)
         except Exception as exc:  # noqa: BLE001
-            snap["partial_errors"].append(f"fills: {exc}")
+            snap["partial_errors"].append(f"fills: {_compact_io_error(exc)}")
 
     try:
         running = _book_running_status(username, book_id)
@@ -1339,7 +1361,7 @@ def _collect_refresh_snapshot(
             )
             sleeve_pnl_text = format_paper_sleeve_pnl_table(sleeve_pnl, compact=True)
         except Exception as exc:  # noqa: BLE001
-            snap["partial_errors"].append(f"sleeve_pnl: {exc}")
+            snap["partial_errors"].append(f"sleeve_pnl: {_compact_io_error(exc)}")
 
     snap.update(
         {
@@ -1452,9 +1474,21 @@ def _read_csv_tail(path: Path, max_rows: int) -> pd.DataFrame:
 
 
 def _read_trade_journal_csv(path: Path, *, tail_rows: int | None = None) -> pd.DataFrame:
-    df = read_csv_file(path, tail_rows=tail_rows)
-    if df.empty:
-        return df
+    """Portal journal via recon reader (ragged fill rows). Not pd.read_csv skip."""
+    try:
+        analysis = PROJECT_ROOT / "scripts" / "analysis"
+        if str(analysis) not in sys.path:
+            sys.path.insert(0, str(analysis))
+        from trade_reconciliation import read_journal_csv
+
+        df, _warnings = read_journal_csv(path)
+    except Exception:
+        df = read_csv_file(path, tail_rows=tail_rows)
+        if df.empty:
+            return df
+        return coerce_trade_journal_df(df)
+    if df is None or getattr(df, "empty", True):
+        return pd.DataFrame()
     return coerce_trade_journal_df(df)
 
 
@@ -2094,7 +2128,9 @@ def _expected_actions(heartbeat: dict | None) -> list[str]:
     phase = _scan_phase_label(heartbeat)
     if phase and not scan.get("market_open"):
         lines.append(f"Overnight / closed session: {phase}.")
-    if vti_tgt > 0 and vti_cap > 0 and vti_val < vti_cap * 0.95:
+    if vti_tgt <= 0 and vti_val > 0:
+        lines.append("Vanguard leftover held (core OFF — not a buy target).")
+    elif vti_tgt > 0 and vti_cap > 0 and vti_val < vti_cap * 0.95:
         if scan.get("market_open"):
             lines.append(f"VTI under target — rebalance toward {vti_tgt:.0%} likely.")
         else:
@@ -2377,7 +2413,7 @@ class DataTable(ctk.CTkFrame):
                 widths = {
                     "Ticker": 96,
                     "symbol": 96,
-                    "Sleeve": 88,
+                    "Sleeve": 140,
                     "sleeve": 88,
                     "Qty": 80,
                     "Entry": 88,
@@ -2392,6 +2428,7 @@ class DataTable(ctk.CTkFrame):
                     "Total $": 100,
                     "Bought": 118,
                     "Sold": 118,
+                    "First fill": 118,
                     "Time": 118,
                     "Side": 56,
                     "Notional": 88,
@@ -2413,6 +2450,7 @@ class DataTable(ctk.CTkFrame):
                 "sleeve",
                 "Bought",
                 "Sold",
+                "First fill",
             )
             right_cols = (
                 "Qty",
@@ -3331,11 +3369,13 @@ class TradingDashboardApp(ctk.CTk):
         self._pill_thinking = _pill(
             status_inner, "Think: —", COLORS["surface2"], COLORS["muted"]
         )
+        self._pill_thinking.pack_forget()
         self._pill_bot = _pill(status_inner, "Bot: —", COLORS["surface2"], COLORS["muted"])
         self._pill_hb = _pill(status_inner, "Heartbeat: —", COLORS["surface2"], COLORS["muted"])
         self._pill_conviction = _pill(
             status_inner, "Conviction: —", COLORS["surface2"], COLORS["muted"]
         )
+        self._pill_conviction.pack_forget()
 
         stats_banner = ctk.CTkFrame(
             top_stack,
@@ -3372,6 +3412,7 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["text_dim"],
             anchor="w",
             justify="left",
+            wraplength=980,
         )
 
         self._small_panel = ctk.CTkFrame(top_stack, fg_color="transparent")
@@ -3473,7 +3514,7 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left")
         ctk.CTkLabel(
             pos_top,
-            text="Select a row, then Sell",
+            text="P&L is vs avg Entry, not First fill date.",
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
         ).pack(side="left", padx=(12, 0))
@@ -3515,7 +3556,7 @@ class TradingDashboardApp(ctk.CTk):
             [
                 "Ticker",
                 "Sleeve",
-                "Opened",
+                "First fill",
                 "Qty",
                 "Buy $",
                 "Current $",
@@ -3959,7 +4000,7 @@ class TradingDashboardApp(ctk.CTk):
         self._tab_overview = self._tabs.add("Overview")
         self._build_overview_tab()
 
-        self._tab_trades = self._tabs.add("Trades")
+        self._tab_trades = self._tabs.add("Activities")
         self._trades_tab_hint = ctk.CTkLabel(
             self._tab_trades,
             text="",
@@ -3970,7 +4011,7 @@ class TradingDashboardApp(ctk.CTk):
         self._trades_tab_hint.pack(fill="x", padx=12, pady=(10, 4))
         self._trades_table = DataTable(
             self._tab_trades,
-            ["Ticker", "Qty", "Entry", "Exit", "P&L $", "P&L %", "Bought", "Sold", "Sleeve"],
+            ["Time", "Ticker", "Side", "Qty", "Notional", "P&L $", "Sleeve"],
             height=14,
             large=True,
         )
@@ -4332,12 +4373,13 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._wisdom_line.pack(fill="x", padx=14)
 
-        ctk.CTkLabel(
+        self._crypto_vol_heading = ctk.CTkLabel(
             self._overview_body,
             text="Crypto vol sleeve",
             font=_ctk_font("heading"),
             anchor="w",
-        ).pack(fill="x", padx=14, pady=(12, 4))
+        )
+        self._crypto_vol_heading.pack(fill="x", padx=14, pady=(12, 4))
         self._crypto_vol_panel = ctk.CTkFrame(
             self._overview_body,
             fg_color=COLORS["card"],
@@ -4968,7 +5010,7 @@ class TradingDashboardApp(ctk.CTk):
         if cycle_err:
             err_at = (heartbeat or {}).get("last_cycle_error_at") or ""
             lines.extend(["", f"Last cycle error ({err_at}):"])
-            lines.append(str(cycle_err))
+            lines.append(_compact_io_error(cycle_err))
         self._live_status_panel.set_text(
             "\n".join(lines),
             text_color=COLORS["red"] if stale else COLORS["text"],
@@ -5097,16 +5139,12 @@ class TradingDashboardApp(ctk.CTk):
     def _update_thinking_pill(self, snap: dict | None, err: str | None = None) -> None:
         if not hasattr(self, "_pill_thinking"):
             return
-        self._pill_thinking.pack(side="left", padx=(0, 8), before=self._pill_bot)
-        if err and not snap:
-            self._pill_thinking.configure(
-                text="Think: err",
-                fg_color=COLORS["surface2"],
-                text_color=COLORS["amber"],
-            )
-            return
         snap = snap or {}
         status = str(snap.get("status") or "OFF").upper()
+        if status in ("", "OFF") or (err and status != "ON"):
+            self._pill_thinking.pack_forget()
+            return
+        self._pill_thinking.pack(side="left", padx=(0, 8), before=self._pill_bot)
         detail = str(snap.get("detail") or "")[:36]
         if status == "ON":
             fg, tc = COLORS["paper_ok_bg"], COLORS["green"]
@@ -5115,7 +5153,7 @@ class TradingDashboardApp(ctk.CTk):
         else:
             fg, tc = COLORS["surface2"], COLORS["muted"]
         text = f"Think: {status}"
-        if detail and status != "OFF":
+        if detail:
             text = f"Think: {status} · {detail}"
         self._pill_thinking.configure(text=text[:48], fg_color=fg, text_color=tc)
 
@@ -5381,7 +5419,12 @@ class TradingDashboardApp(ctk.CTk):
             parts.append(f"hb stale {hb_age:.0f}m")
         errs = snap.get("partial_errors") or []
         if errs:
-            parts.append(f"{len(errs)} partial error(s)")
+            shown = []
+            for e in errs:
+                s = _compact_io_error(e)
+                if s not in shown:
+                    shown.append(s)
+            parts.append("; ".join(shown[:3]))
         return " · ".join(parts)
 
     def refresh_data(
@@ -5462,20 +5505,19 @@ class TradingDashboardApp(ctk.CTk):
                         restore_text=footer,
                     )
                 finally:
-                    if seq != self._refresh_seq:
-                        return
-                    self._refresh_busy = False
-                    self._set_refresh_buttons_busy(False)
-                    if self._refresh_pending:
-                        pending_force = self._refresh_pending_force_positions
-                        self._refresh_pending = False
-                        self._refresh_pending_force_positions = False
-                        self.after(
-                            150,
-                            lambda: self.refresh_data(
-                                full=False, force_positions=pending_force
-                            ),
-                        )
+                    if seq == self._refresh_seq:
+                        self._refresh_busy = False
+                        self._set_refresh_buttons_busy(False)
+                        if self._refresh_pending:
+                            pending_force = self._refresh_pending_force_positions
+                            self._refresh_pending = False
+                            self._refresh_pending_force_positions = False
+                            self.after(
+                                150,
+                                lambda: self.refresh_data(
+                                    full=False, force_positions=pending_force
+                                ),
+                            )
 
             self.after(0, _apply)
 
@@ -5499,6 +5541,7 @@ class TradingDashboardApp(ctk.CTk):
         running = bool(snap.get("running"))
 
         self._last_equity = equity
+        self._last_cash_pct = (cash / equity * 100) if equity > 0 else None
         if equity > 0:
             config.configure_account_profile(equity)
 
@@ -5573,9 +5616,7 @@ class TradingDashboardApp(ctk.CTk):
             upl,
             realized_by_ticker=getattr(self, "_last_realized_by_ticker", None) or {},
         )
-        # Trades tab needs journal; skip table rebuild on fast refresh when absent.
-        if snap.get("journal_df") is not None or not snap.get("fast"):
-            self._fill_trades(snap.get("journal_df"))
+        self._fill_trades(snap.get("journal_df"))
 
         if snap.get("sparkline_df") is not None:
             self._last_sparkline_df = snap.get("sparkline_df")
@@ -5680,6 +5721,16 @@ class TradingDashboardApp(ctk.CTk):
             self._charts_dirty = True
 
     def _fill_crypto_vol_panel(self) -> None:
+        try:
+            crypto_on = bool(config.effective_crypto_enabled())
+        except Exception:
+            crypto_on = False
+        if not crypto_on:
+            if hasattr(self, "_crypto_vol_heading"):
+                self._crypto_vol_heading.pack_forget()
+            if hasattr(self, "_crypto_vol_panel"):
+                self._crypto_vol_panel.pack_forget()
+            return
         hb = _load_json(_resolve_path(CRYPTO_VOL_HEARTBEAT_FILE))
         if hb is None:
             self._crypto_vol_body.configure(
@@ -5721,6 +5772,7 @@ class TradingDashboardApp(ctk.CTk):
     ) -> None:
         last_trade = _format_last_trade(snap)
         if acct_err:
+            acct_err = _compact_io_error(acct_err)
             self._overview_last_trade.configure(
                 text=f"Last trade: {last_trade}",
                 text_color=COLORS["muted"],
@@ -5941,7 +5993,7 @@ class TradingDashboardApp(ctk.CTk):
                 {
                     "Ticker": ticker,
                     "Sleeve": r.get("Sleeve", ""),
-                    "Opened": r.get("Opened", "—"),
+                    "First fill": r.get("First fill") or r.get("Opened") or "—",
                     "Qty": f"{qty:.4f}",
                     "Buy $": buy_txt,
                     "Current $": cur_txt,
@@ -5981,6 +6033,23 @@ class TradingDashboardApp(ctk.CTk):
         except Exception:
             pass
 
+    def _positions_lot_line(self, work_df, total_upl: float) -> tuple[str, str]:
+        n = 0
+        nyse = 0
+        if work_df is not None and not getattr(work_df, "empty", True):
+            n = int(len(work_df))
+            sleeves = work_df["Sleeve"].astype(str) if "Sleeve" in work_df.columns else None
+            if sleeves is not None:
+                nyse = int((sleeves == "NYSE").sum())
+        leftover = max(0, n - nyse)
+        pct = getattr(self, "_last_cash_pct", None)
+        cash_s = f"{pct:.0f}%" if isinstance(pct, (int, float)) else "n/a"
+        line = (
+            f"Alpaca lots: {n}  ·  NYSE active: {nyse}  ·  leftover: {leftover}  ·  cash {cash_s}"
+        )
+        color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
+        return line, color
+
     def _fill_positions(
         self,
         positions_df: pd.DataFrame | None,
@@ -6012,15 +6081,8 @@ class TradingDashboardApp(ctk.CTk):
                 and not pos_err
             ):
                 # Data unchanged — skip tree rebuild; keep total text in sync.
-                color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
-                n = 0
-                if work_df is not None and not getattr(work_df, "empty", True):
-                    n = len(work_df)
-                if n:
-                    self._pos_total.configure(
-                        text=f"{n} position(s) · unrealized P&L ${total_upl:+,.2f}",
-                        text_color=color,
-                    )
+                line, color = self._positions_lot_line(work_df, total_upl)
+                self._pos_total.configure(text=line, text_color=color)
                 return
 
             self._positions_empty_label.place_forget()
@@ -6028,9 +6090,9 @@ class TradingDashboardApp(ctk.CTk):
                 self._last_positions_df = None
                 self._last_positions_fp = fp
                 self._positions_table.clear()
-                self._pos_total.configure(text=pos_err, text_color=COLORS["red"])
+                self._pos_total.configure(text=_compact_io_error(pos_err), text_color=COLORS["red"])
                 self._positions_empty_label.configure(
-                    text=f"Could not load positions\n{pos_err[:120]}",
+                    text=f"Could not load positions\n{_compact_io_error(pos_err)[:120]}",
                     text_color=COLORS["red"],
                 )
                 self._positions_empty_label.place(relx=0.5, rely=0.45, anchor="center")
@@ -6039,10 +6101,8 @@ class TradingDashboardApp(ctk.CTk):
                 self._last_positions_df = None
                 self._last_positions_fp = fp
                 self._positions_table.clear()
-                self._pos_total.configure(
-                    text="No open positions",
-                    text_color=COLORS["muted"],
-                )
+                line, color = self._positions_lot_line(work_df, total_upl)
+                self._pos_total.configure(text=line, text_color=COLORS["muted"])
                 self._positions_empty_label.configure(
                     text="No open positions\nCash idle until the next rebalance cycle.",
                     text_color=COLORS["muted"],
@@ -6055,11 +6115,8 @@ class TradingDashboardApp(ctk.CTk):
             )
             self._positions_table.set_rows(rows, pnl_col="_pnl")
             self._last_positions_fp = fp
-            color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
-            self._pos_total.configure(
-                text=f"{len(rows)} position(s) · unrealized P&L ${total_upl:+,.2f}",
-                text_color=color,
-            )
+            line, color = self._positions_lot_line(work_df, total_upl)
+            self._pos_total.configure(text=line, text_color=color)
         except Exception as exc:  # noqa: BLE001
             self._last_positions_df = None
             self._last_positions_fp = None
@@ -6067,7 +6124,7 @@ class TradingDashboardApp(ctk.CTk):
                 self._positions_table.clear()
             except Exception:
                 pass
-            msg = f"Positions display error: {exc}"
+            msg = f"Positions display error: {_compact_io_error(exc)}"
             try:
                 self._pos_total.configure(text=msg[:80], text_color=COLORS["red"])
                 self._positions_empty_label.configure(
@@ -6079,26 +6136,44 @@ class TradingDashboardApp(ctk.CTk):
                 pass
 
     def _fill_trades(self, journal_df: pd.DataFrame | None) -> None:
-        if journal_df is None or journal_df.empty:
+        """Activities: portal event=fill rows for this book (recon reader)."""
+        path = book_journal_path(self._username, self._book_id)
+        raw = None
+        fills = None
+        try:
+            raw = _read_trade_journal_csv(path)
+            if raw is not None and not raw.empty and "event" in raw.columns:
+                ev = raw["event"].astype(str).str.lower()
+                fills = raw.loc[ev == "fill"].copy()
+        except Exception as exc:
             self._trades_table.clear()
-            src = book_journal_path(self._username, self._book_id)
-            empty = (
-                f"No trades yet · journal: {src.name}"
+            self._trades_tab_hint.configure(
+                text=_compact_io_error(exc),
+                text_color=COLORS["red"],
             )
-            self._trades_tab_hint.configure(text=empty)
+            return
+        if fills is None or fills.empty:
+            n_all = 0
+            try:
+                n_all = 0 if raw is None or raw.empty else int((raw["event"].astype(str).str.lower() == "fill").sum())
+            except Exception:
+                n_all = 0
+            self._trades_table.clear()
+            if n_all == 0:
+                self._trades_tab_hint.configure(
+                    text=f"No portal fills · journal: {path.name}",
+                    text_color=COLORS["muted"],
+                )
+            else:
+                self._trades_tab_hint.configure(
+                    text=f"{n_all} fill(s) in journal but none parsed for display",
+                    text_color=COLORS["amber"],
+                )
             return
 
-        closed = _closed_trades_from_fills(journal_df, limit=TRADES_LIMIT)
-        if not closed:
-            self._trades_table.clear()
-            n_fills = len(journal_df)
-            self._trades_tab_hint.configure(
-                text=(
-                    f"No closed buy/sell pairs yet · {n_fills} fill(s) loaded "
-                    "(open positions show on Positions)"
-                )
-            )
-            return
+        fills["timestamp"] = pd.to_datetime(fills["timestamp"], errors="coerce")
+        fills = fills.dropna(subset=["timestamp"]).sort_values("timestamp", ascending=False)
+        fills = fills.head(TRADES_LIMIT)
 
         def _fmt_ts(ts) -> str:
             if hasattr(ts, "strftime"):
@@ -6107,40 +6182,39 @@ class TradingDashboardApp(ctk.CTk):
             return s[:16].replace("T", " ") if s else "—"
 
         rows = []
-        for trade in closed:
-            qty = float(trade.get("_qty") or trade.get("Qty") or 0)
-            entry = float(trade.get("_entry") or trade.get("Entry") or 0)
-            exit_px = float(trade.get("_exit") or trade.get("Exit") or 0)
-            pnl = float(trade.get("_pnl") or trade.get("P&L $") or 0)
-            pnl_pct = float(trade.get("_pnl_pct") or trade.get("P&L %") or 0)
+        for rec in fills.to_dict(orient="records"):
+            sym = config.normalize_symbol(str(rec.get("symbol") or ""))
+            qty = rec.get("qty")
+            try:
+                qty_f = float(qty) if qty not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                qty_f = 0.0
+            notional = rec.get("notional")
+            try:
+                not_f = float(notional) if notional not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                not_f = 0.0
+            pnl_raw = rec.get("realized_pnl")
+            try:
+                pnl_f = float(pnl_raw) if pnl_raw not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                pnl_f = 0.0
             rows.append(
                 {
-                    "Ticker": trade.get("Ticker") or trade.get("symbol") or "—",
-                    "Qty": f"{qty:.4g}",
-                    "Entry": f"${entry:,.2f}",
-                    "Exit": f"${exit_px:,.2f}",
-                    "P&L $": f"${pnl:+,.2f}",
-                    "P&L %": f"{pnl_pct:+.2f}%",
-                    "Bought": _fmt_ts(trade.get("Bought")),
-                    "Sold": _fmt_ts(trade.get("Sold")),
-                    "Sleeve": trade.get("Sleeve") or trade.get("sleeve") or "—",
-                    "_qty": qty,
-                    "_entry": entry,
-                    "_exit": exit_px,
-                    "_pnl": pnl,
-                    "_pnl_pct": pnl_pct,
+                    "Time": _fmt_ts(rec.get("timestamp")),
+                    "Ticker": sym or "—",
+                    "Side": str(rec.get("side") or "—"),
+                    "Qty": f"{qty_f:.4g}" if qty_f else "—",
+                    "Notional": f"${not_f:,.0f}" if not_f else "—",
+                    "P&L $": f"${pnl_f:+,.2f}" if pnl_raw not in (None, "") else "—",
+                    "Sleeve": _infer_sleeve(sym),
+                    "_pnl": pnl_f,
                 }
             )
-
         self._trades_table.set_rows(rows, pnl_col="_pnl")
-        realized = sum(float(r["_pnl"]) for r in rows)
-        color = COLORS["green"] if realized >= 0 else COLORS["red"]
         self._trades_tab_hint.configure(
-            text=(
-                f"{len(rows)} closed trade(s) · realized P&L ${realized:+,.2f} "
-                f"· newest first"
-            ),
-            text_color=color,
+            text=f"{len(rows)} portal fill(s) · {path.name} · newest first",
+            text_color=COLORS["text_dim"],
         )
 
     def _clear_wisdom_chart(self) -> None:
