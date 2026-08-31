@@ -461,7 +461,9 @@ def _nyse_entry_hygiene_skip(executor, symbol: str, *, now=None, data=None) -> s
     next_add = open_adds + 1 if open_adds >= 0 else 1
     if open_adds >= max_adds or next_add > max_adds:
         _record_nyse_hygiene_skip("hygiene_max_adds")
-        return f"max adds/symbol ({open_adds}/{max_adds})"
+        return (
+            f"max adds/symbol ({open_adds}/{max_adds}; add {next_add} blocked)"
+        )
     return None
 
 
