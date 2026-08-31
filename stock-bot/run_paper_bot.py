@@ -25,11 +25,36 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 RUN_ALL = ROOT / "run_all.py"
 CRYPTO_VOL_ERROR_LOG = ROOT / "crypto_vol_sleeve_errors.log"
+
+
+def paper_env_file_overlay(env: dict[str, str], path: Path | None = None) -> dict[str, str]:
+    """Copy stock-bot/.env over *env* so file keys beat inherited parent env."""
+    path = path if path is not None else ROOT / ".env"
+    if not path.is_file():
+        return env
+    from dotenv import dotenv_values
+
+    out = dict(env)
+    for key, val in dotenv_values(path).items():
+        if key and val is not None:
+            out[str(key)] = str(val)
+    return out
+
+
+def load_paper_stock_env(*, override: bool = True) -> None:
+    """Load stock-bot/.env into os.environ before config is imported.
+
+    override=True is required: dashboard pythonw can be days old and pass
+    stale PAPER_NYSE_MAX_ADDS_PER_SYMBOL. Live entry must not call this.
+    """
+    path = ROOT / ".env"
+    if path.is_file():
+        load_dotenv(path, override=override)
 
 
 def _truthy(val: str | None, default: bool = False) -> bool:
@@ -61,9 +86,13 @@ def _maybe_spawn_weekly_review(python: str, env: dict[str, str]) -> None:
         print(f"--- Weekly review skipped: missing {script.name} ---")
         return
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    cmd = [python, str(script)]
+    # Match Task Scheduler: open MD in PyCharm when WEEKLY_REVIEW_OPEN is on.
+    if _truthy(env.get("WEEKLY_REVIEW_OPEN"), True):
+        cmd.append("--open")
     try:
         subprocess.Popen(
-            [python, str(script)],
+            cmd,
             cwd=str(ROOT),
             env=env,
             stdout=subprocess.DEVNULL,
@@ -198,6 +227,7 @@ def _apply_paper_research_env(env: dict[str, str]) -> dict[str, str]:
     env["PAPER_CHASE_MODE"] = "1"
     env.setdefault("PAPER_AGGRESSIVE", "true")
     env = apply_realistic_research_env(env)
+    env = paper_env_file_overlay(env)
     # REALISTIC_RESEARCH_ENV setdefaults THINKING_ENGINE_ENABLED=false. When paper
     # thinking is opted in (env file or explicit), keep the master gate aligned so
     # effective_thinking_engine_enabled() is True (banner shows ON, not "armed").
@@ -233,13 +263,20 @@ def _fetch_paper_alpaca_equity() -> float | None:
         return None
 
 
-def _force_write_paper_chase_heartbeat(env: dict[str, str]) -> None:
-    """Write a minimal fresh paper_chase_heartbeat.json every supervisor cycle.
+def _read_json(path: Path) -> dict:
+    try:
+        import json
 
-    Portal-managed run_all may write a different HEARTBEAT_FILE path; status.py
-    still reads paper_chase_heartbeat.json — keep that file fresh regardless.
-    Failures are logged and never abort the supervisor loop.
-    """
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def _force_write_paper_chase_heartbeat(env: dict[str, str]) -> None:
+    """Pulse timestamp/equity — merge so regime/gates are not wiped."""
     try:
         from modules.safe_io import write_json_atomic
 
@@ -253,7 +290,32 @@ def _force_write_paper_chase_heartbeat(env: dict[str, str]) -> None:
             "source": "run_paper_bot",
         }
         path = _paper_chase_heartbeat_path(env)
-        write_json_atomic(str(path), payload)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        existing = _read_json(path)
+        # Seed from portal paper hb when chase file is thin
+        if not existing.get("regime"):
+            portal = ROOT / "data" / "portal" / "users"
+            if portal.is_dir():
+                hits = sorted(portal.glob("*/books/alpaca_paper/bot_heartbeat.json"))
+                if hits:
+                    rich = _read_json(hits[0])
+                    if rich.get("regime"):
+                        seed = dict(rich)
+                        seed.update(existing)
+                        existing = seed
+        merged = dict(existing)
+        merged.update(payload)
+        if equity is None and existing.get("equity") is not None:
+            merged["equity"] = existing.get("equity")
+        write_json_atomic(str(path), merged)
+        try:
+            from modules import error_watcher
+
+            error_watcher.warn_incomplete_heartbeat(
+                merged, path=str(path), book="paper"
+            )
+        except Exception:
+            pass
     except Exception as exc:
         print(f"WARNING: paper_chase_heartbeat write failed: {exc}", flush=True)
 
@@ -261,8 +323,8 @@ def _force_write_paper_chase_heartbeat(env: dict[str, str]) -> None:
 def main() -> None:
     from modules.logging_utils import setup_project_logging
 
+    load_paper_stock_env(override=True)
     setup_project_logging(book="paper")
-    load_dotenv(find_dotenv())
 
     env = os.environ.copy()
     env = _apply_paper_research_env(env)
@@ -298,9 +360,10 @@ def main() -> None:
     crypto_cycle_sec = _crypto_vol_cycle_sec(env)
 
     python = sys.executable
-    # Prefer a venv that can actually import trading deps. stock-bot/.venv is often
-    # incomplete; the repo-root .venv is the working one.
+    # Prefer venv311 (cp311 wheels). Repo .venv is often Python 3.14 and breaks numpy.
     candidates = [
+        ROOT.parent / "venv311" / "Scripts" / "python.exe",
+        ROOT / "venv311" / "Scripts" / "python.exe",
         ROOT.parent / ".venv" / "Scripts" / "python.exe",
         ROOT / ".venv" / "Scripts" / "python.exe",
         Path(sys.executable),
@@ -310,11 +373,12 @@ def main() -> None:
             continue
         try:
             probe = subprocess.run(
-                [str(cand), "-c", "import alpaca, dotenv"],
+                [str(cand), "-c", "import alpaca, dotenv, numpy"],
                 cwd=str(ROOT),
                 capture_output=True,
                 timeout=20,
                 check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if probe.returncode == 0:
                 python = str(cand)
@@ -352,6 +416,7 @@ def main() -> None:
         pass
     print("-" * width)
     print(config.format_telegram_automation_banner())
+    print(f"Alerts policy: {config.telegram_alert_policy_summary()}")
     u = config.get_nyse_universe()
     print(
         f"NYSE universe: {len(u)} tickers "

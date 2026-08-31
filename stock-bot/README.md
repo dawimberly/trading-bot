@@ -1,17 +1,29 @@
 # PythonTrading
 
-**Personal systematic fund** on Alpaca. Two books: **live ~$300** and **paper ~$96k**.
+**Personal systematic fund** on Alpaca. Two books: **live ~$300** and **paper ~$97k**.
 
 **Current lock (paper + live):**
 
 - **VTI core OFF.** Do not rebuy VTI as core.
-- **NYSE 100%.** Vanguard names (if any leftover) count as NYSE, not a separate sleeve.
-- **SPY / crypto / stat-arb / social OFF.**
-- **Existing VTI leftover:** paper flattened; live qty **0**. Do not restock.
+- **NYSE 100%.** SPY / crypto / stat-arb / social **OFF**.
+- **Existing VTI** (if any on the book) is a **NYSE / Vanguard lot** — not a separate sleeve and **not force-trimmed** by hygiene.
 
-**Paper hygiene (still):** max **2** adds/symbol · same-day reentry block · ATR sleeve cooldown · **12**/cycle · `MAX_ACTIVE=25` · ~**8%** per-name ceiling. Clip size is risk/wisdom (~$1,300), not the 8% cap.
+**Paper hygiene** (`format_nyse_entry_hygiene_banner()`): max **2** adds/symbol · same-day reentry block · min **$25** notional (`PAPER_NYSE_MIN_NOTIONAL`) · **ATR-stop sleeve cooldown** (`PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN=true`, rest-of-session block on new NYSE names after an ATR stop) · **12**/cycle · `MAX_ACTIVE=25` · ~**8%** per-name ceiling. Clip size is risk/wisdom (~$1,300), not the 8% cap.
 
 **Live:** ~$300 book · `MAX_ACTIVE` **6–10** · 8% per name · does **not** use `PAPER_NYSE_MAX_ADDS` · do not size options. Small-account order caps still apply (1% risk, **$10** max/order, **$1** min).
+
+**Child `.env` overlay (before `config` import):**
+
+| Child | Behavior |
+|-------|----------|
+| **`run_paper_bot.py`** | Full `stock-bot/.env` overlay — file beats stale dashboard parent env (e.g. old `PAPER_NYSE_MAX_ADDS_PER_SYMBOL`). |
+| **`run_live_bot.py`** | **Allowlist only:** `LIVE_*`, `APCA_*` / `ALPACA_*`, `TELEGRAM_*`, `SMTP_*`, `TAVILY_*`, `XAI_*`, `ERROR_WATCHER_*`, `ALLOW_LIVE_TRADING`. **Denylist:** `PAPER_TRADING`, all `PAPER_*`, all `RESEARCH_*`, paper hygiene keys. Live hard-sets `PAPER_TRADING=false` — never load paper flags onto live. |
+
+**Dashboard:** closing the monitor (`pythonw`) **does not** stop bot children — bots keep running. Use dashboard **Restart Bot** (or `Start_Bot_and_Dashboard.bat`) to pick up `.env` / code changes.
+
+**Trade SoT:** portal `paper_journal.csv` rows with **`event=fill`**. VTI fills may still be missing from the journal until a natural rebalance after the Alpaca fill poll wait.
+
+**Draft gate (off):** `PAPER_VTI_CASH_NEED_SKIP` is **`False` in code** — not an `.env` key; behavior unchanged until measured and flipped.
 
 **Standing:** one change at a time · measure first · no live flatten/orders from this README · do not invent new sleeves.
 
@@ -27,7 +39,7 @@ Older v1.5.4 / 40–75% Dynamic VTI / Profile A ~85% VTI write-ups below are **h
 
 **Home folder:** `stock-bot/` — all launchers set `PYTHONTRADING_ROOT` to `stock-bot/`. Runtime EXEs and writable data live under **`stock-bot/dist/`**.
 
-**`.env` precedence:** `stock-bot/.env` wins. Frozen EXE loads `stock-bot/.env` first; `dist/.env` only fills keys missing from stock-bot. `build_all.bat` syncs stock-bot → dist as a portable fallback.
+**`.env` precedence:** portal book `.env` + `stock-bot/.env` (see child overlay table above). Paper/live supervisors overlay file keys over inherited dashboard env before spawning `run_all.py`. Frozen EXE loads `stock-bot/.env` first; `dist/.env` only fills keys missing from stock-bot. `build_all.bat` syncs stock-bot → dist as a portable fallback.
 
 | Path | Purpose |
 |------|---------|
@@ -64,7 +76,7 @@ Same logic is available as `Start Trading.bat` (repo root) or `stock-bot\fix_set
 1. Stops stray bot and dashboard processes from earlier runs
 2. Restarts **both portal books** for your user (`alpaca_live` + `alpaca_paper`):
    - **Live** (~$300) — NYSE 100%, VTI core OFF, via `run_all.py`
-   - **Paper** (~$96k) — NYSE 100%, VTI core OFF, via `run_paper_bot.py`
+   - **Paper** (~$97k) — NYSE 100%, VTI core OFF, via `run_paper_bot.py`
 3. Opens the **desktop monitor** (`dashboard_app.py` via `pythonw` — no extra console window)
 4. Shows a small **startup console** with progress, then minimizes on success
 
@@ -133,7 +145,7 @@ Quit **PythonTradingMonitor.exe** before rebuilding (unlocks `dist\PythonTrading
 
 This section is the **authoritative summary** of what actually runs on **live and paper bots**. Older v1.5.4 / 40–75% VTI / ~85% Profile A text elsewhere is **historical**. Confirm with `python status.py`.
 
-**Both books (current lock):** VTI core **OFF** · NYSE **100%** · SPY / crypto / stat-arb / social **OFF** · do not rebuy VTI as core · leftover Vanguard (if any) is NYSE, not a separate sleeve · paper VTI leftover was flattened · live VTI qty **0** · do not restock. One change at a time; measure first; no live flatten/orders from this README; do not invent new sleeves.
+**Both books (current lock):** VTI core **OFF** · NYSE **100%** · SPY / crypto / stat-arb / social **OFF** · do not rebuy VTI as core · existing VTI (if any) is a NYSE/Vanguard lot, not force-trimmed · do not restock. One change at a time; measure first; no live flatten/orders from this README; do not invent new sleeves.
 
 ### Profile A — live (`run_all.py`, ~$300)
 
@@ -152,11 +164,11 @@ This section is the **authoritative summary** of what actually runs on **live an
 
 | Layer | Runtime default |
 |-------|-----------------|
-| **VTI core** | **OFF** (paper flattened; do not rebuy as core) |
+| **VTI core** | **OFF** (do not rebuy as core; existing VTI lot = NYSE, not force-trimmed) |
 | **Equity path** | NYSE momentum (`run_nyse_momentum_and_stat_arb`) |
 | **NYSE** | **100%** · leftover Vanguard counts as NYSE |
 | **SPY / crypto / stat-arb / social** | **OFF** |
-| **Hygiene** | max **2** adds/symbol · same-day reentry block · ATR sleeve cooldown |
+| **Hygiene** | max **2** adds/symbol · same-day reentry block · min **$25** · ATR-stop sleeve cooldown (rest of session) |
 | **Portfolio guards** | ~**8%**/name ceiling · `MAX_ACTIVE=25` · **12**/cycle |
 | **Clip size** | risk/wisdom (~$1,300), **not** the 8% cap |
 | **Thinking engine** | **Off** unless `PAPER_THINKING_ENGINE_ENABLED=true` |
@@ -212,7 +224,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 **Two books (same lock, different size):**
 
 - **Profile A — live** (~$300): NYSE 100%, VTI core OFF, `MAX_ACTIVE` 6–10, 8% per name, 1% / $10 caps. Does not use `PAPER_NYSE_MAX_ADDS`.
-- **Profile B — paper** (~$96k): NYSE 100%, VTI core OFF, hygiene (max 2 adds, same-day block, ATR cooldown), 12/cycle, `MAX_ACTIVE=25`, ~8% ceiling, ~$1,300 clips.
+- **Profile B — paper** (~$97k): NYSE 100%, VTI core OFF, hygiene (max 2 adds, same-day block, min $25, ATR-stop sleeve cooldown), 12/cycle, `MAX_ACTIVE=25`, ~8% ceiling, ~$1,300 clips.
 
 ---
 
@@ -335,7 +347,7 @@ Operational hardening for 24/7 live + paper on one PC (no strategy changes on Pr
 | **Daily breaker false trips** | `modules/trading_safety.py` | Detects **anchor contamination** (live ~$300 vs paper ~$98k in `trading_safety_state.json`), resets stale anchors, auto-clears trips when loss is below limit; live session re-primes on startup |
 | **Stat-arb reconcile** | `modules/stat_arb_sleeve.py` | Startup reconcile ignores VTI/SPY/NYSE longs and crypto when sleeves disabled; purges stale book rows; resolves orphan pair registries — no spurious orphan warnings on Profile A |
 | **Dashboard restart** | `dashboard_app.py`, `modules/portal_bot.py`, `scripts/owner_reset.py` | **Restart Both** always clean-restarts `alpaca_paper` + `alpaca_live` (stale PIDs cleared; positions not closed) |
-| **Dashboard open dual reset** | `dashboard_app.py`, `scripts/owner_reset.py` | On open/reopen (default): `clean_restart_both_bots` — opt out with `DASHBOARD_RESTART_BOTS_ON_OPEN=false`; closing the monitor prompts to stop portal bots (paper default; live optional) |
+| **Dashboard open dual reset** | `dashboard_app.py`, `scripts/owner_reset.py` | On open/reopen (default): `clean_restart_both_bots` — opt out with `DASHBOARD_RESTART_BOTS_ON_OPEN=false`; **closing the monitor does not kill bots** — use **Restart Bot** to reload env/code |
 | **Dashboard refresh bot** | `dashboard_app.py`, `modules/portal_bot.py` | **Refresh Bot** — confirm → stop book → `fetch_data.py --daily` → restart (progress in status bar) |
 | **Heartbeat reporting** | `run_all.py`, `status.py`, `status_metrics.py` | Heartbeats include `last_cycle_error`; `status.py` shows age, **STARTING** / **WARMING UP** / **STALE**, scan phase; prefers fresh Alpaca equity over stale heartbeat |
 | **Crypto vol gate** | `modules/crypto_vol_gate.py` | Centralized allow/deny with regime pause + vol-only check; optional SpaceX narrative override; status surfaces gate reason |
