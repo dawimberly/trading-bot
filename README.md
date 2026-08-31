@@ -20,13 +20,14 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 
 ## Recent changes
 
+- **2026-08-31** — paper NYSE max-adds tests (adds=2; add 3 skipped)
+- **2026-08-31** — Test paper NYSE max-adds: 2 allowed, add 3 skipped, live untouched.
+- **2026-08-30** — Label leftover VTI/metal on the desktop dashboard and drop the Opened vs P&L mix-up.
 - **2026-08-29** — Count Saturday weekly closes from the portal fill tape, not chase CSV.
 - **2026-08-28** — Listen for freeze HOLD/CONFIRM on Telegram and stop live banners from advertising a VTI core.
 - **2026-08-20** — Point recon at the portal journal and add AI-burst hedge v1.
 - **2026-08-12** — Update README Recent changes for 2026-08-12.
 - **2026-08-12** — Document commit-hook enablement in README recent changes.
-- **2026-08-11** — Enable commit hooks: auto README Recent changes and dual-remote push.
-- **2026-08-11** — Commit hooks: auto README Recent changes + dual-remote push via `origin`.
 
 ## Quick start
 
@@ -50,7 +51,7 @@ Build frozen EXEs (optional): `stock-bot\build_all.bat`
 
 Friend setup: [FRIENDS.md](FRIENDS.md) · Full bot docs: [stock-bot/README.md](stock-bot/README.md) — see **“What the bot is set to do (runtime defaults)”** for live vs paper vs research-only features (good to paste into Grok with `python status.py` output).
 
-**Paper lock (v1.5.4):** Smart Dynamic VTI **40–75%** (≥40% floor) · **SPY satellite OFF** · portfolio guards (≤8%/name, dust &lt;$10, max 25) · equity `run_nyse_momentum_and_stat_arb` · Telegram fills ≥$5 + error watcher ON. Details: [`stock-bot/PAPER_RESEARCH_PROFILE.md`](stock-bot/PAPER_RESEARCH_PROFILE.md). **Forward freeze** (~2–4 weeks from 2026-07-29): measure-only — [`stock-bot/FORWARD_PAPER_FREEZE.md`](stock-bot/FORWARD_PAPER_FREEZE.md); known-good tag `paper-v154-spy-off-strict`; daily/Saturday freeze memos via Telegram. **Live Conservative** stays separate (~85% VTI; Profile A unchanged). Branch `ollama-fallback-test` includes `main` + WIP `f46f4b5`.
+**Current lock (paper + live):** VTI core **OFF** — do not rebuy VTI as core. **NYSE 100%**. Vanguard names (if any leftover) count as NYSE, not a separate sleeve. **SPY / crypto / stat-arb / social OFF**. Existing VTI leftover: paper flattened; live qty **0** — do not restock. Paper hygiene still: max **2** adds/symbol, same-day reentry block, ATR sleeve cooldown, **12**/cycle, `MAX_ACTIVE=25`, ~**8%** per-name ceiling; clip is risk/wisdom (~$1,300), not the 8% cap. Live ~$300: `MAX_ACTIVE` **6–10**, 8% per name, does **not** use `PAPER_NYSE_MAX_ADDS`; do not size options. Standing: one change at a time; measure first; no live flatten/orders from this README; do not invent new sleeves. Details: [`stock-bot/README.md`](stock-bot/README.md#what-the-bot-is-set-to-do-runtime-defaults). Freeze memos (CONFIRM/DENY/HOLD only): [`stock-bot/FORWARD_PAPER_FREEZE.md`](stock-bot/FORWARD_PAPER_FREEZE.md).
 
 ## Runtime data layout
 

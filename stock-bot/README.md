@@ -1,28 +1,21 @@
 # PythonTrading
 
-**Personal systematic fund** on Alpaca. Currently running **live on ~$300** (small-account guardrails while equity &lt; $500).
+**Personal systematic fund** on Alpaca. Two books: **live ~$300** and **paper ~$96k**.
 
-The bot automatically applies **small-account safety** when equity &lt; $500:
+**Current lock (paper + live):**
 
-- **90% VTI core** (passive index anchor)
-- **~10% active sleeves** (SPY, NYSE momentum — crypto **off** on Profile A live)
-- **1% risk per trade** (~$1–$3 orders)
-- **$10 max per order**
+- **VTI core OFF.** Do not rebuy VTI as core.
+- **NYSE 100%.** Vanguard names (if any leftover) count as NYSE, not a separate sleeve.
+- **SPY / crypto / stat-arb / social OFF.**
+- **Existing VTI leftover:** paper flattened; live qty **0**. Do not restock.
 
-**Recommended live stack — Profile A (~$300 live, lock 2026-06-19):**
+**Paper hygiene (still):** max **2** adds/symbol · same-day reentry block · ATR sleeve cooldown · **12**/cycle · `MAX_ACTIVE=25` · ~**8%** per-name ceiling. Clip size is risk/wisdom (~$1,300), not the 8% cap.
 
-| Setting | Value |
-|---------|-------|
-| **VTI core** | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT=0.90`) |
-| **Crypto sleeve** | **OFF** (Profile A / Alpaca live default) |
-| **Thinking engine** | **OFF** (paper opt-in only) |
-| **Game plan** | Yield-gate-only (`GAME_PLAN_YIELD_GATE_ONLY=true`) |
-| **WISDOM_MODE** | `dynamic` |
-| Overlap / chunk / co-fire / SPY MA exit / social / macro | **off** (opt-in via `.env`) |
+**Live:** ~$300 book · `MAX_ACTIVE` **6–10** · 8% per name · does **not** use `PAPER_NYSE_MAX_ADDS` · do not size options. Small-account order caps still apply (1% risk, **$10** max/order, **$1** min).
 
-No extra flags required — preflight and `status.py` confirm the stack.
+**Standing:** one change at a time · measure first · no live flatten/orders from this README · do not invent new sleeves.
 
-**Paper research** (`paper_aggressive`): **Realistic Research v1.5.4** (locked) — RHYME primary / HMM soft, **Smart Dynamic VTI LOCKED 40–75%** (≥40% hard floor; stress/default/calm), **SPY satellite OFF** (Dyn VTI + NYSE; live SPY unchanged), portfolio guards (≤8%/name, auto-dust &lt;$10, max 25 non-core), equity path `run_nyse_momentum_and_stat_arb`, GARCH paper ON, Daily Banking, Stat Arb quality; ARIMA optional OFF. Telegram: yields change-only/OFF, fills ≥$5 ON, error watcher ON. Live uses **Live Conservative** (~85% VTI — separate lock). Branch `ollama-fallback-test` includes `main` + WIP restore `f46f4b5`. See [What's New in v1.5](#whats-new-in-v15), [Profile B](#profile-b-realistic-research-v154-paper_aggressive), and **[Research velocity profile](PAPER_RESEARCH_PROFILE.md)**.
+Older v1.5.4 / 40–75% Dynamic VTI / Profile A ~85% VTI write-ups below are **historical research**, not current runtime. Confirm with `python status.py`.
 
 **At-a-glance status:** `python status.py` — live + paper equity, regime, and key flags.
 
@@ -70,8 +63,8 @@ Same logic is available as `Start Trading.bat` (repo root) or `stock-bot\fix_set
 
 1. Stops stray bot and dashboard processes from earlier runs
 2. Restarts **both portal books** for your user (`alpaca_live` + `alpaca_paper`):
-   - **Live** (~$300) — Profile A conservative via `run_all.py`
-   - **Paper** (~$98k) — Best Paper aggressive via `run_paper_bot.py`
+   - **Live** (~$300) — NYSE 100%, VTI core OFF, via `run_all.py`
+   - **Paper** (~$96k) — NYSE 100%, VTI core OFF, via `run_paper_bot.py`
 3. Opens the **desktop monitor** (`dashboard_app.py` via `pythonw` — no extra console window)
 4. Shows a small **startup console** with progress, then minimizes on success
 
@@ -138,39 +131,35 @@ Quit **PythonTradingMonitor.exe** before rebuilding (unlocks `dist\PythonTrading
 
 ## What the bot is set to do (runtime defaults)
 
-This section is the **authoritative summary** of what actually runs on **live and paper bots** vs what exists **only for backtests and research scripts**. Code defaults below; your `.env` can override opt-in flags (but not the hard-disabled research experiments).
+This section is the **authoritative summary** of what actually runs on **live and paper bots**. Older v1.5.4 / 40–75% VTI / ~85% Profile A text elsewhere is **historical**. Confirm with `python status.py`.
 
-### Profile A — live (`run_all.py`, ~$100–$300)
+**Both books (current lock):** VTI core **OFF** · NYSE **100%** · SPY / crypto / stat-arb / social **OFF** · do not rebuy VTI as core · leftover Vanguard (if any) is NYSE, not a separate sleeve · paper VTI leftover was flattened · live VTI qty **0** · do not restock. One change at a time; measure first; no live flatten/orders from this README; do not invent new sleeves.
+
+### Profile A — live (`run_all.py`, ~$300)
 
 | Layer | Runtime default |
 |-------|-----------------|
-| **VTI core** | **90%** when equity &lt; $500; **80%** at ≥ $500 |
-| **Active sleeves** | SPY MA200 trend, NYSE MA50 momentum, **vol-gated crypto pairs** (24 majors) |
-| **Game plan** | Yield-gate-only — blocks new SPY buys on hostile rates |
-| **Risk / orders** | 1% per trade, **$10 max** (small account) |
-| **Overlap / chunk / co-fire** | **Off** |
-| **Dynamic NYSE screener** | **Off** (static universe from `market_data.db`) |
-| **IPO safety** | **Off** |
+| **VTI core** | **OFF** (qty **0**; do not restock) |
+| **Active sleeves** | **NYSE 100%** only |
+| **SPY / crypto / stat-arb / social** | **OFF** |
+| **Name cap** | `MAX_ACTIVE` **6–10** · ~**8%** per name |
+| **Max-adds** | Live does **not** use `PAPER_NYSE_MAX_ADDS` |
+| **Options** | Do not size options |
+| **Risk / orders** | 1% per trade (~$3 clip), **$1** min, **$10** max |
 | **Thinking engine** | **Off** |
-| **Social / macro adaptor** | **Off** |
 
-### Profile B — paper Sharpe chase (`run_paper_bot.py` / `PAPER_CHASE_MODE=1`)
+### Profile B — paper (`run_paper_bot.py` / `PAPER_CHASE_MODE=1`)
 
 | Layer | Runtime default |
 |-------|-----------------|
-| **VTI core** | **Smart Dynamic LOCKED 40–75%** (`PAPER_DYNAMIC_VTI=true`; hard floor ≥40%; tiers stress 75% / default 65% / calm 50%) |
-| **Equity path** | **`run_nyse_momentum_and_stat_arb`** primary |
-| **Portfolio guards** | Concentration **≤8%**/name · auto-dust **&lt;$10** · max **25** active non-core tickers |
-| **Telegram** | Yields **OFF** (change-only if enabled) · fills **≥$5 ON** · error watcher **ON** (daily MD + per-error TG) |
-| **Active sleeves** | SPY **OFF** / crypto / NYSE × **1.40×** boost (365d STRICT confirm) |
-| **Stat arb + vol overlay + options** | **On** |
-| **Overlap / chunk / co-fire** | **On** |
-| **Dynamic universe** | Weekly NYSE+NASDAQ screener refresh — **on** (`PAPER_DYNAMIC_UNIVERSE=true`) |
-| **Dynamic universe strict** | Quality screener (8–12 names) — **off** unless `PAPER_DYNAMIC_UNIVERSE_STRICT=true` |
-| **IPO safety** | **On** — 2% cap, 0.5× sizing, trim rules (`PAPER_IPO_SAFETY_ENABLED=true`) |
-| **Crypto** | Base **24-pair** universe; vol gate **off** on paper (`PAPER_CRYPTO_VOL_ONLY=false`) |
+| **VTI core** | **OFF** (paper flattened; do not rebuy as core) |
+| **Equity path** | NYSE momentum (`run_nyse_momentum_and_stat_arb`) |
+| **NYSE** | **100%** · leftover Vanguard counts as NYSE |
+| **SPY / crypto / stat-arb / social** | **OFF** |
+| **Hygiene** | max **2** adds/symbol · same-day reentry block · ATR sleeve cooldown |
+| **Portfolio guards** | ~**8%**/name ceiling · `MAX_ACTIVE=25` · **12**/cycle |
+| **Clip size** | risk/wisdom (~$1,300), **not** the 8% cap |
 | **Thinking engine** | **Off** unless `PAPER_THINKING_ENGINE_ENABLED=true` |
-| **Social / macro / equity pairs** | **Locked off** by `enforce_best_paper_stack()` |
 
 ### Hard-disabled on all bots (research / backtest only)
 
@@ -192,7 +181,7 @@ Other research compares (safe to run; do not wire to bots without re-backtesting
 **Grok still will not know** unless you paste it separately:
 
 - Your actual `.env` overrides (e.g. strict dynamic universe, thinking engine)
-- Current equity tier (90% vs 80% VTI), open positions, or today's regime
+- Current equity, cash, open positions, or today's regime (not this README's historical VTI %)
 - Whether a bot process is running and which profile is active
 
 **Best bundle to paste into Grok:**
@@ -207,7 +196,7 @@ That combination is enough for Grok to answer “what should my bot be doing?”
 
 ## System overview
 
-One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → VTI core rebalance → sleeve strategies → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`) and **`status.py`** read portal book heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
+One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → regime → yield-gate game plan → NYSE sleeve (VTI core **OFF**) → capped orders → heartbeat JSON → sleep. The **desktop monitor** (`dashboard_app.py`) and **`status.py`** read portal book heartbeats + Alpaca for at-a-glance health; the **portal** (`portal.py`) is the friend/onboarding path.
 
 **Dual-book owner setup:** one portal user (e.g. `dawimberly`) with two books — `alpaca_live` (Profile A) and `alpaca_paper` (Profile B). Start both daily with **`Start_Bot_and_Dashboard.bat`**.
 
@@ -220,10 +209,10 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 | **`modules/thinking_engine.py`** | Opt-in Ollama PM tilts (paper only by default; live requires manual approval) |
 | **`backtester.py`** | Daily-bar mirror of the live stack for validation |
 
-**Two profiles (do not mix on the same book without intent):**
+**Two books (same lock, different size):**
 
-- **Profile A — live** (`current_dynamic`): 90% VTI (&lt; $500), yield-gate-only, overlap/chunk/co-fire **off**, 1% / $10 small-account caps.
-- **Profile B — paper v1.5** (`paper_aggressive` / Realistic Research): **locked default** — see [What's New in v1.5](#whats-new-in-v15) and [`PAPER_RESEARCH_PROFILE.md`](PAPER_RESEARCH_PROFILE.md).
+- **Profile A — live** (~$300): NYSE 100%, VTI core OFF, `MAX_ACTIVE` 6–10, 8% per name, 1% / $10 caps. Does not use `PAPER_NYSE_MAX_ADDS`.
+- **Profile B — paper** (~$96k): NYSE 100%, VTI core OFF, hygiene (max 2 adds, same-day block, ATR cooldown), 12/cycle, `MAX_ACTIVE=25`, ~8% ceiling, ~$1,300 clips.
 
 ---
 
@@ -231,9 +220,9 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 
 ### v1.5.4 final summary (Monday / production-ready paper)
 
-**Realistic Research v1.5.4** is the **final lock** for production-ready paper (`REALISTIC_RESEARCH_VERSION = "1.5.4"`). Startup banners show **`v1.5.4 — Sector-Aware Portfolio Constructor`**; run **`Lock_v15.bat`** for the Monday-ready sign-off. Do not invent version bumps past 1.5.4.
+**Realistic Research v1.5.4** is a **historical paper research lock** (`REALISTIC_RESEARCH_VERSION = "1.5.4"`). **Current runtime is VTI core OFF / NYSE 100%** — see [What the bot is set to do](#what-the-bot-is-set-to-do-runtime-defaults). Do not treat 40–75% Dynamic VTI or ~85% live VTI as live policy.
 
-**Locked paper defaults (do not flip casually):**
+**Historical v1.5.4 paper defaults (research record, not current runtime):**
 
 | Layer | v1.5.4 lock |
 |-------|-------------|
@@ -260,7 +249,7 @@ One **24/7 loop** (`run_all.py`) drives everything on Alpaca: refresh bars → r
 
 **One-click (preferred):** double-click **`Monday_Checklist.bat`** every Monday before open (prefers repo-root `.venv`). Runs paper + live verify, `Lock_v15 --verify-only`, `owner_reset`, RESPONDING/FINAL LOCK checks, Telegram `/status`, paper Health ≥90 + Strategy Performance, and confirms the Friday weekly path. Exit non-zero on FAIL. Optional schedule: `python scripts\monday_checklist.py --install-task` (Monday 08:00 local). Smoke / re-check without restart: `python scripts\monday_checklist.py --quick --skip-reset --no-telegram-send`.
 
-Use this sequence before market open (or Sunday night for autonomous overnight). Confirms **Realistic Research v1.5.4 FINAL LOCK** (paper) and **Live Conservative FINAL LOCK** (live book): RHYME primary, Dynamic VTI ON, GARCH paper ON, Daily Banking, HMM soft-only, ARIMA OFF. Live book separately shows **Live Conservative FINAL LOCK** (SPY trend + ~85% VTI + GARCH/ATR/exits/corr/tail; scanners/shorts/stat-arb OFF).
+Use this sequence before market open (or Sunday night for autonomous overnight). Confirms **current lock** on both books: VTI core **OFF**, NYSE **100%**, SPY/crypto/stat-arb/social **OFF**. Do not expect ~85% VTI or Dynamic VTI 40–75%.
 
 | Step | Command | Purpose |
 |------|---------|---------|
@@ -280,9 +269,10 @@ Use this sequence before market open (or Sunday night for autonomous overnight).
 - Portal paper book (`alpaca_paper`) using chase journal / heartbeat paths
 - Scheduled task `PythonTrading_Autonomous_Paper` is **Ready** (11:00 PM → `Start_Autonomous.bat`, prefers repo-root `.venv`)
 
-**Live bot Monday checklist (Live Conservative FINAL LOCK):**
-- Startup shows `Live Conservative FINAL LOCK` — ON: SPY trend / High VTI ~85% / GARCH / Tail / Corr / ATR / Exits
-- Paper-only OFF: Stat Arb, shorts, RVOL/ORB/Catalyst, optional VTI floor, SPY-like, ARIMA, Daily Banking
+**Live bot Monday checklist (current lock):**
+- VTI core **OFF**, qty **0** — do not restock
+- NYSE **100%**, `MAX_ACTIVE` 6–10, ~8% per name; does **not** use `PAPER_NYSE_MAX_ADDS`
+- SPY / crypto / stat-arb / social **OFF**; do not size options
 - `ALLOW_LIVE_TRADING=yes` only when intentionally running the live book
 
 ### Autonomous overnight (paper)
@@ -359,7 +349,6 @@ Run from `stock-bot/` (venv active):
 ```powershell
 python tests/test_trading_safety_status.py   # daily loss status + false-trip auto-clear
 python tests/test_stat_arb_reconcile.py      # stat-arb orphan filtering / book purge
-python tests/test_kraken_budget.py          # Kraken cycle budget caps (exchange stack only)
 python status.py                            # live + paper equity, breaker, heartbeat age
 python scripts/account/preflight.py         # keys, alerts, small-account sizing
 ```
@@ -417,8 +406,6 @@ These are informational warnings or optional paths — **no action required** fo
 |------|---------|-------|
 | ~~**Stat-arb orphan warnings**~~ | ~~`Stat-arb orphans (not in book)` at startup~~ | **Resolved (2026-06)** — reconcile filters VTI/SPY/NYSE/crypto when sleeves off; real orphans still logged on paper Profile B |
 | ~~**Daily breaker false trip**~~ | ~~`circuit_tripped` with tiny loss~~ | **Resolved (2026-06)** — anchor contamination repair + auto-clear in `trading_safety.py`; verify with `python tests/test_trading_safety_status.py` |
-| **Kraken xStocks API off** | Startup banner: SPY/NYSE will not auto-trade on Kraken | Alpaca-only live is fine; set `KRAKEN_AUTOPILOT_ENABLED=false` to silence Kraken paths |
-| **Kraken autopilot vs Alpaca** | Preflight warns when both live | Recommended: Alpaca-only for ~$300 live; Kraken is separate `scripts/exchange/` stack |
 | **Thinking engine calibration** | Heuristic fallback common on first cycles | Keep off on live; use `--simulate-live-thinking` before enabling |
 | **Universe screener age** | `status.py` universe line &gt; 7 days | Run `python scripts/analysis/universe_screener.py --force` on paper book — see [Dynamic universe](#dynamic-nyse-universe-paper-only) |
 | **Legacy Streamlit dashboard** | `dashboard.py` still works | CustomTkinter `dashboard_app.py` is primary; Streamlit is backup |
@@ -503,24 +490,22 @@ Output: comparison table (`--quality-fixes`), hour-of-day stats, trade log → `
 
 The repo supports **three deployment targets**. Live defaults stay conservative; paper research opts into aggressive layers via `PAPER_CHASE_MODE`. VPS cloud uses the same Best Paper stack via `cloud_bot/`. Summary: [`scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md`](scripts/analysis/OPTIMIZED_SYSTEM_SUMMARY.md).
 
-### Profile A: Live Conservative (`alpaca_live`)
+### Profile A: live (`alpaca_live`)
 
-**Use for:** live ~$100–$500 account, default `run_all.py`, `preflight.py` when not in paper chase.
+**Use for:** live ~$300 account, default `run_all.py`.
 
-**Label:** Live Conservative (does **not** bump Paper Research v1.5.4). Locked by `config.enforce_live_conservative_profile()` when `PAPER_TRADING=false`.
+**Current lock** (not the historical ~85% VTI “Live Conservative” write-up):
 
 | Layer | Setting |
 |-------|---------|
-| **VTI core** | **85%** when equity &lt; $500 (`LIVE_VTI_CORE_PCT`); **80%** when ≥ $500 — **no** optional 0% floor |
-| **Active sleeve** | **5% SPY trend** (`LIVE_ACTIVE_SLEEVE_CHOICE=spy`) + leftover NYSE/active |
-| **GARCH vol sizing** | **ON** (`GARCH_VOL_LIVE_ENABLED` via live enforce) |
-| **Tail risk / corr guard / ATR / exits** | **ON** |
-| **Stat Arb / shorts / RVOL·ORB·Catalyst** | **OFF** (paper-only) |
-| **Optional VTI floor / SPY-like / ARIMA / Daily Bank** | **OFF** |
-| **Risk / orders** | 1% / **$10 max** (small) or 2% / scaled (large) |
-| **Game plan** | Yield-gate-only |
-| **WISDOM_MODE** | `dynamic` |
-| **Thinking engine** | **off** (paper opt-in; live requires approval) |
+| **VTI core** | **OFF** (qty **0**; do not restock) |
+| **NYSE** | **100%** |
+| **SPY / crypto / stat-arb / social** | **OFF** |
+| **Name cap** | `MAX_ACTIVE` **6–10** · ~**8%** per name |
+| **Max-adds** | Does **not** use `PAPER_NYSE_MAX_ADDS` |
+| **Options** | Do not size options |
+| **Risk / orders** | 1% / **$10 max** (small) |
+| **Thinking engine** | **off** |
 | **Halt** | 10% DD; resume 8%; liquidate on breach |
 
 Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()` and the Live Conservative banner/headline.
@@ -539,7 +524,7 @@ Preflight / `run_all.py` print Profile A via `config.print_live_stack_flags()` a
 
 | Layer | Default | Env flag |
 |-------|---------|----------|
-| **VTI core** | **Smart Dynamic LOCKED 40–75%** (hard floor ≥40%; tiers 75/65/50) + **SPY-like boosts** (paper ON) | `PAPER_DYNAMIC_VTI=true`, `DYNAMIC_VTI_*`, `SPY_LIKE_BOOST_*` |
+| **VTI core** | **OFF** (do not rebuy as core). Historical 40–75% Dynamic VTI is research-only. | `VTI_CORE_ENABLED=false`, `PAPER_VTI_CORE_PCT=0` |
 | **Equity path** | **`run_nyse_momentum_and_stat_arb`** primary | `pipeline_strategies` / `run_all` |
 | **Portfolio guards** | ≤**8%**/name · auto-dust **&lt;$10** · max **25** non-core | `CONCENTRATION_GUARD_*`, `AUTO_DUST_*`, `MAX_ACTIVE_TICKERS` |
 | **Telegram / errors** | Yields OFF or change-only · fills ≥$5 ON · error watcher ON | `TELEGRAM_ALERT_YIELDS`, `TELEGRAM_ALERT_FILLS`, `ERROR_WATCHER_*` |
@@ -784,7 +769,7 @@ python fetch_data.py
 python scripts/account/preflight.py
 ```
 
-Preflight checks live mode, Alpaca connection, alerts, and prints small-account sizing (1% risk, 90% VTI, $10 cap).
+Preflight checks live mode, Alpaca connection, alerts, and prints small-account sizing (1% risk, **$10** cap). Current lock: VTI core **OFF**, NYSE **100%**.
 
 4. **Start monitor + bot:**
 
@@ -863,11 +848,11 @@ Live and paper research use **different allocation profiles** — see [VTI core]
 
 On a $100k account with **Profile A** (live default), SPY can hold at most ~$45k; crypto ~$20k; NYSE ~$20k; ~$15k stays as cash headroom. Each buy is **2% of equity per order** on large accounts (capped at $10k per order). **Adaptive chunk** and **co-fire budget** are off unless you opt in via `.env`.
 
-On a **~$100 live account** (equity &lt; $500), `config.configure_account_profile()` auto-applies **1% risk**, **$10 max per order**, and **90% VTI core** — active sleeves scale to the remaining ~10%.
+On a **~$300 live account**, small-account caps still apply (**1% risk**, **$10 max per order**). **Current lock:** VTI core **OFF**, NYSE **100%** — do not restock VTI. Historical 90% VTI scaling math below is research-only.
 
-Effective caps come from `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`. With **yield-gate-only** (default), long sleeves use **full** base caps — no 0.9 scale and no metal sleeve.
+Effective caps come from `config.effective_sleeve_cap()` and `config.fund_allocation_pct()`. Current runtime is NYSE 100% with SPY/crypto off.
 
-When **VTI core** is enabled, active sleeves scale to the **remaining equity slice** after the passive VTI allocation — e.g. 90% VTI + 10% active (small live) → SPY cap ≈ 4.5% of total equity (45% × 10%); 80% VTI + 20% active (large live) → SPY cap ≈ 9%.
+When **VTI core** was enabled (historical), active sleeves scaled to the remaining slice after VTI — e.g. 90% VTI + 10% active. That path is **off**.
 
 Tune base caps in `config.py`:
 
@@ -904,20 +889,19 @@ Sharpe phase backtests selected **current_dynamic** as the **live** baseline. Pa
 
 | Book | Profile | Stack |
 |------|---------|-------|
-| **Live ~$300** | Profile A (`current_dynamic`) | **90% VTI**, crypto **OFF**, thinking **OFF**, yield-gate-only, 1% / $10 caps, overlap/chunk/co-fire off |
-| **Paper ~$98k** | Profile B v2.2 (`paper_aggressive`) | Smart Dynamic VTI **LOCKED** 40–75% (≥40% floor), stat arb + vol overlay + options, overlap/chunk/co-fire **on**; thinking opt-in; macro/social off |
+| **Live ~$300** | Profile A | VTI core **OFF**, NYSE **100%**, `MAX_ACTIVE` 6–10, 8%/name, 1% / $10; no `PAPER_NYSE_MAX_ADDS`; do not size options |
+| **Paper ~$96k** | Profile B | VTI core **OFF**, NYSE **100%**, max 2 adds, same-day + ATR hygiene, 12/cycle, `MAX_ACTIVE=25`, ~8% ceiling, ~$1,300 clips |
 
 Confirm anytime: `python status.py` (Profile A vs v2.2 locked lines) · `python scripts/account/preflight.py`
 
 ```env
-# Live Profile A (~$300) — defaults; only set if overriding
+# Live (~$300) — current lock is VTI core OFF / NYSE 100% (already in stock-bot/.env)
 PAPER_TRADING=false
 ALLOW_LIVE_TRADING=yes
-VTI_CORE_ENABLED=true
-SMALL_ACCOUNT_VTI_CORE_PCT=0.90
+VTI_CORE_ENABLED=false
+LIVE_VTI_CORE_PCT=0
 GAME_PLAN_YIELD_GATE_ONLY=true
-# Live uses SPY MA200 / NYSE MA50 (config defaults); paper-aggressive uses PAPER_* tuned MAs
-# Crypto + thinking stay off on live Profile A (no env needed)
+# Do not restock VTI. Do not size options. Live does not use PAPER_NYSE_MAX_ADDS.
 
 # Paper Profile B — portal / run_paper_bot.py sets PAPER_CHASE_MODE=1
 PAPER_CHASE_MODE=1
@@ -938,7 +922,7 @@ PAPER_APCA_API_SECRET_KEY=...
 | **Risk** | 10% max DD halt; resume at 8%; liquidate to 25% cash on breach |
 | **Regime** | Skip panic/bear entries; `DERIVED_BEAR_PAUSE_ENABLED=false` |
 | **Wisdom** | `WISDOM_MODE=dynamic`, `SENTIMENT_SOURCE=price` |
-| **Small account** | equity &lt; $500 → 90% VTI, 1% risk, $10 max order |
+| **Small account** | equity &lt; $500 → 1% risk, $10 max order; VTI core **OFF** |
 
 Preflight prints Profile A via `config.print_recommended_stack_flags()` (dispatches to `print_live_stack_flags()`):
 
@@ -955,11 +939,11 @@ Preflight prints Profile A via `config.print_recommended_stack_flags()` (dispatc
   derived_bear_pause:     False
   wisdom_mode:            dynamic
   small_account:        ON (<$500) | risk 1% | max order $10
-  vti_core:             90% VTI passive | active 10%
-  sleeves: SPY 5% | crypto 2% | NYSE 2% | metal 0% | cash 1%
+  vti_core:             OFF
+  sleeves: NYSE 100% | SPY/crypto/stat-arb/social OFF
 ```
 
-(Sleeve percentages above are effective on a ~$100 account with 90% VTI core.)
+(Historical 90% VTI printout is obsolete. Current lock: VTI OFF / NYSE 100%.)
 
 ### Profile B — Best Paper Bot (`paper_aggressive`)
 
@@ -1023,9 +1007,11 @@ Full legacy blend: set `GAME_PLAN_YIELD_GATE_ONLY=false` and keep metal/stress e
 
 Preflight prints macro signals (`stress`, `yield_gate`, `bond_stress`) when game plan is active.
 
-## VTI passive core (Profile A live)
+## VTI core (current lock: OFF)
 
-Live applies **90% VTI** when equity &lt; $500; **80%** at ≥ $500 (`config.configure_account_profile()`). Thinking engine adjusts **active sleeve caps only** on live (±6% tilt cap); it does not replace the VTI anchor unless you explicitly change `SMALL_ACCOUNT_VTI_CORE_PCT` / `VTI_CORE_PCT`.
+**Current lock:** VTI core is **OFF** on paper and live. Do not rebuy VTI as core. Paper leftover was flattened; live qty is **0**. Do not restock. Leftover Vanguard (if any) counts as **NYSE**, not a separate sleeve.
+
+The tables below are **historical research** (365d VTI-level A/B). They are not runtime policy.
 
 ### Fixed VTI + Best Paper v2.1 + Thinking (365d, 2025-03 → 2026-06)
 
@@ -1048,7 +1034,7 @@ Stack: stat arb + vol overlay + options + overlap/chunk/co-fire + **upgraded Thi
 |--------|------------|-----|
 | **$300–$499** | **90%** | Matches small-account guardrails; best MaxDD in test; active stack still adds +28 pp vs passive VTI |
 | **$500–$1000** | **80%** | Step down at $500 threshold; best Sharpe/return balance with full stat-arb/vol/options stack on paper |
-| **Paper research** | **Smart Dynamic LOCKED 40–75%** (≥40% floor) | `PAPER_DYNAMIC_VTI=true` (default) — multi-signal allocator; live stays anchored |
+| **Paper / live (current)** | **OFF** — do not restock | Historical 40–75% Dynamic VTI is research-only |
 
 **Thinking Engine (paper):** opt-in via `PAPER_THINKING_ENGINE_ENABLED=true`. Tuned prompt focuses on **beating VTI on Sharpe**, avoiding crowded AI/tech chase, and coordinating **stat arb** (crypto pairs) + **vol overlay** (trim beta when VIX elevated). Live: thinking stays **off by default**; if enabled later, tilts are ±6% on active sleeves only — keep **90%/80% VTI anchor**.
 
@@ -1112,7 +1098,7 @@ The **paper book** can run a profit-seeking profile **without changing live ~$10
 
 | Setting | Live (~$100, equity &lt; $500) | Live (≥ $500) | Paper aggressive |
 |---------|-------------------------------|---------------|------------------|
-| VTI core | **90%** (`SMALL_ACCOUNT_VTI_CORE_PCT`) | **80%** (`VTI_CORE_PCT`) | **Smart Dynamic LOCKED 40–75%** (`PAPER_DYNAMIC_VTI=true`, ≥40% floor) |
+| VTI core | **OFF** | **OFF** | **OFF** (do not restock; historical 40–75% is research-only) |
 | Active sleeves | ~10% total | ~20% total | **~31% avg** with dynamic VTI; 1.40× boost on base caps |
 | Social / macro | **off** | **off** | **off** (opt-in via `.env`) |
 | Crypto vol gate | High vol only | High vol only | **Off** (`PAPER_CRYPTO_VOL_ONLY=false`) |
@@ -1167,8 +1153,8 @@ Two **separate** `run_all.py` processes — one command:
 
 **Option A — two portal users** (`streamlit run portal.py`):
 
-1. **you-live** → live Alpaca keys, **Paper trading OFF**, Allow live ON (conservative 90% VTI when equity &lt; $500).
-2. **you-paper** → paper Alpaca keys, **Paper trading ON** (Sharpe chase: 20% VTI, extra layers).
+1. **you-live** → live Alpaca keys, **Paper trading OFF**, Allow live ON (VTI core **OFF**, NYSE **100%**).
+2. **you-paper** → paper Alpaca keys, **Paper trading ON** (VTI core **OFF**, NYSE **100%**).
 3. Copy `data/portal/fund_pair.json.example` → `data/portal/fund_pair.json`:
 
 ```json
@@ -1211,7 +1197,7 @@ Always run commands from **`stock-bot/`** so relative paths (`market_data.db`, l
 
 ## Paper trading on Alpaca (recommended first month)
 
-`run_all.py` trades **only on Alpaca paper** by default (`PAPER_TRADING=true`). Kraken keys in `.env` are for `scripts/exchange/` only — not used by the main fund loop.
+`run_all.py` trades **only on Alpaca paper** by default (`PAPER_TRADING=true`).
 
 1. Create **paper** API keys at [Alpaca Paper Dashboard](https://app.alpaca.markets/paper/dashboard/overview).
 2. Put them in `.env` as `APCA_API_KEY_ID` and `APCA_API_SECRET_KEY` (not live keys).
@@ -1279,8 +1265,6 @@ python run_all.py
 ```powershell
 python -c "from dashboard_app import _stop_bot_processes; print(_stop_bot_processes())"
 ```
-
-Set `KRAKEN_AUTOPILOT_ENABLED=false` in `.env` if you want **Alpaca-only** live (preflight warns when Kraken autopilot is also live).
 
 Optional sanity checks:
 
@@ -1358,7 +1342,7 @@ python dashboard_app.py
 python dashboard_app.py --launch-bot   # also start run_all.py
 ```
 
-Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, 90% VTI, $10 max order), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate UI update; **Refresh Bot** to stop → refresh daily bars → restart the active book; **Restart Both** for a clean stop + relaunch of **both** portal books (paper + live, independent of the dropdown); **Stop Bot** ends the selected book’s loop without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window. Closing the monitor (or tray Quit) prompts to stop portal bots if confirmed — paper by default, live only if you check “Also stop live bot”; choose **Exit UI only** to leave bots running.
+Tabs: **Positions** (default), **Overview**, **Trades**, **Wisdom**, **Charts** — main content fills the window below hero metrics (equity, cash, P&L, sparkline). Shows small-account mode (1% risk, $10 max order; VTI core **OFF**), a **Small Account Summary** panel, and a red **LIVE TRADING** banner when `PAPER_TRADING=false`. Use **Refresh** for an immediate UI update; **Refresh Bot** to stop → refresh daily bars → restart the active book; **Restart Both** for a clean stop + relaunch of **both** portal books (paper + live, independent of the dropdown); **Stop Bot** ends the selected book’s loop without liquidating positions. Charts are **off by default** — enable **Charts on refresh** or open the Charts tab. Optional **Minimize to tray** keeps the monitor running in the system tray when you close the window. Closing the monitor (or tray Quit) prompts to stop portal bots if confirmed — paper by default, live only if you check “Also stop live bot”; choose **Exit UI only** to leave bots running.
 
 **Open / reopen:** by default (`DASHBOARD_RESTART_BOTS_ON_OPEN=true`) signing in runs an `owner_reset`-style clean restart of **both** portal books (clear PID files, kill orphans, relaunch live + paper). Set `DASHBOARD_RESTART_BOTS_ON_OPEN=false` to restore monitor-only open. `Start_Bot_and_Dashboard.bat` / `owner_reset` and `AUTO_LAUNCH_DASHBOARD` already restart bots first, so they launch the monitor with the flag off to avoid a double restart. Optional `DASHBOARD_STOP_BOTS_ON_CLOSE=true` still auto-stops both books when you pick **Exit UI only**; default **false**.
 
@@ -1398,7 +1382,7 @@ Share this repo with programmer friends. Each person runs the bot **on their own
 
 **Repo:** [github.com/dawimberly/trading-bot](https://github.com/dawimberly/trading-bot)
 
-**Full guide (stock + UFC):** [FRIENDS.md](FRIENDS.md)
+**Full guide:** [FRIENDS.md](FRIENDS.md) (stock bot only)
 
 ### Stock trading bot
 
@@ -1467,17 +1451,7 @@ Share URL + invite code. For most friends, **clone + `friend_setup.bat` on their
 | `portal.py` | Login, Alpaca keys, dashboard, bot |
 | `launch.bat` | Owner’s local desktop monitor + bot (not required for friends) |
 
-### UFC betting bot (same repo)
-
-Separate stack under `ufc-predictor/` + `ufc_betting_bot/`. Dry-run / paper only — no auto-betting.
-
-```powershell
-git clone https://github.com/dawimberly/trading-bot.git
-cd trading-bot\ufc_betting_bot
-friend_setup.bat
-```
-
-First run downloads fight data and trains the model (~15–30 min). Dashboard opens on **http://localhost:8502**. Optional `THE_ODDS_API_KEY` in `ufc_betting_bot\.env` for live lines. See [FRIENDS.md](FRIENDS.md).
+UFC Predictor is a **separate project** in the repo root: [`../ufc-predictor/`](../ufc-predictor/) (not part of `stock-bot`).
 
 ## How to review bot performance
 
@@ -1789,8 +1763,6 @@ Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
 | `TAVILY_API_KEY` | No | Only when `SENTIMENT_SOURCE=tavily` |
 | `SPY_APCA_API_KEY_ID` | No | Optional separate paper account for `run_spy.py` only |
 | `SPY_APCA_API_SECRET_KEY` | No | Same |
-| `KRAKEN_API_KEY` | No | `scripts/exchange/` only (not used by `run_all.py`) |
-| `KRAKEN_SECRET_KEY` or `KRAKEN_API_SECRET` | No | `scripts/exchange/` |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | No | Your Telegram chat id |
 | `TELEGRAM_ALERT_*` | No | Alert policy flags — see [Alerts](#alerts-optional) and `.env.example` |
@@ -1841,7 +1813,7 @@ stock-bot/
 │   └── fund/               # @root bot slots (e.g. paper/ heartbeat, journal)
 ├── run_all.py              # Main 24/7 integrated fund loop (+ game plan)
 ├── status.py               # One-line live + paper equity, regime, flags
-├── tests/                  # Unit tests (trading_safety, stat_arb reconcile, kraken budget)
+├── tests/                  # Unit tests (trading_safety, stat_arb reconcile)
 ├── run_spy.py              # Optional standalone SPY loop
 ├── fetch_data.py           # yfinance → SQLite (5m live, daily backtest)
 ├── config.py               # Universe, sleeves, game plan, credentials, paths
@@ -1886,7 +1858,6 @@ stock-bot/
     ├── generate_dashboard_icon.py  # Icon for launch shortcut / PyInstaller
     ├── create_monitor_shortcut.ps1 # Desktop shortcut → launch_monitor.bat
     ├── dashboard_running.ps1       # Detect running monitor (venv or .exe)
-    └── exchange/           # Kraken checks
 ```
 
 ## Utility scripts
@@ -1909,7 +1880,6 @@ python scripts/account/check_balance.py
 python scripts/account/get_telegram_chat_id.py --wait
 python scripts/account/test_alerts.py
 python scripts/db/check_tables.py
-python scripts/exchange/health_check.py      # Kraken only
 ```
 
 ## Data fetch
@@ -2024,7 +1994,7 @@ The single-process cloud supervisor (`cloud_bot/runtime/main.py --run`, forced p
 - **Paper trading:** `PAPER_TRADING=true` by default in `.env`.
 - **Desktop launch:** `launch.bat` (venv) or `launch_monitor.bat` (`.exe`) → sign in → `--launch-bot`. Shortcut **Start in** must be the project root.
 - **Dual bots:** `launch_bots.py` / `launch_both.bat`; pair live + paper in `data/portal/fund_pair.json` (paper can be `@root`).
-- **Small account:** equity &lt; $500 triggers 1% risk, $10 max order, 90% VTI — see `config.configure_account_profile()`.
+- **Small account:** equity &lt; $500 triggers 1% risk and $10 max order. **Current lock:** VTI core **OFF**, NYSE **100%** — see [What the bot is set to do](#what-the-bot-is-set-to-do-runtime-defaults).
 - **Strategy sharing:** `run_all.py`, `backtester.py`, and `backtest_spy.py` share `modules/pipeline_strategies.py`.
 - **Alpaca fees:** US stocks/ETFs are commission-free. Crypto market orders use `ALPACA_CRYPTO_TAKER_FEE_PCT` (default 0.25% per leg); live sizing and `backtester.py` reserve that fee on crypto buys only (`ALPACA_CRYPTO_FEE_AWARE=true`).
 - **NYSE overlap:** SPY and NYSE sleeves both hold US equities; caps limit double exposure. SPY is excluded from the NYSE MA50 picker. GLD, SLV, and CPER are excluded from NYSE momentum and counted in the metal sleeve.
