@@ -20,6 +20,7 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 
 ## Recent changes
 
+- **2026-09-03** — Lock alpaca_paper_v2 to 33/67 VTI/NYSE and make dashboard close/restart both books.
 - **2026-08-31** — Live-safe .env overlay: paper full file, live allowlist-only.
 - **2026-08-31** — Document current VTI-off NYSE-100 lock in READMEs.
 - **2026-08-31** — paper NYSE max-adds tests (adds=2; add 3 skipped)
@@ -27,7 +28,6 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 - **2026-08-30** — Label leftover VTI/metal on the desktop dashboard and drop the Opened vs P&L mix-up.
 - **2026-08-29** — Count Saturday weekly closes from the portal fill tape, not chase CSV.
 - **2026-08-28** — Listen for freeze HOLD/CONFIRM on Telegram and stop live banners from advertising a VTI core.
-- **2026-08-20** — Point recon at the portal journal and add AI-burst hedge v1.
 
 ## Quick start
 
