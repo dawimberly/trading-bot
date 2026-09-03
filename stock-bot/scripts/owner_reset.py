@@ -26,7 +26,9 @@ def _log(msg: str) -> None:
 
 
 def _pythonw() -> str:
+    # Prefer venv311 (working deps). Repo .venv may be Python 3.14 / incomplete.
     for candidate in (
+        ROOT.parent / "venv311" / "Scripts" / "pythonw.exe",
         ROOT.parent / ".venv" / "Scripts" / "pythonw.exe",
         ROOT / ".venv" / "Scripts" / "pythonw.exe",
         Path(sys.executable).with_name("pythonw.exe"),
@@ -38,12 +40,17 @@ def _pythonw() -> str:
 
 def _stop_dashboards() -> None:
     ps1 = ROOT / "scripts" / "stop_dashboard.ps1"
-    if ps1.is_file():
+    if not ps1.is_file():
+        return
+    try:
         subprocess.run(
             ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1)],
             cwd=str(ROOT),
             check=False,
+            timeout=45,
         )
+    except subprocess.TimeoutExpired:
+        _log("[WARN] stop_dashboard.ps1 timed out after 45s — continuing")
 
 
 def _force_clear_all_pids(username: str) -> None:
@@ -56,8 +63,9 @@ def _force_clear_all_pids(username: str) -> None:
     and will kill every stray run_all / run_paper_bot process unconditionally.
     """
     from modules.portal_bot import book_pid_path
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
 
-    for book_id in ("alpaca_paper", "alpaca_live"):
+    for book_id in (PRIMARY_PAPER_BOOK_ID, "alpaca_live"):
         path = book_pid_path(username, book_id)
         if path.is_file():
             path.unlink(missing_ok=True)
@@ -88,8 +96,9 @@ def _live_preserve_pids(username: str) -> set[int]:
 
 def _clear_paper_pid_only(username: str) -> None:
     from modules.portal_bot import book_pid_path
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
 
-    path = book_pid_path(username, "alpaca_paper")
+    path = book_pid_path(username, PRIMARY_PAPER_BOOK_ID)
     if path.is_file():
         path.unlink(missing_ok=True)
 
@@ -106,13 +115,15 @@ def clean_restart_paper_only(username: str) -> tuple[bool, str]:
 
     bind_project_root(ROOT)
 
-    if not has_alpaca_config(username, "alpaca_paper"):
-        return False, "alpaca_paper: Alpaca keys missing in portal — aborting (paper only)."
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    if not has_alpaca_config(username, PRIMARY_PAPER_BOOK_ID):
+        return False, f"{PRIMARY_PAPER_BOOK_ID}: Alpaca keys missing in portal — aborting (paper only)."
 
     _clear_paper_pid_only(username)
 
-    if bot_running(username, "alpaca_paper"):
-        _ok, stop_msg = stop_bot(username, "alpaca_paper")
+    if bot_running(username, PRIMARY_PAPER_BOOK_ID):
+        _ok, stop_msg = stop_bot(username, PRIMARY_PAPER_BOOK_ID)
         if not _ok:
             return False, f"stop paper: {stop_msg}"
         time.sleep(1.0)
@@ -124,16 +135,65 @@ def clean_restart_paper_only(username: str) -> tuple[bool, str]:
     if stopped:
         time.sleep(1.0)
 
-    ok, msg = start_bot(username, "alpaca_paper", skip_orphan_stop=True)
+    ok, msg = start_bot(username, PRIMARY_PAPER_BOOK_ID, skip_orphan_stop=True)
     detail = orphan_msg if orphan_msg else "Paper bot started."
     return ok, f"{msg} | {detail}" if ok else msg
+
+
+def clean_restart_both_bots(username: str) -> tuple[bool, str]:
+    """Force-clear PID files, then restart live + paper via portal_bot — no dashboard.
+
+    Shared by ``owner_reset`` CLI and dashboard open/close/Restart Both so kill
+    logic stays in one place. Clearing PID files first is required: otherwise
+    ``stop_orphan_project_bots`` treats alive processes as managed and skips them.
+    """
+    from modules.portal_bot import restart_all_bots
+    from modules.portal_paths import bind_project_root, has_alpaca_config
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    bind_project_root(ROOT)
+    _force_clear_all_pids(username)
+
+    warnings: list[str] = []
+    for book_id in (PRIMARY_PAPER_BOOK_ID, "alpaca_live"):
+        if not has_alpaca_config(username, book_id):
+            warnings.append(f"{book_id}: Alpaca keys missing in portal — skip")
+
+    ok, msg = restart_all_bots(username)
+    if warnings:
+        return ok, " | ".join(warnings + [msg])
+    return ok, msg
+
+
+def stop_both_bots(username: str) -> tuple[bool, str]:
+    """Gracefully stop portal live + primary paper books (positions left open)."""
+    from modules.portal_bot import bot_running, stop_bot
+    from modules.portal_paths import bind_project_root
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    bind_project_root(ROOT)
+    messages: list[str] = []
+    ok_all = True
+    any_stopped = False
+    for book_id in (PRIMARY_PAPER_BOOK_ID, "alpaca_live"):
+        if not bot_running(username, book_id):
+            continue
+        any_stopped = True
+        ok, msg = stop_bot(username, book_id)
+        messages.append(f"{book_id}: {msg}")
+        ok_all = ok_all and ok
+    if not any_stopped:
+        return True, "No portal bots were running."
+    return ok_all, "; ".join(messages)
 
 
 def wait_for_paper_heartbeat(username: str, timeout_sec: int = 75) -> tuple[bool, str]:
     """Poll the paper book heartbeat until it is fresh (bot responding)."""
     from modules.portal_bot import book_heartbeat_path
 
-    path = book_heartbeat_path(username, "alpaca_paper")
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    path = book_heartbeat_path(username, PRIMARY_PAPER_BOOK_ID)
     deadline = time.monotonic() + max(10, timeout_sec)
     last_age: float | None = None
     while time.monotonic() < deadline:
@@ -192,7 +252,7 @@ def _run_paper_only(username: str, *, verify: bool) -> int:
     ok, msg = clean_restart_paper_only(username)
     _log(msg if ok else f"[ERROR] {msg}")
     if not ok:
-        _log("Bot restart FAILED — check portal Alpaca keys for alpaca_paper.")
+        _log(f"Bot restart FAILED — check portal Alpaca keys for {PRIMARY_PAPER_BOOK_ID}.")
         return 1
 
     if verify:
@@ -243,38 +303,12 @@ def main() -> int:
     time.sleep(0.5)
 
     _log("Loading portal bot manager...")
-    from modules.portal_bot import (
-        restart_all_bots,
-        stop_bot,
-        stop_orphan_project_bots,
-        bot_running,
-    )
-    from modules.portal_paths import bind_project_root, has_alpaca_config
+    from modules.portal_paths import bind_project_root
 
     bind_project_root(ROOT)
 
-    # Force-clear all PID files so the orphan sweep has no preserved PIDs
-    # and will kill every stray bot process unconditionally.
-    _force_clear_all_pids(username)
-
-    _log("Stopping any running portal bots...")
-    for book_id in ("alpaca_paper", "alpaca_live"):
-        if bot_running(username, book_id):
-            _ok, stop_msg = stop_bot(username, book_id)
-            _log(stop_msg)
-
-    _log("Scanning for stray bot processes (please wait, can take 30-60 seconds)...")
-    stopped, orphan_msg = stop_orphan_project_bots(username=username)
-    _log(orphan_msg if stopped else f"{orphan_msg} Continuing.")
-    if stopped:
-        time.sleep(1.0)
-
-    for book_id in ("alpaca_paper", "alpaca_live"):
-        if not has_alpaca_config(username, book_id):
-            _log(f"[WARN] {book_id}: Alpaca keys missing in portal — skip")
-
-    _log("Starting Live + Paper bots...")
-    ok, msg = restart_all_bots(username)
+    _log("Scanning for stray bot processes + restarting Live + Paper...")
+    ok, msg = clean_restart_both_bots(username)
     _log(msg if ok else f"[ERROR] {msg}")
     if ok:
         _log("Bot restarted successfully (live + paper).")
@@ -285,6 +319,8 @@ def main() -> int:
         _log("Opening dashboard (pythonw, no console)...")
         env = os.environ.copy()
         env["PYTHONTRADING_ROOT"] = str(ROOT)
+        # Bots already restarted above — skip dashboard-on-open dual reset.
+        env["DASHBOARD_RESTART_BOTS_ON_OPEN"] = "false"
         pyw = _pythonw()
         script = ROOT / "dashboard_app.py"
         subprocess.Popen(

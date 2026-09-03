@@ -499,12 +499,12 @@ def _clear_stale_live_heartbeat_on_boot(
         try:
             write_json_atomic(str(path), payload)
             logger.info(
-                "Cleared stale live heartbeat at %s → equity $%.2f (book=live)",
+                "Cleared stale live heartbeat at %s -> equity $%.2f (book=live)",
                 path,
                 live_eq,
             )
             print(
-                f"--- Cleared stale live heartbeat ({path.name}) → "
+                f"--- Cleared stale live heartbeat ({path.name}) -> "
                 f"${live_eq:,.2f} book=live ---",
                 flush=True,
             )
@@ -558,21 +558,7 @@ def _write_heartbeat(
         "equity_trades_last_cycle": equity_trades,
         "spy_trades_last_cycle": spy_trades,
         "sleeve_caps": sleeve_caps
-        or {
-            "vti_core": config.effective_vti_core_pct(
-                equity,
-                vol_score=dynamic_vol_score,
-                macro_stress=macro_stress,
-                regime=heartbeat_regime or regime,
-                data=heartbeat_data,
-                insider_state=insider_state,
-            ),
-            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
-            "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
-            "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
-            "metal": config.METAL_SLEEVE_CAP_PCT if config.metal_sleeve_enabled() else 0.0,
-            "cash_buffer": config.effective_cash_buffer_pct(),
-        },
+        or config.fund_allocation_pct(),
         "crypto_vol_only": config.CRYPTO_VOL_ONLY,
         "equity_session_open": market_open,
         "halted": halted,
@@ -654,11 +640,8 @@ def _write_heartbeat(
             "days_until_expected": spacex_listing.get("days_until_expected"),
             "ready_to_buy": spacex_listing.get("ready_to_buy"),
             "ready_to_buy_alpaca": spacex_listing.get("ready_to_buy_alpaca"),
-            "ready_to_buy_kraken": spacex_listing.get("ready_to_buy_kraken"),
             "expected_listing_date": spacex_listing.get("expected_listing_date"),
             "alpaca_tradable": (spacex_listing.get("alpaca") or {}).get("tradable"),
-            "kraken_tradable": (spacex_listing.get("kraken") or {}).get("tradable"),
-            "kraken_pair": (spacex_listing.get("kraken") or {}).get("wsname"),
         }
     if game_plan:
         payload["game_plan_state"] = game_plan
@@ -1031,6 +1014,17 @@ def main():
         yield_gated = apply_yield_gate_boost(yield_gated, macro_regime_result)
     raw_yield_gated = yield_gated
     yield_gated = config.effective_yield_gate(yield_gated, regime=regime)
+    if (
+        raw_yield_gated
+        and yield_gated
+        and (not config.PAPER_TRADING)
+        and config.vti_core_enabled()
+        and (not config.effective_yield_gate(raw_yield_gated, regime=regime, sleeve="nyse"))
+    ):
+        logger.info(
+            "Yield gate: SPY blocked; live NYSE leftover still eligible (mild stress, VTI core on)"
+        )
+        print("--- Yield gate: SPY blocked; live NYSE leftover still eligible (VTI core on) ---")
     if (
         config.PAPER_YIELD_GATE_OVERRIDE
         and (config.paper_aggressive_context() or config.is_realistic_research_active())
@@ -1439,39 +1433,18 @@ def main():
         print(f"--- {format_listing_line(listing_snapshot)} ---")
         if listing_snapshot.get("ready_to_buy_alpaca"):
             print(f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON ALPACA - IPO listing live !!!")
-        if listing_snapshot.get("ready_to_buy_kraken"):
-            k = listing_snapshot.get("kraken") or {}
-            print(
-                f"!!! {config.SPACEX_IPO_TICKER} TRADABLE ON KRAKEN "
-                f"({k.get('wsname') or k.get('pair')}) - buy on Kraken Pro !!!"
-            )
         spacex_listing_heartbeat = {
             "stage": listing_snapshot.get("stage"),
             "days_until_expected": listing_snapshot.get("days_until_expected"),
             "ready_to_buy": listing_snapshot.get("ready_to_buy"),
             "ready_to_buy_alpaca": listing_snapshot.get("ready_to_buy_alpaca"),
-            "ready_to_buy_kraken": listing_snapshot.get("ready_to_buy_kraken"),
             "sec_stage": (listing_snapshot.get("sec") or {}).get("sec_stage"),
-            "kraken_pair": (listing_snapshot.get("kraken") or {}).get("wsname"),
         }
         try:
             alerts.maybe_spacex_listing_alert(listing_snapshot)
             alerts.maybe_spacex_ipo_countdown_alert(listing_snapshot)
         except Exception as exc:
             _warn_nonfatal("SpaceX listing alert error", exc)
-        if listing_snapshot.get("ready_to_buy_kraken"):
-            from modules.kraken_ipo_buy import maybe_buy_kraken_spcx
-
-            kraken_buy = maybe_buy_kraken_spcx(listing_snapshot)
-            if kraken_buy:
-                if kraken_buy.get("ok"):
-                    print(
-                        f"--- Kraken SPCX buy {kraken_buy.get('pair')}: "
-                        f"${kraken_buy.get('usd', 0):,.0f} "
-                        f"vol {kraken_buy.get('volume')} ---"
-                    )
-                elif kraken_buy.get("error"):
-                    print(f"--- Kraken SPCX buy skipped/failed: {kraken_buy['error']} ---")
 
     vti_result = None
     if config.REBALANCE_ENABLED and market_open:
@@ -1635,6 +1608,30 @@ def main():
                     f"  social live mirror {act['action']} {act['symbol']} "
                     f"${act.get('notional', 0):,.2f}"
                 )
+            try:
+                from modules import error_watcher
+
+                # Catch fight even if Ollama/thinking is off (live default).
+                paper_buys = [
+                    a
+                    for a in (social_result.get("paper_actions") or [])
+                    if str(a.get("action") or "").lower() == "buy"
+                    and str(a.get("symbol") or "").upper() == "SPY"
+                ]
+                if paper_buys and float(
+                    getattr(config, "PAPER_SPY_MAX_EXPOSURE_PCT", 0) or 0
+                ) <= 0:
+                    error_watcher.warn_social_spy_freeze_fight(
+                        detail=(
+                            f"social cycle submitted {len(paper_buys)} paper SPY "
+                            "buy(s) while freeze hard-cap is 0"
+                        ),
+                        blocked=False,
+                        score=social_result.get("score"),
+                    )
+                error_watcher.check_recent_symbol_churn_from_actions(symbol="SPY")
+            except Exception:
+                pass
 
     orb_mom_result = None
     if config.effective_orb_momentum_enabled() and market_open:
@@ -1742,6 +1739,8 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Vol breakout sleeve", exc)
 
+    if hasattr(executor, "set_sizing_context"):
+        executor.set_sizing_context(data)
     exits = run_position_exits(
         executor, risk_manager, trade_journal, equity_session_open=market_open
     )
@@ -1932,52 +1931,6 @@ def main():
             )
     print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
 
-    kraken_autopilot_result = None
-    if config.KRAKEN_AUTOPILOT_ENABLED:
-        try:
-            from modules.kraken_autopilot import format_autopilot_line, run_kraken_autopilot
-
-            kraken_autopilot_result = run_kraken_autopilot(
-                wisdom=wisdom,
-                gp_signals=gp_signals,
-                gp_result=gp_result,
-                crypto_gate=crypto_gate,
-                data=data,
-                regime=regime,
-                now=now,
-                pair_cooldown=pair_cooldown,
-                market_open=market_open,
-            )
-            print(f"--- {format_autopilot_line(kraken_autopilot_result)} ---")
-            rb = kraken_autopilot_result.get("rebalance") or {}
-            if rb.get("profile"):
-                cap = rb.get("capabilities") or {}
-                print(
-                    f"--- Kraken rebalance {rb.get('profile')}: "
-                    f"${rb.get('total_usd', 0):.0f} | "
-                    f"API fills: crypto={cap.get('crypto_ok')} xstock={cap.get('xstock_ok')} "
-                    f"| stocks not on API: {len(rb.get('needs_app') or [])} ---"
-                )
-            for bucket in ("cleanup", "crypto_mirror", "paper_mirror"):
-                for item in kraken_autopilot_result.get(bucket) or []:
-                    if not item.get("ok"):
-                        continue
-                    intent = item.get("intent") or item.get("trade") or {}
-                    sym = intent.get("symbol") or item.get("pair", "?")
-                    phase = intent.get("phase", bucket)
-                    dry = " (dry-run)" if item.get("dry_run") else ""
-                    print(f"--- Kraken {phase}: {sym}{dry} ---")
-            for item in rb.get("executed") or []:
-                if not item.get("ok"):
-                    continue
-                tr = item.get("trade") or {}
-                sym = tr.get("symbol", "?")
-                dry = " (dry-run)" if item.get("dry_run") else ""
-                print(f"--- Kraken rebalance: {tr.get('side')} {sym}{dry} ---")
-        except Exception as exc:
-            log_subsystem_warning("kraken_autopilot", "Autopilot cycle failed", exc)
-            print(f"--- Kraken autopilot error (non-fatal): {exc} ---")
-
     sleeves = executor.sleeve_snapshot()
     metal_line = ""
     if config.metal_sleeve_enabled() and "metal_value" in sleeves:
@@ -2144,7 +2097,7 @@ def main():
         scan_schedule=schedule,
         social_sleeve=social_result,
         vti_core=vti_result,
-        sleeve_caps=sleeve_cap_pcts,
+        sleeve_caps=sleeve_cap_pcts or config.fund_allocation_pct(),
         dynamic_vol_score=vol_score
         if config.DYNAMIC_SLEEVE_CAPS_ENABLED or config.paper_aggressive_context()
         else None,
@@ -2189,32 +2142,6 @@ def main():
             alerts.maybe_monthly_wisdom_summary(rollup)
         except Exception as exc:
             _warn_nonfatal("Monthly wisdom alert error", exc)
-
-
-def _print_kraken_banner():
-    if not config.KRAKEN_AUTOPILOT_ENABLED:
-        return
-    from modules.kraken_capabilities import probe_kraken_capabilities
-    from modules.kraken_spot import autopilot_enabled, trading_allowed
-
-    if not autopilot_enabled():
-        print("--- Kraken autopilot: enabled but API keys missing ---")
-        return
-    mode = "DRY-RUN" if config.KRAKEN_DRY_RUN else (
-        "LIVE" if trading_allowed() else "BLOCKED (set ALLOW_KRAKEN_TRADING=yes)"
-    )
-    print(
-        f"--- Kraken autopilot: {mode} | max ${config.KRAKEN_MAX_ORDER_USD:.0f}/order | "
-        f"cycle buy budget ${config.KRAKEN_CYCLE_BUDGET_USD:.0f} ---"
-    )
-    cap = probe_kraken_capabilities()
-    if not cap.get("crypto_ok"):
-        print("!!! Kraken crypto API failed - run scripts/account/preflight_kraken.py !!!")
-    if not cap.get("xstock_ok"):
-        print(
-            "!!! Kraken xStocks API off - SPY/NYSE will not auto-trade "
-            "(enable tokenized permission on API key) !!!"
-        )
 
 
 def _alpaca_startup_hint(exc: Exception | None = None) -> str:
@@ -2317,6 +2244,14 @@ def _print_startup_banner(startup_equity: float | None = None):
             f"crypto vol-only={config.effective_crypto_vol_only()} | "
             f"cycle {config.CYCLE_INTERVAL_SEC}s | refresh {config.REFRESH_INTERVAL}s ---"
         )
+        try:
+            from modules.strategy_lock import print_paper_v2_strategy_lock
+
+            print_paper_v2_strategy_lock()
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            _warn_nonfatal("paper v2 strategy lock banner", exc)
         for line in config.paper_frequency_mode_lines():
             print(line)
         research_line = config.format_research_mode_banner()
@@ -2411,7 +2346,6 @@ def _print_startup_banner(startup_equity: float | None = None):
                 print(f">>> {boost_line} <<<")
     except ImportError:
         pass
-    _print_kraken_banner()
     alloc = config.fund_allocation_pct()
     if config.vti_core_enabled():
         print(
@@ -2440,6 +2374,19 @@ def _print_startup_banner(startup_equity: float | None = None):
                 f"stress cash {config.STRESS_CASH_PCT:.0%} | yield gate "
                 f"{'ON' if config.YIELD_GATE_ENABLED else 'OFF'} ---"
             )
+    if config.metals_as_equity_enabled():
+        metals = ", ".join(config.live_metal_universe())
+        print(
+            f"--- Metals as equity ON (no mandatory sleeve): {metals} "
+            f"+ {len(config.METAL_RELATED_STOCKS)} related stocks ---"
+        )
+    if not config.PAPER_TRADING:
+        print(
+            f"--- Live active-ticker cap: "
+            f"{config.LIVE_MAX_ACTIVE_TICKERS_MIN}–{config.LIVE_MAX_ACTIVE_TICKERS_MAX} "
+            f"(now {config.effective_max_active_tickers()}, "
+            f"conv {config._live_conviction_for_ticker_cap():.0%}) ---"
+        )
     config.print_recommended_stack_flags()
     risk_pct = config.effective_risk_per_trade()
     spy_ma = config.effective_spy_ma_window()
@@ -2545,11 +2492,6 @@ def _print_startup_banner(startup_equity: float | None = None):
             f"(expected {config.SPACEX_IPO_EXPECTED_DATE}) -> "
             f"{config.SPACEX_IPO_LISTING_CACHE_FILE} ---"
         )
-        if config.KRAKEN_SPCX_BUY_ENABLED:
-            print(
-                f"--- Kraken SPCX live buy: ${config.KRAKEN_SPCX_BUY_USD:,.0f} "
-                f"when SPCX/SPCXx appears on Kraken Pro API ---"
-            )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     print(f"--- {config.format_telegram_automation_banner()} ---")
     if alerts.alerts_configured():
@@ -2618,6 +2560,9 @@ if __name__ == "__main__":
     cli_args = parser.parse_args()
 
     install_safe_stdout()
+    from modules import error_watcher
+
+    error_watcher.install_uncaught_exception_hooks()
 
     if getattr(sys, "frozen", False):
         from modules.runtime_paths import resolve_data_root
@@ -2669,11 +2614,23 @@ if __name__ == "__main__":
     if config.effective_real_time_websocket_enabled():
         start_realtime_feed()
         time.sleep(1.5)
-    _print_startup_banner(startup_equity)
-    if startup_equity is not None:
-        _print_account_startup_summary(startup_equity, cash=startup_cash)
-    if startup_equity is not None:
-        _confirm_live_trading_startup(startup_equity)
+    try:
+        _print_startup_banner(startup_equity)
+        if startup_equity is not None:
+            _print_account_startup_summary(startup_equity, cash=startup_cash)
+        if startup_equity is not None:
+            _confirm_live_trading_startup(startup_equity)
+    except Exception as exc:
+        # Log here (not only via excepthook) then exit — avoids silent portal deaths
+        # and prevents a second Telegram from re-raising into sys.excepthook.
+        try:
+            from modules import error_watcher
+
+            error_watcher.log_exception(exc, context="startup_banner")
+        except Exception:
+            pass
+        logger.exception("Startup banner/confirm failed: %s", exc)
+        sys.exit(1)
     from modules.dashboard_launcher import maybe_launch_dashboard
 
     maybe_launch_dashboard()

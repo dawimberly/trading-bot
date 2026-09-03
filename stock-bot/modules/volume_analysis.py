@@ -36,7 +36,7 @@ def _cache_put(symbol: str, series: pd.Series) -> None:
 
 def _fetch_volume_series(symbol: str, *, lookback_days: int) -> pd.Series | None:
     sym = config.normalize_symbol(symbol)
-    if not sym:
+    if not sym or sym.upper() in ("NONE", "NULL", "NAN"):
         return None
     cached = _cache_get(sym)
     if cached is not None:
@@ -45,7 +45,7 @@ def _fetch_volume_series(symbol: str, *, lookback_days: int) -> pd.Series | None
         import yfinance as yf
 
         period_days = max(lookback_days + 15, 30)
-        hist = yf.Ticker(sym).history(period=f"{period_days}d", auto_adjust=False)
+        hist = yf.Ticker(config.yf_symbol(sym)).history(period=f"{period_days}d", auto_adjust=False)
         if hist is None or hist.empty or "Volume" not in hist.columns:
             return None
         vols = hist["Volume"].dropna()
@@ -59,15 +59,62 @@ def _fetch_volume_series(symbol: str, *, lookback_days: int) -> pd.Series | None
         return None
 
 
+def _volume_series_from_data(data, symbol: str) -> pd.Series | None:
+    """Extract as-of volume from the sim matrix when present (MultiIndex or columns)."""
+    if data is None:
+        return None
+    sym = config.normalize_symbol(symbol)
+    try:
+        if isinstance(getattr(data, "columns", None), pd.MultiIndex):
+            # Prefer (symbol, Volume) or (Volume, symbol) layouts.
+            for key in ((sym, "Volume"), ("Volume", sym), (sym, "volume"), ("volume", sym)):
+                if key in data.columns:
+                    s = data[key].dropna()
+                    s = s[s > 0]
+                    return s if not s.empty else None
+            # Flat volume column named like AAPL_Volume
+            for col in data.columns:
+                c = str(col)
+                if c.upper() in (f"{sym}_VOLUME", f"{sym}.VOLUME"):
+                    s = data[col].dropna()
+                    s = s[s > 0]
+                    return s if not s.empty else None
+            return None
+        if "Volume" in getattr(data, "columns", []):
+            # Single-asset OHLCV frame
+            s = data["Volume"].dropna()
+            s = s[s > 0]
+            return s if not s.empty else None
+        vol_col = f"{sym}_Volume"
+        if vol_col in getattr(data, "columns", []):
+            s = data[vol_col].dropna()
+            s = s[s > 0]
+            return s if not s.empty else None
+    except Exception as exc:
+        logger.debug("volume-from-data failed for %s: %s", sym, exc)
+    return None
+
+
 def calculate_rvol(data, symbol: str, lookback_days: int = 10) -> float | None:
-    """Current session volume vs average of prior *lookback_days* daily bars."""
-    del data  # close matrix has no volume; kept for API compatibility
+    """Current session volume vs average of prior *lookback_days* daily bars.
+
+    In backtest / STRICT PIT: use volume from the sim matrix only (no yfinance).
+    If volume is missing, return None → callers treat as neutral (no boost).
+    """
     if not symbol:
         return None
     lookback = max(2, int(lookback_days or getattr(config, "RVOL_LOOKBACK_DAYS", 10)))
-    vols = _fetch_volume_series(symbol, lookback_days=lookback)
-    if vols is None or len(vols) < 2:
-        return None
+    in_backtest = bool(
+        config.backtest_paper_sleeves_context() or config.effective_strict_pit_backtest()
+    )
+    if in_backtest:
+        vols = _volume_series_from_data(data, symbol)
+        if vols is None or len(vols) < 2:
+            return None
+    else:
+        vols = _fetch_volume_series(symbol, lookback_days=lookback)
+        if vols is None or len(vols) < 2:
+            return None
     tail = vols.tail(lookback + 1)
     current = float(tail.iloc[-1])
     prior = tail.iloc[:-1]
@@ -135,8 +182,11 @@ def prioritize_symbols_by_rvol(symbols: list[str], data) -> list[str]:
 def apply_rvol_universe_boost(symbols: list[str], data) -> list[str]:
     """Filter low-RVOL names, then prioritize high-RVOL for momentum sleeve."""
     cols = filter_symbols_by_rvol(symbols, data)
-    # Never wipe the sleeve when every name fails the RVOL threshold.
-    if not cols and symbols:
+    min_pool = max(10, int(getattr(config, "STAT_ARB_MIN_UNIVERSE", 20) or 20))
+    # Never collapse a healthy momentum pool to 0-1 names (idle NYSE + excess cash).
+    if len(cols) < min_pool and len(symbols) >= min_pool:
+        cols = list(symbols)
+    elif not cols and symbols:
         cols = list(symbols)
     return prioritize_symbols_by_rvol(cols, data)
 

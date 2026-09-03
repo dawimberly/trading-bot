@@ -33,27 +33,31 @@ from modules.runtime_paths import (
     resolve_bot_executable,
     resolve_bot_workdir,
 )
-from modules.trading_books import BOOKS, book_enabled
+from modules.trading_books import BOOKS, PRIMARY_PAPER_BOOK_ID, book_enabled
 
 WISDOM_SCORECARD = PROJECT_ROOT / "wisdom_scorecard.json"
 WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
 
 
 def _python() -> str:
-    """Interpreter for run_all.py — prefer a venv that has project deps (dotenv)."""
+    """Interpreter for run_all.py — prefer venv311 (numpy/cp311), not broken 3.14 .venv."""
     candidates = [
+        PROJECT_ROOT.parent / "venv311" / "Scripts" / "python.exe",
+        PROJECT_ROOT / "venv311" / "Scripts" / "python.exe",
         PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
         PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
+        PROJECT_ROOT.parent / "venv311" / "bin" / "python",
         PROJECT_ROOT.parent / ".venv" / "bin" / "python",
         PROJECT_ROOT / ".venv" / "bin" / "python",
     ]
     existing = [p for p in candidates if p.is_file()]
     for path in existing:
         try:
+            # dotenv alone is not enough — 3.14 .venv can import dotenv but not numpy.
             probe = subprocess.run(
-                [str(path), "-c", "import dotenv"],
+                [str(path), "-c", "import dotenv, numpy"],
                 capture_output=True,
-                timeout=15,
+                timeout=20,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
             if probe.returncode == 0:
@@ -87,6 +91,99 @@ def _bot_subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
     return env
 
 
+_PORTAL_CREDENTIAL_KEYS = frozenset(
+    {
+        "APCA_API_KEY_ID",
+        "APCA_API_SECRET_KEY",
+        "PAPER_APCA_API_KEY_ID",
+        "PAPER_APCA_API_SECRET_KEY",
+        "ALPACA_API_KEY",
+        "ALPACA_SECRET_KEY",
+    }
+)
+
+
+def _book_env_has_alpaca_keys(path: Path | str | None) -> bool:
+    if not path:
+        return False
+    try:
+        from dotenv import dotenv_values
+
+        vals = dotenv_values(str(path))
+        key = (vals.get("APCA_API_KEY_ID") or vals.get("PAPER_APCA_API_KEY_ID") or "").strip()
+        secret = (
+            vals.get("APCA_API_SECRET_KEY") or vals.get("PAPER_APCA_API_SECRET_KEY") or ""
+        ).strip()
+        return bool(key and secret)
+    except Exception:
+        return False
+
+
+def _overlay_dotenv_file(
+    env: dict[str, str],
+    path: Path,
+    *,
+    book_env_file: str | None = None,
+    prefer_book_keys: bool = False,
+) -> dict[str, str]:
+    """Copy KEY=value from a .env file over *env* (file wins). Paper child only.
+
+    When ``prefer_book_keys`` is True (root overlay onto a portal book), skip any
+    key already owned by the book ``.env`` so legacy root overrides cannot clobber
+    alpaca_paper_v2 strategy locks (33% VTI / 67% NYSE).
+    """
+    if not path.is_file():
+        return env
+    try:
+        from dotenv import dotenv_values
+
+        overlay = dotenv_values(path)
+    except Exception:
+        return env
+    book_path = book_env_file or env.get("PYTHONTRADING_ENV_FILE")
+    protect_creds = bool(env.get("PORTAL_MANAGED_BOT")) and _book_env_has_alpaca_keys(
+        book_path
+    )
+    book_keys: set[str] = set()
+    if prefer_book_keys and protect_creds and book_path and Path(book_path).is_file():
+        try:
+            from dotenv import dotenv_values as _dv
+
+            book_keys = {
+                str(k)
+                for k, v in _dv(str(book_path)).items()
+                if k and v is not None and str(v).strip() != ""
+            }
+        except Exception:
+            book_keys = set()
+    out = dict(env)
+    for key, val in overlay.items():
+        if not key or val is None:
+            continue
+        if protect_creds and key in _PORTAL_CREDENTIAL_KEYS:
+            continue
+        if key in book_keys:
+            continue
+        out[str(key)] = str(val)
+    return out
+
+
+def sanitize_portal_book_credentials(env: dict[str, str]) -> dict[str, str]:
+    """Drop root PAPER_APCA_* when a portal book owns APCA_* (per-book accounts)."""
+    if not env.get("PORTAL_MANAGED_BOT"):
+        return env
+    if not _book_env_has_alpaca_keys(env.get("PYTHONTRADING_ENV_FILE")):
+        return env
+    out = dict(env)
+    for key in (
+        "PAPER_APCA_API_KEY_ID",
+        "PAPER_APCA_API_SECRET_KEY",
+        "PAPER_CHASE_USE_RESEARCH_KEYS",
+    ):
+        out.pop(key, None)
+    return out
+
+
 def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]:
     migrate_user_to_books(username)
     env = _bot_subprocess_env()
@@ -95,6 +192,9 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
     env["PORTAL_MANAGED_BOT"] = "1"
+    book_env_path = env["PYTHONTRADING_ENV_FILE"]
+    # Book .env credentials must load before root overlay (v2 keys vs legacy PAPER_APCA_*).
+    env = _overlay_dotenv_file(env, Path(book_env_path), book_env_file=book_env_path)
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
     env["WISDOM_SCORECARD_FILE"] = str(bd / "wisdom_scorecard.json")
@@ -105,11 +205,24 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     allow_live = bool(prefs.get("allow_live", spec.get("allow_live_default", False)))
     env["PAPER_TRADING"] = "true" if paper else "false"
     env["ALLOW_LIVE_TRADING"] = "yes" if allow_live else "no"
-    if spec.get("paper_chase") or (paper and book_id == "alpaca_paper"):
+    if spec.get("paper_chase") or (paper and book_id == PRIMARY_PAPER_BOOK_ID):
         env["PAPER_CHASE_MODE"] = "1"
         from config import apply_realistic_research_env
 
         env = apply_realistic_research_env(env)
+        # Dashboard pythonw can be days old; inherited os.environ wins
+        # load_dotenv(override=False) in the child. Overlay stock-bot/.env
+        # onto the *child* dict so Restart picks up file keys (e.g. max-adds).
+        env = _overlay_dotenv_file(
+            env,
+            PROJECT_ROOT / ".env",
+            book_env_file=book_env_path,
+            prefer_book_keys=True,
+        )
+        # Re-assert every non-empty book key so Realistic Research setdefaults +
+        # any root fill cannot leave diverting sleeves ON for locked books.
+        env = _overlay_dotenv_file(env, Path(book_env_path), book_env_file=book_env_path)
+        env = sanitize_portal_book_credentials(env)
     else:
         env.pop("PAPER_CHASE_MODE", None)
         if book_id == "alpaca_live":
@@ -188,7 +301,7 @@ def _portal_launched(cmd: str) -> bool:
 
 
 def _paper_run_all_child(username: str) -> int | None:
-    supervisor = bot_pid(username, "alpaca_paper")
+    supervisor = bot_pid(username, PRIMARY_PAPER_BOOK_ID)
     if supervisor is None:
         return None
     for pid in sorted(_descendant_pids(supervisor)):
@@ -212,25 +325,15 @@ def _paper_allowed_descendants(supervisor: int) -> set[int]:
 
 
 def _managed_bot_pids(username: str) -> set[int]:
-    """PIDs that may run for this user (supervisors, live chain, one paper run_all)."""
+    """PIDs that may run for this user (supervisors + full process trees)."""
     allowed: set[int] = set()
-    live = bot_pid(username, "alpaca_live")
-    if live is not None:
-        allowed.add(live)
-        walk = live
-        for _ in range(32):
-            parent = _parent_pid(walk)
-            if parent is None:
-                break
-            cmd = _process_cmdline(parent) or ""
-            if "run_all.py" not in cmd:
-                break
-            allowed.add(parent)
-            walk = parent
-    paper = bot_pid(username, "alpaca_paper")
-    if paper is not None:
-        allowed.add(paper)
-        allowed |= _paper_allowed_descendants(paper)
+    for bid in BOOKS:
+        if not book_enabled(bid):
+            continue
+        pid = bot_pid(username, bid)
+        if pid is not None:
+            allowed.add(pid)
+            allowed |= _descendant_pids(pid)
     return allowed
 
 
@@ -305,7 +408,7 @@ def _tracked_book_pids(username: str) -> set[int]:
 def trim_portal_duplicate_bots(username: str) -> tuple[int, str]:
     """Remove extra portal-launched supervisors and stray paper run_all workers."""
     live = bot_pid(username, "alpaca_live")
-    paper = bot_pid(username, "alpaca_paper")
+    paper = bot_pid(username, PRIMARY_PAPER_BOOK_ID)
     stopped = 0
     notes: list[str] = []
     for pid in _find_script_pids("run_paper_bot.py"):
@@ -351,24 +454,27 @@ def stop_orphan_project_bots(
     *,
     username: str | None = None,
 ) -> tuple[int, str]:
-    """Stop stray run_paper_bot / run_all processes for this repo (no pid file)."""
+    """Stop stray run_paper_bot / run_live_bot / run_all processes for this repo."""
     preserve = set(preserve_pids or set())
     if username:
         preserve |= _managed_bot_pids(username)
+    # Always protect entire trees of currently tracked supervisors
+    for book in (bid for bid in BOOKS if book_enabled(bid)):
+        if not username:
+            break
+        root = bot_pid(username, book)
+        if root is not None:
+            preserve.add(root)
+            preserve |= _descendant_pids(root)
+
     stopped = 0
     notes: list[str] = []
-    for script in ("run_paper_bot.py", "run_all.py"):
+    for script in ("run_paper_bot.py", "run_live_bot.py", "run_all.py"):
         pids = _find_script_pids(script)
         if pids:
             print(f"Found {len(pids)} {script} process(es)...", flush=True)
         for pid in pids:
             if pid in preserve:
-                continue
-            live_supervisor = bot_pid(username, "alpaca_live") if username else None
-            paper_supervisor = bot_pid(username, "alpaca_paper") if username else None
-            if live_supervisor is not None and _is_descendant_of(live_supervisor, pid):
-                continue
-            if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
                 continue
             print(f"Stopping orphan {script} PID {pid}...", flush=True)
             ok, msg = _graceful_stop_pid(pid)
@@ -379,12 +485,16 @@ def stop_orphan_project_bots(
     for pid in find_bot_exe_pids():
         if pid in preserve:
             continue
+        print(f"Stopping orphan {BOT_EXE_NAME} PID {pid}...", flush=True)
         ok, msg = _graceful_stop_pid(pid)
         if ok:
             stopped += 1
         else:
             notes.append(msg)
-    summary = f"Stopped {stopped} orphan bot process(es)." if stopped else "No orphan bot processes."
+    if stopped:
+        summary = f"Stopped {stopped} orphan bot process(es)."
+    else:
+        summary = "No orphan bot processes."
     if notes:
         summary += " " + "; ".join(notes)
     return stopped, summary
@@ -397,14 +507,12 @@ def _is_paper_book(username: str, book_id: str) -> bool:
 
 
 def _bot_entry_script(username: str, book_id: str) -> Path:
-    """Paper chase books use run_paper_bot supervisor; live uses run_all."""
-    pid = bot_pid(username, book_id)
-    if pid:
-        cmd = _process_cmdline(pid) or ""
-        if "run_paper_bot" in cmd:
-            return PROJECT_ROOT / "run_paper_bot.py"
+    """Paper uses run_paper_bot; live uses run_live_bot (never sticky to bare run_all)."""
     if _is_paper_book(username, book_id):
         return PROJECT_ROOT / "run_paper_bot.py"
+    live_supervisor = PROJECT_ROOT / "run_live_bot.py"
+    if live_supervisor.is_file():
+        return live_supervisor
     return PROJECT_ROOT / "run_all.py"
 
 
@@ -427,6 +535,8 @@ def bot_status_label(username: str, book_id: str = "alpaca_paper") -> str:
         script = BOT_EXE_NAME
     elif "run_paper_bot" in cmd:
         script = "run_paper_bot"
+    elif "run_live_bot" in cmd:
+        script = "run_live_bot"
     else:
         script = "run_all"
     mode = "paper" if _is_paper_book(username, book_id) else "live"
@@ -688,7 +798,10 @@ def start_bot(username: str, book_id: str = "alpaca_paper", *, skip_orphan_stop:
     orphan_msg = ""
     if not skip_orphan_stop:
         preserve = _tracked_book_pids(username)
-        orphans_stopped, orphan_msg = stop_orphan_project_bots(preserve_pids=preserve)
+        orphans_stopped, orphan_msg = stop_orphan_project_bots(
+            preserve_pids=preserve,
+            username=username,
+        )
         if orphans_stopped:
             time.sleep(1.0)
     bot_script = _bot_entry_script(username, book_id)
@@ -765,7 +878,25 @@ def restart_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str
             return False, stop_msg
     else:
         stop_msg = "Bot was not running."
+    if mode == "paper":
+        deadline = time.time() + 8.0
+        while bot_running(username, book_id) and time.time() < deadline:
+            time.sleep(0.25)
+        if bot_running(username, book_id):
+            ok, stop_msg = stop_bot(username, book_id)
+            if not ok:
+                return False, stop_msg
+            time.sleep(0.5)
     ok, start_msg = start_bot(username, book_id)
+    if (
+        not ok
+        and mode == "paper"
+        and "already running" in start_msg.lower()
+    ):
+        ok_stop, stop_msg = stop_bot(username, book_id)
+        if ok_stop:
+            time.sleep(0.5)
+            ok, start_msg = start_bot(username, book_id)
     if not ok:
         return False, start_msg
     prefix = "Bot restarted successfully" if was_running else "Bot started successfully"

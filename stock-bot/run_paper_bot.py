@@ -31,18 +31,64 @@ ROOT = Path(__file__).resolve().parent
 RUN_ALL = ROOT / "run_all.py"
 CRYPTO_VOL_ERROR_LOG = ROOT / "crypto_vol_sleeve_errors.log"
 
+_PORTAL_CREDENTIAL_KEYS = frozenset(
+    {
+        "APCA_API_KEY_ID",
+        "APCA_API_SECRET_KEY",
+        "PAPER_APCA_API_KEY_ID",
+        "PAPER_APCA_API_SECRET_KEY",
+        "ALPACA_API_KEY",
+        "ALPACA_SECRET_KEY",
+    }
+)
+
+
+def _book_env_has_alpaca_keys(path: Path | str | None) -> bool:
+    if not path:
+        return False
+    try:
+        from dotenv import dotenv_values
+
+        vals = dotenv_values(str(path))
+        key = (vals.get("APCA_API_KEY_ID") or vals.get("PAPER_APCA_API_KEY_ID") or "").strip()
+        secret = (
+            vals.get("APCA_API_SECRET_KEY") or vals.get("PAPER_APCA_API_SECRET_KEY") or ""
+        ).strip()
+        return bool(key and secret)
+    except Exception:
+        return False
+
 
 def paper_env_file_overlay(env: dict[str, str], path: Path | None = None) -> dict[str, str]:
-    """Copy stock-bot/.env over *env* so file keys beat inherited parent env."""
+    """Copy stock-bot/.env over *env* so file keys beat inherited parent env.
+
+    Portal-managed books: never overwrite keys already set by the book ``.env``.
+    Root ``.env`` may still contain legacy weekly-review overrides (e.g. 90% NYSE)
+    that must not clobber alpaca_paper_v2's 33/67 lock.
+    """
     path = path if path is not None else ROOT / ".env"
     if not path.is_file():
         return env
     from dotenv import dotenv_values
 
+    book_env = (env.get("PYTHONTRADING_ENV_FILE") or "").strip()
+    portal = bool(env.get("PORTAL_MANAGED_BOT")) and _book_env_has_alpaca_keys(book_env)
+    book_keys: set[str] = set()
+    if portal and book_env and Path(book_env).is_file():
+        book_keys = {
+            str(k)
+            for k, v in dotenv_values(book_env).items()
+            if k and v is not None and str(v).strip() != ""
+        }
     out = dict(env)
     for key, val in dotenv_values(path).items():
-        if key and val is not None:
-            out[str(key)] = str(val)
+        if not key or val is None:
+            continue
+        if portal and key in _PORTAL_CREDENTIAL_KEYS:
+            continue
+        if key in book_keys:
+            continue
+        out[str(key)] = str(val)
     return out
 
 
@@ -51,10 +97,45 @@ def load_paper_stock_env(*, override: bool = True) -> None:
 
     override=True is required: dashboard pythonw can be days old and pass
     stale PAPER_NYSE_MAX_ADDS_PER_SYMBOL. Live entry must not call this.
+
+    Portal-managed bots load the book .env first so root PAPER_APCA_* cannot
+    replace per-book APCA_* keys (e.g. alpaca_paper_v2 vs legacy paper).
     """
+    book_env = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
+    if os.getenv("PORTAL_MANAGED_BOT") and book_env and os.path.isfile(book_env):
+        load_dotenv(book_env, override=True)
+        stock = ROOT / ".env"
+        if stock.is_file():
+            from dotenv import dotenv_values
+
+            protect = _book_env_has_alpaca_keys(book_env)
+            for key, val in dotenv_values(stock).items():
+                if not key or val is None:
+                    continue
+                if protect and key in _PORTAL_CREDENTIAL_KEYS:
+                    continue
+                if key not in os.environ:
+                    os.environ[str(key)] = str(val)
+        return
     path = ROOT / ".env"
     if path.is_file():
         load_dotenv(path, override=override)
+
+
+def sanitize_portal_book_credentials(env: dict[str, str]) -> dict[str, str]:
+    """Drop root PAPER_APCA_* when a portal book owns APCA_* (per-book accounts)."""
+    if not env.get("PORTAL_MANAGED_BOT"):
+        return env
+    if not _book_env_has_alpaca_keys(env.get("PYTHONTRADING_ENV_FILE")):
+        return env
+    out = dict(env)
+    for key in (
+        "PAPER_APCA_API_KEY_ID",
+        "PAPER_APCA_API_SECRET_KEY",
+        "PAPER_CHASE_USE_RESEARCH_KEYS",
+    ):
+        out.pop(key, None)
+    return out
 
 
 def _truthy(val: str | None, default: bool = False) -> bool:
@@ -222,12 +303,24 @@ def _run_crypto_vol_cycle() -> None:
 
 def _apply_paper_research_env(env: dict[str, str]) -> dict[str, str]:
     from config import apply_realistic_research_env
+    from dotenv import dotenv_values
 
     env["PAPER_TRADING"] = "true"
     env["PAPER_CHASE_MODE"] = "1"
     env.setdefault("PAPER_AGGRESSIVE", "true")
     env = apply_realistic_research_env(env)
     env = paper_env_file_overlay(env)
+    # Belt-and-suspenders: re-assert portal book keys after any root fill.
+    book_env = (env.get("PYTHONTRADING_ENV_FILE") or "").strip()
+    if (
+        env.get("PORTAL_MANAGED_BOT")
+        and book_env
+        and Path(book_env).is_file()
+        and _book_env_has_alpaca_keys(book_env)
+    ):
+        for key, val in dotenv_values(book_env).items():
+            if key and val is not None and str(val).strip() != "":
+                env[str(key)] = str(val)
     # REALISTIC_RESEARCH_ENV setdefaults THINKING_ENGINE_ENABLED=false. When paper
     # thinking is opted in (env file or explicit), keep the master gate aligned so
     # effective_thinking_engine_enabled() is True (banner shows ON, not "armed").
@@ -296,7 +389,9 @@ def _force_write_paper_chase_heartbeat(env: dict[str, str]) -> None:
         if not existing.get("regime"):
             portal = ROOT / "data" / "portal" / "users"
             if portal.is_dir():
-                hits = sorted(portal.glob("*/books/alpaca_paper/bot_heartbeat.json"))
+                hits = sorted(portal.glob("*/books/alpaca_paper_v2/bot_heartbeat.json"))
+                if not hits:
+                    hits = sorted(portal.glob("*/books/alpaca_paper/bot_heartbeat.json"))
                 if hits:
                     rich = _read_json(hits[0])
                     if rich.get("regime"):
@@ -328,6 +423,8 @@ def main() -> None:
 
     env = os.environ.copy()
     env = _apply_paper_research_env(env)
+    env = sanitize_portal_book_credentials(env)
+    os.environ.update(env)
 
     import config
 
@@ -340,6 +437,13 @@ def main() -> None:
         config.PAPER_THINKING_ENGINE_ENABLED = True
         config.THINKING_ENGINE_ENABLED = True
 
+    try:
+        from modules.strategy_lock import print_paper_v2_strategy_lock
+
+        print_paper_v2_strategy_lock()
+    except Exception as exc:
+        print(f"FATAL: strategy lock: {exc}", flush=True)
+        raise
     os.environ.update(
         {k: env[k] for k in env if k in config.REALISTIC_RESEARCH_ENV or k in (
             "PAPER_TRADING",
@@ -353,7 +457,14 @@ def main() -> None:
 
     env.setdefault("HEARTBEAT_FILE", "paper_chase_heartbeat.json")
     env.setdefault("PAPER_JOURNAL_CSV", "paper_chase_journal.csv")
-    if env.get("PAPER_APCA_API_KEY_ID") and env.get("PAPER_APCA_API_SECRET_KEY"):
+    if (
+        env.get("PAPER_APCA_API_KEY_ID")
+        and env.get("PAPER_APCA_API_SECRET_KEY")
+        and not (
+            env.get("PORTAL_MANAGED_BOT")
+            and _book_env_has_alpaca_keys(env.get("PYTHONTRADING_ENV_FILE"))
+        )
+    ):
         env.setdefault("PAPER_CHASE_USE_RESEARCH_KEYS", "yes")
 
     crypto_enabled = _crypto_vol_enabled(env)

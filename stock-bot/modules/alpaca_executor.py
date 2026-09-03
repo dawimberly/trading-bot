@@ -179,9 +179,33 @@ class AlpacaExecutor:
         sleeve: str | None = None,
         notional=None,
         qty=None,
+        op: str | None = None,
     ):
+        """Submit order; ``side`` is required by all execute_* callers.
+
+        Optional ``op`` is only used for notional-guard log labels (defaults to side).
+        """
         if not self._validate_order_symbol(symbol):
             return None
+
+        op_label = (op or side or "submit").strip() or "submit"
+
+        # Pre-flight notional on the request object (qty-only orders skip this).
+        req_notional = notional if notional is not None else getattr(order, "notional", None)
+        if req_notional is not None:
+            valid = self._skip_if_notional_invalid(
+                req_notional, symbol=symbol, op=op_label
+            )
+            if valid is None:
+                return None
+            if valid != self._coerce_notional(req_notional):
+                order = MarketOrderRequest(
+                    symbol=order.symbol,
+                    notional=valid,
+                    side=order.side,
+                    time_in_force=order.time_in_force,
+                )
+                notional = valid
 
         safe_notional = None
         if notional is not None:
@@ -261,6 +285,18 @@ class AlpacaExecutor:
                 except Exception:
                     pass
                 raise
+        # Capture avg entry before cache drop so sell fills can compute realized PnL
+        # even if the position is gone after a full exit.
+        avg_entry = None
+        if str(side or "").lower() in ("sell", "sell_short"):
+            try:
+                pos = self._find_position(symbol)
+                raw = getattr(pos, "avg_entry_price", None) if pos is not None else None
+                avg_entry = float(raw) if raw not in (None, "") else None
+                if avg_entry is not None and avg_entry <= 0:
+                    avg_entry = None
+            except Exception:
+                avg_entry = None
         self._invalidate_cache()
         self._track_order(
             submitted,
@@ -268,6 +304,7 @@ class AlpacaExecutor:
             side=side,
             reason=reason,
             sleeve=sleeve,
+            avg_entry=avg_entry,
         )
         logger.info(
             "order submitted",
@@ -293,6 +330,30 @@ class AlpacaExecutor:
             )
         except Exception:
             pass
+        try:
+            from modules.pipeline_strategies import mark_nyse_atr_stop_from_exit
+
+            mark_nyse_atr_stop_from_exit(symbol, reason=reason or "", sleeve=sleeve)
+        except Exception:
+            pass
+        # Poll fill so Telegram buy/sell alerts fire even when callers don't wait.
+        # Deduped by order id inside _emit_fill_notification.
+        if submitted is not None and not getattr(self, "dry_run", False):
+            try:
+                paper = bool(getattr(config, "PAPER_TRADING", False))
+                wait = 5.0 if paper else 3.0
+                details = self.order_fill_details(submitted, max_wait=wait)
+                # Paper VTI/notional often fills after 5s. Same notify path; no second journal.
+                if paper and (not details or not details.get("filled")):
+                    details = self.order_fill_details(submitted, max_wait=25.0)
+                if paper and (not details or not details.get("filled")):
+                    logger.warning(
+                        "fill notify missed after extra wait order_id=%s status=%s",
+                        getattr(submitted, "id", ""),
+                        self._order_status(submitted) if submitted is not None else "",
+                    )
+            except Exception as exc:
+                logger.debug("post-submit fill poll failed: %s", exc)
         return submitted
 
     @staticmethod
@@ -478,25 +539,6 @@ class AlpacaExecutor:
             return None
         return n
 
-    def _submit_order(self, order, *, symbol: str, op: str):
-        """Submit with pre-flight notional guard; validation errors return None."""
-        req_notional = getattr(order, "notional", None)
-        if req_notional is not None:
-            valid = self._skip_if_notional_invalid(req_notional, symbol=symbol, op=op)
-            if valid is None:
-                return None
-            if valid != req_notional:
-                order = MarketOrderRequest(
-                    symbol=order.symbol,
-                    notional=valid,
-                    side=order.side,
-                    time_in_force=order.time_in_force,
-                )
-        try:
-            return self._api("submit_order", self.client.submit_order, order_data=order)
-        except AlpacaValidationError:
-            return None
-
     def _max_notional(self) -> float:
         return config.effective_max_notional_per_order(self._account_equity())
 
@@ -515,7 +557,16 @@ class AlpacaExecutor:
         if mult >= 0.999:
             return notional
         scaled = round(notional * mult, 2)
-        if scaled < self._min_notional():
+        min_n = self._min_notional()
+        if scaled < min_n:
+            # Live leftover NYSE clips are already near the broker floor
+            # (~$5). Wisdom 0.5× must not zero an order that already cleared min.
+            if (
+                not config.PAPER_TRADING
+                and str(sleeve_key or "").strip().lower() == "nyse"
+                and float(notional) >= min_n
+            ):
+                return round(min_n, 2)
             return None
         return scaled
 
@@ -566,7 +617,18 @@ class AlpacaExecutor:
 
     @staticmethod
     def _order_status(order) -> str:
-        return str(getattr(order, "status", "")).lower()
+        status = getattr(order, "status", None)
+        if status is None:
+            return ""
+        # Alpaca SDK enums stringify as "OrderStatus.FILLED" — normalize to "filled".
+        raw = getattr(status, "value", None) or getattr(status, "name", None) or str(status)
+        return (
+            str(raw)
+            .replace("OrderStatus.", "")
+            .replace("orderstatus.", "")
+            .strip()
+            .lower()
+        )
 
     @staticmethod
     def _order_side_label(order, fallback: str = "") -> str:
@@ -587,7 +649,9 @@ class AlpacaExecutor:
         if norm == config.SPY_BOT_SYMBOL:
             return "SPY"
         if config.is_metal_symbol(symbol):
-            return "Metal"
+            return "NYSE" if config.metal_counts_as_nyse() else "Metal"
+        if config.nyse_allow_vanguard() and config.is_vanguard_or_index_etf(norm):
+            return "NYSE"
         if norm == config.VTI_CORE_SYMBOL:
             return "VTI"
         return "NYSE"
@@ -600,6 +664,7 @@ class AlpacaExecutor:
         side: str,
         reason: str = "",
         sleeve: str | None = None,
+        avg_entry=None,
     ) -> None:
         oid = str(getattr(order, "id", "") or "")
         if not oid:
@@ -609,6 +674,7 @@ class AlpacaExecutor:
             "side": side.capitalize() if side else self._order_side_label(order),
             "reason": reason,
             "sleeve": sleeve or self._infer_sleeve(symbol),
+            "avg_entry": avg_entry,
         }
 
     def _emit_fill_notification(self, order, details: dict) -> None:
@@ -663,6 +729,83 @@ class AlpacaExecutor:
             )
         except Exception:
             pass
+        self._journal_fill(
+            order,
+            details,
+            ctx=ctx,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            avg=avg,
+            notional=notional,
+            equity_after=equity_after,
+            oid=oid,
+        )
+
+    def _journal_fill(
+        self,
+        order,
+        details: dict,
+        *,
+        ctx: dict,
+        symbol: str,
+        side: str,
+        qty: float,
+        avg: float,
+        notional,
+        equity_after,
+        oid: str,
+    ) -> None:
+        """Observational blotter write. Never raises into the order path."""
+        try:
+            from modules import trade_journal
+
+            side_l = str(side or "").lower()
+            is_sell = side_l in ("sell", "sell_short")
+            avg_entry = ctx.get("avg_entry")
+            realized = trade_journal.compute_realized_pnl(
+                qty, avg, avg_entry, is_sell=is_sell
+            )
+            realized_pct = ""
+            if realized is not None and avg_entry not in (None, "") and qty:
+                try:
+                    cost = abs(float(qty) * float(avg_entry))
+                    if cost > 0:
+                        realized_pct = round(100.0 * float(realized) / cost, 4)
+                except (TypeError, ValueError):
+                    realized_pct = ""
+            cash_after = ""
+            try:
+                cash_after = round(float(getattr(self._get_account(), "cash", 0) or 0), 2)
+            except Exception:
+                cash_after = ""
+            regime = str(getattr(self, "_last_regime", "") or "")
+            book = "paper" if self.paper else "live"
+            reason = ctx.get("reason") or ""
+            sleeve = ctx.get("sleeve") or self._infer_sleeve(symbol)
+            is_partial = bool(details.get("partial"))
+            trade_journal.log_fill(
+                symbol,
+                side_l,
+                qty=round(qty, 8) if qty else "",
+                price=round(avg, 6) if avg else "",
+                notional=round(float(notional), 2) if notional else "",
+                sleeve=sleeve,
+                reason=reason,
+                pair_key=reason,
+                order_id=oid,
+                equity=round(float(equity_after), 2) if equity_after not in (None, "") else "",
+                cash=cash_after,
+                regime=regime,
+                book=book,
+                exit_reason=reason if is_sell else "",
+                realized_pnl="" if realized is None else realized,
+                realized_pnl_pct=realized_pct,
+                is_partial="1" if is_partial else "0",
+                notes=reason,
+            )
+        except Exception:
+            logger.debug("journal fill write skipped", exc_info=True)
 
     def order_filled(self, order, max_wait=5.0, *, require_complete: bool = True):
         """True when Alpaca confirms fill (poll market orders; optional partial OK)."""
@@ -828,8 +971,10 @@ class AlpacaExecutor:
             return False
         if AlpacaExecutor._is_spy_position(pos):
             return False
-        if AlpacaExecutor._is_metal_position(pos):
+        if AlpacaExecutor._is_metal_position(pos) and not config.metal_counts_as_nyse():
             return False
+        if config.nyse_allow_vanguard() and config.is_vanguard_or_index_etf(pos.symbol):
+            return True
         if AlpacaExecutor._is_vti_core_position(pos):
             return False
         # Sector SPDRs belong to the sector-rotation sleeve, not NYSE momentum.
@@ -1098,7 +1243,11 @@ class AlpacaExecutor:
             "spy_value": spy_v,
             "spy_cap": equity * self._sleeve_cap_pct("spy", config.SPY_SLEEVE_CAP_PCT),
             "crypto_value": crypto_v,
-            "crypto_cap": equity * self._sleeve_cap_pct("crypto", config.CRYPTO_SLEEVE_CAP_PCT),
+            "crypto_cap": (
+                equity * self._sleeve_cap_pct("crypto", config.CRYPTO_SLEEVE_CAP_PCT)
+                if config.effective_crypto_enabled()
+                else 0.0
+            ),
             "nyse_value": nyse_v,
             "nyse_cap": equity * self._sleeve_cap_pct("nyse", config.NYSE_SLEEVE_CAP_PCT),
         }
@@ -1239,6 +1388,40 @@ class AlpacaExecutor:
             )
             if sell_notional is None:
                 return None
+            # Draft paper VTI cash-need skip. Flag default OFF: this branch is skipped.
+            if (
+                getattr(config, "PAPER_VTI_CASH_NEED_SKIP", False)
+                and config.normalize_symbol(symbol) == config.VTI_CORE_SYMBOL
+            ):
+                try:
+                    from modules.vti_core import (
+                        log_paper_vti_reduce_skip,
+                        paper_vti_cash_need_skip_active,
+                        paper_vti_reduce_skip_reason,
+                    )
+
+                    if paper_vti_cash_need_skip_active():
+                        account = self._get_account()
+                        equity = float(getattr(account, "equity", 0) or 0)
+                        cash = float(getattr(account, "cash", 0) or 0)
+                        vti_pct = (mv / equity) if equity > 0 else 0.0
+                        skip = paper_vti_reduce_skip_reason(
+                            vti_pct=vti_pct,
+                            cash=cash,
+                            reduce_notional=float(sell_notional),
+                            enabled=True,
+                        )
+                        if skip:
+                            log_paper_vti_reduce_skip(
+                                skip,
+                                vti_pct=vti_pct,
+                                cash=cash,
+                                reduce_notional=float(sell_notional),
+                                symbol=symbol,
+                            )
+                            return None
+                except Exception:
+                    pass
             # Qty-capped to available — never let notional→qty overshoot broker free qty.
             raw_qty = min(qty, sell_notional / price)
             raw_qty = min(raw_qty, max(0.0, qty * (1.0 - 1e-9)))
@@ -1622,6 +1805,8 @@ class AlpacaExecutor:
         )
 
     def _is_core_exempt(self, symbol: str) -> bool:
+        if config.nyse_allow_vanguard() and config.is_vanguard_or_index_etf(symbol):
+            return True
         return config.normalize_symbol(symbol) in self._core_exempt_symbols()
 
     def _position_market_value(self, pos) -> float:
@@ -1655,30 +1840,60 @@ class AlpacaExecutor:
             return False
         return self.count_active_tickers() >= config.effective_max_active_tickers()
 
+    def _per_name_target_value(self, symbol: str, pos=None) -> tuple[float, float, str]:
+        """Return (target_mv, equity, reason) for concentration / fat-loser caps."""
+        equity = float(self._account_equity() or 0)
+        sym = config.normalize_symbol(symbol)
+        cap_pct = config.effective_per_name_max_pct_for_symbol(sym)
+        target = equity * cap_pct if equity > 0 else 0.0
+        reason = "per_name_cap"
+        if (
+            config.effective_nyse_fat_loser_enabled()
+            and pos is not None
+            and equity > 0
+        ):
+            try:
+                from modules.cost_basis import sleeve_for_symbol
+
+                if sleeve_for_symbol(sym) == "nyse" and not config.is_vanguard_or_index_etf(
+                    sym
+                ):
+                    up_pct = float(getattr(pos, "unrealized_plpc", 0) or 0)
+                    if up_pct <= float(config.PAPER_NYSE_FAT_LOSER_OPEN_PCT):
+                        fat_pct = float(config.PAPER_NYSE_FAT_LOSER_TARGET_PCT)
+                        fat_target = equity * fat_pct
+                        if fat_target < target:
+                            target = fat_target
+                            reason = "nyse_fat_loser"
+            except Exception:
+                pass
+        return target, equity, reason
+
     def _apply_concentration_cap(self, symbol: str, notional: float) -> float | None:
-        """Cap buy notional so position ≤ effective_per_name_max_pct of equity."""
+        """Cap buy notional so position ≤ symbol-specific per-name max of equity."""
         if not config.effective_concentration_guard_enabled():
             return notional
         if self._is_core_exempt(symbol):
             return notional
-        equity = float(self._account_equity() or 0)
-        if equity <= 0 or notional is None:
+        if notional is None:
             return notional
         sym = config.normalize_symbol(symbol)
-        cap_val = equity * config.effective_per_name_max_pct()
-        current_val = 0.0
         pos = self._find_position(sym)
-        if pos is not None:
-            current_val = self._position_market_value(pos)
+        cap_val, equity, reason = self._per_name_target_value(sym, pos)
+        if equity <= 0:
+            return notional
+        current_val = self._position_market_value(pos) if pos is not None else 0.0
         room = max(0.0, cap_val - current_val)
         capped = min(float(notional), room)
         min_n = self._min_notional()
+        cap_pct = (cap_val / equity) if equity else 0.0
         if capped < min_n:
             log_event(
                 "concentration_guard_block",
                 symbol=sym,
                 equity=round(equity, 2),
-                cap_pct=config.effective_per_name_max_pct(),
+                cap_pct=round(cap_pct, 4),
+                reason=reason,
                 current=round(current_val, 2),
                 requested=round(float(notional), 2),
             )
@@ -1689,7 +1904,8 @@ class AlpacaExecutor:
                 symbol=sym,
                 from_notional=round(float(notional), 2),
                 to_notional=round(capped, 2),
-                cap_pct=config.effective_per_name_max_pct(),
+                cap_pct=round(cap_pct, 4),
+                reason=reason,
             )
         return round(capped, 2)
 
@@ -1700,8 +1916,6 @@ class AlpacaExecutor:
         equity = float(self._account_equity() or 0)
         if equity <= 0:
             return []
-        cap_pct = config.effective_per_name_max_pct()
-        cap_val = equity * cap_pct
         min_n = self._min_notional()
         excess: list[dict] = []
         for pos in self._get_positions():
@@ -1711,6 +1925,7 @@ class AlpacaExecutor:
             sym = config.normalize_symbol(self._normalize_pos_symbol(pos))
             if self._is_core_exempt(sym):
                 continue
+            cap_val, _, reason = self._per_name_target_value(sym, pos)
             pos_val = self._position_market_value(pos)
             over = pos_val - cap_val
             if over < min_n:
@@ -1722,6 +1937,7 @@ class AlpacaExecutor:
                     "cap_value": round(cap_val, 2),
                     "excess": round(over, 2),
                     "pct_of_equity": round(pos_val / equity, 4),
+                    "reason": reason,
                 }
             )
         return sorted(excess, key=lambda r: r["excess"], reverse=True)
@@ -1732,6 +1948,11 @@ class AlpacaExecutor:
         actions: list[dict] = []
         for row in self.list_concentration_excess():
             sell_n = round(float(row["excess"]), 2)
+            reason = str(row.get("reason") or "concentration_guard_trim")
+            if reason == "nyse_fat_loser":
+                sell_reason = "nyse_fat_loser_trim"
+            else:
+                sell_reason = "concentration_guard_trim"
             action = {
                 **row,
                 "action": "sell",
@@ -1746,11 +1967,19 @@ class AlpacaExecutor:
                 row["symbol"],
                 "sell",
                 notional=sell_n,
-                reason="concentration_guard_trim",
+                reason=sell_reason,
             )
             action["status"] = "submitted" if submitted is not None else "failed"
             action["order_id"] = getattr(submitted, "id", None) if submitted else None
             actions.append(action)
+            log_event(
+                sell_reason,
+                symbol=row["symbol"],
+                notional=sell_n,
+                status=action["status"],
+                cap_value=row.get("cap_value"),
+                market_value=row.get("market_value"),
+            )
         return actions
 
     def cleanup_dust_positions(
@@ -1799,6 +2028,9 @@ class AlpacaExecutor:
             "active_count": len(active),
             "max_active_tickers": config.effective_max_active_tickers(),
             "per_name_max_pct": config.effective_per_name_max_pct(),
+            "nyse_per_name_max_pct": config.effective_nyse_per_name_max_pct()
+            if config.PAPER_TRADING
+            else None,
             "auto_dust_max_notional": config.effective_auto_dust_max_notional(),
             "concentration_trims": concentration,
             "dust_actions": dust,

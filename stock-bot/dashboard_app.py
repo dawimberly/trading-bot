@@ -75,6 +75,7 @@ from modules.wisdom_evaluator import filter_paper_journal  # noqa: E402
 from modules import status_metrics as sm  # noqa: E402
 from modules.trading_books import (  # noqa: E402
     BOOKS,
+    PRIMARY_PAPER_BOOK_ID,
     book_dropdown_entries,
     book_enabled,
     book_id_for_dropdown_label,
@@ -130,7 +131,7 @@ CHART_RANGE_SPECS: dict[str, dict] = {
     "1M": {"prefer": "1d", "calendar_days": 32, "daily_bars": 22, "max_points": 48},
 }
 ENABLE_SPARKLINE = True  # draw from worker-preloaded data only (never journal on UI)
-DASHBOARD_UI_TAG = "2026-08-21-sleeve-pnl"
+DASHBOARD_UI_TAG = "2026-08-31-today-pnl"
 
 ENV_PATH = PROJECT_ROOT / ".env"
 ICON_PATH = PROJECT_ROOT / "assets" / "dashboard.ico"
@@ -624,17 +625,31 @@ def _positions_fingerprint(
 
 def _fetch_account_summary(
     *, username: str, book_id: str, retries: int = 2
-) -> tuple[float | None, float | None, str | None]:
-    """Fresh Alpaca account read for the selected book."""
+) -> tuple[float | None, float | None, str | None, float | None]:
+    """Fresh Alpaca account read for the selected book.
+
+    Returns (equity, cash, err, last_equity). last_equity is prior-session close
+    when Alpaca provides it — used as a Today P&L fallback before the bot
+    records a day-open anchor.
+    """
     last_err: str | None = None
+    last_equity: float | None = None
     for attempt in range(max(1, retries)):
         try:
             client = _book_trading_client(username, book_id)
             acct = client.get_account()
             equity = float(acct.equity)
             cash = float(acct.cash)
+            raw_last = getattr(acct, "last_equity", None)
+            if raw_last is not None:
+                try:
+                    last_eq = float(raw_last)
+                    if last_eq > 0:
+                        last_equity = last_eq
+                except (TypeError, ValueError):
+                    pass
             if equity > 0:
-                return equity, cash, None
+                return equity, cash, None, last_equity
             last_err = "Account equity is zero"
         except ValueError as exc:
             last_err = _compact_io_error(exc)
@@ -642,7 +657,7 @@ def _fetch_account_summary(
             last_err = _compact_io_error(exc)
         if attempt + 1 < retries:
             time.sleep(0.35)
-    return None, None, last_err
+    return None, None, last_err, last_equity
 
 
 def _resolve_equity_cash(
@@ -713,6 +728,79 @@ def _position_opened_at(pos, client, journal_df, sym: str) -> datetime | None:
     except Exception:
         pass
     return None
+
+
+def _day_pnl_from_session_open(
+    equity: float,
+    heartbeat: dict | None = None,
+    *,
+    paper: bool,
+    last_equity: float | None = None,
+    book_id: str | None = None,
+    username: str | None = None,
+) -> tuple[float | None, float | None]:
+    """Open-to-now (or close) account P&L vs the book's session-open equity.
+
+    Prefer the daily-loss anchor (both paper and live). Fall back to daily-bank
+    open (paper) then Alpaca last_equity (prior close) if the bot has not
+    recorded today's open yet.
+    """
+    if equity is None or float(equity) <= 0:
+        return None, None
+    if paper and username and book_id:
+        try:
+            from modules.trading_safety import prime_paper_day_open_from_book_env
+
+            prime_paper_day_open_from_book_env(
+                book_id=book_id,
+                equity=float(equity),
+                paper=True,
+                env_file=ensure_book_env(username, book_id),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    open_eq: float | None = None
+    try:
+        from modules.trading_safety import get_daily_loss_status
+
+        dl = get_daily_loss_status(
+            paper=paper, current_equity=float(equity), book_id=book_id
+        )
+        raw = dl.get("open_equity")
+        if raw is not None and float(raw) > 0:
+            open_eq = float(raw)
+    except Exception:  # noqa: BLE001
+        pass
+    if open_eq is None:
+        bank = (heartbeat or {}).get("daily_bank") or {}
+        raw = bank.get("open_equity")
+        try:
+            if raw is not None and float(raw) > 0:
+                open_eq = float(raw)
+        except (TypeError, ValueError):
+            pass
+    if open_eq is None and last_equity is not None:
+        try:
+            if float(last_equity) > 0:
+                # Ignore prior-close fallback when it disagrees with live equity (paper reset).
+                if abs(float(last_equity) - float(equity)) / float(equity) > 0.02:
+                    pass
+                else:
+                    open_eq = float(last_equity)
+        except (TypeError, ValueError):
+            pass
+    if open_eq is None or open_eq <= 0:
+        return None, None
+    pnl = float(equity) - open_eq
+    pct = 100.0 * (float(equity) / open_eq - 1.0)
+    return pnl, pct
+
+
+def _format_day_pnl(pnl: float, pct: float) -> str:
+    """Keep live-scale cents; round large paper moves to dollars."""
+    if abs(pnl) >= 1000:
+        return f"${pnl:+,.0f} ({pct:+.2f}%)"
+    return f"${pnl:+,.2f} ({pct:+.2f}%)"
 
 
 def _open_pnl_from_heartbeat(heartbeat: dict | None) -> tuple[float, float, str]:
@@ -1138,6 +1226,7 @@ def _collect_refresh_snapshot(
             snap["partial_errors"].append(f"scorecard: {exc}")
 
         acct_eq, acct_cash, acct_err = 0.0, 0.0, hb_exc
+        last_equity: float | None = None
         # Alpaca network outside lock — holding lock during HTTP made book switches wait.
         try:
             heartbeat_mismatch = _heartbeat_on_disk_mismatch(username, book_id)
@@ -1145,11 +1234,12 @@ def _collect_refresh_snapshot(
             heartbeat_mismatch = False
 
     try:
-        acct_eq, acct_cash, acct_err = _fetch_account_summary(
+        acct_eq, acct_cash, acct_err, last_equity = _fetch_account_summary(
             username=username, book_id=book_id, retries=1 if fast else 2
         )
     except Exception as exc:  # noqa: BLE001
         acct_err = str(exc)
+        last_equity = None
 
     positions_df, pos_err = None, None
     if fetch_positions:
@@ -1388,6 +1478,7 @@ def _collect_refresh_snapshot(
             "running": running,
             "equity": equity,
             "cash": cash,
+            "last_equity": last_equity,
             "runtime_layout": runtime_layout_label(PROJECT_ROOT),
             "bot_exe": str(resolve_bot_executable(PROJECT_ROOT) or ""),
             "insider_rows": insider_rows,
@@ -3294,16 +3385,17 @@ class TradingDashboardApp(ctk.CTk):
             command=self._on_stop_bot,
             **_header_btn_style,
         ).grid(row=0, column=5, padx=2, pady=2, sticky="e")
-        ctk.CTkButton(
+        self._restart_bot_btn = ctk.CTkButton(
             controls_row,
-            text="Restart Bot",
-            width=88,
+            text="Restart Both",
+            width=100,
             fg_color=COLORS["small_bg"],
             hover_color=COLORS["small"],
             text_color=COLORS["amber"],
-            command=self._on_restart_bot,
+            command=self._on_restart_both,
             **_header_btn_style,
-        ).grid(row=0, column=6, padx=(2, 0), pady=2, sticky="e")
+        )
+        self._restart_bot_btn.grid(row=0, column=6, padx=(2, 0), pady=2, sticky="e")
 
         def _resize_header_labels(_event=None) -> None:
             avail = max(240, header_left.winfo_width() - 56)
@@ -3425,7 +3517,7 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._small_body.pack(anchor="w", padx=4)
 
-        # Hero metrics: Equity · Cash · Open P&L · sparkline
+        # Hero metrics: Equity · Cash · Open P&L · Today · sparkline
         hero_row = ctk.CTkFrame(top_stack, fg_color="transparent")
         hero_row.pack(fill="x", pady=(0, 6))
         self._metric_cards: dict[str, MetricCard] = {}
@@ -3435,6 +3527,8 @@ class TradingDashboardApp(ctk.CTk):
         self._metric_cards["cash"].pack(side="left", fill="both", expand=True, padx=(0, 6))
         self._metric_cards["pnl"] = MetricCard(hero_row, "Open P&L", hero=True)
         self._metric_cards["pnl"].pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self._metric_cards["today"] = MetricCard(hero_row, "Today", hero=True)
+        self._metric_cards["today"].pack(side="left", fill="both", expand=True, padx=(0, 6))
 
         spark_wrap = ctk.CTkFrame(
             hero_row,
@@ -4074,7 +4168,9 @@ class TradingDashboardApp(ctk.CTk):
         else:
             self.refresh_data(full=True)
             self._schedule_refresh()
-            if self._auto_start_bot:
+            if getattr(config, "DASHBOARD_RESTART_BOTS_ON_OPEN", True) and not self._auto_start_bot:
+                self.after(600, self._restart_both_on_open)
+            elif self._auto_start_bot:
                 self.after(800, lambda: self._maybe_auto_start_bot(quiet=True))
 
     def _apply_user_paths(self, username: str, book_id: str | None = None) -> None:
@@ -4121,6 +4217,8 @@ class TradingDashboardApp(ctk.CTk):
         self._stats_line1.configure(text="Account Total: —")
         self._stats_line2.configure(text="Loading…")
         self._since_start_label.configure(text="Since Start: —")
+        if "today" in getattr(self, "_metric_cards", {}):
+            self._metric_cards["today"].set("—", color=COLORS["muted"])
         self._last_positions_df = None
         self._last_positions_fp = None
         self._last_realized_by_ticker = {}
@@ -4145,6 +4243,12 @@ class TradingDashboardApp(ctk.CTk):
         threading.Thread(target=_worker, daemon=True, name="dashboard-book-start").start()
 
     def _restart_book_async(self, book_id: str) -> None:
+        if getattr(self, "_bot_restart_busy", False):
+            return
+        self._bot_restart_busy = True
+        self._set_bot_action_buttons_busy(
+            True, status=f"Restarting {book_label(book_id)} bot…"
+        )
         self._status_label.configure(text=f"Restarting {book_label(book_id)} bot…")
         self._bot_badge.configure(text="Bot: restarting…", text_color=COLORS["amber"])
         self._pill_bot.configure(
@@ -4157,6 +4261,8 @@ class TradingDashboardApp(ctk.CTk):
             ok, msg = restart_bot(self._username, book_id)
 
             def _finish() -> None:
+                self._bot_restart_busy = False
+                self._set_bot_action_buttons_busy(False)
                 if not ok:
                     messagebox.showwarning("Restart Bot", msg)
                 self.refresh_data()
@@ -4165,12 +4271,75 @@ class TradingDashboardApp(ctk.CTk):
 
         threading.Thread(target=_worker, daemon=True, name="dashboard-book-restart").start()
 
+    def _restart_both_async(
+        self,
+        *,
+        confirm: bool = True,
+        on_done=None,
+        status: str = "Restarting live + paper…",
+    ) -> None:
+        """Clean-restart primary paper + live (reload env/code). Positions stay open."""
+        if getattr(self, "_bot_restart_busy", False):
+            return
+        if confirm and not messagebox.askyesno(
+            "Restart Both",
+            "Clean-restart Alpaca Live + Paper?\n\n"
+            "Stops both trading loops, clears stale PIDs, then relaunches so "
+            "env/code updates take effect.\n"
+            "Open positions are not closed.\n\nContinue?",
+            icon="warning",
+        ):
+            return
+        self._bot_restart_busy = True
+        self._set_bot_action_buttons_busy(True, status=status)
+        self._status_label.configure(text=status)
+        self._bot_badge.configure(text="Bot: restarting both…", text_color=COLORS["amber"])
+        self._pill_bot.configure(
+            text="Bot: restarting both…",
+            fg_color=COLORS["small_bg"],
+            text_color=COLORS["amber"],
+        )
+
+        def _worker() -> None:
+            from scripts.owner_reset import clean_restart_both_bots
+
+            try:
+                ok, msg = clean_restart_both_bots(self._username)
+            except Exception as exc:
+                ok, msg = False, str(exc)
+
+            def _finish() -> None:
+                self._bot_restart_busy = False
+                self._set_bot_action_buttons_busy(False)
+                if on_done is not None:
+                    on_done(ok, msg)
+                    return
+                if not ok:
+                    messagebox.showwarning("Restart Both", msg)
+                else:
+                    self._status_label.configure(text="Live + paper restarted.")
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(
+            target=_worker, daemon=True, name="dashboard-restart-both"
+        ).start()
+
+    def _restart_both_on_open(self) -> None:
+        """Dashboard open/reopen: reload env/code for both books (no confirm)."""
+        self._restart_both_async(
+            confirm=False,
+            status="Open reset: restarting live + paper…",
+        )
+
     def _set_bot_action_buttons_busy(self, busy: bool, *, status: str | None = None) -> None:
         state = "disabled" if busy else "normal"
         refresh_bot_text = "…" if busy else "Refresh Bot"
         try:
             self._refresh_btn.configure(state=state)
             self._refresh_bot_btn.configure(text=refresh_bot_text, state=state)
+            self._restart_bot_btn.configure(state=state)
         except Exception:
             pass
         if status:
@@ -5554,7 +5723,14 @@ class TradingDashboardApp(ctk.CTk):
         invested = self._invested_pct(heartbeat, equity, cash)
         upl, upl_pct, top_hold = _open_pnl_from_positions(positions_df)
         if abs(upl) < 1e-9 and not top_hold:
-            upl, upl_pct, top_hold = _open_pnl_from_heartbeat(heartbeat)
+            # Empty positions fetch = flat book; do not show stale heartbeat sleeve marks.
+            if positions_df is None or getattr(positions_df, "empty", True):
+                if snap.get("positions_fetched"):
+                    upl, upl_pct, top_hold = 0.0, 0.0, ""
+                else:
+                    upl, upl_pct, top_hold = _open_pnl_from_heartbeat(heartbeat)
+            else:
+                upl, upl_pct, top_hold = _open_pnl_from_heartbeat(heartbeat)
 
         self._metric_cards["equity"].set(f"${equity:,.2f}")
         self._metric_cards["cash"].set(
@@ -5571,6 +5747,21 @@ class TradingDashboardApp(ctk.CTk):
             self._metric_cards["pnl"].set(
                 pnl_txt,
                 color=COLORS["green"] if upl >= 0 else COLORS["red"],
+            )
+        day_pnl, day_pct = _day_pnl_from_session_open(
+            equity,
+            heartbeat,
+            paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+            last_equity=snap.get("last_equity"),
+            book_id=self._book_id,
+            username=self._username,
+        )
+        if day_pnl is None or day_pct is None:
+            self._metric_cards["today"].set("—", color=COLORS["muted"])
+        else:
+            self._metric_cards["today"].set(
+                _format_day_pnl(day_pnl, day_pct),
+                color=COLORS["green"] if day_pnl >= 0 else COLORS["red"],
             )
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
 
@@ -6825,22 +7016,21 @@ class TradingDashboardApp(ctk.CTk):
         self.refresh_data()
 
     def _on_restart_bot(self) -> None:
-        if not has_alpaca_config(self._username, self._book_id):
+        """Legacy single-book restart — prefer Restart Both."""
+        self._on_restart_both()
+
+    def _on_restart_both(self) -> None:
+        if getattr(self, "_bot_restart_busy", False):
+            return
+        paper_ok = has_alpaca_config(self._username, PRIMARY_PAPER_BOOK_ID)
+        live_ok = has_alpaca_config(self._username, "alpaca_live")
+        if not paper_ok and not live_ok:
             messagebox.showwarning(
                 "API keys",
-                f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
+                "Add API keys for paper and/or live first (☰ menu).",
             )
             return
-        if not messagebox.askyesno(
-            "Restart Bot",
-            f"Restart the bot for {book_label(self._book_id)}?\n\n"
-            "The current book stops cleanly, then relaunches in the correct "
-            "paper/live mode for this dropdown selection.\n"
-            "Open positions are not closed.\n\nContinue?",
-            icon="warning",
-        ):
-            return
-        self._restart_book_async(self._book_id)
+        self._restart_both_async(confirm=True)
 
     def _on_refresh_bot(self) -> None:
         if not has_alpaca_config(self._username, self._book_id):
@@ -6901,7 +7091,7 @@ class TradingDashboardApp(ctk.CTk):
             self.after(0, self._show_window)
 
         def on_quit(_icon, _item) -> None:
-            self.after(0, self._shutdown)
+            self.after(0, self._close_with_bot_reset)
 
         menu = pystray.Menu(
             pystray.MenuItem("Show dashboard", on_show, default=True),
@@ -6934,12 +7124,73 @@ class TradingDashboardApp(ctk.CTk):
         self._stop_tray()
         self.destroy()
 
-    def _on_close(self) -> None:
-        if self._tray_var.get() and TRAY_AVAILABLE and not self._shutting_down:
-            self.withdraw()
-            self._start_tray()
+    def _close_with_bot_reset(self) -> None:
+        """Quit UI after clean-restarting live + paper (env/code update)."""
+        if self._shutting_down or getattr(self, "_close_reset_busy", False):
             return
-        self._shutdown()
+        restart_on_close = bool(
+            getattr(config, "DASHBOARD_RESTART_BOTS_ON_CLOSE", True)
+        )
+        stop_on_close = bool(getattr(config, "DASHBOARD_STOP_BOTS_ON_CLOSE", False))
+        if not restart_on_close and not stop_on_close:
+            self._shutdown()
+            return
+
+        self._close_reset_busy = True
+        try:
+            self.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
+        status = (
+            "Closing: restarting live + paper…"
+            if restart_on_close
+            else "Closing: stopping portal bots…"
+        )
+        try:
+            self._status_label.configure(text=status)
+            self._set_bot_action_buttons_busy(True, status=status)
+            self.update_idletasks()
+        except Exception:
+            pass
+
+        def _worker() -> None:
+            ok, msg = True, ""
+            try:
+                if restart_on_close:
+                    from scripts.owner_reset import clean_restart_both_bots
+
+                    ok, msg = clean_restart_both_bots(self._username)
+                else:
+                    from scripts.owner_reset import stop_both_bots
+
+                    ok, msg = stop_both_bots(self._username)
+            except Exception as exc:
+                ok, msg = False, str(exc)
+
+            def _finish() -> None:
+                self._close_reset_busy = False
+                if not ok:
+                    try:
+                        messagebox.showwarning(
+                            "Dashboard close",
+                            f"Bot reset had issues (UI will still close):\n\n{msg}",
+                        )
+                    except Exception:
+                        pass
+                self._shutdown()
+
+            self.after(0, _finish)
+
+        threading.Thread(
+            target=_worker, daemon=True, name="dashboard-close-reset"
+        ).start()
+
+    def _on_close(self) -> None:
+        # Close always clean-restarts live + paper (env/code update), then exits.
+        # Tray "minimize on X" used to skip that and only hide the window — which
+        # left bots on stale processes. Use the tray icon Show after Quit only if
+        # you relaunch; X / Quit = reset both + close UI.
+        self._close_with_bot_reset()
 
 
 def _hide_venv_stub_parent_window() -> None:
