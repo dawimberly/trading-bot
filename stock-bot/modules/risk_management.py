@@ -4,6 +4,7 @@
 
 import datetime
 import logging
+import math
 from pathlib import Path
 
 import config
@@ -400,8 +401,55 @@ def portfolio_vol_risk_multiplier(
     return round(max(min_mult, ceiling / ann), 4)
 
 
+def _daily_close_series(prices):
+    """Collapse sub-daily closes to one last print per calendar day.
+
+    Live pipeline data is 5m; ATR stops/sizing are defined on daily range.
+    Daily (or integer-indexed backtest) series pass through unchanged.
+    """
+    import pandas as pd
+
+    if prices is None or len(prices) < 2:
+        return prices
+    idx = getattr(prices, "index", None)
+    if not isinstance(idx, pd.DatetimeIndex) or len(idx) < 3:
+        return prices
+    deltas = pd.Series(idx).diff().dropna()
+    if deltas.empty:
+        return prices
+    try:
+        med = pd.Timedelta(deltas.median())
+    except (TypeError, ValueError):
+        return prices
+    if med >= pd.Timedelta(hours=12):
+        return prices
+    daily = prices.resample("1D").last().dropna()
+    return daily if len(daily) >= 2 else prices
+
+
+def _scale_intraday_atr_to_daily(native_atr: float, prices) -> float:
+    """When the matrix is too short to resample, scale bar ATR by sqrt(bars/day)."""
+    import pandas as pd
+
+    idx = getattr(prices, "index", None)
+    if not isinstance(idx, pd.DatetimeIndex) or len(prices) < 2:
+        return native_atr
+    n_days = int(idx.normalize().nunique())
+    if n_days < 1:
+        return native_atr
+    bars_per_day = len(prices) / n_days
+    if bars_per_day <= 1.5:
+        return native_atr
+    return native_atr * math.sqrt(bars_per_day)
+
+
 def calculate_atr(data, symbol: str, period: int | None = None) -> float | None:
-    """Average true range proxy from daily close series (|Δclose| rolling mean)."""
+    """Average true range proxy from daily close series (|Δclose| rolling mean).
+
+    Live close matrices are 5-minute bars. Using those raw would make a 14-period
+    ATR ~70 minutes of noise (~0.2% of price) and fire 2.0× stops on the first tick.
+    Sub-daily series are resampled to daily last close (or scaled if too short).
+    """
     import numpy as np
 
     sym = config.normalize_symbol(symbol)
@@ -411,9 +459,21 @@ def calculate_atr(data, symbol: str, period: int | None = None) -> float | None:
     prices = data[sym].dropna()
     if len(prices) < period + 1:
         return None
-    tr = prices.diff().abs()
+    daily = _daily_close_series(prices)
+    if daily is not None and len(daily) >= period + 1:
+        src = daily
+        scale = False
+    else:
+        src = prices
+        scale = True
+    tr = src.diff().abs()
     atr = tr.rolling(window=period).mean().iloc[-1]
     if not np.isfinite(atr) or float(atr) <= 0:
+        return None
+    atr = float(atr)
+    if scale:
+        atr = _scale_intraday_atr_to_daily(atr, prices)
+    if not math.isfinite(atr) or atr <= 0:
         return None
     return round(float(atr), 4)
 

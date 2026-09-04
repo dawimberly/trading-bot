@@ -1,7 +1,9 @@
 """Smart ATR stop-loss with conviction reevaluation (paper / Realistic Research).
 
-Default protective stop at ``ATR_STOP_MULTIPLIER`` × ATR. At the first
-reeval threshold (default −5% unrealized):
+Default protective stop at ``ATR_STOP_MULTIPLIER`` × **daily** ATR (live 5m
+matrices are resampled in ``calculate_atr``). Distance is also floored at
+``ATR_STOP_MIN_PCT`` of entry so a 5m-scaled ATR cannot arm a 0.2% stop.
+At the first reeval threshold (default −5% unrealized):
   • High conviction (RVOL > 2.5 OR catalyst > 70 OR insider cluster)
     → tighten stop to ``ATR_TIGHTEN_MULTIPLIER`` × ATR
   • Low conviction → cut size 50%, keep stop on the remainder
@@ -91,6 +93,15 @@ def atr_tighten_multiplier() -> float:
     return float(getattr(config, "ATR_TIGHTEN_MULTIPLIER", 1.0))
 
 
+def atr_stop_min_pct() -> float:
+    """Minimum stop distance as a fraction of entry (default 1%)."""
+    try:
+        v = float(getattr(config, "ATR_STOP_MIN_PCT", 0.01))
+    except (TypeError, ValueError):
+        v = 0.01
+    return max(0.0, min(v, 0.20))
+
+
 def compute_stop_price(
     entry: float,
     atr: float,
@@ -99,12 +110,31 @@ def compute_stop_price(
     side: str = "long",
 ) -> float:
     entry = max(0.01, float(entry))
-    atr_v = max(0.01, float(atr))
+    atr_v = max(0.0, float(atr))
     mult = float(multiplier if multiplier is not None else atr_stop_multiplier())
     dist = atr_v * mult
+    dist = max(dist, entry * atr_stop_min_pct())
     if str(side).lower() == "short":
         return round(entry + dist, 2)
     return round(max(0.01, entry - dist), 2)
+
+
+def _stop_too_tight(
+    entry: float,
+    stop: float,
+    atr: float,
+    multiplier: float,
+    side: str,
+) -> bool:
+    """True when a stamped stop is still 5m-noise scale vs daily ATR / min pct."""
+    entry = float(entry)
+    stop = float(stop)
+    if entry <= 0 or stop <= 0:
+        return True
+    dist = abs(entry - stop)
+    expected = max(0.0, float(atr)) * float(multiplier)
+    need = max(expected * 0.5, abs(entry) * atr_stop_min_pct())
+    return dist + 1e-9 < need
 
 
 def ensure_initial_stop(
@@ -114,11 +144,13 @@ def ensure_initial_stop(
     atr: float,
     side: str = "long",
 ) -> dict[str, Any]:
-    """Stamp default ATR stop on position meta if missing."""
+    """Stamp default ATR stop on position meta if missing or implausibly tight."""
     row = dict(meta or {})
-    if row.get("smart_stop_price") and row.get("atr_stop_mult"):
-        return row
     mult = atr_stop_multiplier()
+    existing = row.get("smart_stop_price")
+    if existing and row.get("atr_stop_mult"):
+        if not _stop_too_tight(entry, float(existing), atr, mult, side):
+            return row
     row["atr_stop_mult"] = mult
     row["smart_stop_price"] = compute_stop_price(entry, atr, multiplier=mult, side=side)
     row.setdefault("smart_reeval_done", False)
