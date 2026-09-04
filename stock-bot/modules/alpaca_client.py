@@ -31,6 +31,16 @@ NETWORK_BACKOFF_MIN_SEC = 5.0
 NETWORK_BACKOFF_MAX_SEC = 30.0
 TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 AUTH_HTTP_STATUS = frozenset({401, 403})
+# HTTP 403 + code 40310000 is Alpaca's generic "forbidden" for *orders*,
+# not missing API keys. These must not kill the bot as "auth".
+_ORDER_FORBIDDEN_MARKERS = (
+    "not fractionable",
+    "insufficient qty",
+    "insufficient buying power",
+    "insufficient day trading",
+    "wash trade",
+    "not allowed to short",
+)
 
 _NETWORK_MARKERS = (
     "nameresolutionerror",
@@ -217,13 +227,27 @@ def is_transient_alpaca_error(exc: BaseException) -> bool:
     return isinstance(exc, (TimeoutError, OSError, ConnectionError))
 
 
+def is_order_forbidden_not_auth(exc: BaseException) -> bool:
+    """True for Alpaca 40310000 order rejects (fractional, buying power, wash, …)."""
+    msg = str(exc).lower()
+    if any(marker in msg for marker in _ORDER_FORBIDDEN_MARKERS):
+        return True
+    cause = getattr(exc, "__cause__", None)
+    if cause is not None and cause is not exc:
+        return is_order_forbidden_not_auth(cause)
+    return False
+
+
+def is_not_fractionable_error(exc: BaseException) -> bool:
+    return "not fractionable" in str(exc).lower()
+
+
 def is_auth_alpaca_error(exc: BaseException) -> bool:
     if not isinstance(exc, APIError):
         return False
     status = getattr(exc, "status_code", None)
-    msg = str(exc).lower()
-    # Insufficient qty / missing asset are order/asset issues, not credential auth.
-    if status == 403 and "insufficient qty" in msg:
+    # Order rejects share HTTP 403 / 40310000 with real credential failures.
+    if is_order_forbidden_not_auth(exc):
         return False
     if is_unknown_asset_error(exc):
         return False
@@ -245,16 +269,15 @@ def is_unknown_asset_error(exc: BaseException) -> bool:
 
 
 def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation, unknown asset, or insufficient-qty 403 — do not crash the cycle."""
+    """422 notional/qty validation, unknown asset, or order-forbidden 403 — do not crash the cycle."""
+    if is_order_forbidden_not_auth(exc):
+        return True
     if not isinstance(exc, APIError):
         return is_unknown_asset_error(exc)
     status = getattr(exc, "status_code", None)
-    msg = str(exc).lower()
     if is_unknown_asset_error(exc):
         return True
     if status == 422:
-        return True
-    if status == 403 and "insufficient qty" in msg:
         return True
     return False
 

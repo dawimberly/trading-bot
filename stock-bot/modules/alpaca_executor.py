@@ -18,6 +18,7 @@ from modules.alpaca_client import (
     AlpacaValidationError,
     call_with_retry,
     get_trading_client,
+    is_not_fractionable_error,
     is_unknown_asset_error,
 )
 from modules.cost_basis import underwater_sizing_scale
@@ -30,6 +31,8 @@ T = TypeVar("T")
 # Session-level skip list for symbols Alpaca rejects as unknown/untradable (e.g. SKY-USD).
 _UNKNOWN_ASSETS: set[str] = set()
 _TRADABLE_ASSETS: set[str] = set()
+# Whole-share only — Alpaca notional/fractional orders 403 with 40310000.
+_NON_FRACTIONABLE_ASSETS: set[str] = set()
 
 
 class AlpacaExecutor:
@@ -371,6 +374,50 @@ class AlpacaExecutor:
     def _is_unknown_asset(self, symbol: str) -> bool:
         return config.normalize_symbol(symbol) in _UNKNOWN_ASSETS
 
+    @staticmethod
+    def _mark_not_fractionable(symbol: str) -> None:
+        sym = config.normalize_symbol(symbol)
+        if not sym or sym in _NON_FRACTIONABLE_ASSETS:
+            return
+        _NON_FRACTIONABLE_ASSETS.add(sym)
+        logger.info("Alpaca asset %s is not fractionable — whole-share orders only", sym)
+
+    def _is_not_fractionable(self, symbol: str) -> bool:
+        return config.normalize_symbol(symbol) in _NON_FRACTIONABLE_ASSETS
+
+    def _last_equity_price(self, symbol: str) -> float | None:
+        try:
+            from modules.real_time_data import get_latest_price
+
+            px = get_latest_price(symbol)
+            if px is not None and float(px) > 0:
+                return float(px)
+        except Exception:
+            pass
+        data = getattr(self, "_sizing_data", None)
+        if data is None:
+            return None
+        try:
+            cols = getattr(data, "columns", [])
+            if symbol not in cols:
+                return None
+            series = data[symbol].dropna()
+            if len(series) == 0:
+                return None
+            px = float(series.iloc[-1])
+            return px if px > 0 else None
+        except Exception:
+            return None
+
+    def _whole_share_qty_for_notional(self, symbol: str, notional) -> str | None:
+        px = self._last_equity_price(symbol)
+        if px is None or px <= 0:
+            return None
+        shares = int(math.floor(float(notional) / px))
+        if shares < 1:
+            return None
+        return str(shares)
+
     def _asset_tradable(self, symbol: str) -> bool:
         """Best-effort tradability check; False on 401/403/404/not-found. Never raises."""
         sym = config.normalize_symbol(symbol)
@@ -385,6 +432,8 @@ class AlpacaExecutor:
             if not tradable:
                 self._mark_unknown_asset(sym, "not tradable")
                 return False
+            if not bool(getattr(asset, "fractionable", True)):
+                self._mark_not_fractionable(sym)
             _TRADABLE_ASSETS.add(sym)
             return True
         except AlpacaAuthError as exc:
@@ -1744,6 +1793,64 @@ class AlpacaExecutor:
                 return submitted
 
         order_side = OrderSide.BUY if side_lower == "buy" else OrderSide.SELL
+        if (
+            side_lower == "buy"
+            and not is_crypto_sym
+            and self._is_not_fractionable(symbol)
+        ):
+            qty = self._whole_share_qty_for_notional(symbol, target_notional)
+            if qty is None:
+                logger.info(
+                    "execute_order skipped: %s is not fractionable and no whole share "
+                    "fits notional $%.2f",
+                    symbol,
+                    float(target_notional),
+                )
+                return None
+            order = MarketOrderRequest(
+                symbol=formatted_symbol,
+                qty=qty,
+                side=order_side,
+                time_in_force=tif,
+            )
+            try:
+                submitted = self._submit_order(
+                    order,
+                    symbol=symbol,
+                    side=side,
+                    reason=reason,
+                    sleeve=sleeve,
+                    qty=qty,
+                )
+            except AlpacaValidationError as exc:
+                if is_unknown_asset_error(exc):
+                    self._mark_unknown_asset(symbol, exc)
+                    return None
+                logger.info(
+                    "execute_order skipped whole-share buy for %s: %s", symbol, exc
+                )
+                return None
+            if submitted is None:
+                return None
+            order_id = getattr(submitted, "id", None)
+            logger.info(
+                "order submitted",
+                extra={
+                    "symbol": symbol,
+                    "side": side.lower(),
+                    "qty": qty,
+                    "order_id": order_id,
+                },
+            )
+            log_event(
+                "order_submitted",
+                symbol=symbol,
+                side=side.lower(),
+                qty=qty,
+                order_id=order_id,
+            )
+            return submitted
+
         order = MarketOrderRequest(
             symbol=formatted_symbol,
             notional=target_notional,
@@ -1763,7 +1870,49 @@ class AlpacaExecutor:
             if is_unknown_asset_error(exc):
                 self._mark_unknown_asset(symbol, exc)
                 return None
-            raise
+            if is_not_fractionable_error(exc) and side_lower == "buy" and not is_crypto_sym:
+                self._mark_not_fractionable(symbol)
+                qty = self._whole_share_qty_for_notional(symbol, target_notional)
+                if qty is None:
+                    logger.info(
+                        "execute_order skipped: %s not fractionable; cannot size "
+                        "whole shares from $%.2f",
+                        symbol,
+                        float(target_notional),
+                    )
+                    return None
+                logger.info(
+                    "Retrying %s as %s whole shares (notional $%.2f not fractionable)",
+                    symbol,
+                    qty,
+                    float(target_notional),
+                )
+                qty_order = MarketOrderRequest(
+                    symbol=formatted_symbol,
+                    qty=qty,
+                    side=order_side,
+                    time_in_force=tif,
+                )
+                try:
+                    submitted = self._submit_order(
+                        qty_order,
+                        symbol=symbol,
+                        side=side,
+                        reason=reason,
+                        sleeve=sleeve,
+                        qty=qty,
+                    )
+                except AlpacaValidationError as retry_exc:
+                    if is_unknown_asset_error(retry_exc):
+                        self._mark_unknown_asset(symbol, retry_exc)
+                    logger.info(
+                        "execute_order skipped whole-share retry for %s: %s",
+                        symbol,
+                        retry_exc,
+                    )
+                    return None
+            else:
+                raise
         if submitted is None:
             return None
         order_id = getattr(submitted, "id", None)
