@@ -282,6 +282,10 @@ def main() -> int:
     if not args.no_dashboard:
         _stop_dashboards()
         time.sleep(1.5)  # increased from 0.5 — give Windows time to release handles
+        look = ROOT / "scripts" / "apply_paqinhaus_look.py"
+        if look.is_file():
+            _log("Applying dashboard look...")
+            subprocess.run([sys.executable, str(look)], cwd=str(ROOT), check=False)
         _log("Opening dashboard (pythonw, no console)...")
         env = os.environ.copy()
         env["PYTHONTRADING_ROOT"] = str(ROOT)
@@ -298,6 +302,7 @@ def main() -> int:
 
     _log("Done. Wait ~60s for fresh heartbeats, then check the Overview tab.")
     return 0 if ok else 1
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
