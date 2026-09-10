@@ -8,6 +8,8 @@ alwaysApply: false
 
 Stack: **Python 3.11+**, **CustomTkinter** (`dashboard_app.py`), Streamlit backup (`dashboard.py`, `portal.py`). Dark mode default.
 
+Look spec: `stock-bot/docs/PAQINHAUS_LOOK.md`. Cursor prompt: `stock-bot/docs/CURSOR_PROMPT_PAQINHAUS_LOOK.md`.
+
 ## 1. Cognitive load (progressive disclosure)
 
 - **Primary surface:** equity, cash, position status, bot state, active book (Alpaca Live/Paper) — always visible in header + metric row.
@@ -18,29 +20,29 @@ Stack: **Python 3.11+**, **CustomTkinter** (`dashboard_app.py`), Streamlit backu
 
 ## 2. Visual hierarchy (F-pattern)
 
-Top bar left → right (high attention):
+Top of window:
 
-1. ☰ accounts menu
-2. App name
-3. **Active book** badge (Alpaca Live / Paper)
-4. Username (muted)
-
-Below header:
-
-1. **Metric cards** (Equity, Cash %, Invested %, P&L, Market) — top-left, largest numbers
-2. **Primary CTAs** (Start Bot / Stop Bot / Refresh) — footer or header right; **Stop Bot** uses confirmation; live actions use extra friction (confirm + warning copy)
+1. 6px cyan hairline (`#1fa8ef`)
+2. Kicker `PYTHONTRADING · {book}` + giant Georgia **Stock-bot** wordmark + `NYSE 100` stamp
+3. Running/halted chip + Paper/Live book switcher
+4. Cyan tape (NYSE 100% · VTI CORE OFF · …)
+5. Live banner (live book only)
+6. Status pills + metric cards (Equity, Cash %, Invested %, P&L, Market)
+7. Tabs: Positions / Overview / Trades / Wisdom / Charts
 
 Fitts's Law: primary actions ≥ 88px wide, reachable without crossing the full window.
 
 ## 3. Error mitigation & color
 
-Palette (`dashboard_app.py` `COLORS`):
+Palette (`dashboard_app.py` `COLORS`) — Paqinhaüs poster:
 
-- Background `#141414`, cards `#1e1e1e`, muted text `#9ca3af`
-- **Green** `#22c55e` — positive P&L, bot running (not generic UI)
-- **Amber** `#f59e0b` — stopped/warning, small-account mode (not panic)
-- **Red** `#dc2626` / `#7f1d1d` — **live money banner, destructive actions, errors only** — never for labels, borders, or decoration (avoid alert fatigue)
-- Live vs paper must be instantly distinguishable (banner + title book badge)
+- Background `#0b0b0e`, surface `#121214`, cards `#16161a` / `#1a1a1f`, ink `#f2ebe0`, muted `#a89f91`
+- **Cyan** `#1fa8ef` — primary accent, paper tab, tape, stamp, charts
+- **Green** `#7ec13a` — positive P&L, bot running (not generic UI)
+- **Amber** `#f4d21e` — stopped/warning, small-account mode (not panic)
+- **Red** `#e23a3a` / live `#c81e1e` — **live money banner, losses, destructive actions, errors only** — never for labels, borders, or decoration
+- Live vs paper must be instantly distinguishable (banner + title kicker + book switcher)
+- Do **not** use navy `#0a0e17` / `#2563eb` on the monitor
 
 High-risk actions require:
 
@@ -57,6 +59,7 @@ Color-blind: do not rely on red vs green alone — pair with text ("Running", "L
 - **Order book:** N/A (bot-driven); show **sleeve caps / exposure** instead of fake order UI
 - Button states: every `CTkButton` needs distinct `fg_color` / `hover_color`; disabled = `state="disabled"` + muted color
 - Dark theme only for desktop monitor; no white flashes on refresh
+- Display type is Georgia (hero **Stock-bot**); body/metrics are Segoe UI tabular
 
 ## 5. Multi-account (books)
 
@@ -68,7 +71,8 @@ Color-blind: do not rely on red vs green alone — pair with text ("Running", "L
 
 Before merging UI changes, verify:
 
-- [ ] Default view still shows equity + bot state in &lt; 3 seconds of scanning
+- [ ] Default view still shows equity + bot state in < 3 seconds of scanning
 - [ ] New config lives in tab, menu, or dialog — not the main canvas
 - [ ] Live/destructive actions have confirmation
 - [ ] Red used only for urgent/risk states
+- [ ] Palette still matches `stock-bot/docs/PAQINHAUS_LOOK.md`

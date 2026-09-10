@@ -1,7 +1,8 @@
-"""Apply Paqinhaüs look tokens to stock-bot dashboards. Look only. Idempotent."""
+"""Apply Paqinhaüs poster look to stock-bot dashboards. Look only. Idempotent."""
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,7 +10,7 @@ APP = ROOT / "dashboard_app.py"
 STREAMLIT = ROOT / "dashboard.py"
 
 NEW_COLORS = '''COLORS = {
-    # Paqinhaüs tokens — look only; live banner stays loud red
+    # Paqinhaüs poster tokens — look only; live banner stays loud red
     "bg": "#0b0b0e",
     "surface": "#121214",
     "surface2": "#16161a",
@@ -38,56 +39,16 @@ NEW_COLORS = '''COLORS = {
     "magenta": "#e653a4",
 }'''
 
-OLD_COLORS = '''COLORS = {
-    "bg": "#0a0e17",
-    "surface": "#111827",
-    "surface2": "#1a2332",
-    "card": "#152238",
-    "card_hover": "#1c2d4a",
-    "border": "#243049",
-    "muted": "#8b9cb8",
-    "text": "#e8eef7",
-    "text_dim": "#c5d0e0",
-    "green": "#34d399",
-    "green_dim": "#065f46",
-    "red": "#f87171",
-    "red_dim": "#7f1d1d",
-    "amber": "#fbbf24",
-    "amber_dim": "#78350f",
-    "blue": "#60a5fa",
-    "accent": "#2563eb",
-    "accent_hover": "#1d4ed8",
-    "live": "#991b1b",
-    "live_bg": "#450a0a",
-    "small": "#b45309",
-    "small_bg": "#451a03",
-    "paper_ok": "#065f46",
-    "paper_ok_bg": "#064e3b",
-    "chart_grid": "#243049",
-}'''
-
 NEW_FONTS = '''FONTS = {
-    "hero": ("Georgia", 28, "bold"),
-    "hero_sub": ("Georgia", 22, "bold"),
-    "title": ("Georgia", 20, "bold"),
-    "heading": ("Georgia", 14, "bold"),
+    "hero": ("Georgia", 42, "bold"),
+    "hero_sub": ("Georgia", 26, "bold"),
+    "title": ("Georgia", 22, "bold"),
+    "heading": ("Georgia", 16, "bold"),
     "body": ("Segoe UI", 12),
     "body_sm": ("Segoe UI", 11),
     "caption": ("Segoe UI", 10),
-    "metric": ("Segoe UI", 16, "bold"),
-    "metric_sm": ("Segoe UI", 13, "bold"),
-}'''
-
-OLD_FONTS = '''FONTS = {
-    "hero": ("Segoe UI", 28, "bold"),
-    "hero_sub": ("Segoe UI", 22, "bold"),
-    "title": ("Segoe UI", 20, "bold"),
-    "heading": ("Segoe UI", 14, "bold"),
-    "body": ("Segoe UI", 12),
-    "body_sm": ("Segoe UI", 11),
-    "caption": ("Segoe UI", 10),
-    "metric": ("Segoe UI", 16, "bold"),
-    "metric_sm": ("Segoe UI", 13, "bold"),
+    "metric": ("Segoe UI", 22, "bold"),
+    "metric_sm": ("Segoe UI", 15, "bold"),
 }'''
 
 ACCENT_OLD = '''        # Header bar
@@ -100,7 +61,7 @@ ACCENT_OLD = '''        # Header bar
         )
         header_bar.pack(fill="x", padx=14, pady=(12, 6))'''
 
-ACCENT_NEW = '''        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=4, corner_radius=0)
+ACCENT_NEW = '''        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
         accent_bar.pack(fill="x")
         accent_bar.pack_propagate(False)
 
@@ -115,6 +76,14 @@ ACCENT_NEW = '''        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"
         header_bar.pack(fill="x", padx=14, pady=(12, 6))'''
 
 
+def _replace_block(text: str, name: str, new_block: str) -> str:
+    pattern = rf"^{re.escape(name)} = \{{.*?\n\}}"
+    compiled = re.compile(pattern, re.M | re.S)
+    if compiled.search(text):
+        return compiled.sub(new_block, text, count=1)
+    return text
+
+
 def _swap(s: str, old: str, new: str) -> str:
     if new.strip() in s and old not in s:
         return s
@@ -124,8 +93,8 @@ def _swap(s: str, old: str, new: str) -> str:
 
 
 def patch_app(text: str) -> str:
-    text = _swap(text, OLD_COLORS, NEW_COLORS)
-    text = _swap(text, OLD_FONTS, NEW_FONTS)
+    text = _replace_block(text, "COLORS", NEW_COLORS)
+    text = _replace_block(text, "FONTS", NEW_FONTS)
     text = text.replace(
         'ctk.set_default_color_theme("blue")',
         'ctk.set_default_color_theme("dark-blue")',
@@ -155,6 +124,10 @@ def patch_app(text: str) -> str:
                 hover_color=COLORS["paper_ok"],''',
     )
     text = text.replace('specs.append(("GLD", "#fbbf24"))', 'specs.append(("GLD", COLORS["amber"]))')
+    text = text.replace(
+        'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=4, corner_radius=0)',
+        'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)',
+    )
     if 'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"]' not in text:
         text = _swap(text, ACCENT_OLD, ACCENT_NEW)
     return text
@@ -166,14 +139,14 @@ def patch_streamlit(text: str) -> str:
     needle = """        <style>
         .live-trading-banner {"""
     insert = """        <style>
-        html, body, [data-testid="stAppViewContainer"], .stApp {
+        html, body, [data-testid=\"stAppViewContainer\"], .stApp {
             background: #0b0b0e !important;
             color: #f2ebe0 !important;
         }
-        [data-testid="stHeader"] { background: #0b0b0e !important; }
+        [data-testid=\"stHeader\"] { background: #0b0b0e !important; }
         h1, h2, h3 { color: #f2ebe0 !important; font-family: Georgia, serif !important; }
-        [data-testid="stMetricValue"] { color: #f2ebe0 !important; font-variant-numeric: tabular-nums; }
-        [data-testid="stMetricLabel"] { color: #a89f91 !important; }
+        [data-testid=\"stMetricValue\"] { color: #f2ebe0 !important; font-variant-numeric: tabular-nums; }
+        [data-testid=\"stMetricLabel\"] { color: #a89f91 !important; }
         .stButton>button {
             background: #1fa8ef !important;
             color: #0b0b0e !important;
