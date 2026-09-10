@@ -75,6 +75,8 @@ ACCENT_NEW = '''        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"
         )
         header_bar.pack(fill="x", padx=14, pady=(12, 6))'''
 
+PAPER_V2_TITLE = "33/67 (target VTI 33% / NYSE 67%)"
+
 
 def _replace_block(text: str, name: str, new_block: str) -> str:
     pattern = rf"^{re.escape(name)} = \{{.*?\n\}}"
@@ -90,6 +92,17 @@ def _swap(s: str, old: str, new: str) -> str:
     if old not in s:
         return s
     return s.replace(old, new, 1)
+
+
+def patch_paper_v2_title(text: str) -> str:
+    """Chrome leftover from the 100% NYSE cutover. Display only."""
+    text = re.sub(
+        r"NYSE-only\s*100%\s*\|\s*NYSE\s*100%",
+        PAPER_V2_TITLE,
+        text,
+    )
+    text = re.sub(r"NYSE-only\s*100%?", PAPER_V2_TITLE, text)
+    return text
 
 
 def patch_app(text: str) -> str:
@@ -130,6 +143,7 @@ def patch_app(text: str) -> str:
     )
     if 'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"]' not in text:
         text = _swap(text, ACCENT_OLD, ACCENT_NEW)
+    text = patch_paper_v2_title(text)
     return text
 
 
