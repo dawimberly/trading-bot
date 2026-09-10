@@ -87,6 +87,45 @@ if not any(isinstance(f, _YfinanceCryptoDelistedFilter) for f in _yf_logger.filt
 warnings.filterwarnings("ignore", message=r".*possibly delisted.*")
 
 pair_cooldown = {}
+_log = logging.getLogger(__name__)
+_LAST_CYCLE_DONE_MONO: float | None = None
+_CYCLE_GAP_SEC = float(os.getenv("CYCLE_GAP_OPS_SEC", "1200") or 1200)
+
+
+def _cycle_print(msg: str) -> None:
+    """Per-cycle banner: stdout only when VERBOSE_CYCLE_LOG=true; else DEBUG."""
+    try:
+        verbose = bool(config.verbose_cycle_log())
+    except Exception:
+        verbose = False
+    if verbose:
+        print(msg, flush=True)
+    else:
+        _log.debug("%s", msg)
+
+
+def _note_cycle_gap() -> None:
+    """Emit ops event when cycles were stalled (sleep / WiFi / hang)."""
+    if _LAST_CYCLE_DONE_MONO is None:
+        return
+    gap = time.monotonic() - _LAST_CYCLE_DONE_MONO
+    if gap < _CYCLE_GAP_SEC:
+        return
+    mins = int(gap // 60)
+    msg = f"--- Ops: cycle gap {mins}m (sleep/network/stall?) ---"
+    print(msg, flush=True)
+    _log.warning("cycle gap %.0fs", gap)
+    try:
+        trade_journal.log_ops_event("cycle_gap", gap_sec=int(gap), gap_min=mins)
+    except Exception:
+        pass
+    try:
+        from modules.session_uptime import note_gap
+
+        note_gap(gap)
+    except Exception:
+        pass
+
 
 logger = logging.getLogger(__name__)
 
@@ -613,6 +652,25 @@ def _write_heartbeat(
         payload["entry_skip_reason"] = entry_skip_reason
     if entry_skip_daily:
         payload["entry_skip_daily"] = entry_skip_daily
+    try:
+        from modules.session_uptime import pulse as _uptime_pulse, snapshot as _uptime_snap
+
+        payload["session_uptime"] = _uptime_pulse(market_open=bool(market_open))
+    except Exception:
+        pass
+    try:
+        from modules.exit_ledger import summarize_exit_ledger
+
+        # Cheap enough: CSV read ~4k rows; refresh each cycle for dashboard.
+        payload["exit_ledger"] = summarize_exit_ledger(days=20)
+    except Exception:
+        pass
+    try:
+        from modules.auto_tune import heartbeat_snapshot as _auto_tune_hb
+
+        payload["auto_tune"] = _auto_tune_hb()
+    except Exception:
+        pass
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
@@ -878,8 +936,8 @@ def main():
             print(f"--- Canceled {canceled} stale equity order(s) (session closed) ---")
 
     log_event("cycle_start", timestamp=str(datetime.datetime.now()))
-    print("--- Pipeline Cycle: " + str(datetime.datetime.now()) + " ---")
-    print(f"--- {format_scan_schedule_line(schedule)} ---")
+    _cycle_print("--- Pipeline Cycle: " + str(datetime.datetime.now()) + " ---")
+    _cycle_print(f"--- {format_scan_schedule_line(schedule)} ---")
     data = load_live_close_matrix()
     if config.effective_dynamic_core_enabled():
         from modules.core_allocator import maybe_refresh_core_allocation
@@ -1150,7 +1208,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Daily profit banking refresh", exc)
 
-    print(
+    _cycle_print(
         f"--- Regime: {display_regime} | Vol: {vol} | "
         f"Wisdom: {wisdom['wisdom_mode']} | web {web_s} | gap {gap_s}{pause_s}{regime_sz}{gp_s}{macro_s}{pnl_s} | "
         f"Equity session: {'OPEN' if market_open else 'CLOSED'} | "
@@ -1246,7 +1304,7 @@ def main():
                 )
                 summary = (insider_boost or {}).get("summary") or ""
                 if summary and summary != "insider signal boost off":
-                    print(f"--- Insider signal boost: {summary} ---")
+                    _cycle_print(f"--- Insider signal boost: {summary} ---")
         except Exception as exc:
             _warn_nonfatal("Insider signal boost error", exc)
 
@@ -1581,7 +1639,7 @@ def main():
         from modules.social_sleeve import apply_dynamic_social_gate
 
         apply_dynamic_social_gate(
-            display_regime, bubble_for_social, log=True
+            display_regime, bubble_for_social, log=bool(config.verbose_cycle_log())
         )
     if (
         config.effective_social_sleeve_enabled() or social_dynamic_ctx
@@ -1746,6 +1804,12 @@ def main():
     )
     if exits:
         print(f"--- Stop-loss exits: {exits} ---")
+    try:
+        from modules.one_r_hit_test import observe_open_positions
+
+        observe_open_positions(executor)
+    except Exception:
+        pass
 
     now = datetime.datetime.now()
     resolve_cycle_deploy(
@@ -1929,7 +1993,7 @@ def main():
                 market_open=False,
                 signals=gp_signals,
             )
-    print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
+    _cycle_print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
 
     sleeves = executor.sleeve_snapshot()
     metal_line = ""
@@ -1953,7 +2017,7 @@ def main():
             volatility=vol,
             wisdom_paused=bool(wisdom.get("wisdom_paused")),
         )
-    print(f"--- Entry gates: {entry_skip_reason} ---")
+    _cycle_print(f"--- Entry gates: {entry_skip_reason} ---")
     from modules.entry_skip_tracker import (
         maybe_emit_daily_summary,
         record_cycle,
@@ -1961,12 +2025,12 @@ def main():
 
     entry_skip_daily = record_cycle(entry_skip_reason)
     maybe_emit_daily_summary()
-    print(
+    _cycle_print(
         f"=== CYCLE STATUS: spy={s} nyse={nyse_trades} crypto={c} | "
         f"gates={entry_skip_reason} | today skipped={entry_skip_daily.get('skipped_cycles', 0)} "
         f"({entry_skip_daily.get('top_skip', '-')}) ==="
     )
-    print(
+    _cycle_print(
         f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
         f"Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
         f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)}{metal_line} ---"
@@ -2663,11 +2727,25 @@ if __name__ == "__main__":
             f">{watchdog.timeout_sec:.0f}s) ---"
         )
 
+    try:
+        from modules.system_awake import arm as _keep_awake_arm, pulse as _keep_awake_pulse
+
+        _keep_awake_arm(reason="run_all engine")
+    except Exception:
+        _keep_awake_pulse = None  # type: ignore[assignment]
+
     while True:
+        if _keep_awake_pulse is not None:
+            try:
+                _keep_awake_pulse()
+            except Exception:
+                pass
         if watchdog is not None:
             watchdog.begin_cycle("main")
         try:
+            _note_cycle_gap()
             main()
+            _LAST_CYCLE_DONE_MONO = time.monotonic()
         except AlpacaAuthError as e:
             log_event("alpaca_auth_failure", error=str(e))
             logger.critical(

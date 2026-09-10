@@ -33,6 +33,12 @@ def _transcripts_dir(channel_id: str) -> Path:
     return path
 
 
+def _inbox_dir(channel_id: str) -> Path:
+    path = ROOT / config.youtube_inbox_dir(channel_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _sync_state_path(channel_id: str) -> Path:
     path = ROOT / config.youtube_channel_dir(channel_id) / "sync_state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -390,17 +396,26 @@ def _fetch_upload_date(video_id: str) -> str | None:
     return raw if len(raw) == 8 and raw.isdigit() else None
 
 
-def _fetch_transcript(video_id: str) -> str | None:
-    from youtube_transcript_api import YouTubeTranscriptApi
+def _fetch_transcript(video_id: str) -> tuple[str | None, str | None]:
+    """Return (text, error). error is set when captions cannot be fetched."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+    except ImportError:
+        raise RuntimeError(
+            "youtube-transcript-api not installed (pip install youtube-transcript-api)"
+        ) from None
 
     try:
         fetched = YouTubeTranscriptApi().fetch(video_id)
         snippets = getattr(fetched, "snippets", None) or fetched
-        return " ".join(
+        text = " ".join(
             s.text if hasattr(s, "text") else s["text"] for s in snippets
         )
-    except Exception:
-        return None
+        if not text.strip():
+            return None, "empty transcript"
+        return text, None
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
 
 
 def _resolve_channel_spec(
@@ -422,70 +437,255 @@ def _resolve_channel_spec(
     return None
 
 
+def _write_sync_state(cid: str, result: dict) -> None:
+    payload = {
+        "last_sync_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        **result,
+    }
+    with open(_sync_state_path(cid), "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def _append_manifest_row(
+    *,
+    manifest_path: Path,
+    transcripts_dir: Path,
+    spec: dict,
+    video_id: str,
+    title: str,
+    text: str,
+    published: str | None,
+    source: str,
+) -> dict:
+    out_file = transcripts_dir / f"{video_id}.txt"
+    out_file.write_text(text, encoding="utf-8")
+    sentiment = round(
+        score_transcript_text(text, channel_name=spec.get("name")), 4
+    )
+    _, macro_hits = score_creator_transcript_sentiment(
+        text, channel_name=spec.get("name")
+    )
+    row = {
+        "video_id": video_id,
+        "channel_id": spec["id"],
+        "channel_name": spec.get("name"),
+        "title": title,
+        "published": published,
+        "synced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "sentiment": sentiment,
+        "macro_bearish_hits": macro_hits,
+        "transcript_file": str(out_file.relative_to(ROOT)).replace("\\", "/"),
+        "chars": len(text),
+        "source": source,
+    }
+    with open(manifest_path, "a", encoding="utf-8") as manifest:
+        manifest.write(json.dumps(row) + "\n")
+    return row
+
+
 def sync_channel_transcripts(
     channel_id: str,
     *,
     max_videos: int | None = None,
     channel_url: str | None = None,
 ) -> dict:
-    """Pull new videos + captions for one registered channel."""
+    """Pull new videos + captions for one registered channel.
+
+    Scans up to FELIX_SYNC_LIST_LIMIT playlist entries and stops after
+    adding max_videos *new* transcripts (default FELIX_SYNC_MAX_VIDEOS).
+    """
     spec = _resolve_channel_spec(channel_id=channel_id, channel_url=channel_url)
     if not spec:
         return {"ok": False, "error": f"unknown channel: {channel_id}"}
     cid = spec["id"]
-    max_n = max_videos if max_videos is not None else config.FELIX_SYNC_MAX_VIDEOS
+    max_new = max_videos if max_videos is not None else config.FELIX_SYNC_MAX_VIDEOS
+    list_limit = max(int(getattr(config, "FELIX_SYNC_LIST_LIMIT", 45) or 45), max_new)
     channel = channel_url or spec["url"]
     transcripts_dir = _transcripts_dir(cid)
     manifest_path = _manifest_path(cid)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    _inbox_dir(cid)
 
     known = _existing_ids(manifest_path)
-    entries = _list_videos(channel, max_n)
+    try:
+        entries = _list_videos(channel, list_limit)
+    except Exception as exc:
+        result = {
+            "ok": False,
+            "channel_id": cid,
+            "channel_name": spec.get("name"),
+            "added": 0,
+            "skipped": 0,
+            "skipped_known": 0,
+            "skipped_no_caption": 0,
+            "listed": 0,
+            "list_limit": list_limit,
+            "max_new": max_new,
+            "manifest": str(manifest_path.relative_to(ROOT)),
+            "errors": [f"list_videos: {type(exc).__name__}: {exc}"],
+        }
+        _write_sync_state(cid, result)
+        return result
+
+    added = 0
+    skipped_known = 0
+    skipped_no_caption = 0
+    skipped_no_id = 0
+    errors: list[str] = []
+
+    for entry in entries:
+        if added >= max_new:
+            break
+        vid = entry.get("id") or entry.get("url", "").split("v=")[-1]
+        if not vid:
+            skipped_no_id += 1
+            continue
+        if vid in known:
+            skipped_known += 1
+            continue
+        text, err = _fetch_transcript(vid)
+        if not text:
+            skipped_no_caption += 1
+            if err:
+                msg = f"{vid}: {err}"
+                if len(errors) < 20:
+                    errors.append(msg)
+            continue
+        published = entry.get("upload_date") or entry.get("release_date")
+        if not published:
+            published = _fetch_upload_date(vid)
+        _append_manifest_row(
+            manifest_path=manifest_path,
+            transcripts_dir=transcripts_dir,
+            spec=spec,
+            video_id=vid,
+            title=str(entry.get("title") or ""),
+            text=text,
+            published=published,
+            source="youtube_transcript_api",
+        )
+        known.add(vid)
+        added += 1
+
+    skipped = skipped_known + skipped_no_caption + skipped_no_id
+    result = {
+        "ok": True,
+        "channel_id": cid,
+        "channel_name": spec.get("name"),
+        "added": added,
+        "skipped": skipped,
+        "skipped_known": skipped_known,
+        "skipped_no_caption": skipped_no_caption,
+        "skipped_no_id": skipped_no_id,
+        "listed": len(entries),
+        "list_limit": list_limit,
+        "max_new": max_new,
+        "manifest": str(manifest_path.relative_to(ROOT)),
+        "errors": errors,
+    }
+    if added == 0 and skipped_no_caption and not skipped_known:
+        result["message"] = "no captions for unknown videos"
+    elif added == 0 and skipped_known == len(entries) and entries:
+        result["message"] = (
+            f"all {len(entries)} listed videos already in manifest "
+            f"(raise FELIX_SYNC_LIST_LIMIT to scan deeper)"
+        )
+    _write_sync_state(cid, result)
+    return result
+
+
+def _parse_inbox_video_id(path: Path) -> str | None:
+    """Accept `{video_id}.txt` or `anything__{video_id}.txt` (11-char YouTube ids)."""
+    stem = path.stem.strip()
+    if not stem:
+        return None
+    if "__" in stem:
+        stem = stem.rsplit("__", 1)[-1].strip()
+    # YouTube ids are typically 11 chars [A-Za-z0-9_-]
+    if len(stem) == 11 and all(c.isalnum() or c in "-_" for c in stem):
+        return stem
+    # Allow bare id with slight length variance
+    if 10 <= len(stem) <= 12 and all(c.isalnum() or c in "-_" for c in stem):
+        return stem
+    return None
+
+
+def ingest_inbox_transcripts(
+    channel_id: str = "felix_and_friends",
+    *,
+    published: str | None = None,
+) -> dict:
+    """Ingest manual VidScript TXT drops from channel inbox/ into transcripts + manifest.
+
+    Operator workflow (≤3/day free on VidScript — human download only, no scrape):
+      1. Download TXT from vidscript.co
+      2. Save as sentiment/sources/youtube/<channel>/inbox/{video_id}.txt
+      3. Run: python scripts/maintenance/ingest_felix_inbox.py
+    """
+    spec = _resolve_channel_spec(channel_id=channel_id)
+    if not spec:
+        return {"ok": False, "error": f"unknown channel: {channel_id}"}
+    cid = spec["id"]
+    inbox = _inbox_dir(cid)
+    transcripts_dir = _transcripts_dir(cid)
+    manifest_path = _manifest_path(cid)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    known = _existing_ids(manifest_path)
 
     added = 0
     skipped = 0
     errors: list[str] = []
-    with open(manifest_path, "a", encoding="utf-8") as manifest:
-        for entry in entries:
-            vid = entry.get("id") or entry.get("url", "").split("v=")[-1]
-            if not vid or vid in known:
-                skipped += 1
-                continue
+    ingested: list[str] = []
+
+    for path in sorted(inbox.glob("*.txt")):
+        if path.name.startswith(".") or path.name.upper().startswith("README"):
+            continue
+        vid = _parse_inbox_video_id(path)
+        if not vid:
+            skipped += 1
+            errors.append(f"{path.name}: could not parse video_id")
+            continue
+        if vid in known:
+            skipped += 1
+            # remove duplicate drop so inbox stays clean
             try:
-                text = _fetch_transcript(vid)
-            except ImportError:
-                raise RuntimeError(
-                    "youtube-transcript-api not installed (pip install youtube-transcript-api)"
-                ) from None
-            if not text:
-                skipped += 1
-                continue
-            out_file = transcripts_dir / f"{vid}.txt"
-            out_file.write_text(text, encoding="utf-8")
-            sentiment = round(
-                score_transcript_text(text, channel_name=spec.get("name")), 4
-            )
-            _, macro_hits = score_creator_transcript_sentiment(
-                text, channel_name=spec.get("name")
-            )
-            published = entry.get("upload_date") or entry.get("release_date")
-            if not published:
-                published = _fetch_upload_date(vid)
-            row = {
-                "video_id": vid,
-                "channel_id": cid,
-                "channel_name": spec.get("name"),
-                "title": entry.get("title", ""),
-                "published": published,
-                "synced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                "sentiment": sentiment,
-                "macro_bearish_hits": macro_hits,
-                "transcript_file": str(out_file.relative_to(ROOT)).replace("\\", "/"),
-                "chars": len(text),
-            }
-            manifest.write(json.dumps(row) + "\n")
-            known.add(vid)
-            added += 1
+                path.unlink()
+            except OSError:
+                pass
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as exc:
+            errors.append(f"{path.name}: {exc}")
+            skipped += 1
+            continue
+        if not text:
+            skipped += 1
+            errors.append(f"{path.name}: empty file")
+            continue
+        title = path.stem
+        if "__" in title:
+            title = title.rsplit("__", 1)[0].replace("_", " ").strip() or vid
+        else:
+            title = vid
+        pub = published or datetime.now().strftime("%Y%m%d")
+        _append_manifest_row(
+            manifest_path=manifest_path,
+            transcripts_dir=transcripts_dir,
+            spec=spec,
+            video_id=vid,
+            title=title,
+            text=text,
+            published=pub,
+            source="vidscript_inbox",
+        )
+        known.add(vid)
+        added += 1
+        ingested.append(vid)
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
     result = {
         "ok": True,
@@ -493,18 +693,26 @@ def sync_channel_transcripts(
         "channel_name": spec.get("name"),
         "added": added,
         "skipped": skipped,
-        "manifest": str(manifest_path.relative_to(ROOT)),
+        "ingested": ingested,
+        "inbox": str(inbox.relative_to(ROOT)).replace("\\", "/"),
+        "manifest": str(manifest_path.relative_to(ROOT)).replace("\\", "/"),
         "errors": errors,
+        "source": "vidscript_inbox",
     }
-    with open(_sync_state_path(cid), "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "last_sync_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                **result,
-            },
-            f,
-            indent=2,
-        )
+    # Merge into sync_state without clobbering last yt sync stats entirely
+    state_path = _sync_state_path(cid)
+    prev: dict = {}
+    if state_path.is_file():
+        try:
+            prev = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            prev = {}
+    prev["last_inbox_ingest_at"] = datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    prev["last_inbox_ingest"] = result
+    with open(state_path, "w", encoding="utf-8") as f:
+        json.dump(prev, f, indent=2)
     return result
 
 

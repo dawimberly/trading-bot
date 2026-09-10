@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Sync YouTube creator transcripts (Felix, Andrei Jikh, …) into sentiment/sources/.
 
 Requires: pip install yt-dlp youtube-transcript-api
@@ -6,6 +7,9 @@ Run:
   python scripts/maintenance/sync_felix_transcripts.py
   python scripts/maintenance/sync_felix_transcripts.py --max 30
   python scripts/maintenance/sync_felix_transcripts.py --channel andrei_jikh --max 15
+
+Manual VidScript TXT (3/day human download — no scrape):
+  python scripts/maintenance/ingest_felix_inbox.py
 """
 
 from __future__ import annotations
@@ -16,13 +20,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import config
 from modules.felix_sentiment import backfill_manifest_published_dates, sync_felix_transcripts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync YouTube creator transcripts")
-    parser.add_argument("--max", type=int, default=None, help="Max videos to scan")
+    parser.add_argument(
+        "--max",
+        type=int,
+        default=None,
+        help="Max NEW videos to add per channel (default FELIX_SYNC_MAX_VIDEOS)",
+    )
     parser.add_argument(
         "--channel",
         default=None,
@@ -41,7 +49,9 @@ def main() -> None:
         except Exception as exc:
             print(f"FAIL: {exc}")
             sys.exit(1)
-        print(f"Updated {result.get('updated', 0)} / {result.get('total', 0)} manifest rows")
+        print(
+            f"Updated {result.get('updated', 0)} / {result.get('total', 0)} manifest rows"
+        )
         return
 
     try:
@@ -61,14 +71,25 @@ def main() -> None:
         sys.exit(1)
     if result.get("channels"):
         for ch in result["channels"]:
+            msg = ch.get("message") or ""
             print(
                 f"{ch.get('channel_name', ch.get('channel_id'))}: "
-                f"added {ch.get('added', 0)}, skipped {ch.get('skipped', 0)}"
+                f"added {ch.get('added', 0)}, skipped {ch.get('skipped', 0)} "
+                f"(known={ch.get('skipped_known', '?')} "
+                f"no_cap={ch.get('skipped_no_caption', '?')} "
+                f"listed={ch.get('listed', '?')}/{ch.get('list_limit', '?')})"
+                + (f" | {msg}" if msg else "")
             )
-        print(f"Total added {result.get('added', 0)}, skipped {result.get('skipped', 0)}")
+            for err in (ch.get("errors") or [])[:5]:
+                print(f"  err: {err}")
+        print(
+            f"Total added {result.get('added', 0)}, skipped {result.get('skipped', 0)}"
+        )
     else:
         print(f"Added {result.get('added', 0)}, skipped {result.get('skipped', 0)}")
         print(f"Manifest: {result.get('manifest')}")
+        for err in (result.get("errors") or [])[:5]:
+            print(f"  err: {err}")
 
 
 if __name__ == "__main__":

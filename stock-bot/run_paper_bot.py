@@ -41,6 +41,17 @@ _PORTAL_CREDENTIAL_KEYS = frozenset(
         "ALPACA_SECRET_KEY",
     }
 )
+# Root stock-bot/.env may carry legacy hygiene flips (e.g. cooldown=false).
+# Portal books: book file or code defaults win — never inherit these from root.
+_PORTAL_BOOK_HYGIENE_KEYS = frozenset(
+    {
+        "PAPER_NYSE_ENTRY_HYGIENE_ENABLED",
+        "PAPER_NYSE_MAX_ADDS_PER_SYMBOL",
+        "PAPER_NYSE_SAME_DAY_REENTRY_BLOCK",
+        "PAPER_NYSE_MIN_NOTIONAL",
+        "PAPER_NYSE_ATR_STOP_SLEEVE_COOLDOWN",
+    }
+)
 
 
 def _book_env_has_alpaca_keys(path: Path | str | None) -> bool:
@@ -88,6 +99,9 @@ def paper_env_file_overlay(env: dict[str, str], path: Path | None = None) -> dic
             continue
         if key in book_keys:
             continue
+        # Root must not clobber hygiene with legacy false (cooldown accident).
+        if portal and key in _PORTAL_BOOK_HYGIENE_KEYS:
+            continue
         out[str(key)] = str(val)
     return out
 
@@ -100,19 +114,30 @@ def load_paper_stock_env(*, override: bool = True) -> None:
 
     Portal-managed bots load the book .env first so root PAPER_APCA_* cannot
     replace per-book APCA_* keys (e.g. alpaca_paper_v2 vs legacy paper).
+    Book strategy + hygiene keys win over root; missing hygiene keys use code
+    defaults (not root legacy flips like COOLDOWN=false).
     """
     book_env = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
     if os.getenv("PORTAL_MANAGED_BOT") and book_env and os.path.isfile(book_env):
+        from dotenv import dotenv_values
+
+        book_keys = {
+            str(k)
+            for k, v in dotenv_values(book_env).items()
+            if k and v is not None and str(v).strip() != ""
+        }
         load_dotenv(book_env, override=True)
         stock = ROOT / ".env"
         if stock.is_file():
-            from dotenv import dotenv_values
-
             protect = _book_env_has_alpaca_keys(book_env)
             for key, val in dotenv_values(stock).items():
                 if not key or val is None:
                     continue
                 if protect and key in _PORTAL_CREDENTIAL_KEYS:
+                    continue
+                if key in book_keys:
+                    continue
+                if key in _PORTAL_BOOK_HYGIENE_KEYS:
                     continue
                 if key not in os.environ:
                     os.environ[str(key)] = str(val)
@@ -186,6 +211,32 @@ def _maybe_spawn_weekly_review(python: str, env: dict[str, str]) -> None:
         )
     except Exception as exc:
         print(f"--- Weekly review spawn failed: {exc} ---")
+
+
+def _maybe_run_auto_tune(env: dict[str, str]) -> None:
+    """Gated paper auto-tune eval (once/day). Propose-only unless AUTO_TUNE_APPLY."""
+    if not _truthy(env.get("AUTO_TUNE_ENABLED"), False):
+        return
+    marker = ROOT / "data" / f"auto_tune_ran_{datetime.now().date().isoformat()}.flag"
+    if marker.is_file():
+        return
+    try:
+        from modules import auto_tune
+
+        # Ensure process sees the arming flags from supervisor env.
+        if env.get("AUTO_TUNE_ENABLED"):
+            os.environ["AUTO_TUNE_ENABLED"] = str(env["AUTO_TUNE_ENABLED"])
+        if env.get("AUTO_TUNE_APPLY"):
+            os.environ["AUTO_TUNE_APPLY"] = str(env["AUTO_TUNE_APPLY"])
+        result = auto_tune.evaluate(force=False)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(result.get("decision") or "HOLD", encoding="utf-8")
+        print(
+            f"--- Auto-tune: {result.get('decision')} — {result.get('message')} ---",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"--- Auto-tune eval failed: {exc} ---", flush=True)
 
 
 def _maybe_spawn_freeze_ops(python: str, env: dict[str, str]) -> None:
@@ -502,6 +553,7 @@ def main() -> None:
 
     _maybe_spawn_weekly_review(python, env)
     _maybe_spawn_freeze_ops(python, env)
+    _maybe_run_auto_tune(env)
 
     config.init_paper_chase_if_enabled()
 
@@ -573,12 +625,30 @@ def main() -> None:
     proc = _spawn_run_all(python, env, flags)
     _force_write_paper_chase_heartbeat(env)
 
+    try:
+        from modules.system_awake import arm as _keep_awake_arm, pulse as _keep_awake_pulse
+
+        _keep_awake_arm(reason="paper bot")
+    except Exception:
+        _keep_awake_pulse = None  # type: ignore[assignment]
+
     last_crypto = 0.0
     poll_sec = 5
     restart_count = 0
     last_restart = 0.0
     try:
         while True:
+            if _keep_awake_pulse is not None:
+                try:
+                    _keep_awake_pulse()
+                except Exception:
+                    pass
+            try:
+                from modules.network_guard import pulse as _network_guard_pulse
+
+                _network_guard_pulse()
+            except Exception:
+                pass
             # Force-refresh paper_chase_heartbeat.json every supervisor tick so
             # status.py never shows a stale paper heartbeat while the engine runs.
             _force_write_paper_chase_heartbeat(env)

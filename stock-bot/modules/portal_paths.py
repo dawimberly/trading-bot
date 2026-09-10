@@ -186,6 +186,29 @@ def book_journal_path(username: str, book_id: str) -> Path:
     return book_dir(username, book_id) / "paper_journal.csv"
 
 
+def primary_portal_username() -> str:
+    return (os.getenv("PORTAL_OWNER_USERNAME") or "dawimberly").strip() or "dawimberly"
+
+
+def resolve_primary_paper_journal() -> Path:
+    """Employed paper SoT: alpaca_paper_v2/paper_journal.csv (may not exist yet)."""
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    return book_journal_path(primary_portal_username(), PRIMARY_PAPER_BOOK_ID)
+
+
+def resolve_primary_paper_heartbeat() -> Path:
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    return book_heartbeat_path(primary_portal_username(), PRIMARY_PAPER_BOOK_ID)
+
+
+def resolve_primary_paper_book_dir() -> Path:
+    from modules.trading_books import PRIMARY_PAPER_BOOK_ID
+
+    return book_dir(primary_portal_username(), PRIMARY_PAPER_BOOK_ID)
+
+
 def book_scorecard_path(username: str, book_id: str) -> Path:
     return book_dir(username, book_id) / "wisdom_scorecard.json"
 

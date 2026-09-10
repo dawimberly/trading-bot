@@ -9,9 +9,7 @@ hmmlearn>=0.3.0
 ccxt
 
 # (backtesting lib was for removed modules/backtest_engine.py; main backtester uses native pandas/yf sim)
-
-# Kraken — scripts/exchange/
-python-kraken-sdk
+arch>=6.0
 
 # Dashboard — dashboard.py (Streamlit backup) + dashboard_app.py (desktop)
 streamlit
@@ -23,8 +21,8 @@ pystray
 # Optional: pip install pyinstaller  — build with dashboard.spec
 
 # Felix transcript sync (optional — scripts/maintenance/sync_felix_transcripts.py)
-# yt-dlp
-# youtube-transcript-api
+yt-dlp
+youtube-transcript-api
 
 # NerdMiner monitor — nerdminer/
 pyserial

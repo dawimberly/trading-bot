@@ -240,6 +240,11 @@ USE_DYNAMIC_UNIVERSE = os.getenv("USE_DYNAMIC_UNIVERSE", "false").lower() in (
     "yes",
 )
 SCREENER_UNIVERSE_PATH = os.getenv("SCREENER_UNIVERSE_PATH", "data/screener_universe.json")
+# Optional: merge ranked symbols from nightly Alpaca scan (data/watchlists/current_watchlist.json)
+NIGHTLY_WATCHLIST_PATH = os.getenv(
+    "NIGHTLY_WATCHLIST_PATH", "data/watchlists/current_watchlist.json"
+)
+MERGE_NIGHTLY_WATCHLIST = _parse_env_bool("MERGE_NIGHTLY_WATCHLIST", default="true")
 
 # Index / core ETFs kept out of NYSE momentum unless NYSE_ALLOW_VANGUARD / no VTI core.
 _CORE_INDEX_ETFS = frozenset({"SPY", "QQQ", "IWM", "VTI"})
@@ -1834,7 +1839,10 @@ FELIX_SYNC_ENABLED = os.getenv("FELIX_SYNC_ENABLED", "false").lower() in (
     "yes",
 )
 FELIX_SYNC_INTERVAL_HOURS = int(os.getenv("FELIX_SYNC_INTERVAL_HOURS", "24"))
+# Max *new* transcripts to add per channel per sync (not playlist window).
 FELIX_SYNC_MAX_VIDEOS = int(os.getenv("FELIX_SYNC_MAX_VIDEOS", "15"))
+# How far down the channel /videos playlist to scan for unknowns (default >= 3x max).
+FELIX_SYNC_LIST_LIMIT = int(os.getenv("FELIX_SYNC_LIST_LIMIT", "45"))
 FELIX_SENTIMENT_ENABLED = os.getenv("FELIX_SENTIMENT_ENABLED", "false").lower() in (
     "1",
     "true",
@@ -1900,6 +1908,11 @@ def youtube_manifest_file(channel_id: str) -> str:
 
 def youtube_transcripts_dir(channel_id: str) -> str:
     return os.path.join(youtube_channel_dir(channel_id), "transcripts")
+
+
+def youtube_inbox_dir(channel_id: str) -> str:
+    """Manual VidScript / TXT drops before ingest into transcripts/ + manifest."""
+    return os.path.join(youtube_channel_dir(channel_id), "inbox")
 
 
 # --- Social / creator sleeve (Felix + shared sources): paper book, optional live mirror ---
@@ -3963,6 +3976,10 @@ def load_screener_universe_tickers() -> list[str] | None:
 
     Owner-pinned equities (``EQUITY_UNIVERSE_PINNED``) are always prepended so
     they stay eligible after weekly screener refreshes.
+
+    When ``MERGE_NIGHTLY_WATCHLIST`` is on, also append symbols from
+    ``data/watchlists/current_watchlist.json`` (nightly full-market scan) so
+    the bot *scans* wide while ``MAX_ACTIVE_TICKERS`` still caps how many it holds.
     """
     path = SCREENER_UNIVERSE_PATH
     tickers: list[str] = []
@@ -3977,6 +3994,23 @@ def load_screener_universe_tickers() -> list[str] | None:
             ]
         except (OSError, json.JSONDecodeError, TypeError, AttributeError):
             tickers = []
+
+    if MERGE_NIGHTLY_WATCHLIST:
+        wl_path = NIGHTLY_WATCHLIST_PATH
+        if not os.path.isabs(wl_path):
+            wl_path = str(PROJECT_ROOT / wl_path)
+        if os.path.isfile(wl_path):
+            try:
+                with open(wl_path, encoding="utf-8") as f:
+                    wl = json.load(f)
+                wl_syms = wl.get("symbols") or wl.get("tickers") or []
+                for t in wl_syms:
+                    s = normalize_symbol(str(t).strip().upper())
+                    if s:
+                        tickers.append(s)
+            except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+                pass
+
     pinned = [normalize_symbol(t) for t in EQUITY_UNIVERSE_PINNED if t]
     if not tickers and not pinned:
         return None
@@ -6151,6 +6185,11 @@ def set_paper_aggressive_context(active: bool) -> None:
 
 def paper_aggressive_context() -> bool:
     return PAPER_AGGRESSIVE_ENABLED and _paper_aggressive_ctx
+
+
+def verbose_cycle_log() -> bool:
+    """When false (default), demote per-cycle --- banners to DEBUG."""
+    return _env_bool_first("VERBOSE_CYCLE_LOG", default="false")
 
 
 def research_mode_ready() -> bool:
