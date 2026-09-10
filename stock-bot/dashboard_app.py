@@ -135,43 +135,45 @@ except ImportError:
     TRAY_AVAILABLE = False
 
 COLORS = {
-    "bg": "#0a0e17",
-    "surface": "#111827",
-    "surface2": "#1a2332",
-    "card": "#152238",
-    "card_hover": "#1c2d4a",
-    "border": "#243049",
-    "muted": "#8b9cb8",
-    "text": "#e8eef7",
-    "text_dim": "#c5d0e0",
-    "green": "#34d399",
-    "green_dim": "#065f46",
-    "red": "#f87171",
+    # Paqinhaüs poster tokens — look only; live banner stays loud red
+    "bg": "#0b0b0e",
+    "surface": "#121214",
+    "surface2": "#16161a",
+    "card": "#1a1a1f",
+    "card_hover": "#24242a",
+    "border": "#2e2c28",
+    "muted": "#a89f91",
+    "text": "#f2ebe0",
+    "text_dim": "#d4cbbd",
+    "green": "#7ec13a",
+    "green_dim": "#3d6a18",
+    "red": "#e23a3a",
     "red_dim": "#7f1d1d",
-    "amber": "#fbbf24",
-    "amber_dim": "#78350f",
-    "blue": "#60a5fa",
-    "accent": "#2563eb",
-    "accent_hover": "#1d4ed8",
-    "live": "#991b1b",
-    "live_bg": "#450a0a",
+    "amber": "#f4d21e",
+    "amber_dim": "#8a7610",
+    "blue": "#4fbcf5",
+    "accent": "#1fa8ef",
+    "accent_hover": "#1688c4",
+    "live": "#c81e1e",
+    "live_bg": "#3a0a0a",
     "small": "#b45309",
     "small_bg": "#451a03",
-    "paper_ok": "#065f46",
-    "paper_ok_bg": "#064e3b",
-    "chart_grid": "#243049",
+    "paper_ok": "#3d6a18",
+    "paper_ok_bg": "#1a3310",
+    "chart_grid": "#2e2c28",
+    "magenta": "#e653a4",
 }
 
 FONTS = {
-    "hero": ("Segoe UI", 28, "bold"),
-    "hero_sub": ("Segoe UI", 22, "bold"),
-    "title": ("Segoe UI", 20, "bold"),
-    "heading": ("Segoe UI", 14, "bold"),
+    "hero": ("Georgia", 42, "bold"),
+    "hero_sub": ("Georgia", 26, "bold"),
+    "title": ("Georgia", 22, "bold"),
+    "heading": ("Georgia", 16, "bold"),
     "body": ("Segoe UI", 12),
     "body_sm": ("Segoe UI", 11),
     "caption": ("Segoe UI", 10),
-    "metric": ("Segoe UI", 16, "bold"),
-    "metric_sm": ("Segoe UI", 13, "bold"),
+    "metric": ("Segoe UI", 22, "bold"),
+    "metric_sm": ("Segoe UI", 15, "bold"),
 }
 
 
@@ -183,7 +185,7 @@ def _ctk_font(key: str) -> ctk.CTkFont:
 plt.ioff()
 
 ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+ctk.set_default_color_theme("dark-blue")
 
 
 # --- Data layer --------------------------------------------------------------
@@ -2324,8 +2326,8 @@ class BookMenu(ctk.CTkToplevel):
             values=_book_dropdown_values(),
             command=self._on_book_selected,
             width=260,
-            fg_color="#1e3a5f",
-            button_color="#334155",
+            fg_color="#16161a",
+            button_color="#1a1a1f",
             button_hover_color="#475569",
         ).pack(anchor="w", padx=16, pady=(0, 12))
 
@@ -2567,6 +2569,10 @@ class TradingDashboardApp(ctk.CTk):
             except Exception:
                 pass
 
+        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
+        accent_bar.pack(fill="x")
+        accent_bar.pack_propagate(False)
+
         # Header bar
         header_bar = ctk.CTkFrame(
             self,
@@ -2576,6 +2582,17 @@ class TradingDashboardApp(ctk.CTk):
             border_color=COLORS["border"],
         )
         header_bar.pack(fill="x", padx=14, pady=(12, 6))
+
+        tape = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=28, corner_radius=0)
+        tape.pack(fill="x")
+        tape.pack_propagate(False)
+        ctk.CTkLabel(
+            tape,
+            text="NYSE 100%   ·   VTI CORE OFF   ·   SPY SLEEVE 0%   ·   CRYPTO 0%   ·   STAT-ARB 0%   ·   JOURNAL = FILL   ·   ATR COOLDOWN ON   ·   SURVIVAL NOT P95",
+            font=_ctk_font("caption"),
+            text_color=COLORS["bg"],
+        ).pack(expand=True)
+
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
         header_inner = ctk.CTkFrame(header_bar, fg_color="transparent")
@@ -2604,15 +2621,30 @@ class TradingDashboardApp(ctk.CTk):
         title_block.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(
             title_block,
-            text="PythonTrading Monitor",
-            font=_ctk_font("title"),
+            text="PYTHONTRADING",
+            font=_ctk_font("caption"),
+            text_color=COLORS["accent"],
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        word_row = ctk.CTkFrame(title_block, fg_color="transparent")
+        word_row.grid(row=1, column=0, sticky="w")
+        ctk.CTkLabel(
+            word_row,
+            text="Stock-bot",
+            font=_ctk_font("hero"),
             text_color=COLORS["text"],
             anchor="w",
-            wraplength=520,
-            justify="left",
-        ).grid(row=0, column=0, sticky="w")
+        ).pack(side="left")
+        ctk.CTkLabel(
+            word_row,
+            text="  NYSE 100  ",
+            font=_ctk_font("caption"),
+            text_color=COLORS["bg"],
+            fg_color=COLORS["accent"],
+            corner_radius=4,
+        ).pack(side="left", padx=(12, 0), pady=(10, 0))
         sub_row = ctk.CTkFrame(title_block, fg_color="transparent")
-        sub_row.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        sub_row.grid(row=2, column=0, sticky="w", pady=(2, 0))
         self._clock_label = ctk.CTkLabel(
             sub_row,
             text="",
@@ -2635,7 +2667,7 @@ class TradingDashboardApp(ctk.CTk):
             wraplength=520,
             justify="left",
         )
-        self._live_equity_label.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self._live_equity_label.grid(row=3, column=0, sticky="w", pady=(6, 0))
         self._since_start_label = ctk.CTkLabel(
             title_block,
             text="Since Start: —",
@@ -2645,7 +2677,7 @@ class TradingDashboardApp(ctk.CTk):
             wraplength=520,
             justify="left",
         )
-        self._since_start_label.grid(row=3, column=0, sticky="w", pady=(2, 0))
+        self._since_start_label.grid(row=4, column=0, sticky="w", pady=(2, 0))
         self._equity_error_label = ctk.CTkLabel(
             title_block,
             text="",
@@ -2655,7 +2687,7 @@ class TradingDashboardApp(ctk.CTk):
             wraplength=520,
             justify="left",
         )
-        self._equity_error_label.grid(row=4, column=0, sticky="w", pady=(2, 0))
+        self._equity_error_label.grid(row=5, column=0, sticky="w", pady=(2, 0))
 
         header_right = ctk.CTkFrame(header_inner, fg_color="transparent")
         header_right.grid(row=0, column=1, sticky="ne")
@@ -5122,8 +5154,8 @@ class TradingDashboardApp(ctk.CTk):
                 btn_row,
                 text="Start Bot",
                 width=100,
-                fg_color="#166534",
-                hover_color="#14532d",
+                fg_color="#3d6a18",
+                hover_color="#3d6a18",
                 command=self._on_start_bot,
             ).pack(side="left", padx=(0, 8))
             ctk.CTkButton(
@@ -5547,7 +5579,7 @@ class TradingDashboardApp(ctk.CTk):
             ("SPY", COLORS["amber"]),
         ]
         if self._last_equity > 0 and config.is_small_account(self._last_equity):
-            specs.append(("GLD", "#fbbf24"))
+            specs.append(("GLD", "#f4d21e"))
         for idx, (symbol, color) in enumerate(specs):
             df = _load_daily_closes(symbol, CHART_DAYS)
             cell = ctk.CTkFrame(
