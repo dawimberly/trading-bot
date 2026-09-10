@@ -41,6 +41,20 @@ def _inject_dashboard_css() -> None:
     st.markdown(
         """
         <style>
+        html, body, [data-testid="stAppViewContainer"], .stApp {
+            background: #0b0b0e !important;
+            color: #f2ebe0 !important;
+        }
+        [data-testid="stHeader"] { background: #0b0b0e !important; }
+        h1, h2, h3 { color: #f2ebe0 !important; font-family: Georgia, serif !important; }
+        [data-testid="stMetricValue"] { color: #f2ebe0 !important; font-variant-numeric: tabular-nums; }
+        [data-testid="stMetricLabel"] { color: #a89f91 !important; }
+        .stButton>button {
+            background: #1fa8ef !important;
+            color: #0b0b0e !important;
+            border: 0 !important;
+            font-weight: 700 !important;
+        }
         .live-trading-banner {
             background: linear-gradient(135deg, #7f0000 0%, #b91c1c 55%, #991b1b 100%);
             color: #fff;
@@ -136,6 +150,15 @@ def _expected_next_actions(heartbeat: dict | None) -> list[str]:
         return ["Start `run_all.py` to begin trading cycles."]
 
     actions: list[str] = []
+    gates = heartbeat.get("entry_skip_reason")
+    if gates and gates != "traded":
+        actions.append(f"Last cycle — no entries: {gates}")
+    daily = heartbeat.get("entry_skip_daily") or {}
+    if daily.get("cycles"):
+        actions.append(
+            f"Today: {daily.get('traded_cycles', 0)} traded / "
+            f"{daily.get('skipped_cycles', 0)} skipped"
+        )
     if heartbeat.get("halted"):
         actions.append("Risk halt active — no new entries until drawdown recovers.")
 
@@ -429,9 +452,9 @@ def _style_pnl_df(df: pd.DataFrame):
         if pd.isna(val):
             return ""
         if val > 0:
-            return "color: #198754; font-weight: 600"
+            return "color: #7ec13a; font-weight: 600"
         if val < 0:
-            return "color: #dc3545; font-weight: 600"
+            return "color: #e23a3a; font-weight: 600"
         return ""
 
     styler = df.style
@@ -532,7 +555,7 @@ def _build_candlestick_figure(
             y=df["MA50"],
             mode="lines",
             name="MA50",
-            line=dict(color="#fd7e14", width=1.5),
+            line=dict(color="#f4d21e", width=1.5),
         )
     )
     fig.add_trace(
@@ -541,7 +564,7 @@ def _build_candlestick_figure(
             y=df["MA200"],
             mode="lines",
             name="MA200",
-            line=dict(color="#0d6efd", width=1.5),
+            line=dict(color="#1fa8ef", width=1.5),
         )
     )
     fig.update_layout(
@@ -552,6 +575,11 @@ def _build_candlestick_figure(
         margin=dict(t=48, b=32),
         xaxis_rangeslider_visible=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        paper_bgcolor="#0b0b0e",
+        plot_bgcolor="#121214",
+        font=dict(color="#f2ebe0"),
+        xaxis=dict(gridcolor="#2e2c28", zerolinecolor="#2e2c28"),
+        yaxis=dict(gridcolor="#2e2c28", zerolinecolor="#2e2c28"),
     )
     return fig
 
@@ -612,6 +640,16 @@ def render_bot_status(
         c1.metric("Regime", regime.split(":")[-1].strip() if ":" in regime else regime)
         c2.metric("Status", "HALTED" if halted else "Running")
         c3.metric("Last cycle", str(last_cycle)[-19:] if last_cycle != "—" else "—")
+        gates = heartbeat.get("entry_skip_reason")
+        if gates:
+            st.caption(f"Entry gates: **{gates}**")
+        daily = heartbeat.get("entry_skip_daily") or {}
+        if daily.get("cycles"):
+            st.caption(
+                f"Today skips: {daily.get('skipped_cycles', 0)} / "
+                f"{daily.get('cycles', 0)} cycles "
+                f"(traded {daily.get('traded_cycles', 0)})"
+            )
         st.caption(
             f"{'Paper' if paper else 'Live'} | "
             f"Sleeves: {', '.join(active) if active else 'cash only'} | "
@@ -629,6 +667,22 @@ def render_bot_status(
             f"Cash: ${float(heartbeat.get('cash') or 0):,.2f} | "
             f"Session open: {heartbeat.get('equity_session_open', '—')}"
         )
+        if paper and config.effective_buffett_indicator_enabled():
+            try:
+                from modules.bubble_risk import compute_bubble_risk_from_live_context
+
+                br = compute_bubble_risk_from_live_context(
+                    regime=str(regime), hb=heartbeat
+                )
+                if br:
+                    bi = br.get("buffett") or {}
+                    st.caption(
+                        f"Bubble Risk: **{br['score_100']:.0f}/100** | "
+                        f"Buffett: **{bi.get('ratio_pct', 'n/a')}%** "
+                        f"({bi.get('signal', 'n/a')})"
+                    )
+            except Exception:
+                pass
 
     exposure_rows = _sleeve_exposure_rows(heartbeat)
     exp_df = pd.DataFrame(exposure_rows)
