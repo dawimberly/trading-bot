@@ -20,6 +20,7 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 
 ## Recent changes
 
+- **2026-09-10** — Add paper ops telemetry, tiered auto-tune, Felix sync/inbox, and wide-scan nightly watchlist.
 - **2026-09-10** — Restyle Stock-bot monitor to Paqinhaus look and add desktop shortcut.
 - **2026-09-04** — fix: skip Alpaca 40310000 not-fractionable; retry whole shares
 - **2026-09-04** — Add overnight pre-sale open vs 10:00 study scripts (no strategy change).
@@ -27,7 +28,6 @@ Monorepo for local trading tools. **Only `stock-bot/` is the active trading proj
 - **2026-09-03** — Lock alpaca_paper_v2 to 33/67 VTI/NYSE and make dashboard close/restart both books.
 - **2026-08-31** — Live-safe .env overlay: paper full file, live allowlist-only.
 - **2026-08-31** — Document current VTI-off NYSE-100 lock in READMEs.
-- **2026-08-31** — paper NYSE max-adds tests (adds=2; add 3 skipped)
 
 ## Quick start
 
