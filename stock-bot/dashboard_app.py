@@ -2285,7 +2285,11 @@ def _selectable_book_ids() -> set[str]:
 
 
 class BookMenu(ctk.CTkToplevel):
-    """Hamburger menu — switch books and account actions."""
+    """Hamburger menu — switch books and account actions.
+
+    Do not grab_set: a modal grab on an off-screen/behind popup blocks the
+    main window's title-bar X so the dashboard cannot be closed.
+    """
 
     def __init__(
         self,
@@ -2296,15 +2300,16 @@ class BookMenu(ctk.CTkToplevel):
         on_switch_book,
         on_edit_keys,
         on_logout,
+        on_close=None,
     ) -> None:
         super().__init__(master)
         self._on_switch_book = on_switch_book
         self.title("Menu")
-        self.geometry("300x280")
         self.resizable(False, False)
         self.configure(fg_color=COLORS["card"])
         self.transient(master)
-        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._dismiss)
+        self.bind("<Escape>", lambda _e: self._dismiss())
 
         ctk.CTkLabel(
             self,
@@ -2331,35 +2336,67 @@ class BookMenu(ctk.CTkToplevel):
             values=_book_dropdown_values(),
             command=self._on_book_selected,
             width=260,
-            fg_color="#16161a",
-            button_color="#1a1a1f",
-            button_hover_color="#475569",
+            fg_color=COLORS["surface2"],
+            button_color=COLORS["card"],
+            button_hover_color=COLORS["accent"],
+            dropdown_fg_color=COLORS["card"],
+            dropdown_hover_color=COLORS["accent"],
+            dropdown_text_color=COLORS["text"],
+            text_color=COLORS["text"],
         ).pack(anchor="w", padx=16, pady=(0, 12))
 
         ctk.CTkButton(
             self,
             text="Edit API keys for current account",
-            fg_color="#374151",
-            hover_color="#4b5563",
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
             command=lambda: self._action(on_edit_keys),
         ).pack(fill="x", padx=16, pady=(4, 4))
         ctk.CTkButton(
             self,
             text="Log out",
-            fg_color="#7f1d1d",
-            hover_color="#991b1b",
+            fg_color=COLORS["live_bg"],
+            hover_color=COLORS["live"],
             command=lambda: self._action(on_logout),
+        ).pack(fill="x", padx=16, pady=(4, 4))
+        ctk.CTkButton(
+            self,
+            text="Close dashboard",
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text"],
+            command=lambda: self._action(on_close or self._dismiss),
         ).pack(fill="x", padx=16, pady=(4, 16))
+        self.after(10, lambda: self._place_over_master(master))
+
+    def _place_over_master(self, master) -> None:
+        try:
+            master.update_idletasks()
+            x = int(master.winfo_rootx()) + 16
+            y = int(master.winfo_rooty()) + 72
+            self.geometry(f"300x360+{x}+{y}")
+            self.lift()
+            self.focus_force()
+            self.attributes("-topmost", True)
+            self.after(400, lambda: self.attributes("-topmost", False))
+        except Exception:
+            self.geometry("300x360")
+
+    def _dismiss(self) -> None:
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        self.destroy()
 
     def _on_book_selected(self, menu_label: str) -> None:
-        self.grab_release()
-        self.destroy()
+        self._dismiss()
         self._on_switch_book(menu_label)
 
     def _action(self, callback) -> None:
-        self.grab_release()
-        self.destroy()
-        callback()
+        self._dismiss()
+        if callback:
+            callback()
 
 
 class AlpacaKeysDialog(ctk.CTkToplevel):
@@ -2733,8 +2770,10 @@ class TradingDashboardApp(ctk.CTk):
             fg_color=COLORS["accent"],
             button_color=COLORS["surface"],
             button_hover_color=COLORS["accent_hover"],
-            dropdown_fg_color=COLORS["surface2"],
-            text_color=COLORS["text"],
+            dropdown_fg_color=COLORS["card"],
+            dropdown_hover_color=COLORS["accent"],
+            dropdown_text_color=COLORS["text"],
+            text_color=COLORS["bg"],
         )
         self._book_menu.grid(row=0, column=0, padx=(0, 6), pady=2, sticky="e")
 
@@ -2797,6 +2836,37 @@ class TradingDashboardApp(ctk.CTk):
             command=self._on_restart_bot,
             **_header_btn_style,
         ).grid(row=0, column=5, padx=(3, 0), pady=2, sticky="e")
+
+        account_row = ctk.CTkFrame(header_right, fg_color="transparent")
+        account_row.pack(anchor="e", pady=(8, 0))
+        self._account_var = ctk.StringVar(value="Account")
+        self._account_menu = ctk.CTkOptionMenu(
+            account_row,
+            variable=self._account_var,
+            values=["Account", "Log out", "Close dashboard"],
+            command=self._on_account_menu,
+            width=168,
+            height=32,
+            font=_ctk_font("body_sm"),
+            fg_color=COLORS["card"],
+            button_color=COLORS["surface2"],
+            button_hover_color=COLORS["accent"],
+            dropdown_fg_color=COLORS["card"],
+            dropdown_hover_color=COLORS["accent"],
+            dropdown_text_color=COLORS["text"],
+            text_color=COLORS["text"],
+        )
+        self._account_menu.pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            account_row,
+            text="Close",
+            width=72,
+            fg_color=COLORS["surface"],
+            hover_color=COLORS["live"],
+            text_color=COLORS["text"],
+            command=self._on_close,
+            **_header_btn_style,
+        ).pack(side="left")
 
         def _resize_header_labels(_event=None) -> None:
             avail = max(240, header_left.winfo_width() - 56)
@@ -3463,7 +3533,7 @@ class TradingDashboardApp(ctk.CTk):
         self._tabs.set("Positions")
         self._active_tab = "Positions"
 
-        # Footer — status line only
+        # Footer — charts/tray plus always-visible Log out / Close
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=14, pady=(0, 10))
         footer_inner = ctk.CTkFrame(footer, fg_color="transparent")
@@ -3493,6 +3563,30 @@ class TradingDashboardApp(ctk.CTk):
         tray_cb.pack(side="left")
         if not TRAY_AVAILABLE:
             tray_cb.configure(state="disabled")
+        ctk.CTkButton(
+            footer_inner,
+            text="Log out",
+            width=72,
+            height=26,
+            font=_ctk_font("caption"),
+            fg_color=COLORS["live_bg"],
+            hover_color=COLORS["live"],
+            text_color=COLORS["text"],
+            corner_radius=8,
+            command=self._on_logout_click,
+        ).pack(side="left", padx=(12, 4))
+        ctk.CTkButton(
+            footer_inner,
+            text="Close",
+            width=64,
+            height=26,
+            font=_ctk_font("caption"),
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["accent"],
+            text_color=COLORS["text"],
+            corner_radius=8,
+            command=self._on_close,
+        ).pack(side="left")
         self._status_label = ctk.CTkLabel(
             footer_inner,
             text="",
@@ -3505,6 +3599,7 @@ class TradingDashboardApp(ctk.CTk):
         self._start_clock()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.bind("<Alt-F4>", lambda _e: self._on_close())
         self.bind("<F5>", self._on_f5_refresh)
         if _needs_setup(username, self._book_id):
             self.after(200, self._show_setup_wizard)
@@ -3538,7 +3633,15 @@ class TradingDashboardApp(ctk.CTk):
             on_switch_book=self._on_header_book_selected,
             on_edit_keys=self._on_edit_keys,
             on_logout=self._on_logout_click,
+            on_close=self._on_close,
         )
+
+    def _on_account_menu(self, choice: str) -> None:
+        self._account_var.set("Account")
+        if choice == "Log out":
+            self._on_logout_click()
+        elif choice == "Close dashboard":
+            self._on_close()
 
     def _on_header_book_selected(self, menu_label: str) -> None:
         book_id = book_id_for_dropdown_label(menu_label)
@@ -3689,13 +3792,27 @@ class TradingDashboardApp(ctk.CTk):
         self.refresh_data()
 
     def _on_logout_click(self) -> None:
-        if self._on_logout is None:
-            return
+        callback = self._on_logout
+        self._on_logout = None
         if self._refresh_job:
-            self.after_cancel(self._refresh_job)
+            try:
+                self.after_cancel(self._refresh_job)
+            except Exception:
+                pass
+            self._refresh_job = None
+        if self._clock_job:
+            try:
+                self.after_cancel(self._clock_job)
+            except Exception:
+                pass
+            self._clock_job = None
         self._stop_tray()
-        self.destroy()
-        self._on_logout()
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        if callback is not None:
+            callback()
 
     def _build_overview_tab(self) -> None:
         self._overview_body = ctk.CTkScrollableFrame(
@@ -5930,17 +6047,29 @@ class TradingDashboardApp(ctk.CTk):
             return
         self._shutting_down = True
         if self._refresh_job:
-            self.after_cancel(self._refresh_job)
+            try:
+                self.after_cancel(self._refresh_job)
+            except Exception:
+                pass
+            self._refresh_job = None
         if self._clock_job:
-            self.after_cancel(self._clock_job)
+            try:
+                self.after_cancel(self._clock_job)
+            except Exception:
+                pass
+            self._clock_job = None
         self._stop_tray()
-        self.destroy()
+        try:
+            self.quit()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def _on_close(self) -> None:
-        if self._tray_var.get() and TRAY_AVAILABLE and not self._shutting_down:
-            self.withdraw()
-            self._start_tray()
-            return
+        """Title-bar X always quits. Tray is only for the minimize checkbox."""
         self._shutdown()
 
 
