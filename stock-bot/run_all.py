@@ -309,7 +309,7 @@ def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
 _last_equity = 0.0
 
 
-def _record_cycle_error(error: str) -> None:
+def _record_cycle_error(error: str) -> str:
     """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
     from modules.safe_io import read_json_file, write_json_atomic
 
@@ -335,10 +335,13 @@ def _record_cycle_error(error: str) -> None:
         )
         # Cycle-level Alpaca 5xx/DNS is not a failed order — never fabricate
         # symbol=CYCLE / side=n/a (that produced "[LIVE] Order failed: n/a CYCLE").
-        if klass in ("transient_api", "transient_network"):
+        if klass == "transient_network":
+            error_watcher.log_transient_network(str(error)[:1000], context="cycle")
+        elif klass == "transient_api":
             error_watcher.log_transient_api(str(error)[:1000], context="cycle")
     except Exception:
         pass
+    return klass
 
 
 def _write_heartbeat(
@@ -2520,6 +2523,7 @@ if __name__ == "__main__":
     while True:
         if watchdog is not None:
             watchdog.begin_cycle("main")
+        autofix_plan = None
         try:
             main()
         except AlpacaAuthError as e:
@@ -2533,12 +2537,18 @@ if __name__ == "__main__":
             sys.exit(1)
         except AlpacaCriticalError as e:
             log_event("alpaca_critical", error=str(e))
-            _record_cycle_error(str(e))
+            klass = _record_cycle_error(str(e))
             logger.warning(
                 "Alpaca API failure after retries (skipping cycle, bot continues): %s",
                 e,
             )
             trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
+            try:
+                from modules.error_autofix import handle_cycle_error
+
+                autofix_plan = handle_cycle_error(str(e), error_class=klass)
+            except Exception:
+                autofix_plan = None
         except AlpacaValidationError as e:
             log_event("alpaca_validation", error=str(e))
             logger.info("Alpaca order validation skipped (cycle continues): %s", e)
@@ -2549,13 +2559,19 @@ if __name__ == "__main__":
             break
         except Exception as e:
             tb = traceback.format_exc()
-            _record_cycle_error(str(e))
+            klass = _record_cycle_error(str(e))
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
             logger.exception("Cycle error: %s", e)
             notes = str(e)
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
+            try:
+                from modules.error_autofix import handle_cycle_error
+
+                autofix_plan = handle_cycle_error(str(e), error_class=klass)
+            except Exception:
+                autofix_plan = None
         finally:
             if watchdog is not None:
                 watchdog.end_cycle()
@@ -2563,4 +2579,7 @@ if __name__ == "__main__":
         if cli_args.cycles and cycle_count >= cli_args.cycles:
             logger.info("Completed %s cycle(s); exiting (--cycles)", cli_args.cycles)
             break
-        time.sleep(cycle_sleep_seconds(_last_cycle_schedule))
+        sleep_for = float(cycle_sleep_seconds(_last_cycle_schedule))
+        if autofix_plan is not None:
+            sleep_for = autofix_plan.loop_sleep_sec(sleep_for)
+        time.sleep(sleep_for)

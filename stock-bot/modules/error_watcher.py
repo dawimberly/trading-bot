@@ -830,4 +830,5 @@ def watcher_banner() -> str:
     )
     return (
         f"Error watcher={on} | daily log + TG per error={tg} | daily digest={digest}"
+        f" | auto-fix={'ON' if getattr(config, 'ERROR_AUTOFIX_ENABLED', True) else 'OFF'}"
     )

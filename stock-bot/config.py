@@ -2513,6 +2513,14 @@ TELEGRAM_LIVE_FILL_MIN_USD = TELEGRAM_FILL_MIN_USD  # alias
 # Error / action watcher (structured JSONL + optional Telegram + Cursor queue).
 ERROR_WATCHER_ENABLED = _parse_env_bool("ERROR_WATCHER_ENABLED", default="true")
 TELEGRAM_ALERT_ERRORS = _parse_env_bool("TELEGRAM_ALERT_ERRORS", default="true")
+# Runtime auto-recovery for cycle errors. Never patches source.
+# Known Alpaca 5xx/DNS: retry/backoff without waiting on Ollama.
+# Unknown errors: optional Ollama JSON pick from an allowlist (skip/backoff/retry/human).
+ERROR_AUTOFIX_ENABLED = _parse_env_bool("ERROR_AUTOFIX_ENABLED", default="true")
+ERROR_AUTOFIX_OLLAMA = _parse_env_bool("ERROR_AUTOFIX_OLLAMA", default="true")
+ERROR_AUTOFIX_OLLAMA_TIMEOUT_SEC = int(os.getenv("ERROR_AUTOFIX_OLLAMA_TIMEOUT_SEC", "12"))
+ERROR_AUTOFIX_MAX_BACKOFF_SEC = int(os.getenv("ERROR_AUTOFIX_MAX_BACKOFF_SEC", "120"))
+ERROR_AUTOFIX_TELEGRAM = _parse_env_bool("ERROR_AUTOFIX_TELEGRAM", default="true")
 # Optional once-per-day Telegram digest of bot_errors.jsonl (default OFF).
 TELEGRAM_DAILY_ERROR_DIGEST = _parse_env_bool(
     "TELEGRAM_DAILY_ERROR_DIGEST", default="false"
@@ -2573,6 +2581,8 @@ def telegram_alert_policy_summary() -> str:
         bits.append("errors")
     if ERROR_WATCHER_ENABLED:
         bits.append("error-watcher+daily-log")
+    if ERROR_AUTOFIX_ENABLED:
+        bits.append("error-autofix")
     if TELEGRAM_DAILY_ERROR_DIGEST:
         bits.append(f"error-digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET")
     if TELEGRAM_ALERT_DAILY_SUMMARY:
@@ -2601,6 +2611,9 @@ def format_telegram_automation_banner() -> str:
         err_s = "Error watcher ON | daily log + TG per error"
         if TELEGRAM_DAILY_ERROR_DIGEST:
             err_s += f" | digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET"
+        if ERROR_AUTOFIX_ENABLED:
+            ollama_s = "Ollama unknown-errors" if ERROR_AUTOFIX_OLLAMA else "rules-only"
+            err_s += f" | auto-fix {ollama_s}"
     else:
         err_s = "Error watcher OFF"
     return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} <<<"
