@@ -313,22 +313,30 @@ def _record_cycle_error(error: str) -> None:
     """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
     from modules.safe_io import read_json_file, write_json_atomic
 
+    try:
+        from modules import error_watcher
+
+        klass = error_watcher.classify_error_class(error)
+    except Exception:
+        klass = "other"
+
     path = config.ensure_heartbeat_path_writable()
     payload = read_json_file(path) or {}
+    payload["timestamp"] = datetime.datetime.now().isoformat()
     payload["last_cycle_error"] = str(error)[:500]
     payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
+    payload["last_cycle_error_class"] = klass
     write_json_atomic(path, payload)
     try:
         from modules import error_watcher
 
-        error_watcher.log_action("cycle_error", error=str(error)[:500])
-        # Promote to error queue without fabricating a traceback.
-        error_watcher.log_failed_order(
-            symbol="CYCLE",
-            side="n/a",
-            reason="cycle_error",
-            error=str(error)[:1000],
+        error_watcher.log_action(
+            "cycle_error", error=str(error)[:500], error_class=klass
         )
+        # Cycle-level Alpaca 5xx/DNS is not a failed order — never fabricate
+        # symbol=CYCLE / side=n/a (that produced "[LIVE] Order failed: n/a CYCLE").
+        if klass in ("transient_api", "transient_network"):
+            error_watcher.log_transient_api(str(error)[:1000], context="cycle")
     except Exception:
         pass
 

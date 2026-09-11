@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -27,6 +28,13 @@ MAX_API_ATTEMPTS = 3
 RETRY_BASE_DELAY_SEC = 0.5
 TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 AUTH_HTTP_STATUS = frozenset({401, 403})
+_SERVER_ERROR_MARKERS = (
+    "internal server error",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+    "too many requests",
+)
 
 _client_cache: dict[tuple[str, str, bool, str], TradingClient] = {}
 _cache_lock = threading.Lock()
@@ -109,10 +117,64 @@ def get_trading_client(
     return build_trading_client(api_key, secret_key, paper=use_paper)
 
 
+def alpaca_http_status(exc: BaseException) -> int | None:
+    """Best-effort HTTP status from an Alpaca SDK error or its cause chain.
+
+    alpaca-py often stringifies 500s as ``{"message":"Internal Server Error"}``
+    with ``status_code`` left unset — still treat those as HTTP 500.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        for attr in ("status_code", "code"):
+            try:
+                val = getattr(cur, attr, None)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            try:
+                code = int(val)
+            except (TypeError, ValueError):
+                continue
+            if 100 <= code <= 599:
+                return code
+        text = str(cur).strip()
+        low = text.lower()
+        if "internal server error" in low:
+            return 500
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                msg = str(payload.get("message") or "")
+                if "internal server error" in msg.lower():
+                    return 500
+                for key in ("status", "status_code", "code"):
+                    raw = payload.get(key)
+                    try:
+                        code = int(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if 100 <= code <= 599:
+                        return code
+        cur = cur.__cause__ or cur.__context__
+    return None
+
+
 def is_transient_alpaca_error(exc: BaseException) -> bool:
+    """True for retryable broker/network failures (5xx, 429, timeouts, DNS)."""
+    status = alpaca_http_status(exc)
+    if status in TRANSIENT_HTTP_STATUS:
+        return True
+    text = str(exc).lower()
+    if any(marker in text for marker in _SERVER_ERROR_MARKERS):
+        return True
     if isinstance(exc, APIError):
-        status = getattr(exc, "status_code", None)
-        return status in TRANSIENT_HTTP_STATUS
+        return False
     return isinstance(exc, (TimeoutError, OSError, ConnectionError))
 
 
@@ -147,23 +209,10 @@ def is_skippable_order_error(exc: BaseException) -> bool:
     """422 notional/qty validation, unknown asset, or insufficient-qty 403 — do not crash the cycle."""
     if not isinstance(exc, APIError):
         return is_unknown_asset_error(exc)
-    status = getattr(exc, "status_code", None)
+    status = alpaca_http_status(exc)
     msg = str(exc).lower()
     if is_unknown_asset_error(exc):
         return True
-    if status == 422:
-        return True
-    if status == 403 and "insufficient qty" in msg:
-        return True
-    return False
-
-
-def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation or insufficient-qty 403 — do not crash the cycle."""
-    if not isinstance(exc, APIError):
-        return False
-    status = getattr(exc, "status_code", None)
-    msg = str(exc).lower()
     if status == 422:
         return True
     if status == 403 and "insufficient qty" in msg:
@@ -211,10 +260,11 @@ def call_with_retry(
                 raise AlpacaAuthError(str(exc)) from exc
             if is_transient_alpaca_error(exc) and attempt < max_attempts:
                 delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+                status = alpaca_http_status(exc) or getattr(exc, "status_code", "?")
                 logger.warning(
                     "Alpaca %s transient HTTP %s — retry %s/%s in %.1fs",
                     op_name,
-                    getattr(exc, "status_code", "?"),
+                    status,
                     attempt,
                     max_attempts,
                     delay,
