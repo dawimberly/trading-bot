@@ -4,6 +4,22 @@ set PYTHONTRADING_ROOT=%CD%
 
 echo [INFO] Launching PythonTrading Monitor...
 
+set "PYW=pythonw"
+if exist "%~dp0.venv\Scripts\pythonw.exe" set "PYW=%~dp0.venv\Scripts\pythonw.exe"
+if exist "%~dp0..\.venv\Scripts\pythonw.exe" set "PYW=%~dp0..\.venv\Scripts\pythonw.exe"
+
+REM Source dashboard is the default so git pull gets close/logout and stamp
+REM fixes without a Windows PyInstaller rebuild. Set DASHBOARD_USE_FROZEN=1
+REM to launch dist\PythonTradingMonitor\PythonTradingMonitor.exe instead.
+if /I not "%DASHBOARD_USE_FROZEN%"=="1" if /I not "%DASHBOARD_USE_FROZEN%"=="true" (
+    if exist "dashboard_app.py" (
+        echo [INFO] Starting source monitor: %PYW% dashboard_app.py
+        start "" "%PYW%" "%~dp0dashboard_app.py"
+        echo [INFO] Sign in when the window appears. Check logs\dashboard_crash.log if it closes.
+        exit /b 0
+    )
+)
+
 if exist "dist\PythonTradingMonitor\PythonTradingMonitor.exe" (
     start "" "dist\PythonTradingMonitor\PythonTradingMonitor.exe"
     echo [INFO] Started PythonTradingMonitor.exe
@@ -11,16 +27,12 @@ if exist "dist\PythonTradingMonitor\PythonTradingMonitor.exe" (
     exit /b 0
 )
 
-set "PYW=pythonw"
-if exist "%~dp0.venv\Scripts\pythonw.exe" set "PYW=%~dp0.venv\Scripts\pythonw.exe"
-if exist "%~dp0..\.venv\Scripts\pythonw.exe" set "PYW=%~dp0..\.venv\Scripts\pythonw.exe"
-
 if exist "dashboard_app.py" (
     echo [INFO] Monitor EXE not found — using source: %PYW% dashboard_app.py
     start "" "%PYW%" "%~dp0dashboard_app.py"
     exit /b 0
 )
 
-echo [ERROR] No monitor found. Build with build_dashboard.bat or ensure dashboard_app.py exists.
+echo [ERROR] No monitor found. Ensure dashboard_app.py exists.
 pause
 exit /b 1
