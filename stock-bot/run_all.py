@@ -2372,6 +2372,15 @@ def _print_startup_banner(startup_equity: float | None = None):
             )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     print(f"--- {config.format_telegram_automation_banner()} ---")
+    try:
+        from modules.telegram_commands import ensure_telegram_command_poller
+
+        if ensure_telegram_command_poller():
+            print("--- Telegram phone commands: ON (open the bot chat, tap /status) ---")
+        elif config.get_telegram_config():
+            print("--- Telegram phone commands: off (TELEGRAM_COMMANDS_* in .env) ---")
+    except Exception as exc:
+        print(f"[WARN] Telegram phone commands: {exc}")
     if alerts.alerts_configured():
         print(f"--- Alerts: on - {config.telegram_alert_policy_summary()} ---")
         if config.telegram_weekly_summary_enabled():

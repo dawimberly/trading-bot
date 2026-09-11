@@ -2468,6 +2468,11 @@ def get_telegram_config():
     return None
 
 
+# Phone slash commands (Telegram). Read-only on live; never start/stop trading.
+TELEGRAM_COMMANDS_ENABLED = _parse_env_bool("TELEGRAM_COMMANDS_ENABLED", default="true")
+TELEGRAM_COMMANDS_LIVE = _parse_env_bool("TELEGRAM_COMMANDS_LIVE", default="true")
+
+
 # --- Alert policy (high-signal Telegram/email; noisy topics off by default) ---
 TELEGRAM_ALERT_HALT = _parse_env_bool("TELEGRAM_ALERT_HALT", default="true")
 TELEGRAM_ALERT_DRAWDOWN_MAJOR = _parse_env_bool("TELEGRAM_ALERT_DRAWDOWN_MAJOR", default="true")
@@ -2593,6 +2598,8 @@ def telegram_alert_policy_summary() -> str:
         bits.append(f"live daily@{TELEGRAM_LIVE_DAILY_SUMMARY_TIME} ET")
     if telegram_weekly_summary_enabled():
         bits.append(f"weekly Fri@{TELEGRAM_WEEKLY_SUMMARY_TIME} ET")
+    if TELEGRAM_COMMANDS_ENABLED and (PAPER_TRADING or TELEGRAM_COMMANDS_LIVE):
+        bits.append("phone /status")
     return ", ".join(bits) if bits else "all high-signal alerts off"
 
 
@@ -2616,7 +2623,11 @@ def format_telegram_automation_banner() -> str:
             err_s += f" | auto-fix {ollama_s}"
     else:
         err_s = "Error watcher OFF"
-    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} <<<"
+    if TELEGRAM_COMMANDS_ENABLED and (PAPER_TRADING or TELEGRAM_COMMANDS_LIVE):
+        phone_s = "phone cmds ON (/status)"
+    else:
+        phone_s = "phone cmds OFF"
+    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} | {phone_s} <<<"
 
 
 def get_smtp_config():

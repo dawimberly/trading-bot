@@ -623,11 +623,12 @@ def check_telegram() -> SectionResult:
         sec.checks.append(CheckResult("Telegram config", "WARN", "TELEGRAM_* not set in .env"))
 
     if effective_telegram_commands_enabled():
-        sec.checks.append(CheckResult("Commands gate", "PASS", "paper commands enabled"))
+        book = "paper" if config.PAPER_TRADING else "live (read-only)"
+        sec.checks.append(CheckResult("Commands gate", "PASS", f"phone commands enabled ({book})"))
     else:
         sec.checks.append(CheckResult("Commands gate", "WARN", "commands gated off"))
 
-    for cmd in ("/status", "/signals", "/shorts", "/boosts"):
+    for cmd in ("/status", "/help", "/signals", "/shorts", "/boosts"):
         try:
             reply = handle_telegram_command(
                 cmd, equity=100_000.0, cash=10_000.0, regime="RHYME_C"
