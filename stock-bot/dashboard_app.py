@@ -92,6 +92,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
 import config  # noqa: E402
+from dashboard_header import (  # noqa: E402
+    header_kicker_text,
+    header_stamp_text,
+    header_tape_text,
+)
 from modules.csv_utils import coerce_trade_journal_df, read_csv_file  # noqa: E402
 from modules.alpaca_client import build_trading_client, reset_trading_client_cache  # noqa: E402
 from modules.alpaca_executor import AlpacaExecutor  # noqa: E402
@@ -2586,12 +2591,13 @@ class TradingDashboardApp(ctk.CTk):
         tape = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=28, corner_radius=0)
         tape.pack(fill="x")
         tape.pack_propagate(False)
-        ctk.CTkLabel(
+        self._header_tape = ctk.CTkLabel(
             tape,
-            text="NYSE 100%   ·   VTI CORE OFF   ·   SPY SLEEVE 0%   ·   CRYPTO 0%   ·   STAT-ARB 0%   ·   JOURNAL = FILL   ·   ATR COOLDOWN ON   ·   SURVIVAL NOT P95",
+            text=header_tape_text(paper=_book_is_paper(self._book_id)),
             font=_ctk_font("caption"),
             text_color=COLORS["bg"],
-        ).pack(expand=True)
+        )
+        self._header_tape.pack(expand=True)
 
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
@@ -2619,13 +2625,14 @@ class TradingDashboardApp(ctk.CTk):
         title_block = ctk.CTkFrame(header_left, fg_color="transparent")
         title_block.grid(row=0, column=1, sticky="ew")
         title_block.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
+        self._header_kicker = ctk.CTkLabel(
             title_block,
-            text="PYTHONTRADING",
+            text=header_kicker_text(paper=_book_is_paper(self._book_id)),
             font=_ctk_font("caption"),
             text_color=COLORS["accent"],
             anchor="w",
-        ).grid(row=0, column=0, sticky="w")
+        )
+        self._header_kicker.grid(row=0, column=0, sticky="w")
         word_row = ctk.CTkFrame(title_block, fg_color="transparent")
         word_row.grid(row=1, column=0, sticky="w")
         ctk.CTkLabel(
@@ -2635,14 +2642,15 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["text"],
             anchor="w",
         ).pack(side="left")
-        ctk.CTkLabel(
+        self._header_stamp = ctk.CTkLabel(
             word_row,
-            text="  NYSE 100  ",
+            text=header_stamp_text(paper=_book_is_paper(self._book_id)),
             font=_ctk_font("caption"),
             text_color=COLORS["bg"],
             fg_color=COLORS["accent"],
             corner_radius=4,
-        ).pack(side="left", padx=(12, 0), pady=(10, 0))
+        )
+        self._header_stamp.pack(side="left", padx=(12, 0), pady=(10, 0))
         sub_row = ctk.CTkFrame(title_block, fg_color="transparent")
         sub_row.grid(row=2, column=0, sticky="w", pady=(2, 0))
         self._clock_label = ctk.CTkLabel(
@@ -3510,6 +3518,18 @@ class TradingDashboardApp(ctk.CTk):
         with _BOOK_ENV_LOCK:
             _apply_user_paths(username, book_id or self._book_id)
 
+    def _sync_header_chrome(self, *, paper: bool | None = None, heartbeat: dict | None = None) -> None:
+        """Keep kicker/stamp/tape on the active book. Stamp is LIVE/PAPER only."""
+        is_paper = _book_is_paper(self._book_id) if paper is None else bool(paper)
+        if hasattr(self, "_header_kicker"):
+            self._header_kicker.configure(text=header_kicker_text(paper=is_paper))
+        if hasattr(self, "_header_stamp"):
+            self._header_stamp.configure(text=header_stamp_text(paper=is_paper))
+        if hasattr(self, "_header_tape"):
+            self._header_tape.configure(
+                text=header_tape_text(paper=is_paper, heartbeat=heartbeat)
+            )
+
     def _open_book_menu(self) -> None:
         BookMenu(
             self,
@@ -3655,6 +3675,7 @@ class TradingDashboardApp(ctk.CTk):
         self._refresh_seq += 1
         self._clear_book_panels_for_switch(book_id)
         paper = _book_is_paper(book_id)
+        self._sync_header_chrome(paper=paper)
         equity, cash, err = _fetch_book_equity(self._username, book_id, retries=2)
         self._apply_equity_cash_ui(equity, cash, err, paper=paper)
         self._status_label.configure(text="Loading account data…")
@@ -4906,6 +4927,10 @@ class TradingDashboardApp(ctk.CTk):
         if equity > 0:
             config.configure_account_profile(equity)
 
+        self._sync_header_chrome(
+            paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
+            heartbeat=heartbeat,
+        )
         self._update_live_equity_header(equity, acct_err, paper=snap.get("book_paper"))
         self._update_stats_banner(equity, heartbeat, acct_err)
         self._update_small_panel(equity, heartbeat)
