@@ -24,6 +24,17 @@ from modules.runtime_paths import (
 logger = logging.getLogger(__name__)
 
 
+def should_use_frozen_monitor() -> bool:
+    """Frozen PythonTradingMonitor.exe is opt-in.
+
+    Default is source dashboard_app.py so git pull picks up monitor fixes
+    without a Windows PyInstaller rebuild. Set DASHBOARD_USE_FROZEN=true to
+    launch the stale/local EXE instead.
+    """
+    val = os.getenv("DASHBOARD_USE_FROZEN", "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
+
 def _resolve_pythonw(root: Path) -> str | None:
     """Return pythonw for dashboard_app.py; never return the frozen bot EXE."""
     for candidate in (
@@ -104,6 +115,33 @@ def try_launch_dashboard(*, force: bool = False) -> tuple[bool, str]:
     env = _dashboard_env(root)
     log_path = root / "logs" / "dashboard_auto_launch.log"
 
+    script = resolve_dashboard_script(root)
+    pyw = _resolve_pythonw(root)
+    use_frozen = should_use_frozen_monitor()
+    if script is not None and pyw is not None and not use_frozen:
+        try:
+            proc = _spawn_detached(
+                [pyw, str(script)],
+                cwd=root,
+                env=env,
+                log_path=log_path,
+            )
+        except OSError as exc:
+            msg = f"Failed to launch {DASHBOARD_SCRIPT}: {exc}"
+            logger.warning(msg)
+            _append_launch_log(root, msg)
+            return False, msg
+        time.sleep(1.5)
+        if proc.poll() is not None:
+            msg = f"{DASHBOARD_SCRIPT} exited immediately (code {proc.returncode})"
+            logger.warning(msg)
+            _append_launch_log(root, msg)
+            return False, msg
+        msg = f"Launched {DASHBOARD_SCRIPT} via {Path(pyw).name} (PID {proc.pid})"
+        logger.info(msg)
+        _append_launch_log(root, msg)
+        return True, msg
+
     monitor = resolve_dashboard_executable(root)
     if monitor is not None:
         try:
@@ -129,7 +167,6 @@ def try_launch_dashboard(*, force: bool = False) -> tuple[bool, str]:
         _append_launch_log(root, msg)
         return True, msg
 
-    script = resolve_dashboard_script(root)
     if script is None:
         msg = (
             f"{DASHBOARD_SCRIPT} not found and no {MONITOR_EXE_NAME}; "
@@ -139,37 +176,13 @@ def try_launch_dashboard(*, force: bool = False) -> tuple[bool, str]:
         _append_launch_log(root, msg)
         return False, msg
 
-    pyw = _resolve_pythonw(root)
-    if pyw is None:
-        msg = (
-            f"No {MONITOR_EXE_NAME} and no pythonw found for {DASHBOARD_SCRIPT}; "
-            "install Python/venv or run build_dashboard.bat"
-        )
-        logger.warning(msg)
-        _append_launch_log(root, msg)
-        return False, msg
-    try:
-        proc = _spawn_detached(
-            [pyw, str(script)],
-            cwd=root,
-            env=env,
-            log_path=log_path,
-        )
-    except OSError as exc:
-        msg = f"Failed to launch {DASHBOARD_SCRIPT}: {exc}"
-        logger.warning(msg)
-        _append_launch_log(root, msg)
-        return False, msg
-    time.sleep(1.5)
-    if proc.poll() is not None:
-        msg = f"{DASHBOARD_SCRIPT} exited immediately (code {proc.returncode})"
-        logger.warning(msg)
-        _append_launch_log(root, msg)
-        return False, msg
-    msg = f"Launched {DASHBOARD_SCRIPT} via {Path(pyw).name} (PID {proc.pid})"
-    logger.info(msg)
+    msg = (
+        f"No pythonw found for {DASHBOARD_SCRIPT}; "
+        "install Python/venv or run build_dashboard.bat"
+    )
+    logger.warning(msg)
     _append_launch_log(root, msg)
-    return True, msg
+    return False, msg
 
 
 def maybe_launch_dashboard() -> None:

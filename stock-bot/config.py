@@ -2468,6 +2468,11 @@ def get_telegram_config():
     return None
 
 
+# Phone slash commands (Telegram). Read-only on live; never start/stop trading.
+TELEGRAM_COMMANDS_ENABLED = _parse_env_bool("TELEGRAM_COMMANDS_ENABLED", default="true")
+TELEGRAM_COMMANDS_LIVE = _parse_env_bool("TELEGRAM_COMMANDS_LIVE", default="true")
+
+
 # --- Alert policy (high-signal Telegram/email; noisy topics off by default) ---
 TELEGRAM_ALERT_HALT = _parse_env_bool("TELEGRAM_ALERT_HALT", default="true")
 TELEGRAM_ALERT_DRAWDOWN_MAJOR = _parse_env_bool("TELEGRAM_ALERT_DRAWDOWN_MAJOR", default="true")
@@ -2513,6 +2518,14 @@ TELEGRAM_LIVE_FILL_MIN_USD = TELEGRAM_FILL_MIN_USD  # alias
 # Error / action watcher (structured JSONL + optional Telegram + Cursor queue).
 ERROR_WATCHER_ENABLED = _parse_env_bool("ERROR_WATCHER_ENABLED", default="true")
 TELEGRAM_ALERT_ERRORS = _parse_env_bool("TELEGRAM_ALERT_ERRORS", default="true")
+# Runtime auto-recovery for cycle errors. Never patches source.
+# Known Alpaca 5xx/DNS: retry/backoff without waiting on Ollama.
+# Unknown errors: optional Ollama JSON pick from an allowlist (skip/backoff/retry/human).
+ERROR_AUTOFIX_ENABLED = _parse_env_bool("ERROR_AUTOFIX_ENABLED", default="true")
+ERROR_AUTOFIX_OLLAMA = _parse_env_bool("ERROR_AUTOFIX_OLLAMA", default="true")
+ERROR_AUTOFIX_OLLAMA_TIMEOUT_SEC = int(os.getenv("ERROR_AUTOFIX_OLLAMA_TIMEOUT_SEC", "12"))
+ERROR_AUTOFIX_MAX_BACKOFF_SEC = int(os.getenv("ERROR_AUTOFIX_MAX_BACKOFF_SEC", "120"))
+ERROR_AUTOFIX_TELEGRAM = _parse_env_bool("ERROR_AUTOFIX_TELEGRAM", default="true")
 # Optional once-per-day Telegram digest of bot_errors.jsonl (default OFF).
 TELEGRAM_DAILY_ERROR_DIGEST = _parse_env_bool(
     "TELEGRAM_DAILY_ERROR_DIGEST", default="false"
@@ -2573,6 +2586,8 @@ def telegram_alert_policy_summary() -> str:
         bits.append("errors")
     if ERROR_WATCHER_ENABLED:
         bits.append("error-watcher+daily-log")
+    if ERROR_AUTOFIX_ENABLED:
+        bits.append("error-autofix")
     if TELEGRAM_DAILY_ERROR_DIGEST:
         bits.append(f"error-digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET")
     if TELEGRAM_ALERT_DAILY_SUMMARY:
@@ -2583,6 +2598,8 @@ def telegram_alert_policy_summary() -> str:
         bits.append(f"live daily@{TELEGRAM_LIVE_DAILY_SUMMARY_TIME} ET")
     if telegram_weekly_summary_enabled():
         bits.append(f"weekly Fri@{TELEGRAM_WEEKLY_SUMMARY_TIME} ET")
+    if TELEGRAM_COMMANDS_ENABLED and (PAPER_TRADING or TELEGRAM_COMMANDS_LIVE):
+        bits.append("phone /status")
     return ", ".join(bits) if bits else "all high-signal alerts off"
 
 
@@ -2601,9 +2618,16 @@ def format_telegram_automation_banner() -> str:
         err_s = "Error watcher ON | daily log + TG per error"
         if TELEGRAM_DAILY_ERROR_DIGEST:
             err_s += f" | digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET"
+        if ERROR_AUTOFIX_ENABLED:
+            ollama_s = "Ollama unknown-errors" if ERROR_AUTOFIX_OLLAMA else "rules-only"
+            err_s += f" | auto-fix {ollama_s}"
     else:
         err_s = "Error watcher OFF"
-    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} <<<"
+    if TELEGRAM_COMMANDS_ENABLED and (PAPER_TRADING or TELEGRAM_COMMANDS_LIVE):
+        phone_s = "phone cmds ON (/status)"
+    else:
+        phone_s = "phone cmds OFF"
+    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} | {phone_s} <<<"
 
 
 def get_smtp_config():
@@ -7429,6 +7453,27 @@ def _long_sleeve_base_cap_sum() -> float:
     return total
 
 
+def _long_sleeve_room_pct() -> float:
+    """Equity fraction left for long sleeves after VTI core + metal."""
+    metal = METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0
+    try:
+        vti = float(vti_core_allocation_pct() or 0.0)
+    except Exception:
+        vti = 0.0
+    return max(0.0, round(1.0 - metal - vti, 6))
+
+
+def _fit_long_sleeve_scale(scale: float, long_sum: float) -> float:
+    """Never let scaled long sleeves plus VTI/metal exceed 100% of equity."""
+    if long_sum <= 0:
+        return 0.0
+    room = _long_sleeve_room_pct()
+    deploy = round(float(scale) * long_sum, 6)
+    if deploy > room + 1e-9:
+        scale = round(room / long_sum, 6)
+    return max(0.0, scale)
+
+
 def active_sleeve_scale() -> float:
     """Scale active SPY/crypto/NYSE caps (VTI core + metal/social reserves)."""
     af = active_fund_fraction()
@@ -7438,14 +7483,14 @@ def active_sleeve_scale() -> float:
         return 0.0
     base_scale = round(lf * af, 6)
     if not paper_aggressive_context():
-        return base_scale
-    # Boost deploys more of the active slice; never exceed active fund headroom.
+        return _fit_long_sleeve_scale(base_scale, long_sum)
+    # Boost deploys more of the active slice; never exceed remaining fund room.
     base_deploy = round(base_scale * long_sum, 6)
     max_active = base_scale
     target_deploy = round(
         min(max_active, base_deploy * PAPER_ACTIVE_SLEEVE_BOOST), 6
     )
-    return round(target_deploy / long_sum, 6)
+    return _fit_long_sleeve_scale(round(target_deploy / long_sum, 6), long_sum)
 
 
 def apply_paper_wisdom_floor(wisdom: dict | None) -> dict | None:
@@ -7563,10 +7608,14 @@ def effective_cash_buffer_pct() -> float:
         long_caps = _long_sleeve_base_cap_sum() * active_sleeve_scale()
     cash = round(1.0 - metal - vti - long_caps, 6)
     if cash < 0:
-        raise ValueError(
-            f"Fund over-allocated: vti {vti:.2%} + metal {metal:.2%} + "
-            f"long sleeves {long_caps:.2%} > 100%; reduce VTI_CORE_PCT or sleeve caps"
+        logging.getLogger(__name__).warning(
+            "Fund over-allocated: vti %.2f%% + metal %.2f%% + long sleeves %.2f%% > 100%%; "
+            "clamping cash buffer to 0 (dashboard/import still starts)",
+            vti * 100.0,
+            metal * 100.0,
+            long_caps * 100.0,
         )
+        return 0.0
     return cash
 
 
@@ -7593,6 +7642,13 @@ def fund_allocation_pct() -> dict[str, float]:
     }
 
 
-_alloc = fund_allocation_pct()
-if abs(sum(_alloc.values()) - 1.0) > 1e-4:
-    raise ValueError(f"Fund allocation must sum to 100%, got {_alloc}")
+try:
+    _alloc = fund_allocation_pct()
+except ValueError as exc:
+    logging.getLogger(__name__).warning("Fund allocation check skipped: %s", exc)
+    _alloc = {}
+else:
+    if _alloc and abs(sum(_alloc.values()) - 1.0) > 1e-4:
+        logging.getLogger(__name__).warning(
+            "Fund allocation must sum to 100%%, got %s", _alloc
+        )

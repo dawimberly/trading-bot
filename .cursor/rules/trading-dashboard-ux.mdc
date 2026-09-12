@@ -23,9 +23,9 @@ Look spec: `stock-bot/docs/PAQINHAUS_LOOK.md`. Cursor prompt: `stock-bot/docs/CU
 Top of window:
 
 1. 6px cyan hairline (`#1fa8ef`)
-2. Kicker `PYTHONTRADING · {book}` + giant Georgia **Stock-bot** wordmark + `NYSE 100` stamp
+2. Kicker `PYTHONTRADING · {book}` + giant Georgia **Stock-bot** wordmark + `LIVE` / `PAPER` stamp (never NYSE 100 or VTI 85)
 3. Running/halted chip + Paper/Live book switcher
-4. Cyan tape (NYSE 100% · VTI CORE OFF · …)
+4. Cyan tape from `dashboard_header.py` (research/holdings facts — never NYSE 100%)
 5. Live banner (live book only)
 6. Status pills + metric cards (Equity, Cash %, Invested %, P&L, Market)
 7. Tabs: Positions / Overview / Trades / Wisdom / Charts

@@ -2,7 +2,7 @@
 
 Look only. Do not change strategy, journal, Alpaca, orders, sleeves, or bot process logic.
 
-Reference: the Grok web preview the owner signed off — giant blackletter **Stock-bot** wordmark, cyan **NYSE 100** stamp, cream-on-near-black, cyan tape.
+Reference: the Grok web preview the owner signed off — giant blackletter **Stock-bot** wordmark, cyan **LIVE** / **PAPER** stamp, cream-on-near-black, cyan tape. Do **not** restore the leftover NYSE-only `NYSE 100` slogan.
 
 ## Palette (mandatory)
 
@@ -30,15 +30,15 @@ Red is **live money + losses + errors**. Never decorative.
 - Body / tables / metrics: **Segoe UI**, tabular numbers.
 - Wordmark text: `Stock-bot`
 - Kicker above wordmark (cyan, tracked uppercase): `PYTHONTRADING · {BOOK}`
-- Stamp next to wordmark: `NYSE 100` — cyan fill, near-black text, slight rotation if the toolkit allows, otherwise a tight cyan pill.
+- Stamp next to wordmark: `LIVE` or `PAPER` (active book) — cyan fill, near-black text, slight rotation if the toolkit allows, otherwise a tight cyan pill. Never `NYSE 100` / `VTI 85`.
 
 ## Layout (top → bottom)
 
 1. 6px cyan hairline across the full window.
 2. Header: kicker + giant **Stock-bot** + NYSE stamp on the left. Running/halted chip + Paper/Live book switcher on the right.
-3. Cyan tape row with strategy facts: `NYSE 100% · VTI CORE OFF · SPY SLEEVE 0% · CRYPTO 0% · STAT-ARB 0% · JOURNAL = FILL · ATR COOLDOWN ON · SURVIVAL NOT P95`
+3. Cyan tape row from `dashboard_header.py`: paper = Realistic Research / Smart Dynamic VTI 40–75% (or mixed holdings); live = LIVE / holdings. Never `NYSE 100% · VTI CORE OFF · …`.
 4. **LIVE TRADING — REAL MONEY ACCOUNT** banner only on the live book. Loud red. Do not size options on ~$300.
-5. Status pills: book, NYSE 100%, regime, gates, health, bot, heartbeat, conviction.
+5. Status pills: book, regime, gates, health, bot, heartbeat, conviction.
 6. Metric row: Equity, Cash %, Invested %, Unrealized P&L, Next market. Equity is the largest cream number.
 7. Tabs: Positions / Overview / Trades / Wisdom / Charts.
 8. Active tab is cyan fill + near-black label. Inactive is cream on surface.

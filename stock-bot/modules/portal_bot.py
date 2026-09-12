@@ -258,34 +258,52 @@ def _process_cmdline(pid: int) -> str | None:
         return None
 
 
-def _graceful_stop_pid(pid: int, *, wait_sec: float = 6.0) -> tuple[bool, str]:
-    """Try graceful shutdown, then force-kill if needed."""
+def _tree_still_alive(pids: set[int]) -> list[int]:
+    return [p for p in sorted(pids) if _pid_alive(p)]
+
+
+def _win_taskkill(pid: int, *, force: bool) -> None:
+    argv = ["taskkill", "/PID", str(pid), "/T"]
+    if force:
+        argv.append("/F")
+    subprocess.run(
+        argv,
+        capture_output=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+
+
+def _graceful_stop_pid(pid: int, *, wait_sec: float = 8.0) -> tuple[bool, str]:
+    """Stop a bot supervisor and its children (paper: run_paper_bot + run_all)."""
     if not _pid_alive(pid):
         return True, f"PID {pid} already stopped."
+    tree = {pid} | _descendant_pids(pid)
     try:
         if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid)],
-                capture_output=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            _win_taskkill(pid, force=False)
         else:
             os.kill(pid, signal.SIGTERM)
         deadline = time.time() + wait_sec
         while time.time() < deadline:
-            if not _pid_alive(pid):
-                return True, f"Stopped PID {pid}."
+            if not _tree_still_alive(tree):
+                return True, f"Stopped PID {pid} (process tree)."
             time.sleep(0.25)
         if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/F"],
-                check=True,
-                capture_output=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
+            _win_taskkill(pid, force=True)
+            for leftover in _tree_still_alive(tree):
+                _win_taskkill(leftover, force=True)
         else:
-            os.kill(pid, signal.SIGKILL)
-        return True, f"Force-stopped PID {pid}."
+            for member in tree:
+                if _pid_alive(member):
+                    try:
+                        os.kill(member, signal.SIGKILL)
+                    except OSError:
+                        pass
+        time.sleep(0.4)
+        leftover = _tree_still_alive(tree | _descendant_pids(pid) | {pid})
+        if leftover:
+            return False, f"Could not fully stop PID {pid}; still alive: {leftover}"
+        return True, f"Force-stopped PID {pid} (process tree)."
     except subprocess.CalledProcessError as exc:
         return False, f"Could not stop PID {pid}: {exc}"
     except OSError as exc:
@@ -708,7 +726,10 @@ def start_bot(username: str, book_id: str = "alpaca_paper", *, skip_orphan_stop:
         f"{time.strftime('%Y-%m-%d %H:%M:%S')} ---\n"
     )
     log_file.flush()
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+    flags = 0
+    if sys.platform == "win32":
+        flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        flags |= int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
     proc = subprocess.Popen(
         launch_argv,
         cwd=str(launch_cwd),
@@ -745,31 +766,60 @@ def start_bot(username: str, book_id: str = "alpaca_paper", *, skip_orphan_stop:
 def stop_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
     pid = bot_pid(username, book_id)
     if pid is None:
+        orphans, orphan_msg = stop_orphan_project_bots(
+            preserve_pids=_tracked_book_pids(username), username=username
+        )
+        if orphans:
+            return True, f"No pid file for {book_id}; {orphan_msg}"
         return False, f"No bot running for {book_id}."
     ok, msg = _graceful_stop_pid(pid)
     book_pid_path(username, book_id).unlink(missing_ok=True)
     if not ok:
         return False, msg
     # run_paper_bot.py supervises a child run_all.py — clean up stragglers
-    stop_orphan_project_bots(preserve_pids=_tracked_book_pids(username), username=username)
-    return True, f"Bot stopped for {book_id} ({msg})"
+    orphans, orphan_msg = stop_orphan_project_bots(
+        preserve_pids=_tracked_book_pids(username), username=username
+    )
+    deadline = time.time() + 6.0
+    while time.time() < deadline:
+        if not bot_running(username, book_id) and not _pid_alive(pid):
+            break
+        time.sleep(0.25)
+    if bot_running(username, book_id) or _pid_alive(pid):
+        return False, f"Bot still running after stop for {book_id} ({msg})."
+    extra = f" {orphan_msg}" if orphans else ""
+    return True, f"Bot stopped for {book_id} ({msg}).{extra}"
 
 
 def restart_bot(username: str, book_id: str = "alpaca_paper") -> tuple[bool, str]:
-    """Gracefully stop then start the book bot (or start if not running)."""
+    """Kill the book process tree, then start a new bot (real restart)."""
     mode = "paper" if _is_paper_book(username, book_id) else "live"
-    was_running = bot_running(username, book_id)
+    old_pid = bot_pid(username, book_id)
+    was_running = old_pid is not None
     if was_running:
         ok, stop_msg = stop_bot(username, book_id)
         if not ok:
             return False, stop_msg
     else:
-        stop_msg = "Bot was not running."
+        orphans, orphan_msg = stop_orphan_project_bots(
+            preserve_pids=_tracked_book_pids(username), username=username
+        )
+        stop_msg = orphan_msg if orphans else "Bot was not running."
+    time.sleep(0.6)
+    if bot_running(username, book_id):
+        return False, "Old bot is still running — restart aborted."
     ok, start_msg = start_bot(username, book_id)
     if not ok:
         return False, start_msg
+    new_pid = bot_pid(username, book_id)
+    if old_pid is not None and new_pid == old_pid:
+        return False, (
+            f"Restart did not spawn a new process (still PID {old_pid}).\n"
+            f"{stop_msg}\n{start_msg}"
+        )
     prefix = "Bot restarted successfully" if was_running else "Bot started successfully"
-    return True, f"{prefix} ({mode} mode).\n{stop_msg}\n{start_msg}"
+    pid_note = f" New PID {new_pid}." if new_pid else ""
+    return True, f"{prefix} ({mode} mode).{pid_note}\n{stop_msg}\n{start_msg}"
 
 
 def refresh_bot_daily_data(*, daily_days: int | None = None) -> tuple[bool, str]:

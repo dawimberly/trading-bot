@@ -31,9 +31,9 @@ When I open `dashboard_app.py` I should immediately see:
 3. Header left:
    - Small cyan tracked kicker: `PYTHONTRADING · {active book}`
    - Giant Georgia wordmark: **Stock-bot** (hero ~42pt)
-   - Cyan stamp/pill: `NYSE 100`
+   - Cyan stamp/pill: `LIVE` or `PAPER` (active book). Never `NYSE 100` or `VTI 85`.
 4. Header right: running/halted chip + Paper / Live segmented control. Active Paper = cyan fill + `#0b0b0e` text. Active Live = live red fill + cream text.
-5. A cyan “tape” strip under the header with: `NYSE 100% · VTI CORE OFF · SPY SLEEVE 0% · CRYPTO 0% · STAT-ARB 0% · JOURNAL = FILL · ATR COOLDOWN ON · SURVIVAL NOT P95`
+5. A cyan “tape” strip under the header from `dashboard_header.header_tape_text` (paper research / mixed holdings). Never hardcode `NYSE 100% · VTI CORE OFF · …`.
 6. Live book only: full-width banner `LIVE TRADING — REAL MONEY ACCOUNT` plus “Do not size options on ~$300.”
 7. Status pills then a 5-up metric row (Equity / Cash / Invested / UPL / Next market). Equity is the biggest cream number. Gains `#7ec13a`, losses `#e23a3a`.
 8. Tab labels in Georgia. Active tab cyan. Tables cream-on-card with `#2e2c28` grid.
@@ -44,16 +44,16 @@ When I open `dashboard_app.py` I should immediately see:
 1. Replace the `COLORS` dict in `dashboard_app.py` with the tokens in `stock-bot/docs/PAQINHAUS_LOOK.md` (same keys the file already uses: bg, surface, surface2, card, card_hover, border, muted, text, text_dim, green, green_dim, red, red_dim, amber, amber_dim, blue, accent, accent_hover, live, live_bg, small, small_bg, paper_ok, paper_ok_bg, chart_grid). Add `magenta` if missing.
 2. Replace `FONTS` so hero/title/heading are Georgia and larger (hero 42 bold, heading 16 bold, metric 22 bold). Body stays Segoe UI.
 3. Add the cyan hairline if missing; bump height to 6 if a 4px bar already exists.
-4. Rebuild the **header left cluster** to kicker + Stock-bot + NYSE stamp. Do not leave a generic “PythonTrading” 20pt title as the hero.
-5. Add the cyan tape row. Static text is fine (no animation required on Tk).
+4. Rebuild the **header left cluster** to kicker + Stock-bot + LIVE/PAPER stamp via `dashboard_header.py`. Do not leave a generic “PythonTrading” 20pt title as the hero. Do not restore `NYSE 100`.
+5. Add the cyan tape row from `header_tape_text`. Static text is fine (no animation required on Tk).
 6. Sweep leftover navy/blue hex (`#0a0e17`, `#111827`, `#152238`, `#2563eb`, `#1e3a5f`, `#334155`, `#60a5fa`, `#1d4ed8`) in `dashboard_app.py` and `dashboard.py` — map them to `COLORS[...]`.
 7. Run `python stock-bot/scripts/apply_paqinhaus_look.py` after edits so the helper stays in sync.
 8. Do not commit secrets. Do not touch `.env`.
 
 ## Verify
 
-- Open the monitor, Paper book: dark near-black, giant Stock-bot, cyan tape, ~$97k equity, no live banner.
-- Click Live: red banner appears, equity ~$300, title kicker shows live.
+- Open the monitor, Paper book: dark near-black, giant Stock-bot, cyan **PAPER** stamp (not NYSE 100), cyan research tape, ~$97k equity, no live banner.
+- Click Live: red banner appears, equity ~$300, cyan **LIVE** stamp, title kicker shows live.
 - Positions / Overview / Trades / Wisdom / Charts still populate from existing data.
 - `rg "0a0e17|2563eb|1e3a5f" stock-bot/dashboard_app.py` returns nothing.
 

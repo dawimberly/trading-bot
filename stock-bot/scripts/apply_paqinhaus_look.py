@@ -105,6 +105,24 @@ def patch_paper_v2_title(text: str) -> str:
     return text
 
 
+OLD_NYSE_100_STAMP = 'text="  NYSE 100  "'
+OLD_NYSE_100_TAPE = (
+    'text="NYSE 100%   ·   VTI CORE OFF   ·   SPY SLEEVE 0%   ·   '
+    'CRYPTO 0%   ·   STAT-ARB 0%   ·   JOURNAL = FILL   ·   '
+    'ATR COOLDOWN ON   ·   SURVIVAL NOT P95"'
+)
+STAMP_HELPER = "text=header_stamp_text(paper=_book_is_paper(self._book_id))"
+TAPE_HELPER = "text=header_tape_text(paper=_book_is_paper(self._book_id))"
+
+
+def strip_nyse_100_chrome(text: str) -> str:
+    """Do not let a look pass restore the leftover NYSE-only stamp/tape."""
+    text = text.replace(OLD_NYSE_100_STAMP, STAMP_HELPER)
+    text = text.replace('text="NYSE 100"', STAMP_HELPER)
+    text = text.replace(OLD_NYSE_100_TAPE, TAPE_HELPER)
+    return text
+
+
 def patch_app(text: str) -> str:
     text = _replace_block(text, "COLORS", NEW_COLORS)
     text = _replace_block(text, "FONTS", NEW_FONTS)
@@ -144,6 +162,7 @@ def patch_app(text: str) -> str:
     if 'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"]' not in text:
         text = _swap(text, ACCENT_OLD, ACCENT_NEW)
     text = patch_paper_v2_title(text)
+    text = strip_nyse_100_chrome(text)
     return text
 
 
