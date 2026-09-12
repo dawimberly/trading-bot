@@ -140,7 +140,7 @@ except ImportError:
     TRAY_AVAILABLE = False
 
 COLORS = {
-    # Paqinhaüs poster tokens — look only; live banner stays loud red
+    # Paqinhaüs / Dirty INK poster tokens — look only; live banner stays loud red
     "bg": "#0b0b0e",
     "surface": "#121214",
     "surface2": "#16161a",
@@ -158,7 +158,7 @@ COLORS = {
     "amber_dim": "#8a7610",
     "blue": "#4fbcf5",
     "accent": "#1fa8ef",
-    "accent_hover": "#1688c4",
+    "accent_hover": "#4fbcf5",
     "live": "#c81e1e",
     "live_bg": "#3a0a0a",
     "small": "#b45309",
@@ -169,23 +169,63 @@ COLORS = {
     "magenta": "#e653a4",
 }
 
-FONTS = {
-    "hero": ("Georgia", 42, "bold"),
-    "hero_sub": ("Georgia", 26, "bold"),
-    "title": ("Georgia", 22, "bold"),
-    "heading": ("Georgia", 16, "bold"),
-    "body": ("Segoe UI", 12),
-    "body_sm": ("Segoe UI", 11),
-    "caption": ("Segoe UI", 10),
-    "metric": ("Segoe UI", 22, "bold"),
-    "metric_sm": ("Segoe UI", 15, "bold"),
+# Display roles prefer Dirty INK faces when installed; Windows falls back to Georgia/Impact.
+_FONT_ROLE_CANDIDATES = {
+    "display": ("Pirata One", "Georgia"),
+    "stamp": ("Bungee", "Permanent Marker", "Impact", "Segoe UI"),
+    "tape": ("Bungee", "Impact", "Segoe UI"),
+    "body": ("DM Sans", "Segoe UI"),
 }
+
+FONTS = {
+    "hero": ("display", 52, "bold"),
+    "hero_sub": ("display", 28, "bold"),
+    "title": ("display", 22, "bold"),
+    "heading": ("display", 16, "bold"),
+    "kicker": ("body", 11, "bold"),
+    "stamp": ("stamp", 13, "bold"),
+    "tape": ("tape", 11, "bold"),
+    "body": ("body", 12),
+    "body_sm": ("body", 11),
+    "caption": ("body", 10),
+    "metric": ("body", 22, "bold"),
+    "metric_sm": ("body", 15, "bold"),
+}
+
+_FONT_FAMILY_CACHE: dict[str, str] = {}
+
+
+def _installed_font_families() -> set[str]:
+    try:
+        import tkinter.font as tkfont
+
+        return {str(name).lower() for name in tkfont.families()}
+    except Exception:
+        return set()
+
+
+def _resolve_font_family(role_or_family: str) -> str:
+    cached = _FONT_FAMILY_CACHE.get(role_or_family)
+    if cached:
+        return cached
+    candidates = _FONT_ROLE_CANDIDATES.get(role_or_family)
+    if candidates:
+        installed = _installed_font_families()
+        for name in candidates:
+            if name.lower() in installed:
+                _FONT_FAMILY_CACHE[role_or_family] = name
+                return name
+        chosen = candidates[-1]
+    else:
+        chosen = role_or_family
+    _FONT_FAMILY_CACHE[role_or_family] = chosen
+    return chosen
 
 
 def _ctk_font(key: str) -> ctk.CTkFont:
-    family, size, *rest = FONTS[key]
+    role_or_family, size, *rest = FONTS[key]
     weight = rest[0] if rest else "normal"
-    return ctk.CTkFont(family=family, size=size, weight=weight)
+    return ctk.CTkFont(family=_resolve_font_family(role_or_family), size=size, weight=weight)
 
 plt.ioff()
 
@@ -1212,7 +1252,7 @@ def _segment_matches_book(scorecard: dict, book_id: str) -> bool:
     live_only = seg.get("live_only")
     if book_id == "alpaca_live":
         return live_only is True or book_type == "live"
-    if book_id == "alpaca_paper":
+    if book_id in ("alpaca_paper", "alpaca_paper_v2"):
         return live_only is False or book_type == "paper"
     return True
 
@@ -2583,8 +2623,8 @@ class TradingDashboardApp(ctk.CTk):
         save_last_book_id(self._book_id)
         self._apply_user_paths(username, self._book_id)
         self.title(f"PythonTrading — {book_label(self._book_id)}")
-        self.geometry("1000x780")
-        self.minsize(960, 680)
+        self.geometry("1400x920")
+        self.minsize(1200, 800)
         self.configure(fg_color=COLORS["bg"])
 
         self._refresh_job: str | None = None
@@ -2611,27 +2651,31 @@ class TradingDashboardApp(ctk.CTk):
             except Exception:
                 pass
 
+        # Dirty INK poster chrome: cyan hairline + magenta atmosphere strip
         accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
         accent_bar.pack(fill="x")
         accent_bar.pack_propagate(False)
+        mag_bar = ctk.CTkFrame(self, fg_color=COLORS["magenta"], height=2, corner_radius=0)
+        mag_bar.pack(fill="x")
+        mag_bar.pack_propagate(False)
 
-        # Header bar
+        # Header bar — sharper poster panel, cream wordmark + cyan LIVE/PAPER stamp
         header_bar = ctk.CTkFrame(
             self,
             fg_color=COLORS["surface"],
-            corner_radius=16,
+            corner_radius=6,
             border_width=1,
             border_color=COLORS["border"],
         )
-        header_bar.pack(fill="x", padx=14, pady=(12, 6))
+        header_bar.pack(fill="x", padx=10, pady=(10, 0))
 
-        tape = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=28, corner_radius=0)
-        tape.pack(fill="x")
+        tape = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=32, corner_radius=0)
+        tape.pack(fill="x", pady=(0, 0))
         tape.pack_propagate(False)
         self._header_tape = ctk.CTkLabel(
             tape,
             text=header_tape_text(paper=_book_is_paper(self._book_id)),
-            font=_ctk_font("caption"),
+            font=_ctk_font("tape"),
             text_color=COLORS["bg"],
         )
         self._header_tape.pack(expand=True)
@@ -2639,7 +2683,7 @@ class TradingDashboardApp(ctk.CTk):
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
         header_inner = ctk.CTkFrame(header_bar, fg_color="transparent")
-        header_inner.pack(fill="x", padx=12, pady=10)
+        header_inner.pack(fill="x", padx=14, pady=(12, 14))
         header_inner.grid_columnconfigure(0, weight=1)
         header_inner.grid_columnconfigure(1, weight=0)
 
@@ -2655,9 +2699,9 @@ class TradingDashboardApp(ctk.CTk):
             font=ctk.CTkFont(size=18),
             fg_color=COLORS["surface2"],
             hover_color=COLORS["accent"],
-            corner_radius=10,
+            corner_radius=8,
             command=self._open_book_menu,
-        ).grid(row=0, column=0, sticky="nw", padx=(0, 8))
+        ).grid(row=0, column=0, sticky="nw", padx=(0, 10))
 
         title_block = ctk.CTkFrame(header_left, fg_color="transparent")
         title_block.grid(row=0, column=1, sticky="ew")
@@ -2665,13 +2709,13 @@ class TradingDashboardApp(ctk.CTk):
         self._header_kicker = ctk.CTkLabel(
             title_block,
             text=header_kicker_text(paper=_book_is_paper(self._book_id)),
-            font=_ctk_font("caption"),
+            font=_ctk_font("kicker"),
             text_color=COLORS["accent"],
             anchor="w",
         )
         self._header_kicker.grid(row=0, column=0, sticky="w")
         word_row = ctk.CTkFrame(title_block, fg_color="transparent")
-        word_row.grid(row=1, column=0, sticky="w")
+        word_row.grid(row=1, column=0, sticky="w", pady=(2, 0))
         ctk.CTkLabel(
             word_row,
             text="Stock-bot",
@@ -2682,14 +2726,15 @@ class TradingDashboardApp(ctk.CTk):
         self._header_stamp = ctk.CTkLabel(
             word_row,
             text=header_stamp_text(paper=_book_is_paper(self._book_id)),
-            font=_ctk_font("caption"),
+            font=_ctk_font("stamp"),
             text_color=COLORS["bg"],
             fg_color=COLORS["accent"],
-            corner_radius=4,
+            corner_radius=3,
+            height=28,
         )
-        self._header_stamp.pack(side="left", padx=(12, 0), pady=(10, 0))
+        self._header_stamp.pack(side="left", padx=(14, 0), pady=(14, 0))
         sub_row = ctk.CTkFrame(title_block, fg_color="transparent")
-        sub_row.grid(row=2, column=0, sticky="w", pady=(2, 0))
+        sub_row.grid(row=2, column=0, sticky="w", pady=(4, 0))
         self._clock_label = ctk.CTkLabel(
             sub_row,
             text="",
@@ -2706,13 +2751,13 @@ class TradingDashboardApp(ctk.CTk):
         self._live_equity_label = ctk.CTkLabel(
             title_block,
             text="Live Equity: —",
-            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
+            font=_ctk_font("metric"),
             text_color=COLORS["green"],
             anchor="w",
             wraplength=520,
             justify="left",
         )
-        self._live_equity_label.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self._live_equity_label.grid(row=3, column=0, sticky="w", pady=(8, 0))
         self._since_start_label = ctk.CTkLabel(
             title_block,
             text="Since Start: —",
@@ -2890,7 +2935,7 @@ class TradingDashboardApp(ctk.CTk):
         status_row = ctk.CTkFrame(
             top_stack,
             fg_color=COLORS["card"],
-            corner_radius=12,
+            corner_radius=8,
             border_width=1,
             border_color=COLORS["border"],
         )
@@ -3090,7 +3135,7 @@ class TradingDashboardApp(ctk.CTk):
         self._positions_table = DataTable(
             self._tab_positions,
             ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %", "ATR Stop"],
-            height=11,
+            height=24,
             large=True,
         )
         self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
@@ -3503,6 +3548,7 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
         )
+        self._collapse_positions_aux_sections()
 
         self._tab_overview = self._tabs.add("Overview")
         self._build_overview_tab()
@@ -4389,6 +4435,22 @@ class TradingDashboardApp(ctk.CTk):
             self._short_empty_label.place(relx=0.5, rely=0.45, anchor="center")
             return
         self._short_table.set_rows(rows, tag_col="_tag")
+
+    def _collapse_positions_aux_sections(self) -> None:
+        """Start with scanner panels folded so the positions table gets the window."""
+        for attr, body, btn, title in (
+            ("_insider_expanded", self._insider_body, self._insider_toggle_btn, "Insider Signals"),
+            ("_rvol_expanded", self._rvol_body, self._rvol_toggle_btn, "RVOL & ORB"),
+            ("_orb_mom_expanded", self._orb_mom_body, self._orb_mom_toggle_btn, "ORB Momentum"),
+            ("_sector_rot_expanded", self._sector_rot_body, self._sector_rot_toggle_btn, "Sector Rotation"),
+            ("_vol_bo_expanded", self._vol_bo_body, self._vol_bo_toggle_btn, "Vol Breakout"),
+            ("_strategy_expanded", self._strategy_body, self._strategy_toggle_btn, "Strategy Performance"),
+            ("_sharpe_expanded", self._sharpe_body, self._sharpe_toggle_btn, "Sharpe History"),
+            ("_short_expanded", self._short_body, self._short_toggle_btn, "Short Activity"),
+        ):
+            setattr(self, attr, False)
+            body.pack_forget()
+            btn.configure(text=f"▶ {title}")
 
     def _toggle_insider_section(self) -> None:
         self._insider_expanded = not self._insider_expanded
