@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import messagebox, ttk
+import tkinter as tk
 
 
 def _app_root() -> Path:
@@ -1995,6 +1996,142 @@ class MetricCard(ctk.CTkFrame):
         self._value.configure(text=text, text_color=color or COLORS["text"])
 
 
+class CopyableChip:
+    """Readonly tk.Entry so status chips can be highlighted and Ctrl+C copied."""
+
+    def __init__(self, parent, text: str, fg: str, text_color: str, *, width: int = 16):
+        self._var = tk.StringVar(value=text)
+        self._entry = tk.Entry(
+            parent,
+            textvariable=self._var,
+            readonlybackground=fg,
+            disabledbackground=fg,
+            background=fg,
+            fg=text_color,
+            insertbackground=text_color,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            highlightcolor=COLORS["accent"],
+            font=("Segoe UI", 10),
+            width=width,
+            takefocus=True,
+        )
+        self._entry.configure(state="readonly")
+        self._entry.pack(side="left", padx=(0, 6), ipady=2)
+
+    def _as_widget(self, other):
+        return getattr(other, "_entry", other)
+
+    def pack(self, **kw):
+        if "before" in kw:
+            kw["before"] = self._as_widget(kw["before"])
+        if "after" in kw:
+            kw["after"] = self._as_widget(kw["after"])
+        self._entry.pack(**kw)
+
+    def pack_forget(self) -> None:
+        self._entry.pack_forget()
+
+    def configure(self, **kw) -> None:
+        text = kw.pop("text", None)
+        fg = kw.pop("fg_color", None)
+        tc = kw.pop("text_color", None)
+        self._entry.configure(state="normal")
+        if text is not None:
+            self._var.set(str(text))
+        opts: dict = {}
+        if fg:
+            opts["readonlybackground"] = fg
+            opts["disabledbackground"] = fg
+            opts["background"] = fg
+        if tc:
+            opts["fg"] = tc
+            opts["insertbackground"] = tc
+        if opts:
+            self._entry.configure(**opts)
+        self._entry.configure(state="readonly")
+
+
+class CopyableMetric:
+    """Compact labeled value: caption + readonly Entry (mouse-select + Ctrl+C)."""
+
+    def __init__(self, master, title: str, *, width: int = 16):
+        self._frame = ctk.CTkFrame(master, fg_color="transparent")
+        self._caption = ctk.CTkLabel(
+            self._frame,
+            text=title.upper(),
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        )
+        self._caption.pack(side="left", padx=(0, 6))
+        self._var = tk.StringVar(value="—")
+        self._entry = tk.Entry(
+            self._frame,
+            textvariable=self._var,
+            readonlybackground=COLORS["card"],
+            background=COLORS["card"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["border"],
+            highlightcolor=COLORS["accent"],
+            font=("Segoe UI", 12, "bold"),
+            width=width,
+            takefocus=True,
+        )
+        self._entry.configure(state="readonly")
+        self._entry.pack(side="left", ipady=1)
+
+    def pack(self, **kw):
+        self._frame.pack(**kw)
+
+    def set(self, text: str, color: str | None = None) -> None:
+        self._entry.configure(state="normal")
+        self._var.set(text)
+        if color:
+            self._entry.configure(fg=color, insertbackground=color)
+        self._entry.configure(state="readonly")
+
+
+class CopyableLines:
+    """Two-line read-only Text for stats (selectable / Ctrl+C)."""
+
+    def __init__(self, master, *, height: int = 2):
+        self._text = tk.Text(
+            master,
+            height=height,
+            wrap="word",
+            background=COLORS["card"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            font=("Segoe UI", 10),
+            padx=4,
+            pady=2,
+        )
+        self._text.pack(fill="x")
+        self._text.bind("<Key>", self._readonly_key)
+
+    @staticmethod
+    def _readonly_key(event):
+        if event.state & 0x4 and event.keysym.lower() in ("c", "a"):
+            return None
+        return "break"
+
+    def configure(self, **kw) -> None:
+        if "text" not in kw:
+            return
+        body = str(kw["text"])
+        self._text.delete("1.0", "end")
+        self._text.insert("1.0", body)
+
+
 class DataTable(ctk.CTkFrame):
     """Lightweight dark table via ttk.Treeview."""
 
@@ -2050,7 +2187,7 @@ class DataTable(ctk.CTkFrame):
             show="headings",
             height=height,
             style=style_name,
-            selectmode="browse",
+            selectmode="extended",
         )
         for col in columns:
             self._tree.heading(
@@ -2145,6 +2282,9 @@ class DataTable(ctk.CTkFrame):
         self._tree.configure(yscrollcommand=scroll.set)
         self._tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        self._tree.bind("<Control-c>", self._copy_selection)
+        self._tree.bind("<Control-C>", self._copy_selection)
+        self._tree.bind("<Button-3>", self._on_tree_right_click)
 
     def clear(self) -> None:
         for item in self._tree.get_children():
@@ -2224,6 +2364,44 @@ class DataTable(ctk.CTkFrame):
         n = len(self._rows)
         shown = max(self._min_rows, min(self._max_rows, n if n else 1))
         self._tree.configure(height=shown)
+
+    def _selection_tsv(self) -> str:
+        items = self._tree.selection()
+        if not items:
+            focus = self._tree.focus()
+            items = (focus,) if focus else ()
+        if not items:
+            return ""
+        lines = ["\t".join(self._columns)]
+        for item in items:
+            vals = self._tree.item(item, "values")
+            lines.append("\t".join(str(v) for v in vals))
+        return "\n".join(lines)
+
+    def _copy_selection(self, _event=None):
+        text = self._selection_tsv()
+        if not text:
+            return "break"
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self.update_idletasks()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _on_tree_right_click(self, event) -> None:
+        row_id = self._tree.identify_row(event.y)
+        if row_id:
+            if row_id not in self._tree.selection():
+                self._tree.selection_set(row_id)
+            self._tree.focus(row_id)
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Copy", command=lambda: self._copy_selection())
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def selected_row(self) -> dict | None:
         sel = self._tree.selection()
@@ -2744,6 +2922,8 @@ class TradingDashboardApp(ctk.CTk):
         self.geometry("1400x920")
         self.minsize(1200, 800)
         self.configure(fg_color=COLORS["bg"])
+        if sys.platform == "win32":
+            self.after(150, lambda: self.state("zoomed"))
 
         self._refresh_job: str | None = None
         self._clock_job: str | None = None
@@ -3058,78 +3238,64 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        status_row.pack(fill="x", pady=(0, 8))
+        status_row.pack(fill="x", pady=(0, 4))
         status_inner = ctk.CTkFrame(status_row, fg_color="transparent")
-        status_inner.pack(fill="x", padx=12, pady=6)
+        status_inner.pack(fill="x", padx=8, pady=3)
 
-        def _pill(parent, text: str, fg: str, text_color: str) -> ctk.CTkLabel:
-            lbl = ctk.CTkLabel(
-                parent,
-                text=text,
-                font=_ctk_font("body_sm"),
-                fg_color=fg,
-                text_color=text_color,
-                corner_radius=8,
-                padx=12,
-                pady=4,
-            )
-            lbl.pack(side="left", padx=(0, 8))
-            return lbl
+        def _pill(parent, text: str, fg: str, text_color: str, *, width: int = 16) -> CopyableChip:
+            return CopyableChip(parent, text, fg, text_color, width=width)
 
-        self._pill_mode = _pill(status_inner, "● PAPER", COLORS["paper_ok_bg"], COLORS["green"])
+        self._pill_mode = _pill(status_inner, "● PAPER", COLORS["paper_ok_bg"], COLORS["green"], width=10)
         self._pill_runtime = _pill(
             status_inner,
             runtime_layout_label(PROJECT_ROOT),
             COLORS["surface2"],
             COLORS["blue"],
+            width=12,
         )
-        self._pill_small = _pill(status_inner, "SMALL ACCOUNT", COLORS["small_bg"], COLORS["amber"])
+        self._pill_small = _pill(
+            status_inner, "SMALL ACCOUNT", COLORS["small_bg"], COLORS["amber"], width=16
+        )
         self._pill_small.pack_forget()
-        self._pill_regime = _pill(status_inner, "Regime: —", COLORS["surface2"], COLORS["text_dim"])
-        self._pill_entry_gates = _pill(
-            status_inner, "Gates: —", COLORS["surface2"], COLORS["amber"]
+        self._pill_regime = _pill(
+            status_inner, "Regime: —", COLORS["surface2"], COLORS["text_dim"], width=28
         )
-        self._pill_health = _pill(status_inner, "Health: —", COLORS["surface2"], COLORS["muted"])
+        self._pill_entry_gates = _pill(
+            status_inner, "Gates: —", COLORS["surface2"], COLORS["amber"], width=18
+        )
+        self._pill_health = _pill(
+            status_inner, "Health: —", COLORS["surface2"], COLORS["muted"], width=14
+        )
         self._pill_daily_bank = _pill(
-            status_inner, "Bank: —", COLORS["surface2"], COLORS["muted"]
+            status_inner, "Bank: —", COLORS["surface2"], COLORS["muted"], width=12
         )
         self._pill_thinking = _pill(
-            status_inner, "Think: —", COLORS["surface2"], COLORS["muted"]
+            status_inner, "Think: —", COLORS["surface2"], COLORS["muted"], width=14
         )
-        self._pill_bot = _pill(status_inner, "Bot: —", COLORS["surface2"], COLORS["muted"])
-        self._pill_hb = _pill(status_inner, "Heartbeat: —", COLORS["surface2"], COLORS["muted"])
+        self._pill_bot = _pill(
+            status_inner, "Bot: —", COLORS["surface2"], COLORS["muted"], width=22
+        )
+        self._pill_hb = _pill(
+            status_inner, "Heartbeat: —", COLORS["surface2"], COLORS["muted"], width=16
+        )
         self._pill_conviction = _pill(
-            status_inner, "Conviction: —", COLORS["surface2"], COLORS["muted"]
+            status_inner, "Conviction: —", COLORS["surface2"], COLORS["muted"], width=16
         )
 
         stats_banner = ctk.CTkFrame(
             top_stack,
             fg_color=COLORS["card"],
-            corner_radius=12,
+            corner_radius=8,
             border_width=1,
             border_color=COLORS["border"],
         )
-        stats_banner.pack(fill="x", pady=(0, 8))
+        stats_banner.pack(fill="x", pady=(0, 4))
         stats_inner = ctk.CTkFrame(stats_banner, fg_color="transparent")
-        stats_inner.pack(fill="x", padx=14, pady=10)
-        self._stats_line1 = ctk.CTkLabel(
-            stats_inner,
-            text="Account Total: —",
-            font=_ctk_font("body_sm"),
-            text_color=COLORS["text"],
-            anchor="w",
-            justify="left",
-        )
-        self._stats_line1.pack(fill="x")
-        self._stats_line2 = ctk.CTkLabel(
-            stats_inner,
-            text="Daily Breaker: —   ·   Insight: —",
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-            anchor="w",
-            justify="left",
-        )
-        self._stats_line2.pack(fill="x", pady=(4, 0))
+        stats_inner.pack(fill="x", padx=8, pady=4)
+        self._stats_line1 = CopyableLines(stats_inner, height=1)
+        self._stats_line1.configure(text="Account Total: —")
+        self._stats_line2 = CopyableLines(stats_inner, height=1)
+        self._stats_line2.configure(text="Daily Breaker: —   ·   Insight: —")
 
         self._small_panel = ctk.CTkFrame(top_stack, fg_color="transparent")
         self._small_body = ctk.CTkLabel(
@@ -3141,45 +3307,41 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._small_body.pack(anchor="w", padx=4)
 
-        # Hero metrics: Equity · Cash · Open P&L · sparkline
-        hero_row = ctk.CTkFrame(top_stack, fg_color="transparent")
-        hero_row.pack(fill="x", pady=(0, 6))
-        self._metric_cards: dict[str, MetricCard] = {}
-        spark_wrap = ctk.CTkFrame(
-            hero_row,
+        # Compact metric strip — leftover vertical space belongs to Positions.
+        hero_row = ctk.CTkFrame(
+            top_stack,
             fg_color=COLORS["card"],
-            corner_radius=14,
+            corner_radius=8,
             border_width=1,
             border_color=COLORS["border"],
-            width=280,
-            height=52,
+            height=40,
         )
-        # Pack the sparkline first so expanding metric cards cannot eat its width.
-        spark_wrap.pack(side="right", padx=(6, 0))
+        hero_row.pack(fill="x", pady=(0, 4))
+        hero_row.pack_propagate(False)
+        hero_inner = ctk.CTkFrame(hero_row, fg_color="transparent")
+        hero_inner.pack(fill="both", expand=True, padx=8, pady=4)
+        self._metric_cards = {}
+        spark_wrap = ctk.CTkFrame(
+            hero_inner,
+            fg_color="transparent",
+            width=140,
+            height=32,
+        )
+        spark_wrap.pack(side="right", padx=(8, 0))
         spark_wrap.pack_propagate(False)
-        self._metric_cards["equity"] = MetricCard(hero_row, "Account Total", hero=True)
-        self._metric_cards["equity"].pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self._metric_cards["cash"] = MetricCard(hero_row, "Cash", hero=True)
-        self._metric_cards["cash"].pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self._metric_cards["pnl"] = MetricCard(hero_row, "Open P&L", hero=True)
-        self._metric_cards["pnl"].pack(side="left", fill="both", expand=True, padx=(0, 6))
-        ctk.CTkLabel(
-            spark_wrap,
-            text="EQUITY TREND",
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-        ).pack(anchor="w", padx=12, pady=(6, 0))
-        self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent", height=42)
-        self._spark_frame.pack(fill="both", expand=True, padx=8, pady=(2, 6))
+        self._metric_cards["equity"] = CopyableMetric(hero_inner, "Equity", width=14)
+        self._metric_cards["equity"].pack(side="left", padx=(0, 12))
+        self._metric_cards["cash"] = CopyableMetric(hero_inner, "Cash", width=16)
+        self._metric_cards["cash"].pack(side="left", padx=(0, 12))
+        self._metric_cards["invested"] = CopyableMetric(hero_inner, "Invested", width=8)
+        self._metric_cards["invested"].pack(side="left", padx=(0, 12))
+        self._metric_cards["pnl"] = CopyableMetric(hero_inner, "Open P&L", width=12)
+        self._metric_cards["pnl"].pack(side="left", padx=(0, 12))
+        self._metric_cards["market"] = CopyableMetric(hero_inner, "Market", width=14)
+        self._metric_cards["market"].pack(side="left", padx=(0, 8))
+        self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent", height=32)
+        self._spark_frame.pack(fill="both", expand=True)
         self._spark_frame.pack_propagate(False)
-
-        metrics = ctk.CTkFrame(top_stack, fg_color="transparent")
-        metrics.pack(fill="x", pady=(0, 4))
-        for i, key in enumerate(("invested", "market")):
-            card = MetricCard(metrics, key.title())
-            card.grid(row=0, column=i, padx=4, sticky="nsew")
-            metrics.grid_columnconfigure(i, weight=1)
-            self._metric_cards[key] = card
 
         # Main tabbed content — positions, overview, trades, wisdom, charts
         self._tabs = ctk.CTkTabview(
@@ -3274,7 +3436,7 @@ class TradingDashboardApp(ctk.CTk):
                 "Weight %",
                 "ATR Stop",
             ],
-            height=24,
+            height=16,
             large=True,
         )
         self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
@@ -3703,6 +3865,37 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
         )
+        self._scanners_bar = ctk.CTkFrame(
+            self._tab_positions,
+            fg_color=COLORS["card"],
+            corner_radius=8,
+            border_width=1,
+            border_color=COLORS["border"],
+            height=28,
+        )
+        self._scanners_bar.pack(fill="x", padx=10, pady=(0, 6))
+        self._scanners_bar.pack_propagate(False)
+        self._scanners_shown = False
+        self._scanners_toggle = ctk.CTkButton(
+            self._scanners_bar,
+            text="▶ Scanners",
+            width=140,
+            height=22,
+            corner_radius=6,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            text_color=COLORS["muted"],
+            font=_ctk_font("body_sm"),
+            anchor="w",
+            command=self._toggle_scanner_windows,
+        )
+        self._scanners_toggle.pack(side="left", padx=6, pady=2)
+        ctk.CTkLabel(
+            self._scanners_bar,
+            text="Insider · RVOL · ORB · Sector · Vol · Strategy · Sharpe · Shorts",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+        ).pack(side="left", padx=(4, 0))
         self._collapse_positions_aux_sections()
         _apply_dark_treeview_styles()
 
@@ -4595,7 +4788,7 @@ class TradingDashboardApp(ctk.CTk):
         self._short_table.set_rows(rows, tag_col="_tag")
 
     def _collapse_positions_aux_sections(self) -> None:
-        """Start with scanner panels folded so the positions table gets the window."""
+        """Fold scanner bodies and hide the stacked frames until Scanners is opened."""
         for attr, body, btn, title in (
             ("_insider_expanded", self._insider_body, self._insider_toggle_btn, "Insider Signals"),
             ("_rvol_expanded", self._rvol_body, self._rvol_toggle_btn, "RVOL & ORB"),
@@ -4609,6 +4802,32 @@ class TradingDashboardApp(ctk.CTk):
             setattr(self, attr, False)
             body.pack_forget()
             btn.configure(text=f"▶ {title}")
+        self._aux_sections = (
+            self._insider_section,
+            self._rvol_section,
+            self._orb_mom_section,
+            self._sector_rot_section,
+            self._vol_bo_section,
+            self._strategy_section,
+            self._sharpe_section,
+            self._short_section,
+        )
+        for sec in self._aux_sections:
+            sec.pack_forget()
+        self._scanners_shown = False
+        if getattr(self, "_scanners_toggle", None) is not None:
+            self._scanners_toggle.configure(text="▶ Scanners")
+
+    def _toggle_scanner_windows(self) -> None:
+        self._scanners_shown = not self._scanners_shown
+        if self._scanners_shown:
+            for sec in self._aux_sections:
+                sec.pack(fill="x", padx=10, pady=(0, 3), before=self._scanners_bar)
+            self._scanners_toggle.configure(text="▼ Scanners")
+        else:
+            for sec in self._aux_sections:
+                sec.pack_forget()
+            self._scanners_toggle.configure(text="▶ Scanners")
 
     def _toggle_insider_section(self) -> None:
         self._insider_expanded = not self._insider_expanded
