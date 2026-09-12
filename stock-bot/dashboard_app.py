@@ -231,6 +231,50 @@ plt.ioff()
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
+_TREEVIEW_THEME_READY = False
+
+
+def _apply_dark_treeview_styles() -> None:
+    """Force clam Treeview off Windows native white/light rows."""
+    global _TREEVIEW_THEME_READY
+    style = ttk.Style()
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
+    names = ("Treeview", "Dash.Treeview", "Dash.Large.Treeview")
+    for name in names:
+        row_h = 34 if "Large" in name else 26
+        font = ("Segoe UI", 12) if "Large" in name else ("Segoe UI", 10)
+        head_font = ("Segoe UI", 11, "bold") if "Large" in name else ("Segoe UI", 10, "bold")
+        style.configure(
+            name,
+            background=COLORS["surface"],
+            foreground=COLORS["text"],
+            fieldbackground=COLORS["surface"],
+            borderwidth=0,
+            relief="flat",
+            rowheight=row_h,
+            font=font,
+        )
+        style.configure(
+            f"{name}.Heading",
+            background=COLORS["surface2"],
+            foreground=COLORS["text_dim"],
+            relief="flat",
+            font=head_font,
+        )
+        style.map(
+            name,
+            background=[("selected", COLORS["accent"])],
+            foreground=[("selected", COLORS["bg"])],
+        )
+        style.map(
+            f"{name}.Heading",
+            background=[("active", COLORS["card"])],
+            foreground=[("active", COLORS["text"])],
+        )
+    _TREEVIEW_THEME_READY = True
 
 
 # --- Data layer --------------------------------------------------------------
@@ -717,7 +761,22 @@ def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, 
     except Exception as exc:  # noqa: BLE001
         return None, str(exc)
 
-    cols = ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %"]
+    cols = [
+        "Ticker",
+        "Sleeve",
+        "Side",
+        "Opened",
+        "Days",
+        "Qty",
+        "Entry",
+        "Current",
+        "Cost $",
+        "Value $",
+        "P&L $",
+        "P&L %",
+        "Day P&L",
+        "Weight %",
+    ]
     if config.effective_atr_sizing_enabled() and _book_is_paper(book_id):
         cols.append("ATR Stop")
     if not positions:
@@ -751,18 +810,40 @@ def _fetch_positions(username: str, book_id: str) -> tuple[pd.DataFrame | None, 
             current = 0.0
         market_value = qty * current if qty else 0.0
         opened = _position_opened_at(pos, client, journal_df, sym)
+        try:
+            cost = float(getattr(pos, "cost_basis", None) or (qty * entry))
+        except (TypeError, ValueError):
+            cost = qty * entry
+        try:
+            day_pl = float(getattr(pos, "unrealized_intraday_pl", 0) or 0)
+        except (TypeError, ValueError):
+            day_pl = 0.0
+        side_raw = str(getattr(pos, "side", "") or "").strip().lower()
+        if not side_raw:
+            side_raw = "short" if qty < 0 else "long"
+        days_held = None
+        if opened is not None:
+            try:
+                od = opened.replace(tzinfo=None) if opened.tzinfo else opened
+                days_held = max(0, (datetime.now() - od).days)
+            except Exception:
+                days_held = None
         rows.append(
             {
                 "Ticker": sym,
                 "Sleeve": _infer_sleeve(sym),
+                "Side": side_raw.capitalize(),
                 "Opened": _format_position_opened(opened),
                 "_opened": opened,
+                "Days": days_held if days_held is not None else "",
                 "Qty": qty,
                 "Entry": entry,
                 "Current": current,
+                "Cost $": cost,
                 "Value $": market_value,
                 "P&L $": float(getattr(pos, "unrealized_pl", 0) or 0),
                 "P&L %": float(getattr(pos, "unrealized_plpc", 0) or 0) * 100,
+                "Day P&L": day_pl,
             }
         )
     df = pd.DataFrame(rows)
@@ -1599,7 +1680,7 @@ def _load_equity_sparkline(
 
 
 def _load_daily_closes(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | None:
-    table = f"{config.normalize_symbol(symbol)}_daily"
+    table = f"{config.normalize_symbol(symbol)}_daily".replace(".", "_")
     db_path = _resolve_db_path()
     if not db_path.is_file():
         return None
@@ -1918,30 +1999,16 @@ class DataTable(ctk.CTkFrame):
     """Lightweight dark table via ttk.Treeview."""
 
     def __init__(self, master, columns: list[str], *, height: int = 8, large: bool = False):
-        super().__init__(master, fg_color="transparent")
-        style = ttk.Style()
-        style.theme_use("clam")
+        super().__init__(
+            master,
+            fg_color=COLORS["surface"],
+            corner_radius=8,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        _apply_dark_treeview_styles()
         # ttk only auto-builds Treeview layouts when the style name ends with ".Treeview".
         style_name = "Dash.Large.Treeview" if large else "Dash.Treeview"
-        row_h = 34 if large else 26
-        font = ("Segoe UI", 12) if large else ("Segoe UI", 10)
-        head_font = ("Segoe UI", 11, "bold") if large else ("Segoe UI", 10, "bold")
-        style.configure(
-            style_name,
-            background=COLORS["surface"],
-            foreground=COLORS["text"],
-            fieldbackground=COLORS["surface"],
-            borderwidth=0,
-            rowheight=row_h,
-            font=font,
-        )
-        style.configure(
-            f"{style_name}.Heading",
-            background=COLORS["surface2"],
-            foreground=COLORS["muted"] if not large else COLORS["text_dim"],
-            font=head_font,
-        )
-        style.map(style_name, background=[("selected", COLORS["accent"])])
 
         self._columns = columns
         self._rows: list[dict] = []
@@ -1955,8 +2022,12 @@ class DataTable(ctk.CTkFrame):
             "Exit": "_exit",
             "Current": "_current",
             "Value $": "_value",
+            "Cost $": "_cost",
             "P&L $": "_pnl",
             "P&L %": "_pnl_pct",
+            "Day P&L": "_day_pnl",
+            "Weight %": "_weight",
+            "Days": "_days",
             "Bought": "Bought",
             "Sold": "Sold",
             "Score": "_score",
@@ -1977,17 +2048,24 @@ class DataTable(ctk.CTkFrame):
             )
             if large:
                 widths = {
-                    "Ticker": 96,
+                    "Ticker": 88,
                     "symbol": 96,
-                    "Sleeve": 88,
-                    "sleeve": 88,
-                    "Qty": 80,
-                    "Entry": 88,
-                    "Exit": 88,
-                    "Current": 92,
-                    "Value $": 100,
-                    "P&L $": 88,
-                    "P&L %": 72,
+                    "Sleeve": 80,
+                    "sleeve": 80,
+                    "Side": 56,
+                    "Opened": 128,
+                    "Days": 48,
+                    "Qty": 72,
+                    "Entry": 84,
+                    "Exit": 84,
+                    "Current": 84,
+                    "Cost $": 92,
+                    "Value $": 96,
+                    "P&L $": 84,
+                    "P&L %": 68,
+                    "Day P&L": 84,
+                    "Weight %": 72,
+                    "ATR Stop": 84,
                     "Bought": 118,
                     "Sold": 118,
                     "Time": 118,
@@ -2009,17 +2087,23 @@ class DataTable(ctk.CTkFrame):
                 "event",
                 "Sleeve",
                 "sleeve",
+                "Side",
+                "Opened",
                 "Bought",
                 "Sold",
             )
             right_cols = (
                 "Qty",
+                "Days",
                 "Entry",
                 "Exit",
                 "Current",
+                "Cost $",
                 "Value $",
                 "P&L $",
                 "P&L %",
+                "Day P&L",
+                "Weight %",
                 "Notional",
             )
             if col in left_cols:
@@ -2028,7 +2112,14 @@ class DataTable(ctk.CTkFrame):
                 anchor = "e"
             else:
                 anchor = "center"
-            self._tree.column(col, width=width, anchor=anchor, stretch=col in ("Ticker", "symbol"))
+            self._tree.column(
+                col,
+                width=width,
+                anchor=anchor,
+                stretch=col in ("Ticker", "symbol", "Opened", "Sleeve", "Value $"),
+            )
+        self._tree.tag_configure("oddrow", background=COLORS["surface"])
+        self._tree.tag_configure("evenrow", background=COLORS["surface2"])
         self._tree.tag_configure("profit", foreground=COLORS["green"])
         self._tree.tag_configure("loss", foreground=COLORS["red"])
         self._tree.tag_configure("cluster_buy", foreground=COLORS["green"])
@@ -2105,7 +2196,12 @@ class DataTable(ctk.CTkFrame):
                     tag = "profit" if float(row[self._pnl_col]) >= 0 else "loss"
                 except (TypeError, ValueError):
                     tag = ""
-            self._tree.insert("", "end", values=values, tags=(tag,) if tag else ())
+            n = len(self._tree.get_children())
+            stripe = "evenrow" if n % 2 else "oddrow"
+            tags = [stripe]
+            if tag:
+                tags.append(tag)
+            self._tree.insert("", "end", values=values, tags=tuple(tags))
 
     def selected_row(self) -> dict | None:
         sel = self._tree.selection()
@@ -3026,24 +3122,24 @@ class TradingDashboardApp(ctk.CTk):
         hero_row = ctk.CTkFrame(top_stack, fg_color="transparent")
         hero_row.pack(fill="x", pady=(0, 6))
         self._metric_cards: dict[str, MetricCard] = {}
-        self._metric_cards["equity"] = MetricCard(hero_row, "Account Total", hero=True)
-        self._metric_cards["equity"].pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self._metric_cards["cash"] = MetricCard(hero_row, "Cash", hero=True)
-        self._metric_cards["cash"].pack(side="left", fill="both", expand=True, padx=(0, 6))
-        self._metric_cards["pnl"] = MetricCard(hero_row, "Open P&L", hero=True)
-        self._metric_cards["pnl"].pack(side="left", fill="both", expand=True, padx=(0, 6))
-
         spark_wrap = ctk.CTkFrame(
             hero_row,
             fg_color=COLORS["card"],
             corner_radius=14,
             border_width=1,
             border_color=COLORS["border"],
-            width=260,
+            width=280,
             height=64,
         )
-        spark_wrap.pack(side="right")
+        # Pack the sparkline first so expanding metric cards cannot eat its width.
+        spark_wrap.pack(side="right", padx=(6, 0))
         spark_wrap.pack_propagate(False)
+        self._metric_cards["equity"] = MetricCard(hero_row, "Account Total", hero=True)
+        self._metric_cards["equity"].pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self._metric_cards["cash"] = MetricCard(hero_row, "Cash", hero=True)
+        self._metric_cards["cash"].pack(side="left", fill="both", expand=True, padx=(0, 6))
+        self._metric_cards["pnl"] = MetricCard(hero_row, "Open P&L", hero=True)
+        self._metric_cards["pnl"].pack(side="left", fill="both", expand=True, padx=(0, 6))
         ctk.CTkLabel(
             spark_wrap,
             text="EQUITY TREND",
@@ -3086,6 +3182,10 @@ class TradingDashboardApp(ctk.CTk):
             pass
 
         self._tab_positions = self._tabs.add("Positions")
+        try:
+            self._tab_positions.configure(fg_color=COLORS["bg"])
+        except Exception:
+            pass
         pos_head = ctk.CTkFrame(self._tab_positions, fg_color="transparent")
         pos_head.pack(fill="x", padx=12, pady=(10, 4))
         ctk.CTkLabel(
@@ -3134,7 +3234,23 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left")
         self._positions_table = DataTable(
             self._tab_positions,
-            ["Ticker", "Sleeve", "Opened", "Qty", "Entry", "Current", "Value $", "P&L $", "P&L %", "ATR Stop"],
+            [
+                "Ticker",
+                "Sleeve",
+                "Side",
+                "Opened",
+                "Days",
+                "Qty",
+                "Entry",
+                "Current",
+                "Cost $",
+                "Value $",
+                "P&L $",
+                "P&L %",
+                "Day P&L",
+                "Weight %",
+                "ATR Stop",
+            ],
             height=24,
             large=True,
         )
@@ -3549,6 +3665,7 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
         self._collapse_positions_aux_sections()
+        _apply_dark_treeview_styles()
 
         self._tab_overview = self._tabs.add("Overview")
         self._build_overview_tab()
@@ -4492,6 +4609,7 @@ class TradingDashboardApp(ctk.CTk):
             self._charts_dirty = True
             self._draw_charts()
         elif self._active_tab == "Positions":
+            _apply_dark_treeview_styles()
             if not _positions_cache_fresh(self._username, self._book_id):
                 self.refresh_data(force_positions=True)
 
@@ -5451,6 +5569,12 @@ class TradingDashboardApp(ctk.CTk):
         self, positions_df: pd.DataFrame
     ) -> list[dict]:
         rows = []
+        book_eq = float(getattr(self, "_last_equity", 0) or 0)
+        if book_eq <= 0:
+            try:
+                book_eq = float(positions_df["Value $"].sum() or 0)
+            except Exception:
+                book_eq = 0.0
         for _, r in positions_df.iterrows():
             try:
                 qty = float(r.get("Qty", 0) or 0)
@@ -5473,6 +5597,14 @@ class TradingDashboardApp(ctk.CTk):
             if market_value != market_value:
                 market_value = 0.0
             try:
+                cost = float(r.get("Cost $", qty * entry) or 0)
+            except (TypeError, ValueError):
+                cost = qty * entry
+            try:
+                day_pl = float(r.get("Day P&L", 0) or 0)
+            except (TypeError, ValueError):
+                day_pl = 0.0
+            try:
                 pnl = float(r.get("P&L $", 0) or 0)
             except (TypeError, ValueError):
                 pnl = 0.0
@@ -5480,24 +5612,39 @@ class TradingDashboardApp(ctk.CTk):
                 pnl_pct = float(r.get("P&L %", 0) or 0)
             except (TypeError, ValueError):
                 pnl_pct = 0.0
+            weight = (100.0 * market_value / book_eq) if book_eq else 0.0
+            days_raw = r.get("Days", "")
+            try:
+                days_n = int(days_raw) if days_raw != "" and days_raw is not None else None
+            except (TypeError, ValueError):
+                days_n = None
             rows.append(
                 {
                     "Ticker": str(r.get("Ticker") or "?"),
                     "Sleeve": r.get("Sleeve", ""),
+                    "Side": r.get("Side", "Long"),
                     "Opened": r.get("Opened", "—"),
+                    "Days": "—" if days_n is None else str(days_n),
                     "Qty": f"{qty:.4f}",
                     "Entry": f"${entry:,.2f}",
                     "Current": f"${current:,.2f}" if current else "—",
+                    "Cost $": f"${cost:,.2f}",
                     "Value $": f"${market_value:,.2f}",
                     "P&L $": f"${pnl:+,.2f}",
                     "P&L %": f"{pnl_pct:+.2f}%",
+                    "Day P&L": f"${day_pl:+,.2f}",
+                    "Weight %": f"{weight:.1f}%",
                     "ATR Stop": r.get("ATR Stop", "—"),
                     "_qty": qty,
                     "_entry": entry,
                     "_current": current,
+                    "_cost": cost,
                     "_value": market_value,
                     "_pnl": pnl,
                     "_pnl_pct": pnl_pct,
+                    "_day_pnl": day_pl,
+                    "_weight": weight,
+                    "_days": days_n if days_n is not None else -1,
                 }
             )
         return rows
@@ -5778,6 +5925,7 @@ class TradingDashboardApp(ctk.CTk):
         self._price_canvases.clear()
         row = ctk.CTkFrame(self._charts_frame, fg_color="transparent")
         row.pack(fill="both", expand=True)
+        row.grid_rowconfigure(0, weight=1)
         specs: list[tuple[str, str]] = [
             (config.VTI_CORE_SYMBOL, COLORS["blue"]),
             ("SPY", COLORS["amber"]),
@@ -5804,7 +5952,7 @@ class TradingDashboardApp(ctk.CTk):
                 continue
             if len(df) > 40:
                 df = df.iloc[:: max(1, len(df) // 40)]
-            fig = _light_line_chart(df, title=symbol, color=color, show_axis=True)
+            fig = _light_line_chart(df, title=symbol, color=color, height=2.4, show_axis=True)
             canvas = FigureCanvasTkAgg(fig, master=cell)
             canvas.draw()
             canvas.get_tk_widget().pack(fill="both", expand=True, padx=4, pady=4)

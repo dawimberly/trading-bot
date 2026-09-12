@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ACTIONS = frozenset({"skip_cycle", "backoff", "retry_soon", "needs_human"})
 _MIN_BACKOFF_SEC = 5.0
-_TRANSIENT_RETRY_SEC = 15.0
-_NETWORK_BACKOFF_SEC = 30.0
+_TRANSIENT_RETRY_SEC = 45.0
+_NETWORK_BACKOFF_SEC = 60.0
 _last_tg_at: float = 0.0
 _TG_COOLDOWN_SEC = 45 * 60.0
 
@@ -106,6 +106,14 @@ def deterministic_plan(error: str, *, error_class: str | None = None) -> Autofix
             source="rules",
             reason="Order validation reject — skip, do not retry the same payload",
             error_class=klass,
+        )
+    if klass == "data_symbol" or "invalid sql table name" in str(error).lower():
+        return AutofixPlan(
+            action="skip_cycle",
+            sleep_sec=120.0,
+            source="rules",
+            reason="Bad SQL ticker ident — skip; dotted symbols are sanitized",
+            error_class="data_symbol",
         )
     return AutofixPlan(
         action="skip_cycle",

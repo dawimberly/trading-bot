@@ -22,7 +22,7 @@ def test_internal_server_error_retries_soon_without_ollama(monkeypatch):
     assert plan.action == "retry_soon"
     assert plan.source == "rules"
     assert plan.error_class == "transient_api"
-    assert plan.loop_sleep_sec(60) == 15.0
+    assert plan.loop_sleep_sec(60) == 45.0
 
 
 def test_dns_error_backs_off():
@@ -30,7 +30,7 @@ def test_dns_error_backs_off():
     assert plan.action == "backoff"
     assert plan.error_class == "transient_network"
     assert plan.loop_sleep_sec(60) == 60.0
-    assert plan.loop_sleep_sec(10) == 30.0
+    assert plan.loop_sleep_sec(10) == 60.0
 
 
 def test_ollama_allowlist_only(monkeypatch):

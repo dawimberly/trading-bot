@@ -339,6 +339,8 @@ def _record_cycle_error(error: str) -> str:
             error_watcher.log_transient_network(str(error)[:1000], context="cycle")
         elif klass == "transient_api":
             error_watcher.log_transient_api(str(error)[:1000], context="cycle")
+        else:
+            error_watcher.log_cycle_fault(str(error)[:1000], error_class=klass)
     except Exception:
         pass
     return klass

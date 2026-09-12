@@ -19,6 +19,25 @@ _EXCESS_NO_ROOM_PCT = 30.0
 _AUX_CACHE_TTL_SEC = 300.0
 
 _AUX_CACHE: dict[str, tuple[float, Any]] = {}
+_STALE_HEARTBEAT_MIN = 15.0
+
+
+def _heartbeat_age_minutes(hb: dict[str, Any] | None) -> float | None:
+    if not hb:
+        return None
+    raw = hb.get("timestamp") or hb.get("ts") or hb.get("last_cycle_at")
+    if not raw:
+        return None
+    try:
+        ts = dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        now = dt.datetime.now(ts.tzinfo) if ts.tzinfo else dt.datetime.now()
+        if ts.tzinfo and now.tzinfo is None:
+            now = now.replace(tzinfo=ts.tzinfo)
+        elif ts.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        return max(0.0, (now - ts).total_seconds() / 60.0)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _clamp_score(raw: float) -> int:
@@ -314,6 +333,7 @@ def gather_health_context(
         "thinking_age_hours": thinking.get("age_hours"),
         "thinking_confidence": thinking.get("confidence"),
         "thinking_validation_score": thinking.get("validation_score"),
+        "heartbeat_age_min": _heartbeat_age_minutes(hb),
     }
 
 
@@ -346,6 +366,7 @@ def calculate_health_score(
     thinking_age_hours: float | None = None,
     thinking_confidence: float | None = None,
     thinking_validation_score: float | None = None,
+    heartbeat_age_min: float | None = None,
     **_: Any,
 ) -> dict[str, Any]:
     """
@@ -356,6 +377,8 @@ def calculate_health_score(
     Thinking engine (Ollama) contributes when enabled for the active book.
     """
     hb = hb or {}
+    if heartbeat_age_min is None:
+        heartbeat_age_min = _heartbeat_age_minutes(hb)
     reg = regime or str(hb.get("regime") or "")
     score = float(_BASE_SCORE)
     penalty_used = 0.0
@@ -553,6 +576,10 @@ def calculate_health_score(
         logger.debug("strategy performance bonus unavailable for health score: %s", exc)
 
     final = _clamp_score(score)
+    stale = heartbeat_age_min is not None and heartbeat_age_min > _STALE_HEARTBEAT_MIN
+    if stale:
+        notes.append(f"HEARTBEAT STALE ({heartbeat_age_min:.0f} min)")
+        final = min(final, 49)
     return {
         "score": final,
         "grade": _grade(final),

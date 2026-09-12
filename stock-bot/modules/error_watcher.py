@@ -221,6 +221,8 @@ def classify_error_class(
         )
     ):
         return "order_reject"
+    if "invalid sql table name" in low or "data_symbol" in low:
+        return "data_symbol"
     return "other"
 
 
@@ -239,17 +241,19 @@ def _maybe_telegram_error(
 
     global _last_tg_at, _last_tg_fingerprint
     now = time.time()
-    cooldown = (
-        _TG_NETWORK_COOLDOWN_SEC
-        if error_class in ("transient_network", "transient_api")
-        else _TG_COOLDOWN_SEC
+    flood = error_class in (
+        "transient_network",
+        "transient_api",
+        "data_symbol",
+        "other",
     )
+    cooldown = _TG_NETWORK_COOLDOWN_SEC if flood else _TG_COOLDOWN_SEC
     if fingerprint == _last_tg_fingerprint and now - _last_tg_at < cooldown:
         return
-    if error_class in ("transient_network", "transient_api") and now - _last_tg_at < cooldown:
-        # Separate flood even if fingerprint differs slightly per cycle.
-        if _last_tg_fingerprint.startswith("network:") or _last_tg_fingerprint.startswith(
-            "api5xx:"
+    if flood and now - _last_tg_at < cooldown:
+        # Collapse skip_cycle / 5xx / dotted-ticker spam even if fingerprints differ.
+        if _last_tg_fingerprint.startswith(
+            ("network:", "api5xx:", "data_symbol:", "cycle:")
         ):
             return
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
@@ -262,6 +266,15 @@ def _maybe_telegram_error(
         )
         subject = f"[PythonTrading {mode}] Alpaca 5xx"
         fp = f"api5xx:{fingerprint}"
+    elif error_class == "data_symbol":
+        text = (
+            f"[PythonTrading {mode}] Bad symbol/SQL ident\n"
+            f"{short[:350]}\n"
+            f"Sanitized table names; bot skipped this cycle.\n"
+            f"At: {file_line}"
+        )
+        subject = f"[PythonTrading {mode}] Data symbol"
+        fp = f"data_symbol:{fingerprint}"
     elif error_class == "transient_network":
         text = (
             f"[PythonTrading {mode}] Network/DNS (transient)\n"
@@ -279,7 +292,7 @@ def _maybe_telegram_error(
             f"See logs/bot_errors.jsonl + logs/cursor_fix_queue.md"
         )
         subject = f"[PythonTrading {mode}] Error"
-        fp = fingerprint
+        fp = f"cycle:{fingerprint}"
     try:
         from modules.alerts import broadcast
 
@@ -463,6 +476,52 @@ def log_transient_api(
     return event_id
 
 
+def log_cycle_fault(
+    error: str,
+    *,
+    error_class: str = "other",
+    context: str = "cycle",
+    extra: dict[str, Any] | None = None,
+) -> str:
+    """Always persist a cycle fault to JSONL; Telegram at most ~45 min."""
+    import time
+
+    global _last_network_log_at
+    event_id = uuid.uuid4().hex[:12]
+    if not _enabled():
+        return event_id
+    klass = error_class or classify_error_class(error)
+    now = time.time()
+    skip_queue = now - _last_network_log_at < _NETWORK_LOG_COOLDOWN_SEC
+    file_line = _frame_file_line()
+    problem = f"CYCLE_FAULT ({context}): {error}"
+    row = {
+        "ts": _now_iso(),
+        "id": event_id,
+        "event": "cycle_fault",
+        "mode": "paper" if config.PAPER_TRADING else "live",
+        "context": context,
+        "error_type": "CycleError",
+        "error_class": klass,
+        "error": str(error)[:1000],
+        "file_line": file_line,
+        "fix_area": "run_all.py / data_loader.py",
+        "stack": "(cycle fault)",
+        **(extra or {}),
+    }
+    _append_jsonl(_ERRORS_PATH, row)
+    if not skip_queue:
+        _last_network_log_at = now
+        _append_jsonl(_ACTIONS_PATH, {**row, "event": "cycle_fault"})
+        _maybe_telegram_error(
+            problem,
+            file_line,
+            "cycle_fault",
+            error_class=klass,
+        )
+    return event_id
+
+
 def log_failed_order(
     *,
     symbol: str,
@@ -493,9 +552,15 @@ def log_failed_order(
                 context="cycle",
                 extra={"reason": reason},
             )
-        return log_transient_api(
+        if klass == "transient_api":
+            return log_transient_api(
+                error or reason or "cycle",
+                context="cycle",
+                extra={"reason": reason},
+            )
+        return log_cycle_fault(
             error or reason or "cycle",
-            context="cycle",
+            error_class=klass,
             extra={"reason": reason},
         )
     if klass == "transient_network":
@@ -569,6 +634,10 @@ def error_label(row: dict[str, Any]) -> str:
         return "auth"
     if klass == "order_reject":
         return "order_reject"
+    if klass == "data_symbol":
+        return "data_symbol"
+    if row.get("event") == "cycle_fault":
+        return "cycle_fault"
     err = str(row.get("error") or "")
     etype = str(row.get("error_type") or "").strip()
     low = err.lower()
@@ -786,10 +855,7 @@ def maybe_send_daily_error_digest(
     try:
         rows = load_errors_for_et_date(now.date(), path=errors_path)
         if not rows:
-            # Still latch the day so we don't re-check forever with empty reads.
-            state = _load_state()
-            state["last_daily_error_digest"] = now.date().isoformat()
-            _save_state(state)
+            # Do not latch an empty day — later cycle_faults must still digest.
             return False
         body = format_daily_digest_message(rows)
         mode = "PAPER" if config.PAPER_TRADING else "LIVE"

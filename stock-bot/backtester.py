@@ -5548,10 +5548,13 @@ def _build_final_verdict(windows: list[dict]) -> str:
     sharpes_final = [w["final"]["sharpe"] for w in windows]
     sharpes_legacy = [w["legacy"]["sharpe"] for w in windows]
     avg_delta = sum(f - l for f, l in zip(sharpes_final, sharpes_legacy)) / len(windows)
+    win_txt = ", ".join(
+        f"{w['window']} {w['final']['sharpe']:.2f} vs {w['legacy']['sharpe']:.2f}"
+        for w in windows
+    )
     lines.append(
         f"- **Sharpe vs legacy paper:** current stack improves Sharpe by "
-        f"**{avg_delta:+.2f}** on average across windows "
-        f"({', '.join(f'{w['window']} {w['final']['sharpe']:.2f} vs {w['legacy']['sharpe']:.2f}' for w in windows)})."
+        f"**{avg_delta:+.2f}** on average across windows ({win_txt})."
     )
     for w in windows:
         f, b = w["final"], w["vti_benchmark_pct"]
