@@ -22,8 +22,13 @@ Both remotes were synced to the same commits on `main` and all cursor branches (
 
 Add the org remote once: `git remote add infinite-robots https://github.com/infinite-robots/python-trading.git`
 
-## Quick start
+## Desktop monitor (paper v2)
 
+GitHub is files. The live window is the Windows app `stock-bot/dashboard_app.py` on the owner PC (Paper v2, 2026-09-12). This repo can show a snapshot and the source — not the running bot.
+
+![Desktop monitor (paper v2)](stock-bot/docs/dashboard-paper-v2-2026-09-12.jpg)
+
+## Quick start
 **Daily routine (owner, Live + Paper):** double-click **`Start_Bot_and_Dashboard.bat`** at the repo root. See [stock-bot/README.md — Daily usage](stock-bot/README.md#daily-usage-recommended).
 
 **Environment:** copy [`stock-bot/.env.example`](stock-bot/.env.example) → `stock-bot/.env` (placeholders only — never commit real keys).
