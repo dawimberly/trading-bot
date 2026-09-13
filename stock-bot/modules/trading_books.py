@@ -43,6 +43,8 @@ BOOKS: dict[str, BookSpec] = {
 }
 
 DEFAULT_BOOK_ID = "alpaca_live"
+PAPER_SOT_BOOK_ID = "alpaca_paper_v2"
+PAPER_BOOK_IDS = ("alpaca_paper", "alpaca_paper_v2")
 
 
 def list_books() -> list[tuple[str, BookSpec]]:

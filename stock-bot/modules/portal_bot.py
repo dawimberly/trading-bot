@@ -33,7 +33,7 @@ from modules.runtime_paths import (
     resolve_bot_executable,
     resolve_bot_workdir,
 )
-from modules.trading_books import BOOKS, book_enabled
+from modules.trading_books import BOOKS, PAPER_BOOK_IDS, book_enabled
 
 WISDOM_SCORECARD = PROJECT_ROOT / "wisdom_scorecard.json"
 WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
@@ -227,10 +227,11 @@ def _managed_bot_pids(username: str) -> set[int]:
                 break
             allowed.add(parent)
             walk = parent
-    paper = bot_pid(username, "alpaca_paper")
-    if paper is not None:
-        allowed.add(paper)
-        allowed |= _paper_allowed_descendants(paper)
+    for paper_id in PAPER_BOOK_IDS:
+        paper = bot_pid(username, paper_id)
+        if paper is not None:
+            allowed.add(paper)
+            allowed |= _paper_allowed_descendants(paper)
     return allowed
 
 
@@ -383,10 +384,15 @@ def stop_orphan_project_bots(
             if pid in preserve:
                 continue
             live_supervisor = bot_pid(username, "alpaca_live") if username else None
-            paper_supervisor = bot_pid(username, "alpaca_paper") if username else None
             if live_supervisor is not None and _is_descendant_of(live_supervisor, pid):
                 continue
-            if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
+            skip_paper = False
+            for paper_id in PAPER_BOOK_IDS:
+                paper_supervisor = bot_pid(username, paper_id) if username else None
+                if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
+                    skip_paper = True
+                    break
+            if skip_paper:
                 continue
             print(f"Stopping orphan {script} PID {pid}...", flush=True)
             ok, msg = _graceful_stop_pid(pid)

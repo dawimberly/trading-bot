@@ -20,6 +20,8 @@ if str(ROOT) not in sys.path:
 
 os.environ.setdefault("PYTHONTRADING_ROOT", str(ROOT))
 
+HEARTBEAT_FRESH_SEC = 15 * 60
+
 
 def _log(msg: str) -> None:
     print(msg, flush=True)
@@ -57,7 +59,9 @@ def _force_clear_all_pids(username: str) -> None:
     """
     from modules.portal_bot import book_pid_path
 
-    for book_id in ("alpaca_paper", "alpaca_live"):
+    from modules.trading_books import PAPER_BOOK_IDS
+
+    for book_id in (*PAPER_BOOK_IDS, "alpaca_live"):
         path = book_pid_path(username, book_id)
         if path.is_file():
             path.unlink(missing_ok=True)
@@ -148,6 +152,109 @@ def wait_for_paper_heartbeat(username: str, timeout_sec: int = 75) -> tuple[bool
     return False, "no heartbeat file yet (first cycle may still be warming up)"
 
 
+def book_is_healthy(username: str, book_id: str, *, max_age_sec: float = HEARTBEAT_FRESH_SEC) -> tuple[bool, str]:
+    """True when the book PID is alive and the heartbeat is fresh."""
+    from modules.portal_bot import bot_pid, book_heartbeat_path
+
+    pid = bot_pid(username, book_id)
+    if pid is None:
+        return False, "no live PID"
+    path = book_heartbeat_path(username, book_id)
+    age = _heartbeat_age_sec(path)
+    if age is None:
+        return False, f"pid {pid} but no heartbeat"
+    if age > max_age_sec:
+        return False, f"pid {pid} stale heartbeat ({age:.0f}s)"
+    return True, f"pid {pid} heartbeat {age:.0f}s"
+
+
+def _open_dashboard(username: str) -> None:
+    look = ROOT / "scripts" / "apply_paqinhaus_look.py"
+    if look.is_file():
+        _log("Applying dashboard look...")
+        subprocess.run([sys.executable, str(look)], cwd=str(ROOT), check=False)
+    _log("Opening dashboard (pythonw, no console)...")
+    env = os.environ.copy()
+    env["PYTHONTRADING_ROOT"] = str(ROOT)
+    pyw = _pythonw()
+    script = ROOT / "dashboard_app.py"
+    subprocess.Popen(
+        [pyw, str(script)],
+        cwd=str(ROOT),
+        env=env,
+        creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+    )
+    _log(f"Monitor launched via {Path(pyw).name} - sign in as {username}")
+
+
+def _daily_start_leave_healthy(username: str, *, no_dashboard: bool) -> int:
+    """Default Daily Start: dashboard + leave healthy Paper v2 / live alone."""
+    from modules.portal_bot import start_bot, stop_bot, stop_orphan_project_bots, bot_pid
+    from modules.portal_paths import bind_project_root, has_alpaca_config
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
+
+    bind_project_root(ROOT)
+    _log("Stopping old dashboard windows (if any)...")
+    _stop_dashboards()
+    time.sleep(0.5)
+
+    healthy, detail = book_is_healthy(username, SOT)
+    if healthy:
+        _log(f"Paper v2 healthy ({detail}) — not killing, not restarting.")
+        preserve = set()
+        for book_id in (SOT, "alpaca_live", "alpaca_paper"):
+            pid = bot_pid(username, book_id)
+            if pid:
+                preserve.add(pid)
+        stopped, orphan_msg = stop_orphan_project_bots(
+            preserve_pids=preserve, username=username
+        )
+        _log(orphan_msg if stopped else f"{orphan_msg} Healthy bots kept.")
+        if not no_dashboard:
+            _stop_dashboards()
+            time.sleep(1.5)
+            _open_dashboard(username)
+        _log("Done. Daily Start did not restart Paper v2.")
+        return 0
+
+    _log(f"Paper v2 not healthy ({detail}) — sweep dead paper tree, leave live.")
+    from modules.portal_bot import book_pid_path
+
+    v2_pid_path = book_pid_path(username, SOT)
+    if v2_pid_path.is_file() and bot_pid(username, SOT) is None:
+        v2_pid_path.unlink(missing_ok=True)
+        _log("Cleared stale Paper v2 PID file.")
+    elif bot_pid(username, SOT) is not None:
+        _ok, stop_msg = stop_bot(username, SOT)
+        _log(stop_msg)
+
+    live = bot_pid(username, "alpaca_live")
+    preserve = {live} if live else set()
+    stopped, orphan_msg = stop_orphan_project_bots(
+        preserve_pids=preserve, username=username
+    )
+    _log(orphan_msg if stopped else f"{orphan_msg} Continuing.")
+    if stopped:
+        time.sleep(1.0)
+
+    if has_alpaca_config(username, SOT):
+        _log("Starting Paper v2 only (live not touched)...")
+        ok, msg = start_bot(username, SOT, skip_orphan_stop=True)
+        _log(msg if ok else f"[ERROR] {msg}")
+        started_ok = ok
+    else:
+        _log("[WARN] alpaca_paper_v2: Alpaca keys missing in portal — skip start")
+        started_ok = True
+
+    if not no_dashboard:
+        _stop_dashboards()
+        time.sleep(1.5)
+        _open_dashboard(username)
+    _log("Done. Wait ~60s for a Paper v2 heartbeat, then check Overview.")
+    return 0 if started_ok else 1
+
+
 def _heartbeat_age_sec(path: Path) -> float | None:
     if not path.is_file():
         return None
@@ -229,6 +336,11 @@ def main() -> int:
         action="store_true",
         help="Wait for a fresh paper heartbeat and confirm the bot is responding",
     )
+    parser.add_argument(
+        "--force-reset",
+        action="store_true",
+        help="Old Daily Start: kill paper+live PID files, orphan-sweep, restart both",
+    )
     args = parser.parse_args()
     username = args.username.strip().lower()
 
@@ -238,7 +350,14 @@ def main() -> int:
     if args.paper_only:
         return _run_paper_only(username, verify=args.verify)
 
-    _log("Stopping old dashboard windows (if any)...")
+    if not args.force_reset:
+        return _daily_start_leave_healthy(username, no_dashboard=args.no_dashboard)
+
+    return _force_reset_all(username, no_dashboard=args.no_dashboard)
+
+
+def _force_reset_all(username: str, *, no_dashboard: bool) -> int:
+    _log("Force-reset: stopping dashboards and killing paper+live...")
     _stop_dashboards()
     time.sleep(0.5)
 
@@ -250,15 +369,13 @@ def main() -> int:
         bot_running,
     )
     from modules.portal_paths import bind_project_root, has_alpaca_config
+    from modules.trading_books import PAPER_BOOK_IDS
 
     bind_project_root(ROOT)
-
-    # Force-clear all PID files so the orphan sweep has no preserved PIDs
-    # and will kill every stray bot process unconditionally.
     _force_clear_all_pids(username)
 
     _log("Stopping any running portal bots...")
-    for book_id in ("alpaca_paper", "alpaca_live"):
+    for book_id in (*PAPER_BOOK_IDS, "alpaca_live"):
         if bot_running(username, book_id):
             _ok, stop_msg = stop_bot(username, book_id)
             _log(stop_msg)
@@ -269,7 +386,7 @@ def main() -> int:
     if stopped:
         time.sleep(1.0)
 
-    for book_id in ("alpaca_paper", "alpaca_live"):
+    for book_id in (*PAPER_BOOK_IDS, "alpaca_live"):
         if not has_alpaca_config(username, book_id):
             _log(f"[WARN] {book_id}: Alpaca keys missing in portal — skip")
 
@@ -279,26 +396,10 @@ def main() -> int:
     if ok:
         _log("Bot restarted successfully (live + paper).")
 
-    if not args.no_dashboard:
+    if not no_dashboard:
         _stop_dashboards()
-        time.sleep(1.5)  # increased from 0.5 — give Windows time to release handles
-        look = ROOT / "scripts" / "apply_paqinhaus_look.py"
-        if look.is_file():
-            _log("Applying dashboard look...")
-            subprocess.run([sys.executable, str(look)], cwd=str(ROOT), check=False)
-        _log("Opening dashboard (pythonw, no console)...")
-        env = os.environ.copy()
-        env["PYTHONTRADING_ROOT"] = str(ROOT)
-        pyw = _pythonw()
-        script = ROOT / "dashboard_app.py"
-        subprocess.Popen(
-            [pyw, str(script)],
-            cwd=str(ROOT),
-            env=env,
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
-            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-        )
-        _log(f"Monitor launched via {Path(pyw).name} - sign in as {username}")
+        time.sleep(1.5)
+        _open_dashboard(username)
 
     _log("Done. Wait ~60s for fresh heartbeats, then check the Overview tab.")
     return 0 if ok else 1

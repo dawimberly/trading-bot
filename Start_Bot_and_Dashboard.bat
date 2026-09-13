@@ -53,6 +53,7 @@ echo ========================================
 echo.
 echo   This window shows startup progress only.
 echo   The dashboard opens in a separate window.
+echo   Healthy Paper v2 is left running unless you pass --force-reset.
 echo.
 echo   Project: %STOCK_BOT%
 echo   Python:  %PY%
@@ -84,9 +85,9 @@ if not "%RC%"=="0" (
 echo.
 echo ========================================
 echo   Started successfully.
-echo   - Live bot  ^(conservative^)
-echo   - Paper bot ^(aggressive^)
 echo   - Desktop dashboard ^(pythonw^)
+echo   - Paper v2 left running when heartbeat is fresh
+echo   - Live / paper restart only with --force-reset
 echo.
 echo   Sign in when the dashboard opens.
 echo   Wait ~60 seconds, then check Overview for fresh heartbeats.
