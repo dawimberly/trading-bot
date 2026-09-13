@@ -2259,18 +2259,15 @@ class PaperBookPanel(ctk.CTkFrame):
     def __init__(self, master, *, book_id: str, on_select=None):
         super().__init__(
             master,
-            fg_color=COLORS["card"],
-            corner_radius=12,
-            border_width=1,
-            border_color=COLORS["border"],
+            fg_color="transparent",
         )
         top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=16, pady=(12, 4))
+        top.pack(fill="x", pady=(0, 12))
         ctk.CTkLabel(
             top,
-            text="PYTHONTRADING  ·  BOOKS",
-            font=ctk.CTkFont(family="Georgia", size=11),
-            text_color=COLORS["blue"],
+            text="PythonTrading",
+            font=ctk.CTkFont(family="Georgia", size=13),
+            text_color=COLORS["muted"],
             anchor="w",
         ).pack(anchor="w")
         self._on_select = on_select
@@ -2305,8 +2302,6 @@ class PaperBookPanel(ctk.CTkFrame):
             )
             btn.pack(side="left", padx=3, pady=3)
             self._book_btns[bid] = btn
-        rule = ctk.CTkFrame(top, fg_color=COLORS["magenta"], height=3, width=88, corner_radius=2)
-        rule.pack(anchor="w", pady=(4, 0))
         self._mix_hint = ctk.CTkLabel(
             top,
             text="",
@@ -2314,11 +2309,19 @@ class PaperBookPanel(ctk.CTkFrame):
             text_color=COLORS["muted"],
             anchor="w",
         )
-        self._mix_hint.pack(anchor="w", pady=(2, 8))
+        self._mix_hint.pack(anchor="w", pady=(4, 0))
         self.set_book(book_id)
 
-        eq_row = ctk.CTkFrame(self, fg_color="transparent")
-        eq_row.pack(fill="x", padx=16)
+        card = ctk.CTkFrame(
+            self,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        card.pack(fill="x")
+        eq_row = ctk.CTkFrame(card, fg_color="transparent")
+        eq_row.pack(fill="x", padx=22, pady=(18, 0))
         ctk.CTkLabel(
             eq_row,
             text="EQUITY",
@@ -2331,7 +2334,7 @@ class PaperBookPanel(ctk.CTkFrame):
         self._equity = ctk.CTkLabel(
             num_row,
             text="$—",
-            font=ctk.CTkFont(family="Segoe UI", size=42, weight="bold"),
+            font=ctk.CTkFont(family="Georgia", size=44, weight="bold"),
             text_color=COLORS["text"],
             anchor="w",
         )
@@ -2339,16 +2342,16 @@ class PaperBookPanel(ctk.CTkFrame):
         self._today = ctk.CTkLabel(
             num_row,
             text="",
-            font=_ctk_font("body"),
+            font=ctk.CTkFont(family="Segoe UI", size=16),
             text_color=COLORS["green"],
             anchor="e",
         )
-        self._today.pack(side="left", padx=(28, 0))
+        self._today.pack(side="right")
 
-        stats = ctk.CTkFrame(self, fg_color="transparent")
-        stats.pack(anchor="w", padx=16, pady=(10, 6))
+        stats = ctk.CTkFrame(card, fg_color="transparent")
+        stats.pack(fill="x", padx=22, pady=(16, 18))
         for col in range(4):
-            stats.grid_columnconfigure(col, weight=0, minsize=130)
+            stats.grid_columnconfigure(col, weight=1, uniform="stat")
 
         def _stat(col: int, caption: str) -> tuple[ctk.CTkFrame, ctk.CTkLabel]:
             box = ctk.CTkFrame(stats, fg_color="transparent")
@@ -2385,11 +2388,7 @@ class PaperBookPanel(ctk.CTkFrame):
         self._book.configure(text=book_id)
 
         self.sleeve = SleeveMixCard(self)
-        self.sleeve.pack(fill="x", padx=10, pady=(4, 12))
-        try:
-            self.sleeve.configure(fg_color="transparent", border_width=0)
-        except Exception:
-            pass
+        self.sleeve.pack(fill="x", pady=(16, 0))
 
         self.metric_cards = {
             "equity": _LabelMetric(self._equity),
@@ -3656,9 +3655,6 @@ class TradingDashboardApp(ctk.CTk):
         self._stats_line2.configure(text="Daily Breaker: —   ·   Insight: —")
         self._status_row = status_row
         self._stats_banner = stats_banner
-        if self._paper_book:
-            status_row.pack_forget()
-            stats_banner.pack_forget()
 
         self._small_panel = ctk.CTkFrame(top_stack, fg_color="transparent")
         self._small_body = ctk.CTkLabel(
@@ -3671,8 +3667,6 @@ class TradingDashboardApp(ctk.CTk):
         self._small_body.pack(anchor="w", padx=4)
 
         if self._paper_book:
-            for bar in (self._accent_bar, self._mag_bar, self._tape_bar):
-                bar.pack_forget()
             self._spark_frame = ctk.CTkFrame(top_stack, fg_color="transparent", width=1, height=1)
             self._metric_cards = {}
             self._paper_panel = None
@@ -3735,17 +3729,18 @@ class TradingDashboardApp(ctk.CTk):
         except Exception:
             pass
         self._tab_positions.grid_columnconfigure(0, weight=1)
-        self._tab_positions.grid_rowconfigure(2, weight=1)
         if self._paper_book:
-            self._paper_panel = PaperBookPanel(self._tab_positions, book_id=self._book_id)
-            self._paper_panel.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
+            self._paper_panel = PaperBookPanel(
+                self._tab_positions,
+                book_id=self._book_id,
+                on_select=self._on_display_book,
+            )
+            self._paper_panel.pack(fill="x", padx=10, pady=(8, 4))
             self._metric_cards = self._paper_panel.metric_cards
             self._sleeve_mix = self._paper_panel.sleeve
         pos_head = ctk.CTkFrame(self._tab_positions, fg_color="transparent")
-        if self._paper_book:
-            pos_head.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 4))
-        else:
-            pos_head.pack(fill="x", padx=12, pady=(10, 4))
+        self._pos_head = pos_head
+        pos_head.pack(fill="x", padx=12, pady=(10, 4))
         ctk.CTkLabel(
             pos_head,
             text="Open Positions",
@@ -3799,10 +3794,7 @@ class TradingDashboardApp(ctk.CTk):
             height=18,
             large=True,
         )
-        if self._paper_book:
-            self._positions_table.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 8))
-        else:
-            self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self._positions_empty_label = ctk.CTkLabel(
             self._tab_positions,
             text="No open positions\nCash idle until the next rebalance cycle.",
@@ -3819,8 +3811,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._insider_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._insider_section.pack(fill="x", padx=10, pady=(0, 3))
         insider_head = ctk.CTkFrame(self._insider_section, fg_color="transparent")
         insider_head.pack(fill="x", padx=8, pady=(2, 1))
         self._insider_toggle_btn = ctk.CTkButton(
@@ -3870,8 +3861,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
         rvol_head = ctk.CTkFrame(self._rvol_section, fg_color="transparent")
         rvol_head.pack(fill="x", padx=8, pady=(2, 1))
         self._rvol_toggle_btn = ctk.CTkButton(
@@ -3921,8 +3911,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
         orb_mom_head = ctk.CTkFrame(self._orb_mom_section, fg_color="transparent")
         orb_mom_head.pack(fill="x", padx=8, pady=(2, 1))
         self._orb_mom_toggle_btn = ctk.CTkButton(
@@ -3972,8 +3961,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
         sector_rot_head = ctk.CTkFrame(self._sector_rot_section, fg_color="transparent")
         sector_rot_head.pack(fill="x", padx=8, pady=(2, 1))
         self._sector_rot_toggle_btn = ctk.CTkButton(
@@ -4023,8 +4011,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
         vol_bo_head = ctk.CTkFrame(self._vol_bo_section, fg_color="transparent")
         vol_bo_head.pack(fill="x", padx=8, pady=(2, 1))
         self._vol_bo_toggle_btn = ctk.CTkButton(
@@ -4074,8 +4061,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
         strategy_head = ctk.CTkFrame(self._strategy_section, fg_color="transparent")
         strategy_head.pack(fill="x", padx=8, pady=(2, 1))
         self._strategy_toggle_btn = ctk.CTkButton(
@@ -4125,8 +4111,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
         sharpe_head = ctk.CTkFrame(self._sharpe_section, fg_color="transparent")
         sharpe_head.pack(fill="x", padx=8, pady=(2, 1))
         self._sharpe_toggle_btn = ctk.CTkButton(
@@ -4185,8 +4170,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        if not self._paper_book:
-            self._short_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._short_section.pack(fill="x", padx=10, pady=(0, 3))
         short_head = ctk.CTkFrame(self._short_section, fg_color="transparent")
         short_head.pack(fill="x", padx=8, pady=(2, 1))
         self._short_toggle_btn = ctk.CTkButton(
@@ -4244,8 +4228,7 @@ class TradingDashboardApp(ctk.CTk):
             border_color=COLORS["border"],
             height=28,
         )
-        if not self._paper_book:
-            self._scanners_bar.pack(fill="x", padx=10, pady=(0, 6))
+        self._scanners_bar.pack(fill="x", padx=10, pady=(0, 6))
         self._scanners_bar.pack_propagate(False)
         self._scanners_shown = False
         self._scanners_toggle = ctk.CTkButton(
@@ -4363,7 +4346,7 @@ class TradingDashboardApp(ctk.CTk):
         self._status_label.pack(side="right")
 
         if self._paper_book:
-            self._show_paper_book_page()
+            self._restyle_paper_book_window()
 
         self._tick_clock()
         self._start_clock()
@@ -4378,6 +4361,101 @@ class TradingDashboardApp(ctk.CTk):
             self._schedule_refresh()
             if self._auto_start_bot:
                 self.after(800, lambda: self._maybe_auto_start_bot(quiet=True))
+
+    def _restyle_paper_book_window(self) -> None:
+        """Grok book-monitor page: hide Stock-bot poster. Keep Start/Stop/tabs."""
+        for w in (
+            self._header_bar,
+            self._tape_bar,
+            self._mag_bar,
+            self._top_stack,
+        ):
+            try:
+                w.pack_forget()
+            except Exception:
+                pass
+        try:
+            self._pos_head.pack_forget()
+        except Exception:
+            pass
+        try:
+            self._scanners_bar.pack_forget()
+        except Exception:
+            pass
+        for sec in getattr(self, "_aux_sections", ()):
+            try:
+                sec.pack_forget()
+            except Exception:
+                pass
+        slim = ctk.CTkFrame(self, fg_color=COLORS["surface"], height=44, corner_radius=0)
+        slim.pack(fill="x", after=self._accent_bar)
+        slim.pack_propagate(False)
+        inner = ctk.CTkFrame(slim, fg_color="transparent")
+        inner.pack(fill="x", padx=12, pady=6)
+        btn = dict(
+            height=28,
+            corner_radius=8,
+            font=_ctk_font("caption"),
+        )
+        ctk.CTkButton(
+            inner,
+            text="Start",
+            width=64,
+            fg_color=COLORS["paper_ok_bg"],
+            text_color=COLORS["green"],
+            command=self._on_start_bot,
+            **btn,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            inner,
+            text="Stop",
+            width=60,
+            fg_color=COLORS["live_bg"],
+            text_color=COLORS["red"],
+            command=self._on_stop_bot,
+            **btn,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            inner,
+            text="Refresh",
+            width=72,
+            fg_color=COLORS["surface2"],
+            command=self._on_manual_refresh,
+            **btn,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            inner,
+            text="Sell",
+            width=56,
+            fg_color=COLORS["live_bg"],
+            text_color=COLORS["red"],
+            command=self._on_sell_selected_position,
+            **btn,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            inner,
+            text="Sell all",
+            width=70,
+            fg_color=COLORS["small"],
+            command=self._on_sell_all_positions,
+            **btn,
+        ).pack(side="left")
+        ctk.CTkButton(
+            inner,
+            text="Log out",
+            width=70,
+            fg_color=COLORS["surface2"],
+            command=self._on_logout_click,
+            **btn,
+        ).pack(side="right")
+        try:
+            self._tabs.configure(fg_color=COLORS["bg"])
+        except Exception:
+            pass
+        if getattr(self, "_paper_panel", None) is not None:
+            self._paper_panel.pack_configure(padx=80, pady=(12, 4))
+        if getattr(self, "_positions_table", None) is not None:
+            self._positions_table.pack_configure(padx=80, pady=(0, 8))
 
     def _apply_user_paths(self, username: str, book_id: str | None = None) -> None:
         with _BOOK_ENV_LOCK:
@@ -4872,8 +4950,7 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._rvol_section.pack_forget()
             return
-        if not self._paper_book:
-            self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._rvol_table.clear()
             self._rvol_status.configure(text=err[:120], text_color=COLORS["amber"])
@@ -4916,8 +4993,7 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._orb_mom_section.pack_forget()
             return
-        if not self._paper_book:
-            self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
         live = " · LIVE opt-in" if config.orb_momentum_live_sleeve_enabled() else " · paper"
         if err:
             self._orb_mom_table.clear()
@@ -4953,8 +5029,7 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._sector_rot_section.pack_forget()
             return
-        if not self._paper_book:
-            self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
         live = (
             " · LIVE opt-in"
             if config.sector_rotation_live_sleeve_enabled()
@@ -4994,8 +5069,7 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._vol_bo_section.pack_forget()
             return
-        if not self._paper_book:
-            self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._vol_bo_table.clear()
             self._vol_bo_status.configure(text=err[:140], text_color=COLORS["amber"])
@@ -5031,8 +5105,7 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._strategy_section.pack_forget()
             return
-        if not self._paper_book:
-            self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
         status_base = "Rolling 30d · Excellent/Good/Fair/Weak ratings"
         if mtf_summary:
             status_base = f"{status_base} · {mtf_summary}"
@@ -5076,8 +5149,7 @@ class TradingDashboardApp(ctk.CTk):
         err: str | None,
     ) -> None:
         self._sharpe_empty_label.place_forget()
-        if not self._paper_book:
-            self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._sharpe_table.clear()
             self._sharpe_summary.configure(text="")
@@ -5158,8 +5230,7 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._short_section.pack_forget()
             return
-        if not self._paper_book:
-            self._short_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._short_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._short_table.clear()
             self._short_status.configure(text=err[:120], text_color=COLORS["amber"])
@@ -5582,29 +5653,35 @@ class TradingDashboardApp(ctk.CTk):
         self._pill_entry_gates.pack(side="left", padx=(0, 8), before=self._pill_bot)
 
     def _show_paper_book_page(self) -> None:
-        """Book display + Dirty INK tape. No Stock-bot ☰ / tabs."""
+        """Grok book-monitor layout: thin cyan bar, centered cards, no Stock-bot ☰."""
         for w in (
             self._header_bar,
             self._top_stack,
             self._tabs,
             self._footer,
             self._mag_bar,
+            self._tape_bar,
         ):
             try:
                 w.pack_forget()
             except Exception:
                 pass
         try:
+            self._accent_bar.configure(height=6, fg_color=COLORS["accent"])
             self._accent_bar.pack(fill="x")
             self._accent_bar.pack_propagate(False)
-            self._tape_bar.pack(fill="x")
-            self._tape_bar.pack_propagate(False)
         except Exception:
             pass
-        shell = ctk.CTkFrame(self, fg_color=COLORS["bg"])
-        shell.pack(fill="both", expand=True, padx=24, pady=16)
+        wrap = ctk.CTkFrame(self, fg_color=COLORS["bg"])
+        wrap.pack(fill="both", expand=True)
+        wrap.grid_columnconfigure(0, weight=1)
+        wrap.grid_columnconfigure(1, weight=0, minsize=1120)
+        wrap.grid_columnconfigure(2, weight=1)
+        wrap.grid_rowconfigure(0, weight=1)
+        shell = ctk.CTkFrame(wrap, fg_color=COLORS["bg"], width=1120)
+        shell.grid(row=0, column=1, sticky="nsew", pady=20)
         shell.grid_columnconfigure(0, weight=1)
-        shell.grid_rowconfigure(1, weight=1)
+        shell.grid_rowconfigure(2, weight=1)
         try:
             self._paper_panel.destroy()
         except Exception:
@@ -5621,13 +5698,35 @@ class TradingDashboardApp(ctk.CTk):
         self._paper_panel.grid(row=0, column=0, sticky="ew")
         self._metric_cards = self._paper_panel.metric_cards
         self._sleeve_mix = self._paper_panel.sleeve
-        self._positions_table = DataTable(
+        pos_card = ctk.CTkFrame(
             shell,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        pos_card.grid(row=2, column=0, sticky="nsew", pady=(16, 8))
+        pos_card.grid_columnconfigure(0, weight=1)
+        pos_card.grid_rowconfigure(1, weight=1)
+        pos_head = ctk.CTkFrame(pos_card, fg_color="transparent")
+        pos_head.grid(row=0, column=0, sticky="ew", padx=18, pady=(12, 4))
+        ctk.CTkLabel(
+            pos_head,
+            text="Positions",
+            font=ctk.CTkFont(family="Georgia", size=18, weight="bold"),
+            text_color=COLORS["text"],
+        ).pack(side="left")
+        self._positions_table = DataTable(
+            pos_card,
             ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED"],
             height=22,
             large=True,
         )
-        self._positions_table.grid(row=1, column=0, sticky="nsew", pady=(10, 8))
+        try:
+            self._positions_table.configure(fg_color=COLORS["card"], border_width=0)
+        except Exception:
+            pass
+        self._positions_table.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 8))
         self._positions_empty_label = ctk.CTkLabel(
             self._positions_table,
             text="No open positions",
@@ -5635,7 +5734,7 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
         bar = ctk.CTkFrame(shell, fg_color="transparent")
-        bar.grid(row=2, column=0, sticky="ew")
+        bar.grid(row=3, column=0, sticky="ew")
         ctk.CTkButton(
             bar,
             text="Refresh",
