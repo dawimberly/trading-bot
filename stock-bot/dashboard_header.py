@@ -111,6 +111,55 @@ def _usable_holdings_bits(heartbeat: dict[str, Any] | None) -> list[str]:
     return bits
 
 
+def sleeve_mix_rows(
+    heartbeat: dict[str, Any] | None,
+    *,
+    equity: float,
+    cash: float,
+) -> list[dict[str, Any]]:
+    """Display-layout sleeve mix: actual vs target for VTI, NYSE, cash."""
+    exp, eq_hb = _exposure(heartbeat)
+    eq = equity if equity > 0 else eq_hb
+    caps = (heartbeat or {}).get("sleeve_caps") if isinstance(
+        (heartbeat or {}).get("sleeve_caps"), dict
+    ) else {}
+    cash_val = cash if cash > 0 else _float((heartbeat or {}).get("cash"))
+    if eq <= 0:
+        return []
+
+    def _pct(value: float) -> float:
+        return 100.0 * value / eq
+
+    vti_val = _float(exp.get("vti_core_value"))
+    nyse_val = _float(exp.get("nyse_value"))
+    vti_tgt = _float(caps.get("vti_core")) * 100.0
+    nyse_tgt = _float(caps.get("nyse")) * 100.0
+    cash_tgt = _float(caps.get("cash")) * 100.0
+    return [
+        {
+            "key": "vti",
+            "label": "VTI actual / target",
+            "actual_pct": _pct(vti_val),
+            "target_pct": vti_tgt,
+            "value": vti_val,
+        },
+        {
+            "key": "nyse",
+            "label": "NYSE actual / target",
+            "actual_pct": _pct(nyse_val),
+            "target_pct": nyse_tgt,
+            "value": nyse_val,
+        },
+        {
+            "key": "cash",
+            "label": "Cash",
+            "actual_pct": _pct(cash_val),
+            "target_pct": cash_tgt,
+            "value": cash_val,
+        },
+    ]
+
+
 def header_tape_text(*, paper: bool, heartbeat: dict[str, Any] | None = None) -> str:
     """Cyan tape under the header. Never claim the NYSE-only 100% experiment."""
     holdings = _usable_holdings_bits(heartbeat)

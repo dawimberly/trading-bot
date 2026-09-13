@@ -12,6 +12,7 @@ from dashboard_header import (
     header_stamp_text,
     header_tape_text,
     holdings_are_nyse_only_slogan,
+    sleeve_mix_rows,
 )
 
 
@@ -151,3 +152,23 @@ def test_look_helper_strips_hardcoded_nyse_100():
     assert "NYSE 100" not in cleaned
     assert "header_stamp_text" in cleaned
     assert "header_tape_text" in cleaned
+
+
+def test_sleeve_mix_rows_match_display_layout():
+    hb = {
+        "equity": 96_967.81,
+        "cash": 12_097.18,
+        "sleeve_caps": {"vti_core": 0.33, "nyse": 0.67, "cash": 0.0},
+        "sleeve_exposure": {
+            "equity": 96_967.81,
+            "vti_core_value": 48_448.0,
+            "nyse_value": 36_423.0,
+        },
+    }
+    rows = {r["key"]: r for r in sleeve_mix_rows(hb, equity=96_967.81, cash=12_097.18)}
+    assert abs(rows["vti"]["actual_pct"] - 49.96) < 0.1
+    assert rows["vti"]["target_pct"] == 33.0
+    assert abs(rows["nyse"]["actual_pct"] - 37.56) < 0.1
+    assert rows["nyse"]["target_pct"] == 67.0
+    assert abs(rows["cash"]["actual_pct"] - 12.48) < 0.1
+    assert rows["cash"]["target_pct"] == 0.0

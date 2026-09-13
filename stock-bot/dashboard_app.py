@@ -97,6 +97,7 @@ from dashboard_header import (  # noqa: E402
     header_kicker_text,
     header_stamp_text,
     header_tape_text,
+    sleeve_mix_rows,
 )
 from modules.csv_utils import coerce_trade_journal_df, read_csv_file  # noqa: E402
 from modules.alpaca_client import build_trading_client, reset_trading_client_cache  # noqa: E402
@@ -2132,6 +2133,92 @@ class CopyableLines:
         self._text.insert("1.0", body)
 
 
+class SleeveMixCard(ctk.CTkFrame):
+    """Paper-book sleeve mix: VTI / NYSE / cash actual vs target."""
+
+    def __init__(self, master):
+        super().__init__(
+            master,
+            fg_color=COLORS["card"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=10, pady=(8, 2))
+        ctk.CTkLabel(
+            head,
+            text="Sleeve mix",
+            font=_ctk_font("body_sm"),
+            text_color=COLORS["blue"],
+        ).pack(side="left")
+        self._bars: dict[str, tuple[ctk.CTkLabel, ctk.CTkProgressBar, ctk.CTkLabel]] = {}
+        colors = {
+            "vti": COLORS["accent"],
+            "nyse": COLORS["green"],
+            "cash": COLORS["muted"],
+        }
+        for key, title in (
+            ("vti", "VTI actual / target"),
+            ("nyse", "NYSE actual / target"),
+            ("cash", "Cash"),
+        ):
+            row = ctk.CTkFrame(self, fg_color="transparent")
+            row.pack(fill="x", padx=10, pady=2)
+            lab = ctk.CTkLabel(
+                row,
+                text=title,
+                font=_ctk_font("caption"),
+                text_color=COLORS["muted"],
+                width=150,
+                anchor="w",
+            )
+            lab.pack(side="left")
+            bar = ctk.CTkProgressBar(
+                row,
+                height=8,
+                progress_color=colors[key],
+                fg_color=COLORS["surface2"],
+            )
+            bar.pack(side="left", fill="x", expand=True, padx=8)
+            bar.set(0)
+            pct = ctk.CTkLabel(
+                row,
+                text="—",
+                font=_ctk_font("caption"),
+                text_color=COLORS["text"],
+                width=120,
+                anchor="e",
+            )
+            pct.pack(side="right")
+            self._bars[key] = (lab, bar, pct)
+        self._detail = ctk.CTkLabel(
+            self,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        self._detail.pack(fill="x", padx=10, pady=(2, 8))
+
+    def set_mix(self, heartbeat: dict | None, *, equity: float, cash: float) -> None:
+        rows = sleeve_mix_rows(heartbeat, equity=equity, cash=cash)
+        by_key = {r["key"]: r for r in rows}
+        bits: list[str] = []
+        for key, (_lab, bar, pct) in self._bars.items():
+            row = by_key.get(key)
+            if not row:
+                bar.set(0)
+                pct.configure(text="—")
+                continue
+            actual = float(row["actual_pct"])
+            target = float(row["target_pct"])
+            bar.set(max(0.0, min(1.0, actual / 100.0)))
+            pct.configure(text=f"{actual:.1f}%  /  {target:.0f}%")
+            bits.append(f"{key.upper()} ${row['value']:,.0f} ({actual:.1f}%)")
+        self._detail.configure(text="  ·  ".join(bits) if bits else "Waiting for heartbeat…")
+
+
 class DataTable(ctk.CTkFrame):
     """Lightweight dark table via ttk.Treeview."""
 
@@ -2176,6 +2263,10 @@ class DataTable(ctk.CTkFrame):
             "P&L %": "_pnl_pct",
             "Day P&L": "_day_pnl",
             "Weight %": "_weight",
+            "WT": "_weight",
+            "QTY": "_qty",
+            "VALUE": "_value",
+            "UNREALIZED": "_pnl",
             "Days": "_days",
             "Bought": "Bought",
             "Sold": "Sold",
@@ -2198,9 +2289,15 @@ class DataTable(ctk.CTkFrame):
             if large:
                 widths = {
                     "Ticker": 88,
+                    "SYMBOL": 88,
                     "symbol": 96,
                     "Sleeve": 80,
+                    "SLEEVE": 80,
                     "sleeve": 80,
+                    "QTY": 80,
+                    "WT": 72,
+                    "VALUE": 110,
+                    "UNREALIZED": 160,
                     "Side": 56,
                     "Opened": 128,
                     "Days": 48,
@@ -2227,14 +2324,16 @@ class DataTable(ctk.CTkFrame):
                 }
                 width = widths.get(col, 80)
             else:
-                width = 88 if col in ("Ticker", "symbol", "event", "sleeve") else 72
+                width = 88 if col in ("Ticker", "SYMBOL", "symbol", "event", "sleeve") else 72
             left_cols = (
                 "Ticker",
+                "SYMBOL",
                 "symbol",
                 "Time",
                 "timestamp",
                 "event",
                 "Sleeve",
+                "SLEEVE",
                 "sleeve",
                 "Side",
                 "Opened",
@@ -2243,6 +2342,7 @@ class DataTable(ctk.CTkFrame):
             )
             right_cols = (
                 "Qty",
+                "QTY",
                 "Days",
                 "Entry",
                 "Exit",
@@ -2253,6 +2353,9 @@ class DataTable(ctk.CTkFrame):
                 "P&L %",
                 "Day P&L",
                 "Weight %",
+                "WT",
+                "VALUE",
+                "UNREALIZED",
                 "Notional",
             )
             if col in left_cols:
@@ -2265,7 +2368,17 @@ class DataTable(ctk.CTkFrame):
                 col,
                 width=width,
                 anchor=anchor,
-                stretch=col in ("Ticker", "symbol", "Opened", "Sleeve", "Value $"),
+                stretch=col
+                in (
+                    "Ticker",
+                    "SYMBOL",
+                    "symbol",
+                    "Opened",
+                    "Sleeve",
+                    "Value $",
+                    "VALUE",
+                    "UNREALIZED",
+                ),
             )
         self._tree.tag_configure("oddrow", background=COLORS["surface"])
         self._tree.tag_configure("evenrow", background=COLORS["surface2"])
@@ -3335,6 +3448,8 @@ class TradingDashboardApp(ctk.CTk):
         self._metric_cards["cash"].pack(side="left", padx=(0, 12))
         self._metric_cards["invested"] = CopyableMetric(hero_inner, "Invested", width=8)
         self._metric_cards["invested"].pack(side="left", padx=(0, 12))
+        self._metric_cards["positions"] = CopyableMetric(hero_inner, "Positions", width=6)
+        self._metric_cards["positions"].pack(side="left", padx=(0, 12))
         self._metric_cards["pnl"] = CopyableMetric(hero_inner, "Open P&L", width=12)
         self._metric_cards["pnl"].pack(side="left", padx=(0, 12))
         self._metric_cards["market"] = CopyableMetric(hero_inner, "Market", width=14)
@@ -3385,6 +3500,8 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
         ).pack(side="left", padx=(12, 0))
+        self._sleeve_mix = SleeveMixCard(self._tab_positions)
+        self._sleeve_mix.pack(fill="x", padx=10, pady=(0, 6))
         self._pos_total = ctk.CTkLabel(
             pos_head,
             text="",
@@ -3419,24 +3536,8 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left")
         self._positions_table = DataTable(
             self._tab_positions,
-            [
-                "Ticker",
-                "Sleeve",
-                "Side",
-                "Opened",
-                "Days",
-                "Qty",
-                "Entry",
-                "Current",
-                "Cost $",
-                "Value $",
-                "P&L $",
-                "P&L %",
-                "Day P&L",
-                "Weight %",
-                "ATR Stop",
-            ],
-            height=16,
+            ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED"],
+            height=18,
             large=True,
         )
         self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
@@ -5507,10 +5608,17 @@ class TradingDashboardApp(ctk.CTk):
             f"${cash:,.0f} ({cash_pct:.0f}%)" if equity > 0 else "—"
         )
         self._metric_cards["invested"].set(f"{invested:.1f}%")
+        npos = 0
+        if positions_df is not None and not getattr(positions_df, "empty", True):
+            npos = len(positions_df)
+        if "positions" in self._metric_cards:
+            self._metric_cards["positions"].set(str(npos) if npos else "0")
         self._metric_cards["pnl"].set(
             f"${upl:+,.2f}", color=COLORS["green"] if upl >= 0 else COLORS["red"]
         )
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
+        if getattr(self, "_sleeve_mix", None) is not None:
+            self._sleeve_mix.set_mix(heartbeat, equity=equity, cash=cash)
 
         small_acct = equity > 0 and config.is_small_account(equity)
         regime = "—"
@@ -5878,23 +5986,15 @@ class TradingDashboardApp(ctk.CTk):
                 days_n = int(days_raw) if days_raw != "" and days_raw is not None else None
             except (TypeError, ValueError):
                 days_n = None
+            qty_s = f"{qty:.4f}".rstrip("0").rstrip(".")
             rows.append(
                 {
-                    "Ticker": str(r.get("Ticker") or "?"),
-                    "Sleeve": r.get("Sleeve", ""),
-                    "Side": r.get("Side", "Long"),
-                    "Opened": r.get("Opened", "—"),
-                    "Days": "—" if days_n is None else str(days_n),
-                    "Qty": f"{qty:.4f}",
-                    "Entry": f"${entry:,.2f}",
-                    "Current": f"${current:,.2f}" if current else "—",
-                    "Cost $": f"${cost:,.2f}",
-                    "Value $": f"${market_value:,.2f}",
-                    "P&L $": f"${pnl:+,.2f}",
-                    "P&L %": f"{pnl_pct:+.2f}%",
-                    "Day P&L": f"${day_pl:+,.2f}",
-                    "Weight %": f"{weight:.1f}%",
-                    "ATR Stop": r.get("ATR Stop", "—"),
+                    "SYMBOL": str(r.get("Ticker") or "?"),
+                    "SLEEVE": r.get("Sleeve", ""),
+                    "QTY": qty_s,
+                    "WT": f"{weight:.1f}%",
+                    "VALUE": f"${market_value:,.2f}",
+                    "UNREALIZED": f"${pnl:+,.2f}  ({pnl_pct:+.2f}%)",
                     "_qty": qty,
                     "_entry": entry,
                     "_current": current,
@@ -5979,6 +6079,7 @@ class TradingDashboardApp(ctk.CTk):
             self._last_positions_df = positions_df.copy()
             self._last_positions_fp = fp
             rows = self._position_rows(positions_df)
+            rows.sort(key=lambda r: float(r.get("_weight") or 0), reverse=True)
             self._positions_table.set_rows(rows, pnl_col="_pnl")
             color = COLORS["green"] if total_upl >= 0 else COLORS["red"]
             self._pos_total.configure(
@@ -6289,7 +6390,9 @@ class TradingDashboardApp(ctk.CTk):
         if not row:
             messagebox.showwarning("Sell Position", "Select a position row first.")
             return
-        ticker = str(row.get("Ticker") or row.get("symbol") or "").strip()
+        ticker = str(
+            row.get("SYMBOL") or row.get("Ticker") or row.get("symbol") or ""
+        ).strip()
         if not ticker:
             messagebox.showwarning("Sell Position", "Could not read ticker from selection.")
             return
