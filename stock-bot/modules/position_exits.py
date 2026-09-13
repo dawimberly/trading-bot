@@ -89,6 +89,8 @@ def _position_age_bars(pos) -> int | None:
 
 
 def _max_hold_bars() -> int:
+    if config.paper_medium_strategy_enabled():
+        return max(1, int(config.PAPER_POSITION_MAX_HOLD_BARS))
     if config.effective_exit_optimization_enabled():
         return int(getattr(config, "EXIT_OPTIMIZATION_MAX_HOLD_BARS", 35))
     return int(config.PAPER_POSITION_MAX_HOLD_BARS)

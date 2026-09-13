@@ -1841,11 +1841,47 @@ class AlpacaExecutor:
         )
         return [r.as_dict() for r in results]
 
+    def trim_over_active_tickers(self, *, dry_run: bool | None = None) -> list[dict]:
+        """Sell smallest non-core names until count <= max active (Medium 15)."""
+        if not config.paper_medium_strategy_enabled():
+            return []
+        if not getattr(self, "equity_session_open", True):
+            return []
+        use_dry = self.dry_run if dry_run is None else bool(dry_run)
+        cap = config.effective_max_active_tickers()
+        ranked: list[tuple[float, str]] = []
+        for pos in self._get_positions():
+            qty = float(getattr(pos, "qty", 0) or 0)
+            if qty <= 0:
+                continue
+            sym = config.normalize_symbol(self._normalize_pos_symbol(pos))
+            if self._is_core_exempt(sym):
+                continue
+            ranked.append((self._position_market_value(pos), sym))
+        ranked.sort()
+        overflow = len(ranked) - cap
+        if overflow <= 0:
+            return []
+        actions: list[dict] = []
+        for _mv, sym in ranked[:overflow]:
+            action = {"symbol": sym, "action": "sell", "reason": "medium_name_cap"}
+            if use_dry:
+                action["status"] = "dry_run"
+                actions.append(action)
+                continue
+            submitted = self.execute_full_exit(
+                sym, reason="medium_name_cap", sleeve="NYSE"
+            )
+            action["status"] = "submitted" if submitted is not None else "failed"
+            actions.append(action)
+        return actions
+
     def enforce_portfolio_guards(self, *, dry_run: bool | None = None) -> dict:
         """Run concentration trim + auto-dust cleaner. Returns a summary dict."""
         use_dry = self.dry_run if dry_run is None else bool(dry_run)
         self.refresh_cache()
         active = self.list_active_tickers()
+        name_cap = self.trim_over_active_tickers(dry_run=use_dry)
         concentration = self.trim_concentration_excess(dry_run=use_dry)
         dust: list[dict] = []
         if config.effective_auto_dust_cleaner_enabled():
@@ -1861,6 +1897,7 @@ class AlpacaExecutor:
             "per_name_max_pct": config.effective_per_name_max_pct(),
             "auto_dust_max_notional": config.effective_auto_dust_max_notional(),
             "concentration_trims": concentration,
+            "name_cap_trims": name_cap,
             "dust_actions": dust,
         }
         log_event(

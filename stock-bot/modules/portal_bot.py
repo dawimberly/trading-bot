@@ -129,6 +129,9 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PAPER_POSITION_MAX_HOLD_BARS"] = "30"
             env["EXIT_OPTIMIZATION_MAX_HOLD_BARS"] = "30"
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
+            env["PAPER_SMART_STOPS"] = "true"
+            env["ATR_STOP_MULTIPLIER"] = "2.0"
+            env["STOP_LOSS_REEVAL_PCTS"] = "[-50,-50]"
             env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
     else:

@@ -41,8 +41,27 @@ def _load_project_dotenv() -> None:
     """Load .env: stock-bot/.env is authoritative; dist/.env fills missing keys only."""
     loaded: list[str] = []
     env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
+    overlay_keys = (
+        "TRADING_BOOK_ID",
+        "PAPER_MEDIUM_STRATEGY",
+        "PAPER_LAB_CONCENTRATED",
+        "MAX_ACTIVE_TICKERS",
+        "ATR_STOP_MULTIPLIER",
+        "PAPER_POSITION_MAX_HOLD_BARS",
+        "EXIT_OPTIMIZATION_ENABLED",
+        "EXIT_OPTIMIZATION_MAX_HOLD_BARS",
+        "PAPER_SMART_STOPS",
+        "STOP_LOSS_REEVAL_PCTS",
+        "CONCENTRATION_TRIM_MIN_PCT",
+        "PAPER_NYSE_FAT_LOSER_ENABLED",
+        "PAPER_MAX_POSITION_PCT",
+        "PER_NAME_MAX_PCT",
+        "STOP_LOSS_PCT",
+    )
+    launch_overlay = {k: os.environ[k] for k in overlay_keys if k in os.environ}
     if env_override and os.path.isfile(env_override):
         load_dotenv(env_override, override=True)
+        os.environ.update(launch_overlay)
         _append_loaded_env(loaded, Path(env_override))
         stock_env = _CONFIG_DIR / ".env"
         if stock_env.is_file():
@@ -6325,7 +6344,7 @@ def effective_multi_timeframe_enabled() -> bool:
 
 def effective_exit_optimization_enabled() -> bool:
     """Dynamic exits (partial, trail, time) — paper/research + Live Conservative lock."""
-    if paper_lab_concentrated_enabled():
+    if paper_lab_concentrated_enabled() or paper_medium_strategy_enabled():
         return False
     if not EXIT_OPTIMIZATION_ENABLED:
         return False

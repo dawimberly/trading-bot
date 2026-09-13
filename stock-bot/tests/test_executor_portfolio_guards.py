@@ -86,7 +86,7 @@ def test_enforce_portfolio_guards_dry_run():
     ex = _make_executor(positions, equity=100_000.0, dry_run=True)
     summary = ex.enforce_portfolio_guards(dry_run=True)
     assert summary["dry_run"] is True
-    assert summary["max_active_tickers"] == 25
+    assert summary["max_active_tickers"] == config.effective_max_active_tickers()
     assert summary["per_name_max_pct"] == 0.08
     assert summary["auto_dust_max_notional"] == 10.0
     assert any(r["symbol"] == "FAT" and r["status"] == "dry_run" for r in summary["concentration_trims"])
