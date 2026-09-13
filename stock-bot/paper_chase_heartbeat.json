@@ -1,0 +1,296 @@
+{
+  "timestamp": "2026-09-11T15:47:39.234345",
+  "regime": "RHYME_C: Steady_Bullish_Growth",
+  "equity": 99556.53,
+  "cash": 19579.14,
+  "cash_pct": 0.200904,
+  "crypto_trades_last_cycle": 0,
+  "equity_trades_last_cycle": 0,
+  "spy_trades_last_cycle": 0,
+  "sleeve_caps": {
+    "vti_core": 0.536257,
+    "spy": 0.0,
+    "crypto": 0.0,
+    "nyse": 0.124022,
+    "metal": 0.0,
+    "cash_buffer": 0.339721
+  },
+  "crypto_vol_only": true,
+  "equity_session_open": true,
+  "halted": false,
+  "paper": true,
+  "book": "paper",
+  "last_cycle_error": null,
+  "last_cycle_error_at": null,
+  "dynamic_vti": {
+    "pct": 0.5,
+    "base_pct": 0.75,
+    "adjustment_pp": 45.83,
+    "drivers": [
+      "exec selling",
+      "HMM next-regime",
+      "bearish regime"
+    ],
+    "detail": {
+      "nyse_momentum": 0.0,
+      "metal_momentum": 0.002799815942889028,
+      "bubble_score_100": 30.3,
+      "buffett_ratio_pct": 214.04,
+      "insider_cluster_buys": 0,
+      "insider_exec_sells": 2,
+      "regime_conviction": 0.1816,
+      "vti_vs_spy_momentum": 0.0003,
+      "sector_regime_score": 0.5,
+      "spy_like_strength": 0.0,
+      "spy_like_hits": 0,
+      "spy_like_scored": 10,
+      "effective_floor": 0.4,
+      "optional_vti": true
+    },
+    "banner": "Smart Dynamic VTI 50% \u2014 exec selling + HMM next-regime + bearish regime"
+  },
+  "markov_hmm": {
+    "enabled": true,
+    "ok": true,
+    "current": "B",
+    "predicted": "B",
+    "confidence": 0.9869,
+    "confidence_label": "high",
+    "next_probs": {
+      "A": 0.013072,
+      "B": 0.986928,
+      "C": 0.0,
+      "D": 0.0,
+      "E": 0.0
+    },
+    "vti_adj_pp": 12.83,
+    "sizing_mult": 0.6516,
+    "short_boost": 1.55,
+    "tod_bucket": "midday",
+    "tod_entry_mult": 1.168,
+    "tod_sa_boost": 1.21,
+    "reason": "ok"
+  },
+  "time_of_day": {
+    "enabled": true,
+    "current_bucket": "midday",
+    "best_entry": "midday@11:00",
+    "best_stat_arb": "last_hour",
+    "edge": {
+      "entry_mult": 1.168,
+      "sa_boost": 1.21,
+      "vti_adj_pp": -2.8,
+      "confidence": 0.7
+    },
+    "recommendation": "Favor midday@11:00 entries"
+  },
+  "daily_bank": {
+    "enabled": true,
+    "banked": false,
+    "threshold_pct": 0.8,
+    "risk_mult": 1.0,
+    "gain_pct": 0.0,
+    "locked_gain_pct": 0.0,
+    "open_equity": 97455.07,
+    "session_date": "2026-08-05",
+    "banked_at": "",
+    "vti_boost_pp": 0.0
+  },
+  "thinking_engine": {
+    "model": "heuristic-backtest",
+    "confidence": 0.83,
+    "suggested_tilt": {
+      "vti": 0.532,
+      "spy": 0.1433,
+      "energy": 0.0473,
+      "gold": 0.0948,
+      "cash": 0.0783,
+      "crypto": 0.0569,
+      "bonds": 0.0473
+    },
+    "applied_deltas": {
+      "vti_core": 0.036257,
+      "spy": 0.0,
+      "crypto": 0.0,
+      "nyse": -0.030853,
+      "metal": 0.0,
+      "cash_buffer": -0.005404
+    },
+    "apply_log": "Thinking Engine: Risk-off / safe-haven bid -> +4% VTI, -3% Energy, -1% Cash [TILT_CAPPED]",
+    "regime_narrative": "Risk-off / safe-haven bid | Edge: Range-bound chop \u2014 edge in selective tilts vs VTI, not max beta | conf 83% | vti 53%, spy 14%",
+    "narrative": "Risk-off / safe-haven bid",
+    "asymmetry": "Range-bound chop \u2014 edge in selective tilts vs VTI, not max beta",
+    "reasoning_preview": "Force-decision proxy: Risk-off / safe-haven bid"
+  },
+  "entry_skip_reason": "signals_ok",
+  "entry_skip_daily": {
+    "date": "2026-08-05",
+    "cycles": 387,
+    "traded_cycles": 0,
+    "skipped_cycles": 387,
+    "by_category": {
+      "session_closed": 281,
+      "no_room": 58,
+      "no_signal": 48
+    },
+    "by_token": {
+      "equity_session_closed": 281,
+      "nyse_no_room": 58,
+      "signals_ok": 48
+    },
+    "last_reason": "signals_ok",
+    "top_skip": "session_closed (281)"
+  },
+  "scan_schedule": {
+    "enabled": true,
+    "phase": "session",
+    "crypto_only": false,
+    "equity_prep": false,
+    "equity_scans": true,
+    "market_open": true,
+    "session_open": "2026-08-04T09:30:00-04:00",
+    "session_close": "2026-08-05T16:00:00-04:00",
+    "orders_start": "2026-08-04T09:35:00-04:00"
+  },
+  "sleeve_exposure": {
+    "equity": 97474.36,
+    "spy_value": 0.0,
+    "spy_cap": 0.0,
+    "crypto_value": 0.0,
+    "crypto_cap": 0.0,
+    "nyse_value": 9493.028547,
+    "nyse_cap": 19494.872,
+    "vti_core_value": 48734.784932,
+    "vti_core_cap": 48737.18
+  },
+  "wisdom": {
+    "mode": "dynamic",
+    "web_sentiment": -0.0,
+    "price_sentiment": 0.010363256342242666,
+    "gap": -0.15544884513364,
+    "paused": false,
+    "governor_stress": true,
+    "gap_tier": "aggressive",
+    "sizing_multiplier": 1.0,
+    "headline_web_sentiment": 0.3333,
+    "felix_sentiment": -1.0,
+    "felix_video_id": "iGd35DO24Mg",
+    "felix_video_title": "The FED Just Did the UNTHINKABLE (Global Monetary Reset Starts Now)"
+  },
+  "spacex_ipo": {
+    "narrative": "hot_btc_narrative",
+    "headline_count": 245,
+    "btc_linked_count": 192,
+    "spcx_perp_count": 63,
+    "avg_sentiment": 0.1143,
+    "alert": true,
+    "top_headline": "SpaceX just posted a $540 million bitcoin loss and every corporate BTC holder felt it - Crypto News",
+    "top_spcx_perp": "Hyperliquid Lists SpaceX Pre-IPO Perpetual ($SPCX) \u2014 Whales Accumulate Millions in HYPE - Binance",
+    "crypto_override": false,
+    "crypto_allowed": true
+  },
+  "spacex_ipo_listing": {
+    "stage": "trading_live",
+    "days_until_expected": -54,
+    "ready_to_buy": true,
+    "ready_to_buy_alpaca": true,
+    "ready_to_buy_kraken": true,
+    "expected_listing_date": null,
+    "alpaca_tradable": null,
+    "kraken_tradable": null,
+    "kraken_pair": null
+  },
+  "game_plan_state": {
+    "enabled": true,
+    "signals": {
+      "ok": true,
+      "stress": true,
+      "yield_gate": false,
+      "bond_stress": true,
+      "spy_below_ma200": false
+    },
+    "metal_value": 7797.5,
+    "metal_cap": 9747.44,
+    "blend": {
+      "GLD": 0.5,
+      "SLV": 0.3,
+      "CPER": 0.2
+    },
+    "actions": []
+  },
+  "macro_event": {
+    "active": false,
+    "event": null,
+    "sizing_scale": 1.0,
+    "next": {
+      "name": "NFP",
+      "date": "2026-08-07",
+      "release_et": "2026-08-07T08:30:00-04:00",
+      "hours_until": 42.19
+    },
+    "upcoming_2d": [
+      {
+        "name": "NFP",
+        "date": "2026-08-07",
+        "release_et": "2026-08-07T08:30:00-04:00",
+        "hours_until": 42.19
+      }
+    ]
+  },
+  "sleeve_pnl": {
+    "spy": {
+      "cost": 0.0,
+      "value": 0.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "underwater": false,
+      "positions": 0
+    },
+    "crypto": {
+      "cost": 0.0,
+      "value": 0.0,
+      "unrealized_pnl": 0.0,
+      "unrealized_pnl_pct": 0.0,
+      "underwater": false,
+      "positions": 0
+    },
+    "nyse": {
+      "cost": 63827.7937,
+      "value": 64063.6245,
+      "unrealized_pnl": 235.8308,
+      "unrealized_pnl_pct": 0.0037,
+      "underwater": false,
+      "positions": 19
+    },
+    "metal": {
+      "cost": 7792.7287,
+      "value": 7796.4017,
+      "unrealized_pnl": 3.673,
+      "unrealized_pnl_pct": 0.0005,
+      "underwater": false,
+      "positions": 1
+    }
+  },
+  "vti_core": {
+    "target_pct": 0.5,
+    "target_value": 48727.54,
+    "current_value": 54581.93,
+    "drift_pct": 0.0601,
+    "last_action": "sell"
+  },
+  "social_sleeve": {
+    "score": -0.5333,
+    "target": null,
+    "cap_pct": 0.2,
+    "paper_equity": 97474.36,
+    "paper_ok": true,
+    "felix_video_id": "iGd35DO24Mg"
+  },
+  "game_plan": {
+    "enabled": true,
+    "yield_gate_only": true,
+    "yield_gate_enabled": true
+  },
+  "status": "supervisor_pulse",
+  "source": "run_paper_bot"
+}

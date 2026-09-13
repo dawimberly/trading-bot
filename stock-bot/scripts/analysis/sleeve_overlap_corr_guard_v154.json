@@ -1,0 +1,224 @@
+{
+  "generated_at": "2026-07-18T09:35:24",
+  "profile": "Realistic Research v1.5.4",
+  "inputs": {
+    "log": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\backtest_v154_thorough_1000.txt",
+    "exit_events": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\exit_events.json",
+    "correlation_guard": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\correlation_guard.json",
+    "strategy_metrics_db": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\strategy_metrics.db"
+  },
+  "backtest": {
+    "source": "backtest_log",
+    "simulation": "2024-02-23 to 2026-07-17 (~875 days, 800 daily bars)",
+    "total_return_pct": 53.36,
+    "vti_bh_pct": 45.53,
+    "sharpe": 1.02,
+    "max_dd_pct": -16.23,
+    "spy_signals": 120,
+    "nyse_signals": 113,
+    "crypto_signals": 0,
+    "total_orders": 3945,
+    "stack_line": "chase=off | dyn_vti=on | dyn_risk=on | stat_arb=on | vol=on | options=on | thinking=off | overlap=on | chunk=on | cofire=on | dyn_univ=on",
+    "sim_calendar_days": 875,
+    "sim_bars": 800,
+    "skip": {
+      "cycles": 760,
+      "traded": 192,
+      "skipped": 568
+    },
+    "skip_detail": {
+      "blockers": "no_room=208 | no_signal=204",
+      "tokens": "nyse_no_room=208 | signals_ok=179"
+    },
+    "stat_arb_ma50_overlap": {
+      "overlap_bars": 597,
+      "same_symbol_overlap_bars": 0,
+      "overlap_pct_of_sim_bars": 74.6,
+      "same_symbol_pct_of_sim_bars": 0.0
+    },
+    "entry_fills": {
+      "ma50_signals": 0,
+      "ma50_fills": 105,
+      "spy_entry_fills": 120
+    },
+    "stat_arb": {
+      "universe": 29,
+      "contribution_pct": 0.5,
+      "scan_signals": 29,
+      "intents": 6,
+      "pairs_opened": 4,
+      "pairs_closed": 4,
+      "leg_fills": 7,
+      "fill_rate_pct": 66.7,
+      "rejects": "atomic_fail=2 (100%)",
+      "exits_by_reason": "stop_loss=2 ($+0.00, 0%W), trailing_stop=2 ($+0.00, 0%W)",
+      "per_pair_top": "DBB/AMD 1x $+0.0 0%W, AMD/DBB 1x $+0.0 0%W, CVX/COIN 1x $+0.0 0%W, AMZN/BAC 1x $+0.0 0%W"
+    },
+    "sleeves": {
+      "spy": {
+        "pnl_usd": 1983.57,
+        "realized_usd": 851.12,
+        "unrealized_usd": 1132.45,
+        "trips": 115,
+        "win_pct": 93.0,
+        "avg_ret_pct": 13.059,
+        "profit_factor": 38.35
+      },
+      "ma50_momentum": {
+        "pnl_usd": 4169.07,
+        "realized_usd": 0.0,
+        "unrealized_usd": 4169.07,
+        "trips": 0,
+        "win_pct": 0.0,
+        "avg_ret_pct": 0.0,
+        "profit_factor": 0.0
+      },
+      "stat_arb": {
+        "pnl_usd": 21.38,
+        "realized_usd": 21.38,
+        "unrealized_usd": 0.0,
+        "trips": 9,
+        "win_pct": 22.2,
+        "avg_ret_pct": 2.285,
+        "profit_factor": 7.27
+      },
+      "crypto": {
+        "pnl_usd": 0.0,
+        "realized_usd": 0.0,
+        "unrealized_usd": 0.0,
+        "trips": 0,
+        "win_pct": 0.0,
+        "avg_ret_pct": 0.0,
+        "profit_factor": 0.0
+      },
+      "opportunistic_short": {
+        "pnl_usd": -12.74,
+        "realized_usd": -12.68,
+        "unrealized_usd": -0.06,
+        "trips": 1,
+        "win_pct": 0.0,
+        "avg_ret_pct": -2.528,
+        "profit_factor": 0.0
+      }
+    },
+    "shorts_banner": "Protective Shorts: OFF | 1 trips PnL $-12.74 | win 0% | hold 4b | entries 1 | Short fires: 1/156 scans | Rejects: vix_low=118, bear_streak=24, vix_not_rising=12, bubble_low=1 | Reasons: RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064",
+    "spy_nyse_cofire_estimate": {
+      "note": "Fund report does not print cofire_pct / spy_nyse_cofire_days (computed in backtester.py but omitted from print). Bounds below use signal counts only.",
+      "spy_signal_rate_pct": 15.0,
+      "nyse_signal_rate_pct": 14.1,
+      "naive_independent_joint_pct": 2.12,
+      "max_possible_cofire_days": 113,
+      "max_possible_cofire_pct_of_bars": 14.1,
+      "traded_cycles": 192,
+      "traded_cycle_pct_of_skip_cycles": 25.3
+    },
+    "corr_guard_in_log": {
+      "active_or_blocked_lines": 0,
+      "any_mention_lines": 0
+    },
+    "regime_counts": {
+      "RHYME_C: Steady_Bullish_Growth": 325,
+      "RHYME_D: Range_Bound_Neutral": 298,
+      "RHYME_E: Steady_Bearish_Decline": 167,
+      "RHYME_A: Euphoric_Volatility": 10
+    },
+    "log_bytes": 723196,
+    "log_mtime": "2026-07-18T01:48:27"
+  },
+  "exit_events": {
+    "available": true,
+    "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\exit_events.json",
+    "updated_at": "2026-07-18T01:47:16",
+    "n_events": 400,
+    "note": "exit_events.json retains last 400 wall-clock events; timestamps are run-time (not simulation bar dates). Thorough 1000d run overwrote this file during attribution exits.",
+    "ts_first": "2026-07-18T01:22:34",
+    "ts_last": "2026-07-18T01:47:16",
+    "by_sleeve": {
+      "stat_arb": 399,
+      "SHORT": 1
+    },
+    "by_reason": {
+      "trail": 399,
+      "stop_loss": 1
+    },
+    "by_sleeve_reason": {
+      "stat_arb|trail": 399,
+      "SHORT|stop_loss": 1
+    },
+    "top_symbols": {
+      "(empty)": 399,
+      "QQQ": 1
+    }
+  },
+  "correlation_guard": {
+    "available": true,
+    "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\correlation_guard.json",
+    "enabled": true,
+    "max_portfolio_corr": 0.65,
+    "last_corr": null,
+    "last_multiplier": 1.0,
+    "derived_multiplier": null,
+    "status": "no_portfolio_corr_snapshot",
+    "updated_at": "2026-07-18T09:22:04",
+    "config_error": null,
+    "gap": "Snapshot has last_corr=null \u2014 backtest rarely persists a live portfolio corr, and the thorough log has no 'Correlation guard active/blocked' lines. Hit/reject counts are unavailable."
+  },
+  "strategy_metrics": {
+    "available": true,
+    "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\strategy_metrics.db",
+    "tables": [
+      "closed_trades",
+      "daily_snapshots",
+      "sqlite_sequence"
+    ],
+    "closed_trades_by_strategy": [
+      {
+        "strategy_id": "spy_trend",
+        "n": 2680,
+        "pnl": 12393.69
+      },
+      {
+        "strategy_id": "stat_arb",
+        "n": 818,
+        "pnl": -398.7
+      },
+      {
+        "strategy_id": "nyse_momentum_base",
+        "n": 54,
+        "pnl": 0.0
+      },
+      {
+        "strategy_id": "protective_short",
+        "n": 47,
+        "pnl": -432.94
+      }
+    ],
+    "closed_trades_total": 3599
+  },
+  "signal_proxy_spy_nyse": {
+    "available": true,
+    "note": "Signal-intent proxy only (daily MA logic + 1-bar cooldown). Not the thorough executor cofire_budget / room / chunk path.",
+    "window": {
+      "start": "2024-02-24",
+      "end": "2026-07-18",
+      "bars": 800,
+      "days_arg": 1000
+    },
+    "spy_fire_days": 0,
+    "nyse_fire_days": 0,
+    "spy_nyse_cofire_days": 0,
+    "spy_nyse_cowant_days": 0,
+    "pct_bars_spy_fire": 0.0,
+    "pct_bars_nyse_fire": 0.0,
+    "pct_bars_spy_nyse_cofire": 0.0,
+    "pct_bars_spy_nyse_cowant": 0.0,
+    "pct_spy_fires_that_cofire_nyse": null,
+    "pct_nyse_fires_that_cofire_spy": null,
+    "pct_bars_either_fire": 0.0
+  },
+  "gaps": [
+    "No correlation-guard active/blocked lines in thorough log (hit/reject counts unavailable)",
+    "correlation_guard.json last_corr is null",
+    "Exact spy_nyse_cofire_pct not printed in fund report (use signal_proxy or re-run backtester with print)"
+  ]
+}

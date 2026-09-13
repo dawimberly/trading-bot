@@ -1,0 +1,80 @@
+Pre-Market Report — 2026-07-29 00:03:54 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 21648). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3698.391079s
+Equity: $95,138.70
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Thinking engine ON (LLM)
+  • Quality insider signals (30)
+  • All-time Sharpe negative (-0.88)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• TM | cluster_buy | s94 $7K — Cluster buy: 7 insiders purchased TOYOTA MOTOR CORP/ ($
+• PCSA | cluster_buy | s94 — Cluster buy: 8 insiders purchased Processa Pharmaceutic
+• BTSG | executive_sell | s94 $4.1M — CEO sale - BrightSpring Health Services, Inc. ($4.1M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 30 returned
+
+Top signals (up to 5)
+  TM     cluster_buy      score= 94  Cluster buy: 7 insiders purchased TOYOTA MOTOR CORP/ ($7K to
+  PCSA   cluster_buy      score= 94  Cluster buy: 8 insiders purchased Processa Pharmaceuticals, 
+  BTSG   executive_sell   score= 94  CEO sale - BrightSpring Health Services, Inc. ($4.1M)
+  CRWD   executive_sell   score= 94  CEO sale - CrowdStrike Holdings, Inc. ($3.7M)
+  UAL    executive_sell   score= 94  CEO sale - United Airlines Holdings, Inc. ($3.3M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: PCSA T1, TM T1; exec sells -> short watch: BTSG (CEO), CRWD (CEO
+
+Applied boosts
+  momentum  PCSA: +0.280
+  momentum  TM: +0.280
+  stat_arb  PCSA: x1.220
+  stat_arb  TM: x1.220
+  short     BTSG: base=0.420 role=ceo
+  short     CRWD: base=0.420 role=ceo
+  short     UAL: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.8
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 31 | Boost: 0 clusters, 7 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

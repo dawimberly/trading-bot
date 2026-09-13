@@ -1,0 +1,148 @@
+{
+  "generated_at": "2026-09-06 19:30 UTC",
+  "days": 7,
+  "window_start": "2026-08-30",
+  "journal_path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\paper_journal.csv",
+  "freeze_note": "See FORWARD_PAPER_FREEZE.md (2-4 weeks, no new features)",
+  "equity_start": 95050.41,
+  "equity_end": 100421.52,
+  "period_return_pct": 5.65,
+  "equity_source": "journal_equity_marks",
+  "closed_trades": 78,
+  "sleeves": {
+    "nyse": {
+      "name": "nyse",
+      "fills": 45,
+      "exits": 78,
+      "realized_pnl": -705.8100000000002,
+      "realized_wins": 42,
+      "notional_bought": 126711.06000000003,
+      "unrealized_pnl": 840.3147,
+      "open_positions": 15,
+      "open_value": 64179.7466,
+      "win_rate": 0.538
+    },
+    "core": {
+      "name": "core",
+      "fills": 0,
+      "exits": 0,
+      "realized_pnl": 0.0,
+      "realized_wins": 0,
+      "notional_bought": 0.0,
+      "unrealized_pnl": 268.086,
+      "open_positions": 1,
+      "open_value": 33268.076,
+      "win_rate": null
+    },
+    "vti_core": {
+      "name": "vti_core",
+      "fills": 0,
+      "exits": 0,
+      "realized_pnl": 0.0,
+      "realized_wins": 0,
+      "notional_bought": 0.0,
+      "unrealized_pnl": 0.0,
+      "open_positions": 1,
+      "open_value": 33268.076042,
+      "win_rate": null
+    },
+    "vti": {
+      "name": "vti",
+      "fills": 8,
+      "exits": 0,
+      "realized_pnl": 0.0,
+      "realized_wins": 0,
+      "notional_bought": 58258.84,
+      "unrealized_pnl": 0.0,
+      "open_positions": 0,
+      "open_value": 0.0,
+      "win_rate": null
+    },
+    "spy": {
+      "name": "spy",
+      "fills": 0,
+      "exits": 0,
+      "realized_pnl": 0.0,
+      "realized_wins": 0,
+      "notional_bought": 0.0,
+      "unrealized_pnl": 0.0,
+      "open_positions": 0,
+      "open_value": 0.0,
+      "win_rate": null
+    },
+    "crypto": {
+      "name": "crypto",
+      "fills": 0,
+      "exits": 0,
+      "realized_pnl": 0.0,
+      "realized_wins": 0,
+      "notional_bought": 0.0,
+      "unrealized_pnl": 0.0,
+      "open_positions": 0,
+      "open_value": 0.0,
+      "win_rate": null
+    },
+    "metal": {
+      "name": "metal",
+      "fills": 0,
+      "exits": 0,
+      "realized_pnl": 0.0,
+      "realized_wins": 0,
+      "notional_bought": 0.0,
+      "unrealized_pnl": 0.0,
+      "open_positions": 0,
+      "open_value": 0.0,
+      "win_rate": null
+    }
+  },
+  "vs_strict": {
+    "reference": {
+      "label": "STRICT paper windows (~90d)",
+      "return_pct": 15.6,
+      "sharpe": 2.44,
+      "source": "scripts/analysis/eval_strict_windows_last.md"
+    },
+    "expected_return_pct_envelope": 1.21,
+    "period_return_pct": 5.65,
+    "delta_pp": 4.44,
+    "scale_note": "90d STRICT window scaled by 7/90 (envelope only)",
+    "caveat": "Short live-paper samples are noisy; do not retune from this delta. Dashboard Sharpe over days/weeks is not comparable to STRICT backtest Sharpe."
+  },
+  "data_quality": {
+    "journal_path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\paper_journal.csv",
+    "heartbeat_path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\bot_heartbeat.json",
+    "rows_in_window": 2759,
+    "rows_total": 2759,
+    "window_ts_min": "2026-09-01 16:13:56+00:00",
+    "window_ts_max": "2026-09-06 14:28:29+00:00",
+    "equity_source": "journal_equity_marks",
+    "equity_marks_in_window": 2703,
+    "fills_count": 53,
+    "exits_count": 78,
+    "spy_fills": 0,
+    "event_counts": {
+      "cycle": 2502,
+      "fill": 131,
+      "signal": 45,
+      "startup": 42,
+      "exit": 25,
+      "error": 14
+    },
+    "equity_fallback_chain": [
+      "journal_equity_marks",
+      "journal_prewindow_start+heartbeat_end",
+      "heartbeat_equity_end_only",
+      "missing"
+    ]
+  },
+  "notes": [
+    "Forward-paper freeze: measure only - no .env / live / sleeve changes from this report.",
+    "SPY fills on paper should be ~0 (satellite OFF). Non-zero SPY fills -> check restart after lock.",
+    "Closed exits = event in {exit,sell,close} OR sell-side trade event. Cycle rows are marks, not exits.",
+    "journal_load: candidate paper_journal.csv: rows=2759 ts_max=2026-09-06 14:28:29+00:00",
+    "journal_load: candidate paper_journal.csv: rows=25048 ts_max=2026-09-01 16:10:53+00:00",
+    "journal_load: candidate paper_chase_journal.csv: rows=950 ts_max=2026-08-13 22:52:56+00:00",
+    "journal_load: candidate paper_journal.csv: rows=375 ts_max=2026-08-05 13:11:26+00:00"
+  ],
+  "ok": true
+}

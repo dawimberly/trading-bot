@@ -1,0 +1,52 @@
+{
+  "enabled": true,
+  "dry_run": false,
+  "timestamp": "2026-09-13T00:42:24+00:00",
+  "paper_ok": true,
+  "paper_equity": 94477.87,
+  "sleeve_value": 0,
+  "sleeve_cap_pct": 0.15,
+  "position_pct": 0.05,
+  "max_positions": 3,
+  "universe": [
+    "RENDER/USD",
+    "SOL/USD"
+  ],
+  "filters": {
+    "spy_gate": false,
+    "spy_reason": null,
+    "hour_ok": false,
+    "rsi_band": [
+      32,
+      42
+    ],
+    "loss_cooldown_hours": 48
+  },
+  "cooldown_coins": [],
+  "active_positions": [],
+  "last_signal_time": "2026-08-31T01:02:34+00:00",
+  "today_pnl": 0.0,
+  "exit_actions": [],
+  "entry_actions": [],
+  "signals": [
+    {
+      "symbol": "RENDER/USD",
+      "signal": false,
+      "close": 1.383785,
+      "ret_4h": 0.0025,
+      "rsi14": 42.07,
+      "below_sma10": true,
+      "in_cooldown": false
+    },
+    {
+      "symbol": "SOL/USD",
+      "signal": false,
+      "close": 101.62,
+      "ret_4h": 0.0027,
+      "rsi14": 49.02,
+      "below_sma10": true,
+      "in_cooldown": false
+    }
+  ],
+  "cash": 9818.96
+}

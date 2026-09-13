@@ -1,0 +1,4 @@
+$BK: possibly delisted; no price data found  (1d 1927-08-18 -> 2026-07-24) (Yahoo error = "No data found, symbol may be delisted")
+
+1 Failed download:
+['BK']: possibly delisted; no price data found  (1d 1927-08-18 -> 2026-07-24) (Yahoo error = "No data found, symbol may be delisted")

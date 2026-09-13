@@ -1,0 +1,952 @@
+{
+  "generated_at": "2026-07-29 21:28 UTC",
+  "research_db": "data\\research\\geopolitical\\research_macro.db",
+  "disclaimer": "REPORT ONLY - freeze on; labels only; no trade signals; no promote; no live/paper default changes",
+  "series_manifest": {
+    "VIX": {
+      "source": "FRED",
+      "source_id": "VIXCLS",
+      "first_date": "1990-01-02",
+      "last_date": "2026-07-28",
+      "rows": 9239,
+      "checksum": "48e3e1d55d12eec4"
+    },
+    "WTI": {
+      "source": "FRED",
+      "source_id": "DCOILWTICO",
+      "first_date": "1986-01-02",
+      "last_date": "2026-07-27",
+      "rows": 10210,
+      "checksum": "a6e9e3c8145804df"
+    },
+    "SPY": {
+      "source": "yfinance",
+      "source_id": "SPY",
+      "first_date": "1993-01-29",
+      "last_date": "2026-07-29",
+      "rows": 8431,
+      "checksum": "c88b1837c78489a2"
+    },
+    "VTI": {
+      "source": "yfinance",
+      "source_id": "VTI",
+      "first_date": "2001-06-15",
+      "last_date": "2026-07-29",
+      "rows": 6316,
+      "checksum": "4de3c8ae96583a71"
+    },
+    "XLE": {
+      "source": "yfinance",
+      "source_id": "XLE",
+      "first_date": "1998-12-22",
+      "last_date": "2026-07-29",
+      "rows": 6941,
+      "checksum": "5bde84e5ef5de99f"
+    },
+    "GLD": {
+      "source": "yfinance",
+      "source_id": "GLD",
+      "first_date": "2004-11-18",
+      "last_date": "2026-07-29",
+      "rows": 5456,
+      "checksum": "8dd616f190e7a32c"
+    },
+    "VIX_YF": {
+      "source": "yfinance",
+      "source_id": "^VIX",
+      "first_date": "1990-01-02",
+      "last_date": "2026-07-29",
+      "rows": 9211,
+      "checksum": "cae517c3b710b9d7"
+    },
+    "CL_F": {
+      "source": "yfinance",
+      "source_id": "CL=F",
+      "first_date": "2000-08-23",
+      "last_date": "2026-07-29",
+      "rows": 6510,
+      "checksum": "b0571391c2842e7e"
+    },
+    "GC_F": {
+      "source": "yfinance",
+      "source_id": "GC=F",
+      "first_date": "2000-08-30",
+      "last_date": "2026-07-29",
+      "rows": 6501,
+      "checksum": "e1c6498ea45f99ed"
+    }
+  },
+  "events": [
+    {
+      "id": "gulf_war_1990",
+      "label": "Iraq invades Kuwait / Gulf War start",
+      "event_date": "1990-08-02",
+      "region": "Middle East",
+      "calendar_tier": "macro_only",
+      "achieved_grade": "macro_only",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/event/Persian-Gulf-War"
+        },
+        {
+          "name": "US State Department Office of the Historian",
+          "url": "https://history.state.gov/milestones/1989-1992/gulf-war"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "VTI": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "XLE": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "GLD": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 19.543592744294912,
+          "imm_5d_ret_pct": 60.30347528144886,
+          "post_20d_ret_pct": 49.5349975526187,
+          "post_60d_ret_pct": 37.34703866862456,
+          "level_at_event": 20.43,
+          "level_pre": 17.09,
+          "level_change_pct_vs_pre20": 19.543592744294912
+        },
+        "WTI": {
+          "pre_20d_ret_pct": 29.069134458356018,
+          "imm_5d_ret_pct": 24.841838886545766,
+          "post_20d_ret_pct": 28.72205820328975,
+          "post_60d_ret_pct": 56.38970898355122,
+          "level_at_event": 23.71,
+          "level_pre": 18.37,
+          "level_change_pct_vs_pre20": 29.069134458356018
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        }
+      }
+    },
+    {
+      "id": "sep11_2001",
+      "label": "September 11 attacks",
+      "event_date": "2001-09-11",
+      "region": "United States / global",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "911 Memorial & Museum",
+          "url": "https://www.911memorial.org/911-faqs"
+        },
+        {
+          "name": "NYSE historical note (market closure)",
+          "url": "https://www.nyse.com/publicdocs/nyse/historical/NYSE_Timeline.pdf"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": -5.956249852804296,
+          "imm_5d_ret_pct": -5.224859400267501,
+          "post_20d_ret_pct": 0.34630900703267464,
+          "post_60d_ret_pct": 8.478332422870594,
+          "level_at_event": 70.07009887695312,
+          "level_pre": 74.50798034667969
+        },
+        "VTI": {
+          "pre_20d_ret_pct": -6.203225400513257,
+          "imm_5d_ret_pct": -4.748108025445963,
+          "post_20d_ret_pct": -1.1143837349055774,
+          "post_60d_ret_pct": 7.282844632433116,
+          "level_at_event": 32.328582763671875,
+          "level_pre": 34.46662521362305
+        },
+        "XLE": {
+          "pre_20d_ret_pct": -0.8585276431636646,
+          "imm_5d_ret_pct": -2.0436133717055105,
+          "post_20d_ret_pct": -9.465375260717291,
+          "post_60d_ret_pct": -2.744623939317037,
+          "level_at_event": 7.350771427154541,
+          "level_pre": 7.414426326751709
+        },
+        "GLD": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 41.889483065953634,
+          "imm_5d_ret_pct": 31.155778894472363,
+          "post_20d_ret_pct": -22.60536398467432,
+          "post_60d_ret_pct": -34.29118773946359,
+          "level_at_event": 31.84,
+          "level_pre": 22.44,
+          "level_change_pct_vs_pre20": 41.889483065953634
+        },
+        "WTI": {
+          "pre_20d_ret_pct": 1.766654398233336,
+          "imm_5d_ret_pct": 7.016274864376126,
+          "post_20d_ret_pct": -16.38336347197106,
+          "post_60d_ret_pct": -19.602169981916816,
+          "level_at_event": 27.65,
+          "level_pre": 27.17,
+          "level_change_pct_vs_pre20": 1.766654398233336
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": 4.778150479459109,
+          "imm_5d_ret_pct": 4.270721465859939,
+          "post_20d_ret_pct": -21.16491654138859,
+          "post_60d_ret_pct": -24.75449103730245,
+          "level_at_event": 27.6299991607666,
+          "level_pre": 26.3700008392334
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": -1.2004321084893799,
+          "imm_5d_ret_pct": 6.7010240355136474,
+          "post_20d_ret_pct": 0.6891798469578214,
+          "post_60d_ret_pct": -4.410757330160009,
+          "level_at_event": 271.6000061035156,
+          "level_pre": 274.8999938964844
+        }
+      }
+    },
+    {
+      "id": "iraq_invasion_2003",
+      "label": "Iraq War invasion begins",
+      "event_date": "2003-03-20",
+      "region": "Middle East",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/event/Iraq-War"
+        },
+        {
+          "name": "US Army Center of Military History",
+          "url": "https://history.army.mil/html/bookshelves/resmat/iraq.html"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": 3.828046282509301,
+          "imm_5d_ret_pct": -0.3144132905976038,
+          "post_20d_ret_pct": -0.8724882458705063,
+          "post_60d_ret_pct": 5.528697187624521,
+          "level_at_event": 57.42672348022461,
+          "level_pre": 55.309452056884766
+        },
+        "VTI": {
+          "pre_20d_ret_pct": 3.9823665279913767,
+          "imm_5d_ret_pct": -0.1702767778920644,
+          "post_20d_ret_pct": -0.7883043390523703,
+          "post_60d_ret_pct": 6.167430244553973,
+          "level_at_event": 27.098573684692383,
+          "level_pre": 26.060739517211914
+        },
+        "XLE": {
+          "pre_20d_ret_pct": 1.5171363754806322,
+          "imm_5d_ret_pct": -1.6834888221315958,
+          "post_20d_ret_pct": -3.053288343550442,
+          "post_60d_ret_pct": 3.177033154819031,
+          "level_at_event": 5.966976165771484,
+          "level_pre": 5.877801895141602
+        },
+        "GLD": {
+          "pre_20d_ret_pct": null,
+          "imm_5d_ret_pct": null,
+          "post_20d_ret_pct": null,
+          "post_60d_ret_pct": null,
+          "level_at_event": null,
+          "level_pre": null
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 2.7337158285521523,
+          "imm_5d_ret_pct": -5.551905387647837,
+          "post_20d_ret_pct": -10.939553219448095,
+          "post_60d_ret_pct": -32.6215505913272,
+          "level_at_event": 30.44,
+          "level_pre": 29.63,
+          "level_change_pct_vs_pre20": 2.7337158285521523
+        },
+        "WTI": {
+          "pre_20d_ret_pct": -22.143634385201295,
+          "imm_5d_ret_pct": 16.77148846960168,
+          "post_20d_ret_pct": 1.0831586303284402,
+          "post_60d_ret_pct": 0.7686932215233977,
+          "level_at_event": 28.62,
+          "level_pre": 36.76,
+          "level_change_pct_vs_pre20": -22.143634385201295
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": -21.830596166333315,
+          "imm_5d_ret_pct": -2.236984562543165,
+          "post_20d_ret_pct": 0.8388667109336945,
+          "post_60d_ret_pct": 0.768959485009213,
+          "level_at_event": 28.610000610351562,
+          "level_pre": 36.599998474121094
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": -4.940039322534185,
+          "imm_5d_ret_pct": -1.351757309253443,
+          "post_20d_ret_pct": -2.1928470792458743,
+          "post_60d_ret_pct": 9.402228562455207,
+          "level_at_event": 332.8999938964844,
+          "level_pre": 350.20001220703125
+        }
+      }
+    },
+    {
+      "id": "libya_2011",
+      "label": "Libya intervention / oil spike window",
+      "event_date": "2011-03-19",
+      "region": "Middle East / North Africa",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "NATO Libya operation timeline",
+          "url": "https://www.nato.int/cps/en/natolive/topics_71652.htm"
+        },
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/event/Libya-Revolt-of-2011"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": -3.6312256232654327,
+          "imm_5d_ret_pct": 0.8940756083973822,
+          "post_20d_ret_pct": 2.4047739227049947,
+          "post_60d_ret_pct": 3.5609443816922104,
+          "level_at_event": 97.64173889160156,
+          "level_pre": 100.69693756103516
+        },
+        "VTI": {
+          "pre_20d_ret_pct": -3.53659318866133,
+          "imm_5d_ret_pct": 0.8616141778552189,
+          "post_20d_ret_pct": 2.6709935708147947,
+          "post_60d_ret_pct": 3.6554836406824887,
+          "level_at_event": 50.6531982421875,
+          "level_pre": 52.22749328613281
+        },
+        "XLE": {
+          "pre_20d_ret_pct": -3.6875373382758703,
+          "imm_5d_ret_pct": 0.39907782983192863,
+          "post_20d_ret_pct": 2.6262060943211596,
+          "post_60d_ret_pct": -3.823340557060162,
+          "level_at_event": 22.431774139404297,
+          "level_pre": 23.11269187927246
+        },
+        "GLD": {
+          "pre_20d_ret_pct": 0.5157572542427324,
+          "imm_5d_ret_pct": 0.05749736337905542,
+          "post_20d_ret_pct": 3.2485297486620546,
+          "post_60d_ret_pct": 4.642810652727225,
+          "level_at_event": 138.3699951171875,
+          "level_pre": 137.3800048828125
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 33.18801089918255,
+          "imm_5d_ret_pct": -12.66375545851528,
+          "post_20d_ret_pct": -13.294517224648217,
+          "post_60d_ret_pct": -21.251819505094605,
+          "level_at_event": 24.44,
+          "level_pre": 19.22,
+          "level_change_pct_vs_pre20": 27.159209157127997
+        },
+        "WTI": {
+          "pre_20d_ret_pct": 4.0782698249227645,
+          "imm_5d_ret_pct": 2.6182102383743633,
+          "post_20d_ret_pct": 9.681516217272378,
+          "post_60d_ret_pct": -2.7745212973817934,
+          "level_at_event": 101.06,
+          "level_pre": 96.52,
+          "level_change_pct_vs_pre20": 4.703688354745128
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": 4.228110160367549,
+          "imm_5d_ret_pct": 3.195540491111415,
+          "post_20d_ret_pct": 10.22183025242387,
+          "post_60d_ret_pct": -2.179227320463939,
+          "level_at_event": 101.06999969482422,
+          "level_pre": 97.87999725341797
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": 0.46831585590489944,
+          "imm_5d_ret_pct": 0.6030078495784297,
+          "post_20d_ret_pct": 3.3094990084247433,
+          "post_60d_ret_pct": 4.866079567387316,
+          "level_at_event": 1415.9000244140625,
+          "level_pre": 1408.699951171875
+        }
+      }
+    },
+    {
+      "id": "crimea_2014",
+      "label": "Russia annexes Crimea",
+      "event_date": "2014-03-18",
+      "region": "Europe / Black Sea",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/place/Crimea"
+        },
+        {
+          "name": "Council on Foreign Relations timeline",
+          "url": "https://www.cfr.org/timeline/ukraines-struggle-independence"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": 1.5201925987556208,
+          "imm_5d_ret_pct": -0.34011396813713457,
+          "post_20d_ret_pct": -1.335676699739352,
+          "post_60d_ret_pct": 0.6500995131178522,
+          "level_at_event": 152.0387725830078,
+          "level_pre": 149.76210021972656
+        },
+        "VTI": {
+          "pre_20d_ret_pct": 1.5200201605477082,
+          "imm_5d_ret_pct": -0.4379844768291674,
+          "post_20d_ret_pct": -2.0384452934403163,
+          "post_60d_ret_pct": -0.5858141699767727,
+          "level_at_event": 79.69515991210938,
+          "level_pre": 78.50191497802734
+        },
+        "XLE": {
+          "pre_20d_ret_pct": 0.5164919898812848,
+          "imm_5d_ret_pct": -0.0934403155214425,
+          "post_20d_ret_pct": 1.7312119592446829,
+          "post_60d_ret_pct": 7.182115523609189,
+          "level_at_event": 27.352724075317383,
+          "level_pre": 27.212175369262695
+        },
+        "GLD": {
+          "pre_20d_ret_pct": 1.9592494691106355,
+          "imm_5d_ret_pct": -1.6459914077898041,
+          "post_20d_ret_pct": -4.3714528162057675,
+          "post_60d_ret_pct": -4.685343244498563,
+          "level_at_event": 130.6199951171875,
+          "level_pre": 128.11000061035156
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 1.184668989547033,
+          "imm_5d_ret_pct": 3.3057851239669533,
+          "post_20d_ret_pct": 7.23140495867769,
+          "post_60d_ret_pct": -14.325068870523417,
+          "level_at_event": 14.52,
+          "level_pre": 14.35,
+          "level_change_pct_vs_pre20": 1.184668989547033
+        },
+        "WTI": {
+          "pre_20d_ret_pct": -2.7688720489653207,
+          "imm_5d_ret_pct": -0.10991207034372064,
+          "post_20d_ret_pct": 0.3497202238209596,
+          "post_60d_ret_pct": 2.2282174260591647,
+          "level_at_event": 100.08,
+          "level_pre": 102.93,
+          "level_change_pct_vs_pre20": -2.7688720489653207
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": -2.817038203344824,
+          "imm_5d_ret_pct": -0.2407200312093516,
+          "post_20d_ret_pct": 0.7422322124525538,
+          "post_60d_ret_pct": 2.326980707961912,
+          "level_at_event": 99.69999694824219,
+          "level_pre": 102.58999633789062
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": 2.318931633821397,
+          "imm_5d_ret_pct": -1.692420897718916,
+          "post_20d_ret_pct": -4.488594554819725,
+          "post_60d_ret_pct": -4.834433493147539,
+          "level_at_event": 1359.0,
+          "level_pre": 1328.199951171875
+        }
+      }
+    },
+    {
+      "id": "oil_crash_2014",
+      "label": "Oil price collapse (late 2014)",
+      "event_date": "2014-11-27",
+      "region": "Global energy",
+      "calendar_tier": "macro_only",
+      "achieved_grade": "macro_only",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "EIA oil price retrospective",
+          "url": "https://www.eia.gov/todayinenergy/detail.php?id=19451"
+        },
+        {
+          "name": "Reuters OPEC 2014 coverage archive",
+          "url": "https://www.reuters.com/article/us-opec-meeting-idUSKCN0JB1M120141127"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": 2.1146502098362774,
+          "imm_5d_ret_pct": -0.05308871525936398,
+          "post_20d_ret_pct": -2.6110199156192393,
+          "post_60d_ret_pct": -0.2973219064998589,
+          "level_at_event": 170.57188415527344,
+          "level_pre": 167.03958129882812
+        },
+        "VTI": {
+          "pre_20d_ret_pct": 2.099629006928372,
+          "imm_5d_ret_pct": -0.2251433123776847,
+          "post_20d_ret_pct": -2.429641844594721,
+          "post_60d_ret_pct": 0.14086469478722385,
+          "level_at_event": 87.97774505615234,
+          "level_pre": 86.16852569580078
+        },
+        "XLE": {
+          "pre_20d_ret_pct": -2.836343332437463,
+          "imm_5d_ret_pct": 1.440753469012468,
+          "post_20d_ret_pct": -3.432667964645486,
+          "post_60d_ret_pct": -1.9756080902085693,
+          "level_at_event": 27.037443161010742,
+          "level_pre": 27.826704025268555
+        },
+        "GLD": {
+          "pre_20d_ret_pct": 1.9385699015155078,
+          "imm_5d_ret_pct": 2.702701599144497,
+          "post_20d_ret_pct": 1.9266756051693479,
+          "post_60d_ret_pct": 9.704751756475671,
+          "level_at_event": 115.16000366210938,
+          "level_pre": 112.97000122070312
+        },
+        "VIX": {
+          "pre_20d_ret_pct": -8.003048780487799,
+          "imm_5d_ret_pct": -3.6009002250562694,
+          "post_20d_ret_pct": 45.83645911477869,
+          "post_60d_ret_pct": 16.42910727681921,
+          "level_at_event": 12.07,
+          "level_pre": 13.12,
+          "level_change_pct_vs_pre20": -8.003048780487799
+        },
+        "WTI": {
+          "pre_20d_ret_pct": -6.365137847795699,
+          "imm_5d_ret_pct": 1.5923566878980777,
+          "post_20d_ret_pct": -14.422202001819828,
+          "post_60d_ret_pct": -32.05944798301486,
+          "level_at_event": 73.7,
+          "level_pre": 78.71,
+          "level_change_pct_vs_pre20": -6.365137847795699
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": -6.3064195654727655,
+          "imm_5d_ret_pct": 1.1035460479218218,
+          "post_20d_ret_pct": -14.633409042914103,
+          "post_60d_ret_pct": -31.746031013747555,
+          "level_at_event": 73.69000244140625,
+          "level_pre": 78.6500015258789
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": 2.3084815803346537,
+          "imm_5d_ret_pct": 2.0422056668797373,
+          "post_20d_ret_pct": 1.625263652981257,
+          "post_60d_ret_pct": 8.866582502686637,
+          "level_at_event": 1196.5999755859375,
+          "level_pre": 1169.5999755859375
+        }
+      }
+    },
+    {
+      "id": "soleimani_2020",
+      "label": "Soleimani strike / Iran escalation",
+      "event_date": "2020-01-03",
+      "region": "Middle East",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/biography/Qassem-Soleimani"
+        },
+        {
+          "name": "CRS report summary",
+          "url": "https://crsreports.congress.gov/product/pdf/IN/IN11212"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": 1.4069512398922956,
+          "imm_5d_ret_pct": 0.6327234241312318,
+          "post_20d_ret_pct": 2.8876034557990815,
+          "post_60d_ret_pct": -6.876364362129095,
+          "level_at_event": 293.88299560546875,
+          "level_pre": 287.8282165527344
+        },
+        "VTI": {
+          "pre_20d_ret_pct": 1.42072817440273,
+          "imm_5d_ret_pct": 0.5978104963021647,
+          "post_20d_ret_pct": 2.903667053077741,
+          "post_60d_ret_pct": -6.893178216642126,
+          "level_at_event": 149.20066833496094,
+          "level_pre": 146.04241943359375
+        },
+        "XLE": {
+          "pre_20d_ret_pct": 2.7703231968837727,
+          "imm_5d_ret_pct": -1.142406798358686,
+          "post_20d_ret_pct": -5.165575851333426,
+          "post_60d_ret_pct": -24.4039729690532,
+          "level_at_event": 23.119953155517578,
+          "level_pre": 22.19858169555664
+        },
+        "GLD": {
+          "pre_20d_ret_pct": 4.905068795698031,
+          "imm_5d_ret_pct": 0.6855889180141794,
+          "post_20d_ret_pct": 0.8638382706454673,
+          "post_60d_ret_pct": 5.505278174753414,
+          "level_at_event": 145.86000061035156,
+          "level_pre": 139.0500030517578
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 15.485996705107086,
+          "imm_5d_ret_pct": -4.065620542082737,
+          "post_20d_ret_pct": -7.41797432239657,
+          "post_60d_ret_pct": 162.6248216833096,
+          "level_at_event": 14.02,
+          "level_pre": 12.63,
+          "level_change_pct_vs_pre20": 11.005542359461584
+        },
+        "WTI": {
+          "pre_20d_ret_pct": 4.6337817638266054,
+          "imm_5d_ret_pct": -5.317460317460321,
+          "post_20d_ret_pct": -11.888888888888893,
+          "post_60d_ret_pct": -24.96825396825396,
+          "level_at_event": 63.0,
+          "level_pre": 60.11,
+          "level_change_pct_vs_pre20": 4.807852270836799
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": 4.716824772914308,
+          "imm_5d_ret_pct": -5.455985199579461,
+          "post_20d_ret_pct": -11.83187815185206,
+          "post_60d_ret_pct": -25.17049821398958,
+          "level_at_event": 63.04999923706055,
+          "level_pre": 60.06999969482422
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": 5.0305051641949206,
+          "imm_5d_ret_pct": 0.5293101923986354,
+          "post_20d_ret_pct": 0.994063058316863,
+          "post_60d_ret_pct": 5.9966451937846665,
+          "level_at_event": 1549.199951171875,
+          "level_pre": 1475.5999755859375
+        }
+      }
+    },
+    {
+      "id": "russia_ukraine_2022",
+      "label": "Russia full-scale invasion of Ukraine",
+      "event_date": "2022-02-24",
+      "region": "Europe",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/event/2022-Russian-invasion-of-Ukraine"
+        },
+        {
+          "name": "UN news timeline",
+          "url": "https://news.un.org/en/story/2022/02/1112592"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": -4.546484591202315,
+          "imm_5d_ret_pct": 0.3922422113261437,
+          "post_20d_ret_pct": 1.709086180983621,
+          "post_60d_ret_pct": 0.35986142294783807,
+          "level_at_event": 402.9956359863281,
+          "level_pre": 422.1904602050781
+        },
+        "VTI": {
+          "pre_20d_ret_pct": -4.193381386929684,
+          "imm_5d_ret_pct": 0.5217148630789259,
+          "post_20d_ret_pct": 1.4081707606238725,
+          "post_60d_ret_pct": -0.2439087916978333,
+          "level_at_event": 203.2867889404297,
+          "level_pre": 212.1844940185547
+        },
+        "XLE": {
+          "pre_20d_ret_pct": -2.5979511079611717,
+          "imm_5d_ret_pct": 6.228594667625242,
+          "post_20d_ret_pct": 6.526587553491514,
+          "post_60d_ret_pct": 10.840112222017906,
+          "level_at_event": 28.679399490356445,
+          "level_pre": 29.44434928894043
+        },
+        "GLD": {
+          "pre_20d_ret_pct": 4.903469589819065,
+          "imm_5d_ret_pct": 2.5290706463674484,
+          "post_20d_ret_pct": 1.6201846714893886,
+          "post_60d_ret_pct": -0.05080520390692289,
+          "level_at_event": 177.13999938964844,
+          "level_pre": 168.86000061035156
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 30.577088716623614,
+          "imm_5d_ret_pct": 9.894459102902363,
+          "post_20d_ret_pct": -12.03825857519788,
+          "post_60d_ret_pct": -10.883905013192619,
+          "level_at_event": 30.32,
+          "level_pre": 23.22,
+          "level_change_pct_vs_pre20": 30.577088716623614
+        },
+        "WTI": {
+          "pre_20d_ret_pct": 0.5418879375745034,
+          "imm_5d_ret_pct": 11.738708634256767,
+          "post_20d_ret_pct": 2.242104128489819,
+          "post_60d_ret_pct": 7.362293844992984,
+          "level_at_event": 92.77,
+          "level_pre": 92.27,
+          "level_change_pct_vs_pre20": 0.5418879375745034
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": 0.5416531396641222,
+          "imm_5d_ret_pct": 11.421189938964837,
+          "post_20d_ret_pct": 2.4027620036577657,
+          "post_60d_ret_pct": 6.1739074535758665,
+          "level_at_event": 92.80999755859375,
+          "level_pre": 92.30999755859375
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": 6.5592827189963065,
+          "imm_5d_ret_pct": 0.8986571631356188,
+          "post_20d_ret_pct": -0.8882642877148683,
+          "post_60d_ret_pct": -1.65705806548323,
+          "level_at_event": 1925.0999755859375,
+          "level_pre": 1806.5999755859375
+        }
+      }
+    },
+    {
+      "id": "hamas_israel_2023",
+      "label": "Hamas attack on Israel / Gaza war start",
+      "event_date": "2023-10-07",
+      "region": "Middle East",
+      "calendar_tier": "partial_strategy_proxy",
+      "achieved_grade": "partial_strategy_proxy",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/event/Israel-Hamas-War"
+        },
+        {
+          "name": "CFR backgrounder",
+          "url": "https://www.cfr.org/global-conflict-tracker/conflict/israeli-palestinian-conflict"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": -3.1760759311915243,
+          "imm_5d_ret_pct": 0.3169125079490964,
+          "post_20d_ret_pct": -4.998960565528288,
+          "post_60d_ret_pct": 5.197895252898754,
+          "level_at_event": 415.27789306640625,
+          "level_pre": 428.64874267578125
+        },
+        "VTI": {
+          "pre_20d_ret_pct": -3.3067374441536956,
+          "imm_5d_ret_pct": 0.2053272927673211,
+          "post_20d_ret_pct": -5.216991335282706,
+          "post_60d_ret_pct": 5.436302786323233,
+          "level_at_event": 205.4796600341797,
+          "level_pre": 212.48744201660156
+        },
+        "XLE": {
+          "pre_20d_ret_pct": -6.926503280279217,
+          "imm_5d_ret_pct": -1.0497716656044598,
+          "post_20d_ret_pct": -4.470025534452315,
+          "post_60d_ret_pct": -7.54033355531204,
+          "level_at_event": 39.22504806518555,
+          "level_pre": 41.7900276184082
+        },
+        "GLD": {
+          "pre_20d_ret_pct": -5.401640266667728,
+          "imm_5d_ret_pct": 0.254592734619985,
+          "post_20d_ret_pct": 7.713219539018956,
+          "post_60d_ret_pct": 8.69111698710534,
+          "level_at_event": 169.6999969482422,
+          "level_pre": 178.33999633789062
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 24.642857142857146,
+          "imm_5d_ret_pct": -5.70621468926552,
+          "post_20d_ret_pct": 20.169491525423734,
+          "post_60d_ret_pct": -26.723163841807906,
+          "level_at_event": 17.45,
+          "level_pre": 13.79,
+          "level_change_pct_vs_pre20": 26.540971718636698
+        },
+        "WTI": {
+          "pre_20d_ret_pct": -9.445719908166616,
+          "imm_5d_ret_pct": -3.5161252765164686,
+          "post_20d_ret_pct": 0.17464198393295494,
+          "post_60d_ret_pct": -19.68797298870648,
+          "level_at_event": 82.83,
+          "level_pre": 90.83,
+          "level_change_pct_vs_pre20": -8.807662666519878
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": -9.499346439133694,
+          "imm_5d_ret_pct": -4.017126304286023,
+          "post_20d_ret_pct": -0.972443117156252,
+          "post_60d_ret_pct": -19.680482218731864,
+          "level_at_event": 82.79000091552734,
+          "level_pre": 90.7699966430664
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": -5.244631055041415,
+          "imm_5d_ret_pct": 1.0705622507772405,
+          "post_20d_ret_pct": 7.520950288507033,
+          "post_60d_ret_pct": 9.786428764530953,
+          "level_at_event": 1830.199951171875,
+          "level_pre": 1923.699951171875
+        }
+      }
+    },
+    {
+      "id": "iran_israel_2024",
+      "label": "Iran direct strike on Israel (Apr 2024)",
+      "event_date": "2024-04-13",
+      "region": "Middle East",
+      "calendar_tier": "full_freeze_compatible",
+      "achieved_grade": "full_freeze_compatible",
+      "grade_notes": [],
+      "sources": [
+        {
+          "name": "Encyclopaedia Britannica",
+          "url": "https://www.britannica.com/event/Israel-Hamas-War"
+        },
+        {
+          "name": "Reuters timeline coverage",
+          "url": "https://www.reuters.com/world/middle-east/"
+        }
+      ],
+      "metrics": {
+        "SPY": {
+          "pre_20d_ret_pct": -1.7161502841970266,
+          "imm_5d_ret_pct": -0.9773028992227983,
+          "post_20d_ret_pct": 1.3559213361346023,
+          "post_60d_ret_pct": 7.316858296391615,
+          "level_at_event": 497.4313659667969,
+          "level_pre": 507.5192565917969
+        },
+        "VTI": {
+          "pre_20d_ret_pct": -1.907584190486955,
+          "imm_5d_ret_pct": -1.0884877365460732,
+          "post_20d_ret_pct": 1.4566356226344723,
+          "post_60d_ret_pct": 6.754962379566076,
+          "level_at_event": 246.02227783203125,
+          "level_pre": 251.37060546875
+        },
+        "XLE": {
+          "pre_20d_ret_pct": 3.0774094341435854,
+          "imm_5d_ret_pct": -1.4596350043668993,
+          "post_20d_ret_pct": -2.7932394783948045,
+          "post_60d_ret_pct": -5.996011513500987,
+          "level_at_event": 44.76480484008789,
+          "level_pre": 43.027862548828125
+        },
+        "GLD": {
+          "pre_20d_ret_pct": 7.910838082456362,
+          "imm_5d_ret_pct": -0.27608084126584664,
+          "post_20d_ret_pct": -3.61619839091768,
+          "post_60d_ret_pct": -2.8196405583107764,
+          "level_at_event": 216.88999938964844,
+          "level_pre": 200.35000610351562
+        },
+        "VIX": {
+          "pre_20d_ret_pct": 31.235784685367697,
+          "imm_5d_ret_pct": -6.396255850234011,
+          "post_20d_ret_pct": -29.849193967758715,
+          "post_60d_ret_pct": -37.3894955798232,
+          "level_at_event": 17.31,
+          "level_pre": 13.06,
+          "level_change_pct_vs_pre20": 32.54211332312402
+        },
+        "WTI": {
+          "pre_20d_ret_pct": 4.914452129595914,
+          "imm_5d_ret_pct": -3.143486834473952,
+          "post_20d_ret_pct": -7.609326064261667,
+          "post_60d_ret_pct": -7.713722305996972,
+          "level_at_event": 86.46,
+          "level_pre": 81.1,
+          "level_change_pct_vs_pre20": 6.609124537607891
+        },
+        "CL_F": {
+          "pre_20d_ret_pct": 4.527159062873842,
+          "imm_5d_ret_pct": -3.1378061002996005,
+          "post_20d_ret_pct": -8.547011753608357,
+          "post_60d_ret_pct": -8.09039148323427,
+          "level_at_event": 85.66000366210938,
+          "level_pre": 80.62999725341797
+        },
+        "GC_F": {
+          "pre_20d_ret_pct": 8.340992195650166,
+          "imm_5d_ret_pct": 0.6974384842105774,
+          "post_20d_ret_pct": -2.823571199992736,
+          "post_60d_ret_pct": -1.259618235399318,
+          "level_at_event": 2356.199951171875,
+          "level_pre": 2158.10009765625
+        }
+      }
+    }
+  ],
+  "ok": true
+}

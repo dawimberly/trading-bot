@@ -1,0 +1,57 @@
+Pre-Market Report — 2026-07-22 00:04:06 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 2032). First heartbeat may take up to 60s. | Stopped 5 orphan bot process(es).
+Heartbeat age: 3811.695844s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 89/100 (Excellent) — Green
+  • ATR sizing active (SPY probe)
+  • All-time Sharpe negative (-0.78)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 32/100 | Buffett 218% GDP
+
+=== Insider Signals (top 3) ===
+• QTTB | cluster_buy | s94 — Cluster buy: 8 insiders purchased Q32 Bio Inc.
+• ENVX | executive_sell | s84 $83K — CEO sale - Enovix Corp ($83K)
+• MGTX | executive_sell | s83 $701K — executive sale - MeiraGTx Holdings plc ($701K)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 1
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 21 returned
+
+Top signals (up to 5)
+  QTTB   cluster_buy      score= 94  Cluster buy: 8 insiders purchased Q32 Bio Inc.
+  ENVX   executive_sell   score= 84  CEO sale - Enovix Corp ($83K)
+  MGTX   executive_sell   score= 83  executive sale - MeiraGTx Holdings plc ($701K)
+  PSX    executive_sell   score= 83  executive sale - Phillips 66 ($744K)
+  ROIV   cluster_buy      score= 81  Cluster buy: 3 insiders purchased Roivant Sciences Ltd.
+
+Boosts
+  [OK] Insider signal boost enabled
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\verify_insider_integration.py", line 209, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\verify_insider_integration.py", line 73, in main
+    from modules.insider_signal_handler import (  # noqa: E402
+    ...<3 lines>...
+    )
+ImportError: cannot import name '_apply_risk_guard' from 'modules.insider_signal_handler' (C:\Users\Owner\PythonTrading\stock-bot\modules\insider_signal_handler.py)
+
+Ready for market open.

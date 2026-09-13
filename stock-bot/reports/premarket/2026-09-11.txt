@@ -1,0 +1,84 @@
+Pre-Market Report — 2026-09-11 00:07:20 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 12400). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3725.866238s
+Equity: $98,565.69
+
+=== Bot Health ===
+Score: 93/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (3)
+  • All-time Sharpe negative (-0.12)
+  • Tail-risk sizing cut (0.70x)
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• SNOW | executive_sell | s94 $1.5M — CEO sale - Snowflake Inc. ($1.5M)
+• SNOW | executive_sell | s93 $17.1M — executive sale - Snowflake Inc. ($17.1M)
+• KMTS | cluster_buy | s89 $550.3M — Cluster buy: 2 insiders purchased KESTRA MEDICAL TECHNO
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+[deploy] paper_deploy_aggressive ctx=False -> False
+[deploy] paper_deploy_aggressive ctx=False -> False
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 31 returned
+
+Top signals (up to 5)
+  SNOW   executive_sell   score= 94  CEO sale - Snowflake Inc. ($1.5M)
+  SNOW   executive_sell   score= 93  executive sale - Snowflake Inc. ($17.1M)
+  KMTS   cluster_buy      score= 89  Cluster buy: 2 insiders purchased KESTRA MEDICAL TECHNOLOGIE
+  CLSK   cluster_buy      score= 88  Cluster buy: 4 insiders purchased CLEANSPARK, INC.
+  PAYS   executive_sell   score= 88  executive sale - Paysign, Inc. ($1.9M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: KMTS (2 insiders), CLSK (4 insiders), JNJ (3 insiders); exec sells
+
+Applied boosts
+  momentum  JNJ: +0.200
+  momentum  CLSK: +0.180
+  momentum  KMTS: +0.080
+  stat_arb  CLSK: x1.150
+  stat_arb  JNJ: x1.150
+  stat_arb  KMTS: x1.060
+  short     SNOW: base=0.420 role=cfo
+  short     RBRK: base=0.420 role=executive
+  short     PAYS: base=0.420 role=executive
+  short     IBEX: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.9
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 33 | Boost: 3 clusters, 7 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

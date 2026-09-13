@@ -1,0 +1,67 @@
+{
+  "patterns": [
+    {
+      "id": "P1",
+      "title": "Short-term Overperformance with High Drawdown",
+      "novelty": "High",
+      "pattern": "A strategy experiences significant short-term gains followed by a high drawdown.",
+      "evidence_fit": "90d +15.6% Sh2.44 DD-3.1; 180d +25.8% Sh2.31",
+      "falsifiable_strict_test": "Backtest the strategy over multiple market cycles to determine if high drawdowns consistently follow short-term gains.",
+      "priority": "High"
+    },
+    {
+      "id": "P2",
+      "title": "Long-term Performance Lagging Short-term",
+      "novelty": "Medium",
+      "pattern": "A strategy's long-term performance is less than its short-term performance.",
+      "evidence_fit": "90d +15.6% vs 365d +29.2%",
+      "falsifiable_strict_test": "Compare the cumulative returns of the strategy over different time horizons to identify any consistent lagging in long-term performance.",
+      "priority": "Medium"
+    },
+    {
+      "id": "P3",
+      "title": "High Maximum Drawdown with Low Risk Aggression",
+      "novelty": "High",
+      "pattern": "A strategy has a high maximum drawdown despite low risk aggression.",
+      "evidence_fit": "Risk aggression barely moves MaxDD (~7%)",
+      "falsifiable_strict_test": "Analyze the relationship between risk aggression and maximum drawdown across various market conditions to determine if low risk aggression consistently leads to high maximum drawdowns.",
+      "priority": "High"
+    },
+    {
+      "id": "P4",
+      "title": "Market Volatility Impact on Strategy Performance",
+      "novelty": "Medium",
+      "pattern": "A strategy's performance is significantly impacted by market volatility, particularly during high VTI (Volatility Trend Index) periods.",
+      "evidence_fit": "MC wipeouts -30..-52% with HIGH VTI at trough; SPY bleeds.",
+      "falsifiable_strict_test": "Backtest the strategy under different levels of market volatility to assess its performance and identify any patterns or thresholds that affect its stability.",
+      "priority": "Medium"
+    },
+    {
+      "id": "P5",
+      "title": "Late Half Performance Contribution",
+      "novelty": "Low",
+      "pattern": "The contribution of the late half of the year to overall strategy performance is minimal.",
+      "evidence_fit": "late half adds little",
+      "falsifiable_strict_test": "Analyze the performance of the strategy in different quarters or months to determine if there are consistent periods where its performance has a negligible impact on the annual results.",
+      "priority": "Low"
+    },
+    {
+      "id": "P6",
+      "title": "Conviction Strategy Outperformance vs Breadth Baseline",
+      "novelty": "High",
+      "pattern": "A conviction-based strategy outperforms a breadth-based baseline in terms of returns.",
+      "evidence_fit": "Conviction top3 LOSES vs breadth baseline",
+      "falsifiable_strict_test": "Compare the performance of conviction and breadth-based strategies over multiple market cycles to determine if there is a consistent pattern where conviction strategies outperform breadth-based ones.",
+      "priority": "High"
+    }
+  ],
+  "anti_patterns": [
+    "Over-reliance on short-term gains",
+    "Ignoring long-term performance trends",
+    "Failing to manage risk aggression effectively",
+    "Neglecting market volatility impact",
+    "Disregarding the contribution of different time periods to overall performance",
+    "Underestimating the importance of conviction in strategy outperformance"
+  ],
+  "single_best_next_experiment": "Backtest the strategy under varying levels of market volatility to assess its stability and identify any patterns or thresholds that affect its performance."
+}

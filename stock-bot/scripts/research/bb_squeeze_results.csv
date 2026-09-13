@@ -1,0 +1,3 @@
+strategy,trades,return_pct,sharpe,max_dd_pct,win_rate_pct,avg_hold_hours
+v4_MR_RENDER,22,1.2,2.65,-0.3,68.18,5.6818
+bb_squeeze_adx,58,-2.9313,-2.697,-3.3573,32.7586,22.1552

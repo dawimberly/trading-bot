@@ -1,0 +1,79 @@
+Pre-Market Report — 2026-08-29 00:03:55 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 2104). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3727.170686s
+Equity: $96,453.41
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (2)
+  • All-time Sharpe negative (-0.84)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• WULF | executive_sell | s94 $2.3M — CEO sale - TERAWULF INC. ($2.3M)
+• MATX | executive_sell | s94 $2.2M — CEO sale - Matson, Inc. ($2.2M)
+• BIVI | cluster_buy | s88 $49K — Cluster buy: 4 insiders purchased BIOVIE INC. ($49K tot
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 31 returned
+
+Top signals (up to 5)
+  WULF   executive_sell   score= 94  CEO sale - TERAWULF INC. ($2.3M)
+  MATX   executive_sell   score= 94  CEO sale - Matson, Inc. ($2.2M)
+  BIVI   cluster_buy      score= 88  Cluster buy: 4 insiders purchased BIOVIE INC. ($49K total)
+  PGEN   executive_sell   score= 88  executive sale - PRECIGEN, INC. ($1.4M)
+  SBMT   cluster_buy      score= 81  Cluster buy: 3 insiders purchased SILVER BOW MINING CORP.
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: WULF T1; cluster buys: BIVI (4 insiders), SBMT (3 insiders); exe
+
+Applied boosts
+  momentum  BIVI: +0.180
+  momentum  SBMT: +0.180
+  stat_arb  BIVI: x1.150
+  stat_arb  SBMT: x1.150
+  short     WULF: base=0.420 role=ceo
+  short     MATX: base=0.420 role=ceo
+  short     PGEN: base=0.420 role=executive
+  short     CRWV: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.3
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 31 | Boost: 2 clusters, 4 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

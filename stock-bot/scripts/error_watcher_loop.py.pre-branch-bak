@@ -1,0 +1,103 @@
+"""Background / CLI loop for error_watcher (optional; run_all also hooks per cycle).
+
+Usage:
+  python scripts/error_watcher_loop.py           # idle heartbeat every 60s
+  python scripts/error_watcher_loop.py --once    # single tick
+  python scripts/error_watcher_loop.py --test-error
+  python scripts/error_watcher_loop.py --test-fill
+  python scripts/error_watcher_loop.py --write-daily
+  python scripts/error_watcher_loop.py --digest-now
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+os.chdir(ROOT)
+sys.path.insert(0, str(ROOT))
+
+
+def _test_error() -> None:
+    from modules import error_watcher
+
+    try:
+        raise RuntimeError("TEST error_watcher Telegram + cursor queue (safe to ignore)")
+    except RuntimeError as exc:
+        eid = error_watcher.log_exception(exc, context="error_watcher_loop --test-error")
+        print(f"Logged test error id={eid}")
+
+
+def _test_fill() -> None:
+    from modules.trade_notifier import send_trade_notification
+    import config
+
+    ok = send_trade_notification(
+        {
+            "symbol": "TEST",
+            "side": "Buy",
+            "quantity": 1.0,
+            "price": 10.0,
+            "notional": 10.0,
+            "sleeve": "NYSE",
+            "reason": "error_watcher_loop --test-fill",
+            "account_type": "Paper" if config.PAPER_TRADING else "Live",
+            "equity_after": 100_000.0,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    )
+    print(f"Test fill Telegram sent={ok} (min=${config.telegram_fill_min_usd():.0f})")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Error watcher loop")
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--interval", type=float, default=60.0)
+    parser.add_argument("--test-error", action="store_true")
+    parser.add_argument("--test-fill", action="store_true")
+    parser.add_argument(
+        "--write-daily",
+        action="store_true",
+        help="Rewrite logs/daily_errors_YYYY-MM-DD.md for today (ET)",
+    )
+    parser.add_argument(
+        "--digest-now",
+        action="store_true",
+        help="Force-send daily error Telegram digest if N>0 (ignores schedule latch)",
+    )
+    args = parser.parse_args()
+
+    import config
+    from modules import error_watcher
+
+    print(error_watcher.watcher_banner())
+    print(config.format_telegram_automation_banner())
+
+    if args.test_error:
+        _test_error()
+    if args.test_fill:
+        _test_fill()
+    if args.write_daily:
+        path = error_watcher.write_daily_error_summary()
+        print(f"Wrote {path}")
+    if args.digest_now:
+        ok = error_watcher.maybe_send_daily_error_digest(force=True)
+        print(f"Daily digest sent={ok}")
+    if args.test_error or args.test_fill or args.write_daily or args.digest_now:
+        return 0
+
+    n = 0
+    while True:
+        n += 1
+        error_watcher.cycle_tick(cycle=n)
+        if args.once:
+            print(f"tick {n} ok")
+            return 0
+        time.sleep(max(5.0, args.interval))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

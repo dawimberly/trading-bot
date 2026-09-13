@@ -1,0 +1,51 @@
+{
+  "saved_at": "2026-08-19T20:07:38.054558+00:00",
+  "complete": false,
+  "completed_runs": 16,
+  "mc_runs": 200,
+  "elapsed_sec": 34062.6,
+  "sec_per_run": 2128.91,
+  "summary": {
+    "return_pct": {
+      "metric": "return_pct",
+      "n": 16,
+      "mean": 63.1694,
+      "median": 10.645,
+      "std": 123.0756,
+      "p5": -32.365,
+      "p25": -28.3475,
+      "p75": 123.515,
+      "p95": 241.235,
+      "min": -35.2,
+      "max": 454.64
+    },
+    "sharpe": {
+      "metric": "sharpe",
+      "n": 16,
+      "mean": 1.415,
+      "median": 0.645,
+      "std": 3.5997,
+      "p5": -2.75,
+      "p25": -2.1225,
+      "p75": 4.49,
+      "p95": 6.48,
+      "min": -2.78,
+      "max": 9.12
+    },
+    "max_drawdown_pct": {
+      "metric": "max_drawdown_pct",
+      "n": 16,
+      "mean": -16.8131,
+      "median": -15.08,
+      "std": 12.2745,
+      "p5": -33.4225,
+      "p25": -30.3025,
+      "p75": -4.6775,
+      "p95": -3.7625,
+      "min": -37.48,
+      "max": -3.38
+    },
+    "p_return_positive": 56.25,
+    "p_sharpe_gt_1": 43.75
+  }
+}

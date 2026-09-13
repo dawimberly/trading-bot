@@ -1,0 +1,76 @@
+Pre-Market Report — 2026-07-10 15:00:24 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+Skipped startup (--skip-start)
+Heartbeat age: 3677.355083s
+Equity: $98,494.25
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (21)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • No RVOL setups (active session)
+  • ORB breakouts (5)
+  • No catalyst hits (active session)
+
+=== Regime & Bubble ===
+Regime: RHYME_C: Steady_Bullish_Growth
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• GENCO SHIPPING & TRADING LTD | activist_13d | s86 — Schedule 13D activist stake - GENCO SHIPPING & TRADING 
+• GENCO SHIPPING & TRADING LTD | activist_13d | s86 — Schedule 13D activist stake - GENCO SHIPPING & TRADING 
+• IPERIONX Ltd | dilution | s64 — Prospectus / offering - IPERIONX Ltd
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 1
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 21 returned
+
+Top signals (up to 5)
+  GENCO SHIPPING & TRADING LTD activist_13d     score= 86  Schedule 13D activist stake - GENCO SHIPPING & TRADING LTD
+  GENCO SHIPPING & TRADING LTD activist_13d     score= 86  Schedule 13D activist stake - GENCO SHIPPING & TRADING LTD
+  IPERIONX Ltd dilution         score= 64  Prospectus / offering - IPERIONX Ltd
+  FUELCELL ENERGY INC dilution         score= 64  Prospectus / offering - FUELCELL ENERGY INC
+  Rivian Automotive, Inc. / DE dilution         score= 64  Prospectus / offering - Rivian Automotive, Inc. / DE
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � no actionable insider boosts this cycle
+
+Applied boosts
+  momentum: (none active)
+  stat_arb: (none active)
+  short: (none active)
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.8
+  guard: no activations this cycle (normal if bubble <= 85)
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\verify_insider_integration.py", line 207, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\verify_insider_integration.py", line 136, in main
+    guarded_mom, guarded_sa, _, probe_notes = _apply_risk_guard(
+                                              ~~~~~~~~~~~~~~~~~^
+        momentum_boosts=dict(probe_mom),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+        rhyme_b_panic=False,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+TypeError: _apply_risk_guard() missing 2 required keyword-only arguments: 'bear_regime' and 'regime'
+
+Ready for market open.

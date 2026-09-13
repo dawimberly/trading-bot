@@ -1,0 +1,11 @@
+﻿{
+    "phase3_tod":  "scripts/analysis/_tod_analysis_365.log",
+    "seeded_mid_mc200":  true,
+    "mc_dir":  "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\research\\exhaustive_campaign\\runs\\artifacts\\campaign_20260806T221500Z_full\\mc",
+    "profile":  "full",
+    "created_utc":  "2026-08-07 01:42:10 UTC",
+    "phase1_report":  "scripts/analysis/final_paper_bot_backtest.md",
+    "note":  "In-flight MC 200 will not populate mc/ until next spawn with --export-dir",
+    "phase4_log":  "scripts/research/exhaustive_campaign/runs/phase4_mc_200_365.log",
+    "phase2_report":  "scripts/analysis/eval_strict_vs_full_last.md"
+}

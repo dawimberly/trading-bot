@@ -1,0 +1,81 @@
+Pre-Market Report — 2026-09-05 00:03:53 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 9048). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3787.267888s
+Equity: $100,421.83
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (20)
+  • All-time Sharpe OK (0.97)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• DTST | cluster_buy | s94 — Cluster buy: 9 insiders purchased Data Storage Corp
+• BLKB | cluster_buy | s94 — Cluster buy: 6 insiders purchased BLACKBAUD INC
+• KRYS | executive_sell | s94 $9.0M — CEO sale - Krystal Biotech, Inc. ($9.0M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+[deploy] paper_deploy_aggressive ctx=False -> False
+[deploy] paper_deploy_aggressive ctx=False -> False
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 20 returned
+
+Top signals (up to 5)
+  DTST   cluster_buy      score= 94  Cluster buy: 9 insiders purchased Data Storage Corp
+  BLKB   cluster_buy      score= 94  Cluster buy: 6 insiders purchased BLACKBAUD INC
+  KRYS   executive_sell   score= 94  CEO sale - Krystal Biotech, Inc. ($9.0M)
+  EOLS   executive_sell   score= 89  CEO sale - Evolus, Inc. ($950K)
+  KRYS   executive_sell   score= 88  executive sale - Krystal Biotech, Inc. ($9.0M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: DTST T1, BLKB T1; exec sells -> short watch: KRYS (CEO), EOLS (C
+
+Applied boosts
+  momentum  DTST: +0.280
+  momentum  BLKB: +0.280
+  stat_arb  DTST: x1.220
+  stat_arb  BLKB: x1.220
+  short     KRYS: base=0.420 role=executive
+  short     EOLS: base=0.420 role=ceo
+  short     ONTO: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 22 | Boost: 0 clusters, 5 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

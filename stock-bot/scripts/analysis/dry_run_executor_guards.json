@@ -1,0 +1,317 @@
+{
+  "dry_run": true,
+  "active_tickers": [
+    "AJG",
+    "ALL",
+    "BAC",
+    "BBY",
+    "BLLN",
+    "CNC",
+    "COIN",
+    "CRM",
+    "CVLT",
+    "CVX",
+    "DDOG",
+    "DELL",
+    "DINO",
+    "DVA",
+    "EAT",
+    "FROG",
+    "FTNT",
+    "GLD",
+    "GPC",
+    "HNGE",
+    "HPE",
+    "HRB",
+    "HUM",
+    "IFS",
+    "INTC",
+    "JNJ",
+    "KMX",
+    "KTOS",
+    "LMND",
+    "LMT",
+    "LQDA",
+    "MMYT",
+    "MPC",
+    "MTN",
+    "MTRN",
+    "MU",
+    "NAVN",
+    "NFLX",
+    "OC",
+    "OKTA",
+    "PBF",
+    "PFE",
+    "PLTR",
+    "RYAN",
+    "SGHC",
+    "SN",
+    "TIGO",
+    "TWST",
+    "TXG",
+    "UHAL",
+    "UNH",
+    "VG",
+    "VOYA",
+    "VRNS",
+    "VSXY"
+  ],
+  "active_count": 55,
+  "max_active_tickers": 25,
+  "per_name_max_pct": 0.08,
+  "auto_dust_max_notional": 10.0,
+  "concentration_trims": [],
+  "dust_actions": [
+    {
+      "symbol": "AJG",
+      "qty": 1.7e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "ALL",
+      "qty": 5.683e-05,
+      "notional": 0.0143,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "BAC",
+      "qty": 9.21e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "CRM",
+      "qty": 9.54e-07,
+      "notional": 0.0002,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "CVLT",
+      "qty": 2.56e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "DDOG",
+      "qty": 2.01e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "DELL",
+      "qty": 4.1718e-05,
+      "notional": 0.0181,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "FROG",
+      "qty": 8.99e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "FTNT",
+      "qty": 1.39e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "GPC",
+      "qty": 2.31e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "HNGE",
+      "qty": 9.53e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "HRB",
+      "qty": 6.42e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "IFS",
+      "qty": 2.78e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "JNJ",
+      "qty": 5.4e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "LMT",
+      "qty": 6.49e-07,
+      "notional": 0.0004,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "MMYT",
+      "qty": 4.74e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "MTN",
+      "qty": 3.37e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "MU",
+      "qty": 5.567e-05,
+      "notional": 0.0542,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "NAVN",
+      "qty": 9.65e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "NFLX",
+      "qty": 0.0001666,
+      "notional": 0.0114,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "OKTA",
+      "qty": 3.77e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "PFE",
+      "qty": 3.84e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "PLTR",
+      "qty": 4.5e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "RYAN",
+      "qty": 4.96e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "SN",
+      "qty": 5.11e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "SPY",
+      "qty": 4.5707e-05,
+      "notional": 0.0338,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "TWST",
+      "qty": 4.635e-05,
+      "notional": 0.0044,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "UHAL",
+      "qty": 9.81e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "VG",
+      "qty": 1.5e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "VOYA",
+      "qty": 7.8e-07,
+      "notional": 0.0001,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    },
+    {
+      "symbol": "VRNS",
+      "qty": 6.64e-07,
+      "notional": 0.0,
+      "status": "dry_run",
+      "detail": "would close full position",
+      "order_id": null
+    }
+  ],
+  "mode": "paper_dry_run",
+  "would_block_new": true
+}

@@ -1,0 +1,6 @@
+avg_vti=47.1
+maxdd=-5.99
+return=16.98
+sharpe=1.11
+vs_vti=4.15
+vti_bh=12.83

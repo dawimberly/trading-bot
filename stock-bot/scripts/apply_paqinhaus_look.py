@@ -10,7 +10,7 @@ APP = ROOT / "dashboard_app.py"
 STREAMLIT = ROOT / "dashboard.py"
 
 NEW_COLORS = '''COLORS = {
-    # Paqinhaüs poster tokens — look only; live banner stays loud red
+    # Paqinhaüs / Dirty INK poster tokens — look only; live banner stays loud red
     "bg": "#0b0b0e",
     "surface": "#121214",
     "surface2": "#16161a",
@@ -28,7 +28,7 @@ NEW_COLORS = '''COLORS = {
     "amber_dim": "#8a7610",
     "blue": "#4fbcf5",
     "accent": "#1fa8ef",
-    "accent_hover": "#1688c4",
+    "accent_hover": "#4fbcf5",
     "live": "#c81e1e",
     "live_bg": "#3a0a0a",
     "small": "#b45309",
@@ -40,16 +40,69 @@ NEW_COLORS = '''COLORS = {
 }'''
 
 NEW_FONTS = '''FONTS = {
-    "hero": ("Georgia", 42, "bold"),
-    "hero_sub": ("Georgia", 26, "bold"),
-    "title": ("Georgia", 22, "bold"),
-    "heading": ("Georgia", 16, "bold"),
-    "body": ("Segoe UI", 12),
-    "body_sm": ("Segoe UI", 11),
-    "caption": ("Segoe UI", 10),
-    "metric": ("Segoe UI", 22, "bold"),
-    "metric_sm": ("Segoe UI", 15, "bold"),
+    "hero": ("display", 52, "bold"),
+    "hero_sub": ("display", 28, "bold"),
+    "title": ("display", 22, "bold"),
+    "heading": ("display", 16, "bold"),
+    "kicker": ("body", 11, "bold"),
+    "stamp": ("stamp", 13, "bold"),
+    "tape": ("tape", 11, "bold"),
+    "body": ("body", 12),
+    "body_sm": ("body", 11),
+    "caption": ("body", 10),
+    "metric": ("body", 22, "bold"),
+    "metric_sm": ("body", 15, "bold"),
 }'''
+
+FONT_HELPERS = '''# Display roles prefer Dirty INK faces when installed; Windows falls back to Georgia/Impact.
+_FONT_ROLE_CANDIDATES = {
+    "display": ("Pirata One", "Georgia"),
+    "stamp": ("Bungee", "Permanent Marker", "Impact", "Segoe UI"),
+    "tape": ("Bungee", "Impact", "Segoe UI"),
+    "body": ("DM Sans", "Segoe UI"),
+}
+
+_FONT_FAMILY_CACHE: dict[str, str] = {}
+
+
+def _installed_font_families() -> set[str]:
+    try:
+        import tkinter.font as tkfont
+
+        return {str(name).lower() for name in tkfont.families()}
+    except Exception:
+        return set()
+
+
+def _resolve_font_family(role_or_family: str) -> str:
+    cached = _FONT_FAMILY_CACHE.get(role_or_family)
+    if cached:
+        return cached
+    candidates = _FONT_ROLE_CANDIDATES.get(role_or_family)
+    if candidates:
+        installed = _installed_font_families()
+        for name in candidates:
+            if name.lower() in installed:
+                _FONT_FAMILY_CACHE[role_or_family] = name
+                return name
+        chosen = candidates[-1]
+    else:
+        chosen = role_or_family
+    _FONT_FAMILY_CACHE[role_or_family] = chosen
+    return chosen
+
+
+'''
+
+CTK_FONT_OLD = '''def _ctk_font(key: str) -> ctk.CTkFont:
+    family, size, *rest = FONTS[key]
+    weight = rest[0] if rest else "normal"
+    return ctk.CTkFont(family=family, size=size, weight=weight)'''
+
+CTK_FONT_NEW = '''def _ctk_font(key: str) -> ctk.CTkFont:
+    role_or_family, size, *rest = FONTS[key]
+    weight = rest[0] if rest else "normal"
+    return ctk.CTkFont(family=_resolve_font_family(role_or_family), size=size, weight=weight)'''
 
 ACCENT_OLD = '''        # Header bar
         header_bar = ctk.CTkFrame(
@@ -61,19 +114,23 @@ ACCENT_OLD = '''        # Header bar
         )
         header_bar.pack(fill="x", padx=14, pady=(12, 6))'''
 
-ACCENT_NEW = '''        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
+ACCENT_NEW = '''        # Dirty INK poster chrome: cyan hairline + magenta atmosphere strip
+        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
         accent_bar.pack(fill="x")
         accent_bar.pack_propagate(False)
+        mag_bar = ctk.CTkFrame(self, fg_color=COLORS["magenta"], height=2, corner_radius=0)
+        mag_bar.pack(fill="x")
+        mag_bar.pack_propagate(False)
 
-        # Header bar
+        # Header bar — sharper poster panel
         header_bar = ctk.CTkFrame(
             self,
             fg_color=COLORS["surface"],
-            corner_radius=16,
+            corner_radius=6,
             border_width=1,
             border_color=COLORS["border"],
         )
-        header_bar.pack(fill="x", padx=14, pady=(12, 6))'''
+        header_bar.pack(fill="x", padx=10, pady=(10, 0))'''
 
 PAPER_V2_TITLE = "33/67 (target VTI 33% / NYSE 67%)"
 
@@ -126,6 +183,9 @@ def strip_nyse_100_chrome(text: str) -> str:
 def patch_app(text: str) -> str:
     text = _replace_block(text, "COLORS", NEW_COLORS)
     text = _replace_block(text, "FONTS", NEW_FONTS)
+    if "_FONT_ROLE_CANDIDATES" not in text:
+        text = text.replace(NEW_FONTS, FONT_HELPERS + NEW_FONTS, 1)
+    text = _swap(text, CTK_FONT_OLD, CTK_FONT_NEW)
     text = text.replace(
         'ctk.set_default_color_theme("blue")',
         'ctk.set_default_color_theme("dark-blue")',
@@ -159,8 +219,18 @@ def patch_app(text: str) -> str:
         'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=4, corner_radius=0)',
         'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)',
     )
-    if 'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"]' not in text:
-        text = _swap(text, ACCENT_OLD, ACCENT_NEW)
+    if 'mag_bar = ctk.CTkFrame(self, fg_color=COLORS["magenta"]' not in text:
+        if 'accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"]' not in text:
+            text = _swap(text, ACCENT_OLD, ACCENT_NEW)
+        else:
+            text = text.replace(
+                'accent_bar.pack_propagate(False)\n\n        # Header bar\n        header_bar = ctk.CTkFrame(\n            self,\n            fg_color=COLORS["surface"],\n            corner_radius=16,',
+                'accent_bar.pack_propagate(False)\n        mag_bar = ctk.CTkFrame(self, fg_color=COLORS["magenta"], height=2, corner_radius=0)\n'
+                '        mag_bar.pack(fill="x")\n        mag_bar.pack_propagate(False)\n\n'
+                '        # Header bar — sharper poster panel\n        header_bar = ctk.CTkFrame(\n            self,\n'
+                '            fg_color=COLORS["surface"],\n            corner_radius=6,',
+                1,
+            )
     text = patch_paper_v2_title(text)
     text = strip_nyse_100_chrome(text)
     return text

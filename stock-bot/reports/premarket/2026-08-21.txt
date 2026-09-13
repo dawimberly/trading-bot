@@ -1,0 +1,77 @@
+Pre-Market Report — 2026-08-21 00:03:57 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 13232). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3721.644396s
+Equity: $96,410.79
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • All-time Sharpe negative (-0.84)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• AMLX | cluster_buy | s94 — Cluster buy: 5 insiders purchased Amylyx Pharmaceutical
+• TEM | executive_sell | s94 $6.6M — CEO sale - Tempus AI, Inc. ($6.6M)
+• TEM | executive_sell | s88 $2.0M — executive sale - Tempus AI, Inc. ($2.0M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 31 returned
+
+Top signals (up to 5)
+  AMLX   cluster_buy      score= 94  Cluster buy: 5 insiders purchased Amylyx Pharmaceuticals, In
+  TEM    executive_sell   score= 94  CEO sale - Tempus AI, Inc. ($6.6M)
+  TEM    executive_sell   score= 88  executive sale - Tempus AI, Inc. ($2.0M)
+  TEM    executive_sell   score= 88  CFO sale - Tempus AI, Inc. ($2.7M)
+  TEM    executive_sell   score= 88  executive sale - Tempus AI, Inc. ($1.5M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: AMLX T1; cluster buys: NTHI (2 insiders); exec sells -> short wa
+
+Applied boosts
+  momentum  AMLX: +0.280
+  momentum  NTHI: +0.080
+  stat_arb  AMLX: x1.220
+  stat_arb  NTHI: x1.060
+  short     TEM: base=0.420 role=executive
+  short     FLEX: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 32.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 31 | Boost: 1 clusters, 7 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

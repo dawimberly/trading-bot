@@ -1,0 +1,170 @@
+{
+  "generated_at": "2026-07-26 23:50 UTC",
+  "days": 90,
+  "window": "2026-05-11 -> 2026-07-26",
+  "benchmark_return_pct": 0.6103313531546473,
+  "disclaimer": "Per-overlay deltas vs STRICT are diagnostic only; do not promote live from overlays alone",
+  "legs": {
+    "STRICT": {
+      "label": "STRICT",
+      "ok": true,
+      "verdict": "OK",
+      "return_pct": 15.62,
+      "sharpe": 2.44,
+      "max_dd_pct": -3.09,
+      "trade_count": 777,
+      "nyse_fills": 82,
+      "notes": "pure STRICT (hygiene ON)",
+      "strict_pit": true,
+      "strict_pit_allow": [],
+      "nyse_entry_hygiene": true,
+      "error": null,
+      "lookahead_sources": [],
+      "active_overlays": [],
+      "final_equity": 11561.55,
+      "start_date": "2026-04-01",
+      "end_date": "2026-07-26",
+      "sim_days": 116
+    },
+    "+insider": {
+      "label": "+insider",
+      "ok": true,
+      "verdict": "OK",
+      "return_pct": 15.87,
+      "sharpe": 2.48,
+      "max_dd_pct": -2.97,
+      "trade_count": 778,
+      "nyse_fills": 83,
+      "notes": "STRICT + insider only",
+      "strict_pit": true,
+      "strict_pit_allow": [
+        "insider"
+      ],
+      "nyse_entry_hygiene": true,
+      "error": null,
+      "lookahead_sources": [
+        "insider"
+      ],
+      "active_overlays": [
+        "insider"
+      ],
+      "final_equity": 11587.39,
+      "start_date": "2026-04-01",
+      "end_date": "2026-07-26",
+      "sim_days": 116
+    },
+    "+rvol": {
+      "label": "+rvol",
+      "ok": true,
+      "verdict": "OK",
+      "return_pct": 15.62,
+      "sharpe": 2.44,
+      "max_dd_pct": -3.09,
+      "trade_count": 777,
+      "nyse_fills": 82,
+      "notes": "STRICT + rvol only",
+      "strict_pit": true,
+      "strict_pit_allow": [
+        "rvol"
+      ],
+      "nyse_entry_hygiene": true,
+      "error": null,
+      "lookahead_sources": [
+        "rvol"
+      ],
+      "active_overlays": [
+        "rvol"
+      ],
+      "final_equity": 11561.55,
+      "start_date": "2026-04-01",
+      "end_date": "2026-07-26",
+      "sim_days": 116
+    },
+    "+catalyst": {
+      "label": "+catalyst",
+      "ok": true,
+      "verdict": "OK",
+      "return_pct": 15.45,
+      "sharpe": 2.45,
+      "max_dd_pct": -3.72,
+      "trade_count": 831,
+      "nyse_fills": 107,
+      "notes": "STRICT + catalyst only",
+      "strict_pit": true,
+      "strict_pit_allow": [
+        "catalyst"
+      ],
+      "nyse_entry_hygiene": true,
+      "error": null,
+      "lookahead_sources": [
+        "catalyst"
+      ],
+      "active_overlays": [
+        "catalyst"
+      ],
+      "final_equity": 11545.47,
+      "start_date": "2026-04-01",
+      "end_date": "2026-07-26",
+      "sim_days": 116
+    },
+    "+hist_news": {
+      "label": "+hist_news",
+      "ok": true,
+      "verdict": "OK",
+      "return_pct": 15.61,
+      "sharpe": 2.44,
+      "max_dd_pct": -3.09,
+      "trade_count": 777,
+      "nyse_fills": 82,
+      "notes": "STRICT + hist_news only",
+      "strict_pit": true,
+      "strict_pit_allow": [
+        "hist_news"
+      ],
+      "nyse_entry_hygiene": true,
+      "error": null,
+      "lookahead_sources": [
+        "hist_news"
+      ],
+      "active_overlays": [
+        "hist_news"
+      ],
+      "final_equity": 11560.86,
+      "start_date": "2026-04-01",
+      "end_date": "2026-07-26",
+      "sim_days": 116
+    }
+  },
+  "deltas_vs_strict": {
+    "+insider": {
+      "return_pp": 0.25,
+      "sharpe": 0.040000000000000036,
+      "max_dd_pp": 0.11999999999999966,
+      "trades": 1.0,
+      "nyse_fills": 1.0
+    },
+    "+rvol": {
+      "return_pp": 0.0,
+      "sharpe": 0.0,
+      "max_dd_pp": 0.0,
+      "trades": 0.0,
+      "nyse_fills": 0.0
+    },
+    "+catalyst": {
+      "return_pp": -0.16999999999999993,
+      "sharpe": 0.010000000000000231,
+      "max_dd_pp": -0.6300000000000003,
+      "trades": 54.0,
+      "nyse_fills": 25.0
+    },
+    "+hist_news": {
+      "return_pp": -0.009999999999999787,
+      "sharpe": 0.0,
+      "max_dd_pp": 0.0,
+      "trades": 0.0,
+      "nyse_fills": 0.0
+    }
+  },
+  "verdict": "+insider: ret +0.25pp Sharpe +0.04, NYSE +1 (negligible) | +rvol: ret +0.00pp Sharpe +0.00, NYSE +0 (negligible) | +catalyst: ret -0.17pp Sharpe +0.01, NYSE +25 (negligible) | +hist_news: ret -0.01pp Sharpe +0.00, NYSE +0 (negligible) No single overlay moves return much vs STRICT on this window. Per-overlay deltas vs STRICT are diagnostic only; do not promote live from overlays alone",
+  "ok": true
+}

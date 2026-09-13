@@ -1,0 +1,5 @@
+variant,n_trades,win_rate,avg_r_multiple,avg_pnl_bps,total_pnl_bps,warning
+baseline,855,0.547,0.127,24.81,21216.0,
+d_only,415,0.561,0.299,22.53,9348.7,
+d_allow_c_block,546,0.566,0.225,29.76,16251.0,
+d_allow_c_flip_APPROX,855,0.537,0.162,13.2,11286.0,"C-flip uses naive mirrored R, not a real short-side re-sim -- hint only"

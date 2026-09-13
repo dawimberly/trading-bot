@@ -1,0 +1,79 @@
+Pre-Market Report — 2026-08-23 00:04:06 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 41488). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3719.600449s
+Equity: $96,793.63
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (30)
+  • All-time Sharpe negative (-0.82)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 31/100
+
+=== Insider Signals (top 3) ===
+• CRWV | cluster_buy | s100 $50.1B — Cluster buy: 7 insiders purchased CoreWeave, Inc. ($50.
+• LITE | executive_sell | s94 $5.1M — CEO sale - Lumentum Holdings Inc. ($5.1M)
+• LITE | executive_sell | s93 $10.7M — executive sale - Lumentum Holdings Inc. ($10.7M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 30 returned
+
+Top signals (up to 5)
+  CRWV   cluster_buy      score=100  Cluster buy: 7 insiders purchased CoreWeave, Inc. ($50.1B to
+  LITE   executive_sell   score= 94  CEO sale - Lumentum Holdings Inc. ($5.1M)
+  LITE   executive_sell   score= 93  executive sale - Lumentum Holdings Inc. ($10.7M)
+  LITE   executive_sell   score= 93  executive sale - Lumentum Holdings Inc. ($10.7M)
+  LZ     executive_sell   score= 88  CFO sale - LEGALZOOM.COM, INC. ($2.9M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: CRWV T1; exec sells -> short watch: LITE (CEO), LITE (EXECUTIVE)
+
+Applied boosts
+  momentum  CRWV: +0.280
+  stat_arb  CRWV: x1.220
+  short     LITE: base=0.420 role=cfo
+  short     DGNX: base=0.420 role=executive
+  short     LZ: base=0.420 role=cfo
+  short     RSKD: base=0.420 role=executive
+  short     KRT: base=0.420 role=executive
+  short     RIVN: base=0.420 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.6
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 1 | Quality signals: 31 | Boost: 0 clusters, 9 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

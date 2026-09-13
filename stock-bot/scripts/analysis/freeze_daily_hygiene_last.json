@@ -1,0 +1,28 @@
+{
+  "generated_at": "2026-09-11 07:57 UTC",
+  "equity": null,
+  "regime": null,
+  "heartbeat_age_min": 0.11366545,
+  "notes": [
+    "Freeze-safe: recommendations are CONFIRM/DENY/HOLD for humans only.",
+    "No auto .env / strategy / live changes."
+  ],
+  "findings": [
+    {
+      "id": "spy_fills_ok",
+      "severity": "info",
+      "title": "No SPY sleeve fills in window",
+      "detail": "Consistent with SPY-off freeze lock.",
+      "default_action": "HOLD",
+      "evidence": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\paper_journal.csv"
+    },
+    {
+      "id": "attribution_stale",
+      "severity": "cleanup",
+      "title": "Sleeve attribution stale (108h)",
+      "detail": "Run: python scripts/analysis/forward_sleeve_attribution.py",
+      "default_action": "CONFIRM",
+      "evidence": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\analysis\\forward_sleeve_attr_last.md"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+========================================================================
+SLEEVE OVERLAP + CORRELATION GUARD — v1.5.4
+Generated: 2026-07-18T09:35:24
+========================================================================
+
+--- Thorough backtest (parsed log) ---
+  Simulation:     2024-02-23 to 2026-07-17 (~875 days, 800 daily bars)
+  Return / Sharpe / MaxDD: 53.36% / 1.02 / -16.23%
+  Signals:        SPY=120  NYSE=113  Crypto=0  orders=3945
+  Stack:          chase=off | dyn_vti=on | dyn_risk=on | stat_arb=on | vol=on | options=on | thinking=off | overlap=on
+
+  Stat arb × NYSE (MA50) exposure overlap:
+    Overlap bars:          597 (74.6% of 800 bars)
+    Same-symbol overlap:   0 (0.0%)
+    MA50 fills / SPY fills: 105 / 120
+
+  Stat arb funnel:
+    universe=29  signals=29  intents=6  opened=4  fill=66.7%
+    contribution of NYSE+stat PnL: 0.5%
+    rejects: atomic_fail=2 (100%)
+
+  SPY × NYSE co-fire (log-derived bounds):
+    Signal rates: SPY 15.0% / NYSE 14.1% of bars
+    Naive independent joint: 2.12%
+    Max possible cofire: 113 days (14.1% of bars)
+    Traded cycles: 192 (25.3% of skip cycles)
+    Note: Fund report does not print cofire_pct / spy_nyse_cofire_days (computed in backtester.py but omitted from print). Bounds below use signal counts only.
+
+  Corr-guard mentions in log: active/blocked=0  any=0
+
+  Sleeve PnL (attribution):
+    spy                    PnL $  1983.57  trips=115  win=93.0%
+    ma50_momentum          PnL $  4169.07  trips=0  win=0.0%
+    stat_arb               PnL $    21.38  trips=9  win=22.2%
+    crypto                 PnL $     0.00  trips=0  win=0.0%
+    opportunistic_short    PnL $   -12.74  trips=1  win=0.0%
+  Skip: cycles=760 traded=192 skipped=568
+    Blockers: no_room=208 | no_signal=204
+    Tokens:   nyse_no_room=208 | signals_ok=179
+
+--- Exit events JSON ---
+  n=400  updated=2026-07-18T01:47:16  range=2026-07-18T01:22:34 -> 2026-07-18T01:47:16
+  by sleeve: {'stat_arb': 399, 'SHORT': 1}
+  by reason: {'trail': 399, 'stop_loss': 1}
+  Note: exit_events.json retains last 400 wall-clock events; timestamps are run-time (not simulation bar dates). Thorough 1000d run overwrote this file during attribution exits.
+
+--- Correlation guard snapshot ---
+  enabled=True  max_corr=0.65  status=no_portfolio_corr_snapshot
+  last_corr=None  mult=1.0  updated=2026-07-18T09:22:04
+  Gap: Snapshot has last_corr=null — backtest rarely persists a live portfolio corr, and the thorough log has no 'Correlation guard active/blocked' lines. Hit/reject counts are unavailable.
+
+--- SPY/NYSE signal co-fire proxy ---
+  Window: 2024-02-24 -> 2026-07-18 (800 bars)
+  Co-fire days: 0 (0.0% of bars)
+  Co-want days: 0 (0.0%)
+  Of SPY fires that also NYSE-fire: None%  |  Of NYSE fires that also SPY-fire: None%
+  Note: Signal-intent proxy only (daily MA logic + 1-bar cooldown). Not the thorough executor cofire_budget / room / chunk path.
+
+--- Strategy metrics DB (closed_trades) ---
+  total rows: 3599
+    spy_trend              n=2680  pnl=$12393.69
+    stat_arb               n=818   pnl=$-398.7
+    nyse_momentum_base     n=54    pnl=$0.0
+    protective_short       n=47    pnl=$-432.94
+
+--- Gaps ---
+  - No correlation-guard active/blocked lines in thorough log (hit/reject counts unavailable)
+  - correlation_guard.json last_corr is null
+  - Exact spy_nyse_cofire_pct not printed in fund report (use signal_proxy or re-run backtester with print)
+
+========================================================================

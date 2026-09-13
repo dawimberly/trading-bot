@@ -4,6 +4,13 @@ set PYTHONTRADING_ROOT=%CD%
 
 echo [INFO] Launching PythonTrading Monitor...
 
+REM Look-only sleeve caps so import config succeeds without remembering the env var.
+REM Does not change Alpaca keys or start/stop trading.
+if not defined PYTHONTRADING_ENV_FILE if exist "%~dp0.env.lookonly_dashboard" (
+    set "PYTHONTRADING_ENV_FILE=%~dp0.env.lookonly_dashboard"
+    echo [INFO] Using look-only env: %~dp0.env.lookonly_dashboard
+)
+
 set "PYW=pythonw"
 if exist "%~dp0.venv\Scripts\pythonw.exe" set "PYW=%~dp0.venv\Scripts\pythonw.exe"
 if exist "%~dp0..\.venv\Scripts\pythonw.exe" set "PYW=%~dp0..\.venv\Scripts\pythonw.exe"

@@ -1,0 +1,13 @@
+{
+  "last_roll_utc": "2026-08-17T14:16:49.514318+00:00",
+  "total_premium": 185.42,
+  "last_premium": 54.05,
+  "contracts": [
+    {
+      "symbol": "VTI",
+      "strike": 412.08,
+      "notional": 8198.38,
+      "premium": 54.05
+    }
+  ]
+}

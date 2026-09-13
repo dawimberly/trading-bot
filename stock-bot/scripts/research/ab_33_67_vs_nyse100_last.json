@@ -1,0 +1,74 @@
+{
+  "A": {
+    "equity_start": 100000.0,
+    "equity_end": 165444.22,
+    "total_return": 0.6544422124792064,
+    "cagr": 0.6043608321791272,
+    "sharpe": 2.134750509194477,
+    "max_dd": 0.10231821216373882,
+    "trades": 342,
+    "win_pct": 52.33918128654971,
+    "hit_1r_pct": 57.60233918128655,
+    "avg_hold": 17.06140350877193,
+    "exits": {
+      "stop": 189,
+      "time": 138,
+      "1r_partial": 197,
+      "trail": 0,
+      "eod": 15
+    },
+    "start_date": "2025-08-11",
+    "end_date": "2026-09-04",
+    "bars": 390,
+    "end_cash": 125156.48,
+    "vti_end": 40287.74
+  },
+  "B": {
+    "equity_start": 100000.0,
+    "equity_end": 192753.07,
+    "total_return": 0.9275307132878723,
+    "cagr": 0.8518288315216143,
+    "sharpe": 2.1468751898452387,
+    "max_dd": 0.1381455916228058,
+    "trades": 342,
+    "win_pct": 52.33918128654971,
+    "hit_1r_pct": 57.60233918128655,
+    "avg_hold": 17.06140350877193,
+    "exits": {
+      "stop": 189,
+      "time": 138,
+      "1r_partial": 197,
+      "trail": 0,
+      "eod": 15
+    },
+    "start_date": "2025-08-11",
+    "end_date": "2026-09-04",
+    "bars": 390,
+    "end_cash": 192753.07,
+    "vti_end": 0.0
+  },
+  "C": {
+    "equity_start": 100000.0,
+    "equity_end": 122084.05,
+    "total_return": 0.2208405247429801,
+    "cagr": 0.20605763818877598,
+    "sharpe": 1.2650704460481839,
+    "max_dd": 0.08918200178910995,
+    "trades": 1,
+    "win_pct": 100.0,
+    "hit_1r_pct": NaN,
+    "avg_hold": 389.0,
+    "exits": {
+      "stop": 0,
+      "time": 0,
+      "1r_partial": 0,
+      "trail": 0,
+      "eod": 1
+    },
+    "start_date": "2025-08-11",
+    "end_date": "2026-09-04",
+    "bars": 390,
+    "end_cash": 0.0,
+    "vti_end": 122084.05
+  }
+}

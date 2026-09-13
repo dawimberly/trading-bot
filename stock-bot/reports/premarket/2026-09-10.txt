@@ -1,0 +1,85 @@
+Pre-Market Report — 2026-09-10 00:05:22 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 16612). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3823.045605s
+Equity: $100,106.23
+
+=== Bot Health ===
+Score: 97/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • All-time Sharpe OK (0.98)
+  • Tail-risk sizing cut (0.70x)
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• CLSK | cluster_buy | s100 $12.4M — Cluster buy: 5 insiders purchased CLEANSPARK, INC. ($12
+• DELL | cluster_buy | s100 $24.9B — Cluster buy: 5 insiders purchased Dell Technologies Inc
+• RXST | cluster_buy | s88 — Cluster buy: 4 insiders purchased RxSight, Inc.
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+[deploy] paper_deploy_aggressive ctx=False -> False
+[deploy] paper_deploy_aggressive ctx=False -> False
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 27 returned
+
+Top signals (up to 5)
+  CLSK   cluster_buy      score=100  Cluster buy: 5 insiders purchased CLEANSPARK, INC. ($12.4M t
+  DELL   cluster_buy      score=100  Cluster buy: 5 insiders purchased Dell Technologies Inc. ($2
+  RXST   cluster_buy      score= 88  Cluster buy: 4 insiders purchased RxSight, Inc.
+  NVEC   executive_sell   score= 88  executive sale - NVE CORP /NEW/ ($2.1M)
+  SSII   executive_sell   score= 84  CEO sale - SS Innovations International, Inc. ($100K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: CLSK T1, DELL T1; cluster buys: RXST (4 insiders); exec sells ->
+
+Applied boosts
+  momentum  CLSK: +0.280
+  momentum  DELL: +0.280
+  momentum  RXST: +0.180
+  stat_arb  CLSK: x1.220
+  stat_arb  DELL: x1.220
+  stat_arb  RXST: x1.150
+  short     NVEC: base=0.420 role=executive
+  short     WULF: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.8
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 29 | Boost: 1 clusters, 2 shorts
+
+=== Summary ===
+All checks passed
+$CLSK: possibly delisted; no price data found  (period=30d)
+$CLSK: possibly delisted; no price data found  (period=1d)
+$CLSK: possibly delisted; no price data found  (period=30d)
+
+Ready for market open.

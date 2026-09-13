@@ -1,0 +1,81 @@
+Pre-Market Report — 2026-08-28 00:03:55 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 14572). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3730.396887s
+Equity: $96,781.00
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (2)
+  • All-time Sharpe negative (-0.83)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• WDC | cluster_buy | s100 $9.6M — Cluster buy: 7 insiders purchased WESTERN DIGITAL CORP 
+• GOOGL | executive_sell | s94 $1.3M — CEO sale - Alphabet Inc. ($1.3M)
+• TLRY | cluster_buy | s91 $4.0M — Cluster buy: 3 insiders purchased Tilray Brands, Inc. (
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 20 returned
+
+Top signals (up to 5)
+  WDC    cluster_buy      score=100  Cluster buy: 7 insiders purchased WESTERN DIGITAL CORP ($9.6
+  GOOGL  executive_sell   score= 94  CEO sale - Alphabet Inc. ($1.3M)
+  TLRY   cluster_buy      score= 91  Cluster buy: 3 insiders purchased Tilray Brands, Inc. ($4.0M
+  U      executive_sell   score= 88  executive sale - Unity Software Inc. ($1.0M)
+  GOOGL  executive_sell   score= 83  executive sale - Alphabet Inc. ($565K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: WDC T1; cluster buys: TLRY (3 insiders), PAL (2 insiders); exec 
+
+Applied boosts
+  momentum  WDC: +0.280
+  momentum  TLRY: +0.180
+  momentum  PAL: +0.080
+  stat_arb  WDC: x1.220
+  stat_arb  TLRY: x1.150
+  stat_arb  PAL: x1.060
+  short     GOOGL: base=0.420 role=executive
+  short     U: base=0.420 role=executive
+  short     BLLN: base=0.420 role=executive
+  short     TXRH: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 20 | Boost: 2 clusters, 6 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

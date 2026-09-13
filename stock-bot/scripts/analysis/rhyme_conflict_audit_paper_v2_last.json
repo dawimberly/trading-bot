@@ -1,0 +1,120 @@
+{
+  "summary": {
+    "generated": "2026-09-09 15:58",
+    "book": "paper_v2",
+    "start": "2026-09-08",
+    "end": "2026-09-09",
+    "sources": [
+      "journal:paper_journal.csv"
+    ],
+    "n_fills": 36,
+    "n_buy": 10,
+    "n_sell": 26,
+    "gross": 65764.2,
+    "net": -10262.9,
+    "cancel_ratio": 0.8439,
+    "cancel_ex_core": 0.8439,
+    "median_daily_cancel": 0.8605,
+    "n_pairs": 5,
+    "n_regime_mismatch_pairs": 0,
+    "mismatch_frac": 0.0,
+    "n_flip_both": 0,
+    "n_days_with_fills": 2,
+    "verdict": "strong internal disagreement (churn); regime-mismatch share is modest - more sleeve/stop recycling than letter wars",
+    "load_notes": [
+      "journal paper_journal.csv: rows=4335 preferred_trade_rows=167",
+      "SoT journal: C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\paper_journal.csv",
+      "using 167 journal event=fill rows",
+      "jsonl present (1598) but ignored; journal event=fill is SoT",
+      "verdict tape: 36 event=fill rows (submit $ is biased; many sells have null notional)",
+      "submit+fill days with both sides: 2/2"
+    ]
+  },
+  "daily": [
+    {
+      "date": "2026-09-08",
+      "regime": "D",
+      "n_buy": 6,
+      "n_sell": 13,
+      "gross": 38673.75,
+      "net": -9035.31,
+      "cancel_ratio": 0.7664,
+      "count_cancel": 0.6316,
+      "cancel_ex_core": 0.7664,
+      "same_sym_rt": 3,
+      "paired_rt_syms": 5,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    },
+    {
+      "date": "2026-09-09",
+      "regime": "D",
+      "n_buy": 4,
+      "n_sell": 13,
+      "gross": 27090.45,
+      "net": -1227.59,
+      "cancel_ratio": 0.9547,
+      "count_cancel": 0.4706,
+      "cancel_ex_core": 0.9547,
+      "same_sym_rt": 4,
+      "paired_rt_syms": 4,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    }
+  ],
+  "by_regime": [
+    {
+      "regime": "D",
+      "n_buy": 10,
+      "n_sell": 26,
+      "gross": 65764.2,
+      "net": -10262.9,
+      "cancel_ratio": 0.8439,
+      "n_days": 2
+    }
+  ],
+  "top_symbols": [
+    {
+      "symbol": "LB",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 4032.06,
+      "sell_notional": 3969.16
+    },
+    {
+      "symbol": "LMT",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 3909.31,
+      "sell_notional": 3813.04
+    },
+    {
+      "symbol": "ONDS",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 4047.41,
+      "sell_notional": 3954.6
+    },
+    {
+      "symbol": "TGT",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 632.42,
+      "sell_notional": 617.81
+    },
+    {
+      "symbol": "TWST",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 1125.02,
+      "sell_notional": 1069.99
+    }
+  ]
+}

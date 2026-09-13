@@ -1,0 +1,25 @@
+{
+  "choice": "vti",
+  "vti_pct": 0.4198,
+  "last_review_bar": 200,
+  "last_review_date": "2026-09-12",
+  "metrics": {
+    "vti": {
+      "sharpe": 0.435,
+      "calmar": 1.235,
+      "max_dd": -0.0022,
+      "ann_return": 0.0027
+    },
+    "spy": {
+      "sharpe": 0.349,
+      "calmar": 0.897,
+      "max_dd": -0.0023,
+      "ann_return": 0.0021
+    }
+  },
+  "scores": {
+    "vti": 0.435,
+    "spy": 0.349
+  },
+  "updated_at": "2026-09-12T21:01:18+00:00"
+}

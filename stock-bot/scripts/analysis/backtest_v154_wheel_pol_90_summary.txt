@@ -1,0 +1,49 @@
+WHEEL+POLITICIAN 90d backtest summary
+==================================================
+
+1) Core metrics
+  Total Return:   0.48%  (txt: Total Return:     0.48%)
+  Sharpe:         0.19  (txt: Sharpe Ratio:     0.19)
+  Max Drawdown:   -8.1%  (txt: Max Drawdown:     -8.1%)
+  VTI Buy & Hold: 1.43%  (txt: VTI Buy & Hold:   1.43%)
+  vs VTI:         -0.95 pp (bot - VTI)
+
+2) Wheel sleeve
+  txt:  Wheel sleeve:     premium $22.49 | drag $0.00 | net $22.49 | cycles 7
+  json: {
+  "enabled": true,
+  "total_premium": 22.49,
+  "assignment_drag": 0.0,
+  "manage_cycles": 7,
+  "premium_days": 7,
+  "net_income": 22.49
+}
+
+3) Politician copy
+  txt:  Politician copy:  0 buys | $0 | days 0 | top Michael McCaul, Josh Gottheimer, Dan Crenshaw
+  json: {
+  "enabled": true,
+  "total_copies": 0,
+  "total_notional": 0.0,
+  "copy_days": 0,
+  "top_traders": [
+    "Michael McCaul",
+    "Josh Gottheimer",
+    "Dan Crenshaw",
+    "Tommy Tuberville"
+  ]
+}
+
+4) Banner / Wheel|Politician lines
+  OVERRIDE PAPER_WHEEL_SLEEVE_ENABLED=True
+  OVERRIDE PAPER_POLITICIAN_COPY_ENABLED=True
+  === LEG WHEEL_POL days=90 ===
+  Wheel sleeve:     premium $22.49 | drag $0.00 | net $22.49 | cycles 7
+  Politician copy:  0 buys | $0 | days 0 | top Michael McCaul, Josh Gottheimer, Dan Crenshaw
+  JSON export: C:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\backtest_v154_wheel_pol_90.json
+
+5) Errors (.err.txt)
+  (none / empty)
+
+Window: 2026-05-09 -> 2026-07-20 | sim_days=72
+Final equity: 10048.39

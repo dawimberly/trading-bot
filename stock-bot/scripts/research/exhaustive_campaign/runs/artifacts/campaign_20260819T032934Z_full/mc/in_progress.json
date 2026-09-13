@@ -1,0 +1,9 @@
+{
+  "updated_at": "2026-08-19T20:21:39.597636+00:00",
+  "status": "backtesting",
+  "completed_runs": 16,
+  "mc_runs": 200,
+  "current_run": 17,
+  "elapsed_sec": 34904.1,
+  "sec_per_run": 2181.51
+}

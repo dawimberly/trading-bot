@@ -1,0 +1,1380 @@
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8995842222433659, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9673869351023656, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8427019654797308, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9189763176549848, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.0109058223074951, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8839615553897895, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8393911394435349, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.3588695681721052, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2223082652534911, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8085214877927127, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.9022615199611792, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.5017239625673584, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.4087081787844902, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8196579029187578, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.000603733789296, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.0365449305839824, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2882769986876763, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.937938631368751, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.225111953763891, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.9043323091731956, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8691816858659385, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (2.088364344029814, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.0670816131392202, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2622865379572579, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.719825651268736, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8619421744422651, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9250996406086287, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9777524353098865, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.4712071281640426, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8497116250267611, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.9751027934525878, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8189118154607655, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.271217849663775, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (2.6631965144737757, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.9903722478927133, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9227377920382862, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.7571298906546406, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8931027989222295, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.87504864927066, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8142856566544676, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8933179176632944, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2217267300207224, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.524518250420348, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2622083580765775, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.968790318711843, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9025679777457052, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2305921654997443, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.1123380566044672, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.0154345139062881, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.1681850123175241, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8405582387212451, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8808710117671037, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.0041582160954743, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.8772533566606908, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.1185287150726309, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9922482513240016, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (2.0146044368860805, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (2.0870354862231766, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8593332577020663, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.200222942278173, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9407904819157542, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.3374435263697748, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8205447008158062, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.9930126056078015, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.2657480376893293, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.929428967060475, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.9243713804113938, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (1.3590229865256154, 0.8, 0.4)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\logging\__init__.py", line 1154, in emit
+    stream.write(msg + self.terminator)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Owner\AppData\Local\Python\pythoncore-3.14-64\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 110: character maps to <undefined>
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 8486, in <module>
+    run_performance_test(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 7471, in run_performance_test
+    result = run_backtest(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1643, in run_backtest
+    update_daily_bank(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\daily_profit_banking.py", line 234, in update_daily_bank
+    logger.info(
+Message: 'Daily profit banked: +%.2f%% vs open (threshold %.2f%%) \u2192 risk x%.2f'
+Arguments: (0.8891022592250941, 0.8, 0.4)

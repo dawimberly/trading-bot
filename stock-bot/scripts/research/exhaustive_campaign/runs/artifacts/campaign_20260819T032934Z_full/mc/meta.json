@@ -1,0 +1,13 @@
+{
+  "started_at": "2026-08-19T05:42:23.097623+00:00",
+  "profile": "paper-aggressive, deep-indicators",
+  "days": 365,
+  "mc_runs": 200,
+  "noise_level": 0.01,
+  "regime_noise": 0.1,
+  "seed": 42,
+  "window_start": "2025-11-01",
+  "window_end": "2026-08-19",
+  "sim_bars": 292,
+  "fast_mode": false
+}

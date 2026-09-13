@@ -1,0 +1,66 @@
+# PythonTrading — Paper Research Bot (Realistic Research v1.5.3, Smart Dynamic VTI)
+#
+# Install:
+#   sudo cp cloud_bot/deploy/systemd/paper-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now paper-bot
+# Logs:   journalctl -u paper-bot -f
+# Status: systemctl status paper-bot
+#
+# Runs run_paper_bot.py (aggressive research book) as the dedicated `trader-paper`
+# user. Secrets live in /etc/pythontrading/paper.env (chmod 600, owned by trader-paper).
+# This service MUST NEVER hold live Alpaca keys.
+
+[Unit]
+Description=PythonTrading Paper Research Bot (Realistic Research v1.5.3)
+Documentation=file:///opt/PythonTrading/stock-bot/PAPER_RESEARCH_PROFILE.md
+After=network-online.target
+Wants=network-online.target
+# If Ollama runs on this host, uncomment to order after it:
+# After=network-online.target ollama.service
+# Wants=network-online.target ollama.service
+
+[Service]
+Type=simple
+User=trader-paper
+Group=trader-paper
+WorkingDirectory=/opt/PythonTrading/stock-bot
+Environment=PYTHONUNBUFFERED=1
+Environment=PAPER_TRADING=true
+Environment=ALLOW_LIVE_TRADING=false
+EnvironmentFile=/etc/pythontrading/paper.env
+ExecStart=/opt/PythonTrading/.venv/bin/python run_paper_bot.py
+
+# Restart aggressively — paper is research; fast recovery preferred.
+Restart=always
+RestartSec=30
+# Guard against crash loops: >5 restarts in 5 min stops the unit for inspection.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Graceful shutdown so the engine can flush heartbeats/journals.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=paper-bot
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Writable paths the paper bot needs (data, logs, shared OHLCV DB).
+ReadWritePaths=/opt/PythonTrading/stock-bot/data
+ReadWritePaths=/opt/PythonTrading/stock-bot/logs
+ReadWritePaths=/opt/PythonTrading/stock-bot/market_data.db
+# Heartbeat/journal/state JSON written at repo root by run_all.py:
+ReadWritePaths=/opt/PythonTrading/stock-bot
+
+[Install]
+WantedBy=multi-user.target

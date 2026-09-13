@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-07-29 01:08 UTC",
+  "days": 365,
+  "window": "2025-09-22 -> 2026-07-28",
+  "benchmark_return_pct": 12.000264318054743,
+  "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+  "disclaimer": "STRICT research only; no live Profile A changes",
+  "promote_rule": {
+    "return_and_sharpe_beat_baseline": true,
+    "max_dd_worse_pp_max": 1.0
+  },
+  "legs": [
+    {
+      "name": "baseline",
+      "group": "A",
+      "config": "defaults (hold=30 arm=10% trail=5% SPY cap ON)",
+      "notes": "STRICT paper defaults; Dyn VTI ON; hygiene ON",
+      "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+      "ok": true,
+      "return_pct": 20.64,
+      "sharpe": 1.12,
+      "max_dd_pct": -7.58,
+      "trade_count": 2501,
+      "spy_fills": 43,
+      "nyse_fills": 174,
+      "leg": {
+        "name": "baseline",
+        "group": "A",
+        "config_label": "defaults (hold=30 arm=10% trail=5% SPY cap ON)",
+        "notes": "STRICT paper defaults; Dyn VTI ON; hygiene ON",
+        "max_hold_bars": 30,
+        "trail_arm": 0.1,
+        "trail_pull": 0.05,
+        "spy_cap": null
+      },
+      "error": null,
+      "strict_pit": true
+    },
+    {
+      "name": "exit_h45_tight",
+      "group": "B",
+      "config": "hold=45 arm=8% trail=4%",
+      "notes": "exit ladder hold 45d, tight trail",
+      "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+      "ok": true,
+      "return_pct": 19.11,
+      "sharpe": 1.05,
+      "max_dd_pct": -7.6,
+      "trade_count": 2503,
+      "spy_fills": 43,
+      "nyse_fills": 166,
+      "leg": {
+        "name": "exit_h45_tight",
+        "group": "B",
+        "config_label": "hold=45 arm=8% trail=4%",
+        "notes": "exit ladder hold 45d, tight trail",
+        "max_hold_bars": 45,
+        "trail_arm": 0.08,
+        "trail_pull": 0.04,
+        "spy_cap": null
+      },
+      "error": null,
+      "strict_pit": true
+    },
+    {
+      "name": "spy_off",
+      "group": "C",
+      "config": "SPY cap=0% (Dyn VTI ON)",
+      "notes": "SPY satellite disabled; Dynamic VTI core unchanged",
+      "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+      "ok": true,
+      "return_pct": 27.67,
+      "sharpe": 1.47,
+      "max_dd_pct": -7.05,
+      "trade_count": 2873,
+      "spy_fills": 0,
+      "nyse_fills": 408,
+      "leg": {
+        "name": "spy_off",
+        "group": "C",
+        "config_label": "SPY cap=0% (Dyn VTI ON)",
+        "notes": "SPY satellite disabled; Dynamic VTI core unchanged",
+        "max_hold_bars": 30,
+        "trail_arm": 0.1,
+        "trail_pull": 0.05,
+        "spy_cap": 0.0
+      },
+      "error": null,
+      "strict_pit": true
+    }
+  ],
+  "verdict": "Best exit leg exit_h45_tight (hold=45 arm=8% trail=4%): +19.11% Sharpe 1.05 vs baseline -1.53pp. SPY-off: +27.67% Sharpe 1.47 SPY fills 0 vs baseline +7.03pp. PAPER DEFAULT CANDIDATE (365d): spy_off \u2014 beat baseline return+Sharpe with MaxDD within 1.0pp. Discuss paper default change only; no live Profile A change yet. No combo until singles clear. STRICT research only; no live Profile A changes",
+  "ok": true
+}

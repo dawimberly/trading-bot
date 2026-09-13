@@ -1,0 +1,80 @@
+Pre-Market Report — 2026-09-09 00:04:21 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 15964). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3793.075197s
+Equity: $100,845.36
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • All-time Sharpe OK (0.96)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• DELL | executive_sell | s99 $42.9M — CEO sale - Dell Technologies Inc. ($42.9M)
+• DELL | executive_sell | s99 $24.7M — CEO sale - Dell Technologies Inc. ($24.7M)
+• DELL | executive_sell | s99 $47.2M — CEO sale - Dell Technologies Inc. ($47.2M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+[deploy] paper_deploy_aggressive ctx=False -> False
+[deploy] paper_deploy_aggressive ctx=False -> False
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 32 returned
+
+Top signals (up to 5)
+  DELL   executive_sell   score= 99  CEO sale - Dell Technologies Inc. ($42.9M)
+  DELL   executive_sell   score= 99  CEO sale - Dell Technologies Inc. ($24.7M)
+  DELL   executive_sell   score= 99  CEO sale - Dell Technologies Inc. ($47.2M)
+  SNDK   executive_sell   score= 99  CEO sale - Sandisk Corp ($16.4M)
+  DELL   cluster_buy      score= 96  Cluster buy: 3 insiders purchased Dell Technologies Inc. ($1
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: ASTC T1; cluster buys: DELL (3 insiders); exec sells -> short wa
+
+Applied boosts
+  momentum  ASTC: +0.280
+  momentum  DELL: +0.180
+  stat_arb  ASTC: x1.220
+  stat_arb  DELL: x1.150
+  short     DELL: base=0.420 role=ceo
+  short     SNDK: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.8
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 35 | Boost: 1 clusters, 9 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

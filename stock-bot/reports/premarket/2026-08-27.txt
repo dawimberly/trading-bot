@@ -1,0 +1,76 @@
+Pre-Market Report — 2026-08-27 00:04:02 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 17900). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3722.888128s
+Equity: $96,954.63
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (25)
+  • All-time Sharpe negative (-0.81)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• TRUP | cluster_buy | s100 $4.8B — Cluster buy: 10 insiders purchased TRUPANION, INC. ($4.
+• NU | executive_sell | s94 $1.3M — CEO sale - Nu Holdings Ltd. ($1.3M)
+• SIBN | executive_sell | s89 $523K — CEO sale - BONE, Inc. ($523K)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 25 returned
+
+Top signals (up to 5)
+  TRUP   cluster_buy      score=100  Cluster buy: 10 insiders purchased TRUPANION, INC. ($4.8B to
+  NU     executive_sell   score= 94  CEO sale - Nu Holdings Ltd. ($1.3M)
+  SIBN   executive_sell   score= 89  CEO sale - BONE, Inc. ($523K)
+  RKLB   executive_sell   score= 88  executive sale - Rocket Lab Corp ($3.2M)
+  RKLB   executive_sell   score= 88  executive sale - Rocket Lab Corp ($1.0M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: TRUP T1; exec sells -> short watch: NU (CEO), SIBN (CEO), RKLB (
+
+Applied boosts
+  momentum  TRUP: +0.280
+  stat_arb  TRUP: x1.220
+  short     NU: base=0.420 role=ceo
+  short     SIBN: base=0.420 role=executive
+  short     RKLB: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.3
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 1 | Quality signals: 25 | Boost: 0 clusters, 7 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

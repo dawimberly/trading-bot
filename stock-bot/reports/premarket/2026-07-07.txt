@@ -1,0 +1,74 @@
+Pre-Market Report — 2026-07-07 15:46:36 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 45896). First heartbeat may take up to 60s. | Stopped 5 orphan bot process(es).
+Heartbeat age: 3812.334464s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (20)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • No RVOL setups (active session)
+  • ORB breakouts (1)
+  • No catalyst hits (active session)
+  • Strategy stack strong (avg 100/100)
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 33/100
+
+=== Insider Signals (top 3) ===
+• ENANTA PHARMACEUTICALS INC | dilution | s64 — Prospectus / offering - ENANTA PHARMACEUTICALS INC
+• IH Merger Sub LLC | dilution | s64 — Prospectus / offering - IH Merger Sub LLC
+• Invitation Homes OP GP LLC | dilution | s64 — Prospectus / offering - Invitation Homes OP GP LLC
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 1
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 20 returned
+
+Top signals (up to 5)
+  ENANTA PHARMACEUTICALS INC dilution         score= 64  Prospectus / offering - ENANTA PHARMACEUTICALS INC
+  IH Merger Sub LLC dilution         score= 64  Prospectus / offering - IH Merger Sub LLC
+  Invitation Homes OP GP LLC dilution         score= 64  Prospectus / offering - Invitation Homes OP GP LLC
+  Invitation Homes Operating Partnership LP dilution         score= 64  Prospectus / offering - Invitation Homes Operating Partnersh
+  Invitation Homes Inc. dilution         score= 64  Prospectus / offering - Invitation Homes Inc.
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � no actionable insider boosts this cycle
+
+Applied boosts
+  momentum: (none active)
+  stat_arb: (none active)
+  short: (none active)
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 33.1
+  guard: no activations this cycle (normal if bubble <= 85)
+  [FAIL] Risk guard test (bubble=90) did not activate
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 0 | Quality signals: 22 | Boost: 0 clusters, 0 shorts
+
+=== Summary ===
+FAILED � 1 check(s) need attention
+
+Ready for market open.

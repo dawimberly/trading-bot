@@ -1,0 +1,79 @@
+Pre-Market Report — 2026-07-27 00:04:43 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 15080). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3822.780484s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • ATR sizing active (SPY probe)
+  • Thinking engine ON (LLM)
+  • Strong insider clusters (3)
+  • Sharpe 30d improving (-0.15→0.18)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 33/100
+
+=== Insider Signals (top 3) ===
+• MPAA | executive_sell | s89 $405K — CEO sale - MOTORCAR PARTS OF AMERICA INC ($405K)
+• LOOP | cluster_buy | s88 — Cluster buy: 4 insiders purchased Loop Industries, Inc.
+• OMER | cluster_buy | s81 — Cluster buy: 3 insiders purchased OMEROS CORP
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 27 returned
+
+Top signals (up to 5)
+  MPAA   executive_sell   score= 89  CEO sale - MOTORCAR PARTS OF AMERICA INC ($405K)
+  LOOP   cluster_buy      score= 88  Cluster buy: 4 insiders purchased Loop Industries, Inc.
+  OMER   cluster_buy      score= 81  Cluster buy: 3 insiders purchased OMEROS CORP
+  MPAA   executive_sell   score= 78  executive sale - MOTORCAR PARTS OF AMERICA INC ($42K)
+  MPAA   executive_sell   score= 78  executive sale - MOTORCAR PARTS OF AMERICA INC ($43K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: LOOP (4 insiders), OMER (3 insiders), DOCS (2 insiders); exec sell
+
+Applied boosts
+  momentum  LOOP: +0.180
+  momentum  OMER: +0.180
+  momentum  DOCS: +0.080
+  stat_arb  LOOP: x1.150
+  stat_arb  OMER: x1.150
+  stat_arb  DOCS: x1.060
+  short     MPAA: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 32.9
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 27 | Boost: 3 clusters, 3 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

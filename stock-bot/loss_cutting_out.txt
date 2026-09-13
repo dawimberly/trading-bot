@@ -1,0 +1,45 @@
+﻿2026-06-17 23:31:19 INFO [root] logging initialized (daily rotation, 7 days)
+python : C:\Users\Owner\PythonTrading\stock-bot\modules\pipeline_strategies.py:560: UserWarning: Dynamic universe 
+enabled but no screener tickers in price data ù fetch daily history for data/screener_universe.json tickers
+At C:\Users\Owner\AppData\Local\Temp\ps-script-a0e3d817-4283-4062-a4dc-f0382c9ab404.ps1:79 char:44
++ ... \stock-bot; python backtester.py --days 365 --paper-aggressive --stri ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\Owner\...se.json tickers:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  return config.nyse_momentum_universe(data.columns)
+--- TOP1 LOSS CUTTING A/B (strict PIT, thinking + news) ---
+Window (365d): 2025-08-12 -> 2026-06-17 (310 sim bars)
+VTI buy & hold benchmark: +18.19%
+Rules when ON: stop -7% normal / -4% speculative | tighten to -5%/-3% on thinking/sector headwind | scale out 30/30/40 at +6/+12/+20% | conf>=0.7 uses 10% trailing stop after +6%
+Config                         Return  Sharpe    MaxDD  Trades  Stops  Take
+------------------------------------------------------------------------
+2026-06-17 23:31:20 INFO [modules.international_sleeve] ADR/currency risk: home-market gaps and FX moves are unhedged on Alpaca (no forex sleeve) ù international sleeve uses USD ADRs only.
+v2.1 baseline exits           +52.19%    1.95   -7.62%      15      0     0
+2026-06-17 23:32:46 INFO [modules.loss_cutting] Hard stop hit -7.3% on AMD normal name (limit -7%)
+2026-06-17 23:32:46 INFO [modules.loss_cutting] Hard stop hit -7.5% on KTOS speculative name (watchlist hype name) (limit -4%)
+2026-06-17 23:33:07 INFO [modules.loss_cutting] Trailing stop hit on high-conviction GDX (conf=0.83, pnl=18.0%, trail 10% from HWM)
+2026-06-17 23:33:12 INFO [modules.loss_cutting] Trailing stop hit on high-conviction INTC (conf=0.83, pnl=48.6%, trail 10% from HWM)
+2026-06-17 23:33:12 INFO [modules.loss_cutting] Hard stop hit -8.3% on UNH normal name (limit -7%)
+2026-06-17 23:33:16 INFO [modules.loss_cutting] Hard stop hit -15.3% on MU normal name (limit -7%)
+2026-06-17 23:33:31 INFO [modules.loss_cutting] Hard stop hit -7.8% on KTOS speculative name (watchlist hype name) (limit -4%)
+2026-06-17 23:33:36 INFO [modules.loss_cutting] Trailing stop hit on high-conviction GOOGL (conf=0.83, pnl=7.8%, trail 10% from HWM)
+2026-06-17 23:33:46 INFO [modules.loss_cutting] Hard stop hit -7.7% on NFLX normal name (limit -7%)
+2026-06-17 23:33:47 INFO [modules.loss_cutting] Hard stop hit -7.9% on LMT normal name (limit -7%)
+2026-06-17 23:33:50 INFO [modules.loss_cutting] Trailing stop hit on high-conviction XOM (conf=0.84, pnl=1.5%, trail 10% from HWM)
+2026-06-17 23:33:58 INFO [modules.loss_cutting] Trailing stop hit on high-conviction JNJ (conf=0.83, pnl=26.7%, trail 10% from HWM)
+2026-06-17 23:34:00 INFO [modules.loss_cutting] Trailing stop hit on high-conviction INTC (conf=0.84, pnl=55.7%, trail 10% from HWM)
+2026-06-17 23:34:06 INFO [modules.loss_cutting] Hard stop hit -9.2% on PLTR speculative name (watchlist hype name) (limit -4%)
+2026-06-17 23:34:06 INFO [modules.loss_cutting] Hard stop hit -7.8% on MU normal name (limit -7%)
+2026-06-17 23:34:06 INFO [modules.loss_cutting] Trailing stop hit on high-conviction AMD (conf=0.85, pnl=53.5%, trail 10% from HWM)
+2026-06-17 23:34:06 INFO [modules.loss_cutting] Hard stop hit -8.0% on CRM normal name (limit -7%)
+2026-06-17 23:34:06 INFO [modules.loss_cutting] Hard stop hit -13.3% on MU normal name (limit -7%)
+2026-06-17 23:34:07 INFO [modules.loss_cutting] Hard stop hit -29.8% on SMCI speculative name (watchlist hype name) (limit -4%)
+Top1 loss cutting             +27.82%    1.59   -6.76%      59     12     0
+  exits: hard stops 12 | partial takes 0 | trail exits 7 | thinking tightened 0 | sector tightened 0
+------------------------------------------------------------------------
+Delta (loss cutting - baseline): return -24.37pp | Sharpe -0.36 | MaxDD +0.86pp | Trades +44
+Speculative-name exits: SMCI: stops 1 partials 0 trails 0; PLTR: stops 1 partials 0 trails 0; KTOS: stops 2 partials 0 trails 0
+
+Recommendation: KEEP OFF - early stops/partials cut winners on this window.
+------------------------------------------------------------------------

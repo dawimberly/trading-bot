@@ -1,0 +1,150 @@
+OVERRIDE MARKOV_HMM_ENABLED=True
+OVERRIDE MARKOV_HMM_PRIMARY_REGIME=False
+OVERRIDE PAPER_WHEEL_SLEEVE_ENABLED=False
+OVERRIDE PAPER_POLITICIAN_COPY_ENABLED=False
+=== LEG BASELINE sleeves OFF days=365 ===
+ARIMA_ENABLED=False DYNAMIC_VTI_OPTIONAL_ENABLED=True DYNAMIC_VTI_ALLOW_ZERO=False SPY_LIKE_BOOST_ENABLED=True
+--- STARTING FUND BACKTEST (365 days) ---
+--- PAPER AGGRESSIVE: dynamic VTI (35%-50% smart allocator) | boost 140%x ---
+--- Operating Layer ON | last wisdom: lower_core delta -8.0% conv 0.88 (accepted) | core target 80% band 8% | wisdom threshold 0.75 ---
+--- DEEP INDICATOR HISTORY: up to 20y (Alpaca + yfinance, cached as *_deep.pkl) ---
+Deep History: Indicators only (20y context) | Allocator on sim window
+Loading deep indicator history for 363 symbols (max 20y, cached as *_deep.pkl)...
+Indicator context: 2006-07-20 -> 2026-07-20 (6,379 bars) | Trading window: 2025-10-01 -> 2026-07-20 (292 bars)
+Loaded 361 tickers over 292 daily bars.
+Warmup: 0 bars (deep indicator context) | Simulation: 292 bars
+Allocator window: 492 bars (baseline sim + warmup, pinned)
+Simulation window: 2025-10-01 to 2026-07-20 (292 calendar days)
+Cooldown: 1 bar(s) (~60 min live logic)
+--- Best Paper Bot (realistic research / Profile B) ---
+--- Research Mode Ready: stat arb ON | crypto sleeve OFF (PAPER_CRYPTO_ENABLED=false) — see PAPER_RESEARCH_PROFILE.md ---
+  >>> PAPER TUNED DEFAULTS (tail-risk Option A) — SPY MA160 | NYSE MA70 | risk 1.8% calm / 1.1% mod / 0.7% stress | RHYME_B x0.30 | RHYME_E x1.60 | max hold 30 bars | vol cap 17% | per-name cap 8% | DD risk x0.6 @ 5%+ / x0.3 @ 8%+
+  >>> PAPER REGIME DYNAMIC SIZING — entries always on; A x1.2 | C x1.0 | D x0.7 | E x1.6 | B x0.3 | weak B/D/E sleeve cap 25% (hysteresis bump 0.05, dwell 8 bars)
+  >>> SMART DYNAMIC VTI DEFAULT — 35%-50% VTI | optional floor 35%->0% on SPY-like strength | drivers: NYSE/metals, insider, bubble/Buffett, regime, VTI vs SPY, SPY-like confluence
+  >>> CORE ALLOCATOR DYNAMIC chose VTI @ 41% [30%-50%] (Sharpe VTI 7.94 vs SPY 7.50)
+  >>> STAT ARB v1.5.4 quality: cointegration p<0.12 | corr>=0.68 | liquidity>$50M | vol<5.5% | max 8-12 pairs Z 2.1-2.7 | hold=35b | revert>=55% | RR 1.7:1 + trail 45%/30% | conviction 0.6-1.4x | sector-neutral x1.12 | partial @1.2R | NYSE overlap blocked | Stat Arb sleeve: 7% dedicated (vol scaled) | Stat Arb universe: 29 names
+  >>> Sector Screener: ON | Active sectors: Healthcare + Financials + Industrials + Real Estate (+24 tickers)
+  >>> Kimi Deep Thinker: ENABLED (NVIDIA NIM, model=moonshotai/kimi-k2.6, daily, hybrid w/ Ollama)
+  >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 30 | Boost: 3 clusters, 2 shorts
+  game_plan:              yield-gate-only
+  yield_gate:             True
+  stack ON:               chase=off | dyn_vti=on | dyn_risk=on | stat_arb=on | vol=on | options=on | thinking=off | overlap=on | chunk=on | cofire=on | dyn_univ=on
+  locked OFF:             macro | risk_parity | stat_arb_opt | social | equity_pairs | spy_exit
+  nyse_beta_scaling:      False (paper chase tuning)
+  options_sleeve:       on (cap 12%, calm VIX<22)
+  dynamic_vti:          on (Smart 35%-50%)
+  dynamic_risk:         on (1.8% calm bull / 1.1% moderate / 0.7% stress)
+  stat_arb:             on (corr>0.65, Z>=2.0 (dynamic 1.8-2.4), max_trades=2)
+  nyse_stat_arb_path:   momentum + stat_arb (default; set PAPER_EQUITY_PAIRS=true for pairs-only)
+  vol_overlay:          on (cap 8%)
+  thinking_engine:      off (paper=off, live=off)
+  thinking_safety:        ±6% cap | daily_loss paper 4% / live 2% | live_approval=off
+  halt_resume_dd:         8% | liquidate_on_breach: True
+  derived_bear_pause:     False
+  wisdom_mode:            dynamic
+  vti_core:             45% VTI | active boost 1.40x
+  crypto_sleeve:        off (PAPER_CRYPTO_ENABLED=false)
+  crypto_vol_only:      False
+  wisdom_sizing_floor:  1.0
+  sleeves: SPY 34% | crypto 0% | NYSE 15% | stat_arb 5% | metal 0% | cash 1%
+  social_sleeve:      20% paper | live mirror 15% of social cap
+2026-07-20 17:28:02 WARNING [hmmlearn.base] Model is not converging.  Current: 1968.8485971271414 is not greater than 1968.8641616207879. Delta is -0.015564493646479605
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_E: Steady_Bearish_Decline ---
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_E: Steady_Bearish_Decline ---
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_E: Steady_Bearish_Decline ---
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_E: Steady_Bearish_Decline ---
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_E: Steady_Bearish_Decline ---
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_E: Steady_Bearish_Decline ---
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+Final core allocator: SPY @ 39% (Sharpe VTI 3.25 vs SPY 3.46)
+--- FUND BACKTEST REPORT (SPY + vol-gated crypto + NYSE) ---
+Stat Arb v1.5.4 quality: 3 pairs (100% fill, 1% equity PnL) PnL $+4.44 (real $+4.44) | win 17% | avg Z 2.49 | avg hold 2b | universe 80 names | dedicated cap 4% util 1%
+Bubble Risk avg 55/100 (range 44-77, 68 short scans) | Buffett 221.9% GDP (Strongly Overvalued)
+Protective Shorts: OFF | 2 trips PnL $-16.65 | win 0% | hold 4b | entries 2 | Short fires: 1/68 scans | Rejects: vix_low=43, bear_streak=13, vix_not_rising=11 | Reasons: RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064|streak=2=4 | exits stop_loss×2 | worst SPY $-9.83
+Simulation:       2025-10-01 to 2026-07-20 (~292 days, 292 daily bars)
+Sleeves (paper aggressive):      SPY 33.9% | crypto 0.0% | NYSE 15.0% | metal 0.0% | cash 0.8%
+Historical news simulation: ON
+  headline: Nvidia beats earnings on AI datacenter demand
+  headline: Apple tops profit guidance for the quarter
+  headline: Microsoft cloud revenue beats on Azure growth
+  headline: Markets await Fed policy signal at midweek
+  headline: S&P 500 futures steady ahead of CPI and Fed speakers
+  headline: Jobs report beats forecasts as unemployment holds
+VTI core (avg):   48.8%
+Crypto vol-only:  True
+Final Equity:     $12109.04
+Total Return:     21.09%
+VTI Buy & Hold:   12.44%
+Sharpe Ratio:     1.35
+Sortino Ratio:    2.16
+Calmar Ratio:     3.57
+Win rate (daily): 41.9%
+Max Drawdown:     -5.91%
+SPY signals:      72
+Crypto signals:   0
+NYSE signals:     67
+NYSE pick counts: 2 symbols | top2 share 100% | SGHC=140, GLBE=120
+Total orders:     1999
+Skip breakdown:   cycles=292 traded=105 skipped=187
+  TOP BLOCKERS: no_room=98 | pause=68
+  TOP TOKENS: nyse_no_room=98 | regime_paused=68
+Social sleeve:    23 trades | 20% parallel paper book | $10047.39 (+0.47%)
+                  (XOM proxies XLE when XLE daily bars missing)
+Regime distribution:
+  RHYME_D: Range_Bound_Neutral: 128
+  RHYME_C: Steady_Bullish_Growth: 96
+  RHYME_E: Steady_Bearish_Decline: 68
+Profit factor:    1.29
+Avg trade return: 0.011%
+--- SLEEVE ATTRIBUTION ---
+Sleeve                     PnL $  Realized    Unreal  Trips   Win%  AvgRet%    PF
+------------------------------------------------------------------------
+SPY MA200                 118.67    105.00     13.67     49  85.7%   3.588%  1.65
+NYSE MA50 momentum        763.17      0.00    763.17      0   0.0%   0.000%  0.00
+Stat arb pairs (NYSE)       4.44      4.44      0.00      6  16.7%   0.778%  2.85
+Crypto sleeve               0.00      0.00      0.00      0   0.0%   0.000%  0.00
+Opportunistic shorts      -16.65    -16.59     -0.06      2   0.0%  -2.513%  0.00
+Stat arb funnel:
+  Stat Arb universe: 80 names
+  scan_signals=12 intents=3 pairs_opened=3 pairs_closed=3 leg_fills=6 fill_rate=100.0%
+  avg_Z_entry=2.49 win_rate=16.7% avg_hold=2.0 bars fill_rate=100.0% no_room_rate=0.0% | dedicated cap 4% avg_util=1% peak=$245
+  Stat arb contribution: 0.6% of NYSE+stat PnL
+  MA50 signals=0 fills=62 | SPY entry_fills=71
+  Overlap: 7 bars with MA50+stat arb exposure | 0 bars same-symbol overlap
+  Stat arb exits by reason: force_close=1 ($+0.00, 0%W), stop_loss=2 ($+0.00, 0%W)
+  Stat arb avg hold: 2.0 bars (max 2)
+  Stat arb per-pair (top): COIN/CRM 1x $+0.0 0%W, AMZN/AAPL 1x $+0.0 0%W, CVX/DBB 1x $+0.0 0%W
+Opportunistic short funnel:
+  signals=2 intents=2 entries=2 covers=2 trips=2 win=0% avg_hold=4b
+  Exit breakdown: stop_loss=2($-17)
+  Entry triggers: RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064|streak=2=4
+  Trigger rejects (68 scans, 1 fires): vix_low=43, bear_streak=13, vix_not_rising=11
+  Short trade detail:
+    Symbol    PnL $  Hold Exit           Entry Z Partial
+    SPY       -9.83     4 stop_loss         0.00       N
+    QQQ       -6.76     4 stop_loss         0.00       N
+  Worst shorts: SPY $-9.83, QQQ $-6.76
+Rolling Sharpe:   1.44 (mean 63d)
+JSON export: C:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\backtest_v154_wheel_pol_tune_ctrl_365.json
+---------------------------------------------------
+Paper sleeve flags: {}
