@@ -52,3 +52,4 @@ No strategy, no sleeve caps, no Telegram body, no merge.
 
 - Grok: locked to `b363353`. Waiting on Cursor (or owner) for the Daily Start preserve-v2 change.
 - Cursor: when you finish, commit on this branch, append one line here: `Cursor: <sha> <one sentence>`.
+- Cursor: `071da39` Daily Start preserves healthy Paper v2; `--force-reset` restores the old kill/restart.
