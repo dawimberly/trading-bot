@@ -38,6 +38,8 @@ def should_use_frozen_monitor() -> bool:
 def _resolve_pythonw(root: Path) -> str | None:
     """Return pythonw for dashboard_app.py; never return the frozen bot EXE."""
     for candidate in (
+        root / "venv311" / "Scripts" / "pythonw.exe",
+        root.parent / "venv311" / "Scripts" / "pythonw.exe",
         root / ".venv" / "Scripts" / "pythonw.exe",
         root.parent / ".venv" / "Scripts" / "pythonw.exe",
     ):

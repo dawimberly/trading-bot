@@ -12,6 +12,8 @@ if not defined PYTHONTRADING_ENV_FILE if exist "%~dp0.env.lookonly_dashboard" (
 )
 
 set "PYW=pythonw"
+if exist "%~dp0..\venv311\Scripts\pythonw.exe" set "PYW=%~dp0..\venv311\Scripts\pythonw.exe"
+if exist "%~dp0venv311\Scripts\pythonw.exe" set "PYW=%~dp0venv311\Scripts\pythonw.exe"
 if exist "%~dp0.venv\Scripts\pythonw.exe" set "PYW=%~dp0.venv\Scripts\pythonw.exe"
 if exist "%~dp0..\.venv\Scripts\pythonw.exe" set "PYW=%~dp0..\.venv\Scripts\pythonw.exe"
 

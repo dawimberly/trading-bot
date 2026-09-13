@@ -29,6 +29,8 @@ def _log(msg: str) -> None:
 
 def _pythonw() -> str:
     for candidate in (
+        ROOT.parent / "venv311" / "Scripts" / "pythonw.exe",
+        ROOT / "venv311" / "Scripts" / "pythonw.exe",
         ROOT.parent / ".venv" / "Scripts" / "pythonw.exe",
         ROOT / ".venv" / "Scripts" / "pythonw.exe",
         Path(sys.executable).with_name("pythonw.exe"),
@@ -169,10 +171,6 @@ def book_is_healthy(username: str, book_id: str, *, max_age_sec: float = HEARTBE
 
 
 def _open_dashboard(username: str) -> None:
-    look = ROOT / "scripts" / "apply_paqinhaus_look.py"
-    if look.is_file():
-        _log("Applying dashboard look...")
-        subprocess.run([sys.executable, str(look)], cwd=str(ROOT), check=False)
     _log("Opening dashboard (pythonw, no console)...")
     env = os.environ.copy()
     env["PYTHONTRADING_ROOT"] = str(ROOT)

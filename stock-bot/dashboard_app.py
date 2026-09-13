@@ -2056,46 +2056,57 @@ class CopyableChip:
 
 
 class CopyableMetric:
-    """Compact labeled value: caption + readonly Entry (mouse-select + Ctrl+C)."""
+    """Caption + value in pixels so the number is never a zero-width box."""
 
     def __init__(self, master, title: str, *, width: int = 16):
-        self._frame = ctk.CTkFrame(master, fg_color="transparent")
+        px = max(210, int(width) * 12)
+        self._frame = ctk.CTkFrame(
+            master,
+            fg_color=COLORS["surface2"],
+            corner_radius=8,
+            border_width=1,
+            border_color=COLORS["border"],
+            width=px,
+            height=72,
+        )
+        self._frame.grid_propagate(False)
         self._caption = ctk.CTkLabel(
             self._frame,
             text=title.upper(),
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
+            anchor="w",
         )
-        self._caption.pack(side="left", padx=(0, 6))
-        self._var = tk.StringVar(value="—")
-        self._entry = tk.Entry(
+        self._caption.place(x=10, y=8)
+        self._value = ctk.CTkLabel(
             self._frame,
-            textvariable=self._var,
-            readonlybackground=COLORS["card"],
-            background=COLORS["card"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            highlightcolor=COLORS["accent"],
-            font=("Segoe UI", 12, "bold"),
-            width=width,
-            takefocus=True,
+            text="—",
+            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            text_color=COLORS["text"],
+            anchor="w",
         )
-        self._entry.configure(state="readonly")
-        self._entry.pack(side="left", ipady=1)
+        self._value.place(x=10, y=30)
+        self._text = "—"
+        self._frame.bind("<Button-1>", self._copy)
+        self._caption.bind("<Button-1>", self._copy)
+        self._value.bind("<Button-1>", self._copy)
 
     def pack(self, **kw):
         self._frame.pack(**kw)
 
+    def grid(self, **kw):
+        self._frame.grid(**kw)
+
+    def _copy(self, _event=None):
+        try:
+            self._frame.clipboard_clear()
+            self._frame.clipboard_append(self._text)
+        except tk.TclError:
+            pass
+
     def set(self, text: str, color: str | None = None) -> None:
-        self._entry.configure(state="normal")
-        self._var.set(text)
-        if color:
-            self._entry.configure(fg=color, insertbackground=color)
-        self._entry.configure(state="readonly")
+        self._text = str(text)
+        self._value.configure(text=self._text, text_color=color or COLORS["text"])
 
 
 class CopyableLines:
@@ -2134,7 +2145,7 @@ class CopyableLines:
 
 
 class SleeveMixCard(ctk.CTkFrame):
-    """Paper-book sleeve mix: VTI / NYSE / cash actual vs target."""
+    """Sleeve mix as three columns: label + % on top, bar under (Grok book-monitor)."""
 
     def __init__(self, master):
         super().__init__(
@@ -2158,39 +2169,44 @@ class SleeveMixCard(ctk.CTkFrame):
             "nyse": COLORS["green"],
             "cash": COLORS["muted"],
         }
-        for key, title in (
-            ("vti", "VTI actual / target"),
-            ("nyse", "NYSE actual / target"),
-            ("cash", "Cash"),
+        cols = ctk.CTkFrame(self, fg_color="transparent")
+        cols.pack(fill="x", padx=10, pady=(4, 2))
+        for i, (key, title) in enumerate(
+            (
+                ("vti", "VTI actual / target"),
+                ("nyse", "NYSE actual / target"),
+                ("cash", "Cash"),
+            )
         ):
-            row = ctk.CTkFrame(self, fg_color="transparent")
-            row.pack(fill="x", padx=10, pady=2)
+            cols.grid_columnconfigure(i, weight=1, uniform="sleeve")
+            cell = ctk.CTkFrame(cols, fg_color="transparent")
+            cell.grid(row=0, column=i, sticky="ew", padx=6)
+            top = ctk.CTkFrame(cell, fg_color="transparent")
+            top.pack(fill="x")
             lab = ctk.CTkLabel(
-                row,
+                top,
                 text=title,
                 font=_ctk_font("caption"),
                 text_color=COLORS["muted"],
-                width=150,
                 anchor="w",
             )
             lab.pack(side="left")
+            pct = ctk.CTkLabel(
+                top,
+                text="—",
+                font=_ctk_font("caption"),
+                text_color=COLORS["text"],
+                anchor="e",
+            )
+            pct.pack(side="right")
             bar = ctk.CTkProgressBar(
-                row,
+                cell,
                 height=8,
                 progress_color=colors[key],
                 fg_color=COLORS["surface2"],
             )
-            bar.pack(side="left", fill="x", expand=True, padx=8)
+            bar.pack(fill="x", pady=(6, 0))
             bar.set(0)
-            pct = ctk.CTkLabel(
-                row,
-                text="—",
-                font=_ctk_font("caption"),
-                text_color=COLORS["text"],
-                width=120,
-                anchor="e",
-            )
-            pct.pack(side="right")
             self._bars[key] = (lab, bar, pct)
         self._detail = ctk.CTkLabel(
             self,
@@ -2199,7 +2215,7 @@ class SleeveMixCard(ctk.CTkFrame):
             text_color=COLORS["muted"],
             anchor="w",
         )
-        self._detail.pack(fill="x", padx=10, pady=(2, 8))
+        self._detail.pack(fill="x", padx=10, pady=(6, 8))
 
     def set_mix(self, heartbeat: dict | None, *, equity: float, cash: float) -> None:
         rows = sleeve_mix_rows(heartbeat, equity=equity, cash=cash)
@@ -2217,6 +2233,214 @@ class SleeveMixCard(ctk.CTkFrame):
             pct.configure(text=f"{actual:.1f}%  /  {target:.0f}%")
             bits.append(f"{key.upper()} ${row['value']:,.0f} ({actual:.1f}%)")
         self._detail.configure(text="  ·  ".join(bits) if bits else "Waiting for heartbeat…")
+
+
+class _LabelMetric:
+    def __init__(self, label: ctk.CTkLabel):
+        self._label = label
+
+    def set(self, text: str, color: str | None = None) -> None:
+        kw = {"text": str(text)}
+        if color:
+            kw["text_color"] = color
+        self._label.configure(**kw)
+
+
+_DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
+    ("alpaca_paper_v2", "Paper", "33/67 (target VTI 33% / NYSE 67%)"),
+    ("alpaca_paper", "Paper aggressive", "Paper aggressive"),
+    ("alpaca_live", "Live", "Live Profile A — do not size options"),
+)
+
+
+class PaperBookPanel(ctk.CTkFrame):
+    """Display layout from the Paper book photos: big equity, mix, no clipped chips."""
+
+    def __init__(self, master, *, book_id: str, on_select=None):
+        super().__init__(
+            master,
+            fg_color=COLORS["card"],
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.pack(fill="x", padx=16, pady=(12, 4))
+        ctk.CTkLabel(
+            top,
+            text="PYTHONTRADING  ·  BOOKS",
+            font=ctk.CTkFont(family="Georgia", size=11),
+            text_color=COLORS["blue"],
+            anchor="w",
+        ).pack(anchor="w")
+        self._on_select = on_select
+        title_row = ctk.CTkFrame(top, fg_color="transparent")
+        title_row.pack(fill="x")
+        self._title = ctk.CTkLabel(
+            title_row,
+            text="Paper book",
+            font=ctk.CTkFont(family="Georgia", size=36, weight="bold"),
+            text_color=COLORS["text"],
+            anchor="w",
+        )
+        self._title.pack(side="left")
+        switch = ctk.CTkFrame(
+            title_row,
+            fg_color=COLORS["surface2"],
+            corner_radius=10,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        switch.pack(side="right")
+        self._book_btns: dict[str, ctk.CTkButton] = {}
+        for bid, label, _hint in _DISPLAY_BOOKS:
+            btn = ctk.CTkButton(
+                switch,
+                text=label,
+                width=132 if bid == "alpaca_paper" else 88,
+                height=32,
+                corner_radius=8,
+                font=_ctk_font("caption"),
+                command=lambda b=bid: self._pick(b),
+            )
+            btn.pack(side="left", padx=3, pady=3)
+            self._book_btns[bid] = btn
+        rule = ctk.CTkFrame(top, fg_color=COLORS["magenta"], height=3, width=88, corner_radius=2)
+        rule.pack(anchor="w", pady=(4, 0))
+        self._mix_hint = ctk.CTkLabel(
+            top,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        self._mix_hint.pack(anchor="w", pady=(2, 8))
+        self.set_book(book_id)
+
+        eq_row = ctk.CTkFrame(self, fg_color="transparent")
+        eq_row.pack(fill="x", padx=16)
+        ctk.CTkLabel(
+            eq_row,
+            text="EQUITY",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        ).pack(anchor="w")
+        num_row = ctk.CTkFrame(eq_row, fg_color="transparent")
+        num_row.pack(fill="x")
+        self._equity = ctk.CTkLabel(
+            num_row,
+            text="$—",
+            font=ctk.CTkFont(family="Segoe UI", size=42, weight="bold"),
+            text_color=COLORS["text"],
+            anchor="w",
+        )
+        self._equity.pack(side="left")
+        self._today = ctk.CTkLabel(
+            num_row,
+            text="",
+            font=_ctk_font("body"),
+            text_color=COLORS["green"],
+            anchor="e",
+        )
+        self._today.pack(side="left", padx=(28, 0))
+
+        stats = ctk.CTkFrame(self, fg_color="transparent")
+        stats.pack(anchor="w", padx=16, pady=(10, 6))
+        for col in range(4):
+            stats.grid_columnconfigure(col, weight=0, minsize=130)
+
+        def _stat(col: int, caption: str) -> tuple[ctk.CTkFrame, ctk.CTkLabel]:
+            box = ctk.CTkFrame(stats, fg_color="transparent")
+            box.grid(row=0, column=col, sticky="nw", padx=(0, 12))
+            ctk.CTkLabel(
+                box,
+                text=caption,
+                font=_ctk_font("caption"),
+                text_color=COLORS["muted"],
+                anchor="w",
+            ).pack(anchor="w")
+            val = ctk.CTkLabel(
+                box,
+                text="—",
+                font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+                text_color=COLORS["text"],
+                anchor="w",
+            )
+            val.pack(anchor="w")
+            return box, val
+
+        cash_box, self._cash = _stat(0, "CASH")
+        self._cash_sub = ctk.CTkLabel(
+            cash_box,
+            text="",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="w",
+        )
+        self._cash_sub.pack(anchor="w")
+        _, self._invested = _stat(1, "INVESTED")
+        _, self._positions = _stat(2, "POSITIONS")
+        _, self._book = _stat(3, "BOOK")
+        self._book.configure(text=book_id)
+
+        self.sleeve = SleeveMixCard(self)
+        self.sleeve.pack(fill="x", padx=10, pady=(4, 12))
+        try:
+            self.sleeve.configure(fg_color="transparent", border_width=0)
+        except Exception:
+            pass
+
+        self.metric_cards = {
+            "equity": _LabelMetric(self._equity),
+            "cash": self,
+            "invested": _LabelMetric(self._invested),
+            "positions": _LabelMetric(self._positions),
+            "pnl": _LabelMetric(self._today),
+            "market": _LabelMetric(self._today),
+        }
+
+    def set(self, text: str, color: str | None = None) -> None:
+        """Cash metric adapter: '$12,097 (12%)'."""
+        raw = str(text)
+        main, sub = raw, ""
+        if "(" in raw and ")" in raw:
+            main = raw.split("(", 1)[0].strip()
+            sub = raw[raw.find("(") :].strip()
+        self._cash.configure(text=main, text_color=color or COLORS["text"])
+        self._cash_sub.configure(text=sub)
+
+    def set_today(self, today_pnl: float, equity: float) -> None:
+        if equity <= 0:
+            self._today.configure(text="")
+            return
+        pct = 100.0 * today_pnl / equity
+        color = COLORS["green"] if today_pnl >= 0 else COLORS["red"]
+        self._today.configure(
+            text=f"{pct:+.2f}% today   ·   ${today_pnl:+,.2f}",
+            text_color=color,
+        )
+
+    def _pick(self, book_id: str) -> None:
+        if callable(self._on_select):
+            self._on_select(book_id)
+
+    def set_book(self, book_id: str) -> None:
+        meta = {bid: (label, hint) for bid, label, hint in _DISPLAY_BOOKS}
+        label, hint = meta.get(book_id, (book_id, book_id))
+        paper = _book_is_paper(book_id)
+        self._title.configure(text=f"{label} book")
+        self._mix_hint.configure(text=hint)
+        for bid, btn in self._book_btns.items():
+            if bid == book_id:
+                if paper:
+                    btn.configure(fg_color="#2f6b2a", text_color="#f4f4f0")
+                else:
+                    btn.configure(fg_color="#8a3a3a", text_color="#f4f4f0")
+            else:
+                btn.configure(fg_color="transparent", text_color=COLORS["muted"])
+        if hasattr(self, "_book"):
+            self._book.configure(text=book_id)
 
 
 class DataTable(ctk.CTkFrame):
@@ -2243,6 +2467,7 @@ class DataTable(ctk.CTkFrame):
         # ttk only auto-builds Treeview layouts when the style name ends with ".Treeview".
         style_name = "Dash.Large.Treeview" if large else "Dash.Treeview"
         self._fit = fit
+        self._large = bool(large)
         self._min_rows = 1
         self._max_rows = int(max_rows or height)
 
@@ -2398,6 +2623,17 @@ class DataTable(ctk.CTkFrame):
         self._tree.bind("<Control-c>", self._copy_selection)
         self._tree.bind("<Control-C>", self._copy_selection)
         self._tree.bind("<Button-3>", self._on_tree_right_click)
+        self.bind("<Configure>", self._fit_tree_to_frame)
+
+    def _fit_tree_to_frame(self, event=None) -> None:
+        """Treeview height is in rows; grow it so the Positions list fills leftover pixels."""
+        h = int(self.winfo_height() or 0)
+        if h < 80:
+            return
+        row_h = 34 if self._large else 26
+        rows = max(8, (h - 16) // row_h)
+        if str(self._tree.cget("height")) != str(rows):
+            self._tree.configure(height=rows)
 
     def clear(self) -> None:
         for item in self._tree.get_children():
@@ -3022,16 +3258,23 @@ class TradingDashboardApp(ctk.CTk):
         *,
         on_logout=None,
         auto_start_bot: bool = False,
+        paper_book: bool = False,
     ) -> None:
         super().__init__()
         self._username = username
         self._on_logout = on_logout
         self._auto_start_bot = auto_start_bot
+        self._paper_book = bool(paper_book)
         migrate_user_to_books(username)
-        self._book_id = book_id or get_last_book_id()
-        save_last_book_id(self._book_id)
+        if self._paper_book:
+            from modules.trading_books import PAPER_SOT_BOOK_ID
+
+            self._book_id = PAPER_SOT_BOOK_ID
+        else:
+            self._book_id = book_id or get_last_book_id()
+            save_last_book_id(self._book_id)
         self._apply_user_paths(username, self._book_id)
-        self.title(f"PythonTrading — {book_label(self._book_id)}")
+        self.title("Paper book" if self._paper_book else f"PythonTrading — {book_label(self._book_id)}")
         self.geometry("1400x920")
         self.minsize(1200, 800)
         self.configure(fg_color=COLORS["bg"])
@@ -3063,28 +3306,28 @@ class TradingDashboardApp(ctk.CTk):
                 pass
 
         # Dirty INK poster chrome: cyan hairline + magenta atmosphere strip
-        accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
-        accent_bar.pack(fill="x")
-        accent_bar.pack_propagate(False)
-        mag_bar = ctk.CTkFrame(self, fg_color=COLORS["magenta"], height=2, corner_radius=0)
-        mag_bar.pack(fill="x")
-        mag_bar.pack_propagate(False)
+        self._accent_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=6, corner_radius=0)
+        self._accent_bar.pack(fill="x")
+        self._accent_bar.pack_propagate(False)
+        self._mag_bar = ctk.CTkFrame(self, fg_color=COLORS["magenta"], height=2, corner_radius=0)
+        self._mag_bar.pack(fill="x")
+        self._mag_bar.pack_propagate(False)
 
         # Header bar — sharper poster panel, cream wordmark + cyan LIVE/PAPER stamp
-        header_bar = ctk.CTkFrame(
+        self._header_bar = ctk.CTkFrame(
             self,
             fg_color=COLORS["surface"],
             corner_radius=6,
             border_width=1,
             border_color=COLORS["border"],
         )
-        header_bar.pack(fill="x", padx=10, pady=(10, 0))
+        self._header_bar.pack(fill="x", padx=10, pady=(10, 0))
 
-        tape = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=32, corner_radius=0)
-        tape.pack(fill="x", pady=(0, 0))
-        tape.pack_propagate(False)
+        self._tape_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=32, corner_radius=0)
+        self._tape_bar.pack(fill="x", pady=(0, 0))
+        self._tape_bar.pack_propagate(False)
         self._header_tape = ctk.CTkLabel(
-            tape,
+            self._tape_bar,
             text=header_tape_text(paper=_book_is_paper(self._book_id)),
             font=_ctk_font("tape"),
             text_color=COLORS["bg"],
@@ -3093,7 +3336,7 @@ class TradingDashboardApp(ctk.CTk):
 
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
-        header_inner = ctk.CTkFrame(header_bar, fg_color="transparent")
+        header_inner = ctk.CTkFrame(self._header_bar, fg_color="transparent")
         header_inner.pack(fill="x", padx=14, pady=(8, 8))
         header_inner.grid_columnconfigure(0, weight=1)
         header_inner.grid_columnconfigure(1, weight=0)
@@ -3127,13 +3370,14 @@ class TradingDashboardApp(ctk.CTk):
         self._header_kicker.grid(row=0, column=0, sticky="w")
         word_row = ctk.CTkFrame(title_block, fg_color="transparent")
         word_row.grid(row=1, column=0, sticky="w", pady=(2, 0))
-        ctk.CTkLabel(
+        self._wordmark = ctk.CTkLabel(
             word_row,
-            text="Stock-bot",
+            text="Paper book" if self._paper_book else "Stock-bot",
             font=_ctk_font("hero"),
             text_color=COLORS["text"],
             anchor="w",
-        ).pack(side="left")
+        )
+        self._wordmark.pack(side="left")
         self._header_stamp = ctk.CTkLabel(
             word_row,
             text=header_stamp_text(paper=_book_is_paper(self._book_id)),
@@ -3341,6 +3585,7 @@ class TradingDashboardApp(ctk.CTk):
         header_right.bind("<Configure>", _resize_header_labels)
 
         top_stack = ctk.CTkFrame(self, fg_color="transparent")
+        self._top_stack = top_stack
         top_stack.pack(fill="x", padx=14, pady=(0, 4))
 
         # Status pills: Live/Paper · Small Account · Regime · Bot
@@ -3405,10 +3650,15 @@ class TradingDashboardApp(ctk.CTk):
         stats_banner.pack(fill="x", pady=(0, 4))
         stats_inner = ctk.CTkFrame(stats_banner, fg_color="transparent")
         stats_inner.pack(fill="x", padx=8, pady=4)
-        self._stats_line1 = CopyableLines(stats_inner, height=1)
+        self._stats_line1 = CopyableLines(stats_inner, height=2)
         self._stats_line1.configure(text="Account Total: —")
-        self._stats_line2 = CopyableLines(stats_inner, height=1)
+        self._stats_line2 = CopyableLines(stats_inner, height=2)
         self._stats_line2.configure(text="Daily Breaker: —   ·   Insight: —")
+        self._status_row = status_row
+        self._stats_banner = stats_banner
+        if self._paper_book:
+            status_row.pack_forget()
+            stats_banner.pack_forget()
 
         self._small_panel = ctk.CTkFrame(top_stack, fg_color="transparent")
         self._small_body = ctk.CTkLabel(
@@ -3420,43 +3670,41 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._small_body.pack(anchor="w", padx=4)
 
-        # Compact metric strip — leftover vertical space belongs to Positions.
-        hero_row = ctk.CTkFrame(
-            top_stack,
-            fg_color=COLORS["card"],
-            corner_radius=8,
-            border_width=1,
-            border_color=COLORS["border"],
-            height=40,
-        )
-        hero_row.pack(fill="x", pady=(0, 4))
-        hero_row.pack_propagate(False)
-        hero_inner = ctk.CTkFrame(hero_row, fg_color="transparent")
-        hero_inner.pack(fill="both", expand=True, padx=8, pady=4)
-        self._metric_cards = {}
-        spark_wrap = ctk.CTkFrame(
-            hero_inner,
-            fg_color="transparent",
-            width=140,
-            height=32,
-        )
-        spark_wrap.pack(side="right", padx=(8, 0))
-        spark_wrap.pack_propagate(False)
-        self._metric_cards["equity"] = CopyableMetric(hero_inner, "Equity", width=14)
-        self._metric_cards["equity"].pack(side="left", padx=(0, 12))
-        self._metric_cards["cash"] = CopyableMetric(hero_inner, "Cash", width=16)
-        self._metric_cards["cash"].pack(side="left", padx=(0, 12))
-        self._metric_cards["invested"] = CopyableMetric(hero_inner, "Invested", width=8)
-        self._metric_cards["invested"].pack(side="left", padx=(0, 12))
-        self._metric_cards["positions"] = CopyableMetric(hero_inner, "Positions", width=6)
-        self._metric_cards["positions"].pack(side="left", padx=(0, 12))
-        self._metric_cards["pnl"] = CopyableMetric(hero_inner, "Open P&L", width=12)
-        self._metric_cards["pnl"].pack(side="left", padx=(0, 12))
-        self._metric_cards["market"] = CopyableMetric(hero_inner, "Market", width=14)
-        self._metric_cards["market"].pack(side="left", padx=(0, 8))
-        self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent", height=32)
-        self._spark_frame.pack(fill="both", expand=True)
-        self._spark_frame.pack_propagate(False)
+        if self._paper_book:
+            for bar in (self._accent_bar, self._mag_bar, self._tape_bar):
+                bar.pack_forget()
+            self._spark_frame = ctk.CTkFrame(top_stack, fg_color="transparent", width=1, height=1)
+            self._metric_cards = {}
+            self._paper_panel = None
+        else:
+            hero_row = ctk.CTkFrame(
+                top_stack,
+                fg_color=COLORS["card"],
+                corner_radius=8,
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            hero_row.pack(fill="x", pady=(0, 4))
+            hero_inner = ctk.CTkFrame(hero_row, fg_color="transparent")
+            hero_inner.pack(fill="x", padx=8, pady=8)
+            self._metric_cards = {}
+            keys = (
+                ("equity", "Equity", 16),
+                ("cash", "Cash", 18),
+                ("invested", "Invested", 12),
+                ("positions", "Positions", 10),
+                ("pnl", "Open P&L", 16),
+                ("market", "Market", 16),
+            )
+            for col, (key, title, width) in enumerate(keys):
+                hero_inner.grid_columnconfigure(col, weight=1, minsize=160)
+                self._metric_cards[key] = CopyableMetric(hero_inner, title, width=width)
+                self._metric_cards[key].grid(row=0, column=col, sticky="nsew", padx=4, pady=2)
+            spark_wrap = ctk.CTkFrame(hero_inner, fg_color="transparent", width=140, height=72)
+            spark_wrap.grid(row=0, column=len(keys), sticky="nsew", padx=(8, 0))
+            spark_wrap.grid_propagate(False)
+            self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent")
+            self._spark_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
 
         # Main tabbed content — positions, overview, trades, wisdom, charts
         self._tabs = ctk.CTkTabview(
@@ -3486,8 +3734,18 @@ class TradingDashboardApp(ctk.CTk):
             self._tab_positions.configure(fg_color=COLORS["bg"])
         except Exception:
             pass
+        self._tab_positions.grid_columnconfigure(0, weight=1)
+        self._tab_positions.grid_rowconfigure(2, weight=1)
+        if self._paper_book:
+            self._paper_panel = PaperBookPanel(self._tab_positions, book_id=self._book_id)
+            self._paper_panel.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
+            self._metric_cards = self._paper_panel.metric_cards
+            self._sleeve_mix = self._paper_panel.sleeve
         pos_head = ctk.CTkFrame(self._tab_positions, fg_color="transparent")
-        pos_head.pack(fill="x", padx=12, pady=(10, 4))
+        if self._paper_book:
+            pos_head.grid(row=1, column=0, sticky="ew", padx=12, pady=(4, 4))
+        else:
+            pos_head.pack(fill="x", padx=12, pady=(10, 4))
         ctk.CTkLabel(
             pos_head,
             text="Open Positions",
@@ -3500,8 +3758,9 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("caption"),
             text_color=COLORS["muted"],
         ).pack(side="left", padx=(12, 0))
-        self._sleeve_mix = SleeveMixCard(self._tab_positions)
-        self._sleeve_mix.pack(fill="x", padx=10, pady=(0, 6))
+        if not self._paper_book:
+            self._sleeve_mix = SleeveMixCard(self._tab_positions)
+            self._sleeve_mix.pack(fill="x", padx=10, pady=(0, 6))
         self._pos_total = ctk.CTkLabel(
             pos_head,
             text="",
@@ -3540,7 +3799,10 @@ class TradingDashboardApp(ctk.CTk):
             height=18,
             large=True,
         )
-        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+        if self._paper_book:
+            self._positions_table.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 8))
+        else:
+            self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 6))
         self._positions_empty_label = ctk.CTkLabel(
             self._tab_positions,
             text="No open positions\nCash idle until the next rebalance cycle.",
@@ -3557,7 +3819,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._insider_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._insider_section.pack(fill="x", padx=10, pady=(0, 3))
         insider_head = ctk.CTkFrame(self._insider_section, fg_color="transparent")
         insider_head.pack(fill="x", padx=8, pady=(2, 1))
         self._insider_toggle_btn = ctk.CTkButton(
@@ -3607,7 +3870,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
         rvol_head = ctk.CTkFrame(self._rvol_section, fg_color="transparent")
         rvol_head.pack(fill="x", padx=8, pady=(2, 1))
         self._rvol_toggle_btn = ctk.CTkButton(
@@ -3657,7 +3921,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
         orb_mom_head = ctk.CTkFrame(self._orb_mom_section, fg_color="transparent")
         orb_mom_head.pack(fill="x", padx=8, pady=(2, 1))
         self._orb_mom_toggle_btn = ctk.CTkButton(
@@ -3707,7 +3972,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
         sector_rot_head = ctk.CTkFrame(self._sector_rot_section, fg_color="transparent")
         sector_rot_head.pack(fill="x", padx=8, pady=(2, 1))
         self._sector_rot_toggle_btn = ctk.CTkButton(
@@ -3757,7 +4023,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
         vol_bo_head = ctk.CTkFrame(self._vol_bo_section, fg_color="transparent")
         vol_bo_head.pack(fill="x", padx=8, pady=(2, 1))
         self._vol_bo_toggle_btn = ctk.CTkButton(
@@ -3807,7 +4074,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
         strategy_head = ctk.CTkFrame(self._strategy_section, fg_color="transparent")
         strategy_head.pack(fill="x", padx=8, pady=(2, 1))
         self._strategy_toggle_btn = ctk.CTkButton(
@@ -3857,7 +4125,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
         sharpe_head = ctk.CTkFrame(self._sharpe_section, fg_color="transparent")
         sharpe_head.pack(fill="x", padx=8, pady=(2, 1))
         self._sharpe_toggle_btn = ctk.CTkButton(
@@ -3916,7 +4185,8 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._short_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._short_section.pack(fill="x", padx=10, pady=(0, 3))
         short_head = ctk.CTkFrame(self._short_section, fg_color="transparent")
         short_head.pack(fill="x", padx=8, pady=(2, 1))
         self._short_toggle_btn = ctk.CTkButton(
@@ -3974,7 +4244,8 @@ class TradingDashboardApp(ctk.CTk):
             border_color=COLORS["border"],
             height=28,
         )
-        self._scanners_bar.pack(fill="x", padx=10, pady=(0, 6))
+        if not self._paper_book:
+            self._scanners_bar.pack(fill="x", padx=10, pady=(0, 6))
         self._scanners_bar.pack_propagate(False)
         self._scanners_shown = False
         self._scanners_toggle = ctk.CTkButton(
@@ -4030,9 +4301,9 @@ class TradingDashboardApp(ctk.CTk):
         self._active_tab = "Positions"
 
         # Footer — charts/tray plus always-visible Log out / Close
-        footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.pack(fill="x", padx=14, pady=(0, 10))
-        footer_inner = ctk.CTkFrame(footer, fg_color="transparent")
+        self._footer = ctk.CTkFrame(self, fg_color="transparent")
+        self._footer.pack(fill="x", padx=14, pady=(0, 10))
+        footer_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
         footer_inner.pack(fill="x")
         self._charts_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
@@ -4090,6 +4361,9 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["muted"],
         )
         self._status_label.pack(side="right")
+
+        if self._paper_book:
+            self._show_paper_book_page()
 
         self._tick_clock()
         self._start_clock()
@@ -4262,7 +4536,25 @@ class TradingDashboardApp(ctk.CTk):
 
         threading.Thread(target=_worker, daemon=True, name="dashboard-refresh-bot").start()
 
+    def _on_display_book(self, book_id: str) -> None:
+        """Switch Live / Paper aggressive / Paper 2 in the display. Does not start or stop bots."""
+        if book_id == self._book_id:
+            return
+        if not book_enabled(book_id):
+            return
+        self._book_id = book_id
+        self._apply_user_paths(self._username, book_id)
+        self.title(f"PythonTrading — {book_label(book_id)}")
+        if getattr(self, "_paper_panel", None) is not None:
+            self._paper_panel.set_book(book_id)
+        self._last_positions_df = None
+        self._last_positions_fp = None
+        self.refresh_data(force_positions=True)
+
     def _switch_book(self, book_id: str) -> None:
+        if getattr(self, "_paper_book", False):
+            self._on_display_book(book_id)
+            return
         if book_id == self._book_id:
             return
         if not book_enabled(book_id):
@@ -4580,7 +4872,8 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._rvol_section.pack_forget()
             return
-        self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._rvol_table.clear()
             self._rvol_status.configure(text=err[:120], text_color=COLORS["amber"])
@@ -4623,7 +4916,8 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._orb_mom_section.pack_forget()
             return
-        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
         live = " · LIVE opt-in" if config.orb_momentum_live_sleeve_enabled() else " · paper"
         if err:
             self._orb_mom_table.clear()
@@ -4659,7 +4953,8 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._sector_rot_section.pack_forget()
             return
-        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
         live = (
             " · LIVE opt-in"
             if config.sector_rotation_live_sleeve_enabled()
@@ -4699,7 +4994,8 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._vol_bo_section.pack_forget()
             return
-        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._vol_bo_table.clear()
             self._vol_bo_status.configure(text=err[:140], text_color=COLORS["amber"])
@@ -4735,7 +5031,8 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._strategy_section.pack_forget()
             return
-        self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
         status_base = "Rolling 30d · Excellent/Good/Fair/Weak ratings"
         if mtf_summary:
             status_base = f"{status_base} · {mtf_summary}"
@@ -4779,7 +5076,8 @@ class TradingDashboardApp(ctk.CTk):
         err: str | None,
     ) -> None:
         self._sharpe_empty_label.place_forget()
-        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._sharpe_table.clear()
             self._sharpe_summary.configure(text="")
@@ -4860,7 +5158,8 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._short_section.pack_forget()
             return
-        self._short_section.pack(fill="x", padx=10, pady=(0, 3))
+        if not self._paper_book:
+            self._short_section.pack(fill="x", padx=10, pady=(0, 3))
         if err:
             self._short_table.clear()
             self._short_status.configure(text=err[:120], text_color=COLORS["amber"])
@@ -4920,6 +5219,8 @@ class TradingDashboardApp(ctk.CTk):
             self._scanners_toggle.configure(text="▶ Scanners")
 
     def _toggle_scanner_windows(self) -> None:
+        if getattr(self, "_paper_book", False):
+            return
         self._scanners_shown = not self._scanners_shown
         if self._scanners_shown:
             for sec in self._aux_sections:
@@ -5280,6 +5581,84 @@ class TradingDashboardApp(ctk.CTk):
         )
         self._pill_entry_gates.pack(side="left", padx=(0, 8), before=self._pill_bot)
 
+    def _show_paper_book_page(self) -> None:
+        """Book display + Dirty INK tape. No Stock-bot ☰ / tabs."""
+        for w in (
+            self._header_bar,
+            self._top_stack,
+            self._tabs,
+            self._footer,
+            self._mag_bar,
+        ):
+            try:
+                w.pack_forget()
+            except Exception:
+                pass
+        try:
+            self._accent_bar.pack(fill="x")
+            self._accent_bar.pack_propagate(False)
+            self._tape_bar.pack(fill="x")
+            self._tape_bar.pack_propagate(False)
+        except Exception:
+            pass
+        shell = ctk.CTkFrame(self, fg_color=COLORS["bg"])
+        shell.pack(fill="both", expand=True, padx=24, pady=16)
+        shell.grid_columnconfigure(0, weight=1)
+        shell.grid_rowconfigure(1, weight=1)
+        try:
+            self._paper_panel.destroy()
+        except Exception:
+            pass
+        try:
+            self._positions_table.destroy()
+        except Exception:
+            pass
+        self._paper_panel = PaperBookPanel(
+            shell,
+            book_id=self._book_id,
+            on_select=self._on_display_book,
+        )
+        self._paper_panel.grid(row=0, column=0, sticky="ew")
+        self._metric_cards = self._paper_panel.metric_cards
+        self._sleeve_mix = self._paper_panel.sleeve
+        self._positions_table = DataTable(
+            shell,
+            ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED"],
+            height=22,
+            large=True,
+        )
+        self._positions_table.grid(row=1, column=0, sticky="nsew", pady=(10, 8))
+        self._positions_empty_label = ctk.CTkLabel(
+            self._positions_table,
+            text="No open positions",
+            font=_ctk_font("body"),
+            text_color=COLORS["muted"],
+        )
+        bar = ctk.CTkFrame(shell, fg_color="transparent")
+        bar.grid(row=2, column=0, sticky="ew")
+        ctk.CTkButton(
+            bar,
+            text="Refresh",
+            width=88,
+            height=28,
+            command=self._on_manual_refresh,
+            fg_color=COLORS["accent"],
+            hover_color=COLORS["accent_hover"],
+            text_color=COLORS["bg"],
+            font=_ctk_font("caption"),
+        ).pack(side="left")
+        ctk.CTkButton(
+            bar,
+            text="Close",
+            width=72,
+            height=28,
+            command=self._on_close,
+            fg_color=COLORS["surface2"],
+            hover_color=COLORS["card_hover"],
+            font=_ctk_font("caption"),
+        ).pack(side="right")
+        self._active_tab = "Positions"
+
     def _tick_clock(self) -> None:
         now = datetime.now()
         self._clock_label.configure(
@@ -5619,6 +5998,18 @@ class TradingDashboardApp(ctk.CTk):
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
         if getattr(self, "_sleeve_mix", None) is not None:
             self._sleeve_mix.set_mix(heartbeat, equity=equity, cash=cash)
+        if getattr(self, "_paper_panel", None) is not None:
+            today = 0.0
+            if heartbeat:
+                today = float(heartbeat.get("today_pnl") or 0)
+            if not today and positions_df is not None and not getattr(positions_df, "empty", True):
+                if "Day P&L" in positions_df.columns:
+                    try:
+                        today = float(positions_df["Day P&L"].sum())
+                    except Exception:
+                        today = 0.0
+            self._paper_panel.set_today(today, equity)
+            self._paper_panel._book.configure(text=self._book_id)
 
         small_acct = equity > 0 and config.is_small_account(equity)
         regime = "—"
@@ -5653,7 +6044,7 @@ class TradingDashboardApp(ctk.CTk):
         self._fill_positions(positions_df, pos_err, upl)
         self._fill_trades(snap.get("journal_df"))
 
-        if ENABLE_SPARKLINE:
+        if ENABLE_SPARKLINE and not self._paper_book:
             self._draw_sparkline()
 
     def _apply_refresh_extended(self, snap: dict) -> None:
@@ -6653,13 +7044,23 @@ def main() -> None:
         action="store_true",
         help="Start run_all.py after login (uses your portal account's keys)",
     )
+    parser.add_argument(
+        "--paper-book",
+        action="store_true",
+        help="Paper book display: big equity, sleeve mix, SYMBOL/SLEEVE/QTY/WT/VALUE/UNREALIZED",
+    )
     args = parser.parse_args()
     launch_bot_after_login = args.launch_bot
+    paper_book = args.paper_book
 
     def open_dashboard(username: str) -> None:
         migrate_user_to_books(username)
         book_id = get_last_book_id()
-        if launch_bot_after_login and has_alpaca_config(username, book_id):
+        if paper_book:
+            from modules.trading_books import PAPER_SOT_BOOK_ID
+
+            book_id = PAPER_SOT_BOOK_ID
+        if (not paper_book) and launch_bot_after_login and has_alpaca_config(username, book_id):
             ok, msg = start_bot(username, book_id)
             if not ok:
                 print(msg)
@@ -6669,6 +7070,7 @@ def main() -> None:
                 book_id,
                 on_logout=show_login,
                 auto_start_bot=launch_bot_after_login,
+                paper_book=paper_book,
             )
         except Exception as exc:
             import traceback

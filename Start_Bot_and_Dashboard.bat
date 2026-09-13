@@ -37,8 +37,12 @@ set "PYTHONTRADING_ROOT=%STOCK_BOT%"
 title PythonTrading - Starting...
 
 set "PY="
-REM Prefer repo-root .venv (full deps). stock-bot\.venv may be incomplete.
-if exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
+REM Prefer repo venv311 (this PC), then .venv.
+if exist "%REPO_ROOT%\venv311\Scripts\python.exe" (
+    set "PY=%REPO_ROOT%\venv311\Scripts\python.exe"
+) else if exist "%STOCK_BOT%\venv311\Scripts\python.exe" (
+    set "PY=%STOCK_BOT%\venv311\Scripts\python.exe"
+) else if exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
     set "PY=%REPO_ROOT%\.venv\Scripts\python.exe"
 ) else if exist "%STOCK_BOT%\.venv\Scripts\python.exe" (
     set "PY=%STOCK_BOT%\.venv\Scripts\python.exe"
