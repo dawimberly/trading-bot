@@ -46,6 +46,11 @@ class _SafeStream:
             return len(data) if data else 0
         try:
             return self._stream.write(data)
+        except UnicodeEncodeError:
+            raw = data if isinstance(data, str) else str(data)
+            enc = getattr(self._stream, "encoding", None) or "cp1252"
+            safe = raw.encode(enc, errors="replace").decode(enc, errors="replace")
+            return self._stream.write(safe)
         except (OSError, AttributeError) as exc:
             if isinstance(exc, OSError) and getattr(exc, "errno", None) != 22:
                 raise

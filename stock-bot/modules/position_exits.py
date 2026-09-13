@@ -143,10 +143,92 @@ def run_position_exits(
         meta = dict(meta_cache.get(symbol) or {})
 
         atr_stop_hit = False
-        stop_hit = pnl_pct <= -config.STOP_LOSS_PCT
+        lab = config.paper_lab_concentrated_enabled() and qty > 0 and not config.is_crypto(
+            symbol
+        )
+        disaster = config.paper_lab_disaster_pct() if lab else config.STOP_LOSS_PCT
+        stop_hit = pnl_pct <= -disaster
         plpc = getattr(pos, "unrealized_plpc", None)
-        if plpc is not None and float(plpc) <= -config.STOP_LOSS_PCT:
+        if plpc is not None and float(plpc) <= -disaster:
             stop_hit = True
+
+        if lab:
+            half_pct = config.paper_lab_half_gain_pct()
+            if not meta.get("lab_half_taken") and pnl_pct >= half_pct:
+                try:
+                    reduce_n = round(abs(qty) * current * 0.5, 2)
+                    order = executor.execute_reduce_notional(
+                        symbol,
+                        reduce_n,
+                        reason="lab_half_scale",
+                        sleeve="NYSE",
+                    )
+                    if order and executor.order_filled(order):
+                        meta["lab_half_taken"] = True
+                        meta_cache[symbol] = meta
+                        exits += 1
+                        risk_manager._log_event(
+                            f"LAB HALF: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
+                        )
+                        if journal:
+                            journal.log_exit(
+                                symbol,
+                                "sell",
+                                f"lab_half_scale {pnl_pct:.2%}",
+                                equity,
+                                journal_path=journal_path,
+                            )
+                except Exception as e:
+                    if journal:
+                        journal.log_event(
+                            "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                        )
+                continue
+            trail_hit = False
+            if meta.get("lab_half_taken"):
+                trail_hit = current <= peak * (1.0 - config.paper_lab_trail_pct())
+            hold_hit = (
+                age_bars is not None and age_bars >= config.paper_lab_max_hold_days()
+            )
+            if not (stop_hit or trail_hit or hold_hit):
+                continue
+            side = "sell"
+            try:
+                if stop_hit:
+                    exit_code = "lab_disaster"
+                    reason = f"lab_disaster {pnl_pct:.2%}"
+                elif trail_hit:
+                    exit_code = "lab_trail"
+                    reason = f"lab_trail {pnl_pct:.2%}"
+                else:
+                    exit_code = "lab_time"
+                    reason = f"lab_time {pnl_pct:.2%}"
+                order = executor.execute_full_exit(
+                    symbol, reason=exit_code, sleeve="NYSE"
+                )
+                if not executor.order_filled(order):
+                    continue
+                exits += 1
+                peak_cache.pop(symbol, None)
+                meta_cache.pop(symbol, None)
+                risk_manager._log_event(
+                    f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
+                )
+                if journal:
+                    journal.log_exit(
+                        symbol,
+                        side,
+                        reason,
+                        equity,
+                        journal_path=journal_path,
+                        exit_reason=exit_code,
+                    )
+            except Exception as e:
+                if journal:
+                    journal.log_event(
+                        "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                    )
+            continue
 
         smart_on = config.effective_smart_stops_enabled()
         if smart_on and qty > 0 and not config.is_crypto(symbol):

@@ -42,6 +42,8 @@ WISDOM_JOURNAL = PROJECT_ROOT / "wisdom_journal.csv"
 def _python() -> str:
     """Interpreter for run_all.py — prefer a venv that has project deps (dotenv)."""
     candidates = [
+        PROJECT_ROOT.parent / "venv311" / "Scripts" / "python.exe",
+        PROJECT_ROOT / "venv311" / "Scripts" / "python.exe",
         PROJECT_ROOT.parent / ".venv" / "Scripts" / "python.exe",
         PROJECT_ROOT / ".venv" / "Scripts" / "python.exe",
         PROJECT_ROOT.parent / ".venv" / "bin" / "python",
@@ -92,9 +94,12 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env = _bot_subprocess_env()
     bd = book_dir(username, book_id)
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
     env["PORTAL_MANAGED_BOT"] = "1"
+    env["TRADING_BOOK_ID"] = book_id
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
     env["WISDOM_SCORECARD_FILE"] = str(bd / "wisdom_scorecard.json")
@@ -110,6 +115,22 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
         from config import apply_realistic_research_env
 
         env = apply_realistic_research_env(env)
+        if book_id == "alpaca_paper":
+            env["PAPER_LAB_CONCENTRATED"] = "true"
+            env["PAPER_SMART_STOPS"] = "false"
+            env["MAX_ACTIVE_TICKERS"] = "4"
+            env["PAPER_MAX_POSITION_PCT"] = "0.25"
+            env["PER_NAME_MAX_PCT"] = "0.25"
+            env["STOP_LOSS_PCT"] = "0.08"
+            env["EXIT_OPTIMIZATION_ENABLED"] = "false"
+        elif book_id == "alpaca_paper_v2":
+            env["PAPER_MEDIUM_STRATEGY"] = "true"
+            env["MAX_ACTIVE_TICKERS"] = "15"
+            env["PAPER_POSITION_MAX_HOLD_BARS"] = "30"
+            env["EXIT_OPTIMIZATION_MAX_HOLD_BARS"] = "30"
+            env["EXIT_OPTIMIZATION_ENABLED"] = "false"
+            env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
+            env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
     else:
         env.pop("PAPER_CHASE_MODE", None)
         if book_id == "alpaca_live":

@@ -2247,7 +2247,7 @@ class _LabelMetric:
 
 
 _DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
-    ("alpaca_paper_v2", "Paper", "33/67 (target VTI 33% / NYSE 67%)"),
+    ("alpaca_paper_v2", "Paper", "Medium 33/67 (15 names, 30d hold)"),
     ("alpaca_paper", "Paper aggressive", "Paper aggressive"),
     ("alpaca_live", "Live", "Live Profile A — do not size options"),
 )

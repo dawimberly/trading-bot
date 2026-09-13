@@ -240,6 +240,12 @@ def main() -> None:
         f"{config.REALISTIC_RESEARCH_TAGLINE} | deep-history indicators-only"
     )
     print(f"Heartbeat: {env['HEARTBEAT_FILE']} | Journal: {env['PAPER_JOURNAL_CSV']}")
+    lab_line = config.format_paper_lab_banner()
+    if lab_line:
+        print(f"--- {lab_line} ---")
+    v2_line = config.format_paper_v2_calm_banner()
+    if v2_line:
+        print(f"--- {v2_line} ---")
     for line in config.paper_frequency_mode_lines():
         try:
             print(line)

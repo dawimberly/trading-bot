@@ -774,6 +774,8 @@ PAPER_MAX_POSITION_PCT = float(os.getenv("PAPER_MAX_POSITION_PCT", str(PER_NAME_
 CONCENTRATION_GUARD_ENABLED = _env_bool_first(
     "CONCENTRATION_GUARD_ENABLED", default="true"
 )
+# Only sell-down when excess is at least this fraction of equity (0 = min-notional clips).
+CONCENTRATION_TRIM_MIN_PCT = float(os.getenv("CONCENTRATION_TRIM_MIN_PCT", "0"))
 MAX_ACTIVE_TICKERS = int(os.getenv("MAX_ACTIVE_TICKERS", "25"))
 # Auto-dust cleaner: sell positions with market value below this (USD).
 AUTO_DUST_MAX_NOTIONAL = float(os.getenv("AUTO_DUST_MAX_NOTIONAL", "10"))
@@ -3070,6 +3072,8 @@ def effective_risk_per_trade(
 
 def effective_per_name_max_pct() -> float:
     """Strict per-name ceiling (default 8%)."""
+    if paper_lab_concentrated_enabled():
+        return float(os.getenv("PAPER_MAX_POSITION_PCT", "0.25"))
     return min(float(PER_NAME_MAX_PCT), float(PAPER_MAX_POSITION_PCT))
 
 
@@ -3078,8 +3082,18 @@ def effective_concentration_guard_enabled() -> bool:
     return bool(CONCENTRATION_GUARD_ENABLED)
 
 
+def effective_concentration_trim_min_notional(equity: float) -> float:
+    """Skip drip trims until excess is this large (USD)."""
+    pct = float(os.getenv("CONCENTRATION_TRIM_MIN_PCT", str(CONCENTRATION_TRIM_MIN_PCT)))
+    return max(0.0, float(equity or 0.0) * max(0.0, pct))
+
+
 def effective_max_active_tickers() -> int:
     """Max distinct non-core open tickers (default 25)."""
+    if paper_lab_concentrated_enabled():
+        return paper_lab_max_names()
+    if paper_medium_strategy_enabled():
+        return max(1, int(os.getenv("MAX_ACTIVE_TICKERS", "15")))
     return max(1, int(MAX_ACTIVE_TICKERS))
 
 
@@ -5629,11 +5643,68 @@ def paper_aggressive_context() -> bool:
     return PAPER_AGGRESSIVE_ENABLED and _paper_aggressive_ctx
 
 
+def trading_book_id() -> str:
+    return (os.getenv("TRADING_BOOK_ID") or os.getenv("BOOK_ID") or "").strip()
+
+
+def paper_lab_concentrated_enabled() -> bool:
+    """alpaca_paper lab only: 4 names, no ATR drip, scale-out + trail."""
+    if trading_book_id() != "alpaca_paper":
+        return False
+    return os.getenv("PAPER_LAB_CONCENTRATED", "false").lower() in ("1", "true", "yes")
+
+
+def paper_medium_strategy_enabled() -> bool:
+    """alpaca_paper_v2: 15 names, 30d hold, 2x ATR, no 1R, no micro-trims."""
+    if trading_book_id() != "alpaca_paper_v2":
+        return False
+    return os.getenv("PAPER_MEDIUM_STRATEGY", "false").lower() in ("1", "true", "yes")
+
+
+def paper_lab_max_names() -> int:
+    return max(1, int(os.getenv("PAPER_LAB_MAX_NAMES", "4")))
+
+
+def paper_lab_half_gain_pct() -> float:
+    return float(os.getenv("PAPER_LAB_HALF_GAIN_PCT", "0.12"))
+
+
+def paper_lab_trail_pct() -> float:
+    return float(os.getenv("PAPER_LAB_TRAIL_PCT", "0.08"))
+
+
+def paper_lab_disaster_pct() -> float:
+    return float(os.getenv("PAPER_LAB_DISASTER_PCT", "0.08"))
+
+
+def paper_lab_max_hold_days() -> int:
+    return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "10")))
+
+
 def research_mode_ready() -> bool:
     """Paper aggressive with stat arb sleeve (research / attribution stack)."""
     if not paper_aggressive_context():
         return False
     return effective_stat_arb_enabled()
+
+
+def format_paper_lab_banner() -> str | None:
+    if not paper_lab_concentrated_enabled():
+        return None
+    return (
+        "PAPER LAB ON (alpaca_paper only): 4 names ~25% | "
+        "no ATR/size-reduce | disaster -8% | 10d time | "
+        "half @ +12% then trail 8% off high | no same-day rebuy"
+    )
+
+
+def format_paper_v2_calm_banner() -> str | None:
+    if not paper_medium_strategy_enabled():
+        return None
+    return (
+        "PAPER MEDIUM (alpaca_paper_v2): 15 names | 30d hold | 2x ATR | "
+        "no 1R | no micro-trims | 33/67 VTI"
+    )
 
 
 def format_research_mode_banner() -> str | None:
@@ -6254,6 +6325,8 @@ def effective_multi_timeframe_enabled() -> bool:
 
 def effective_exit_optimization_enabled() -> bool:
     """Dynamic exits (partial, trail, time) — paper/research + Live Conservative lock."""
+    if paper_lab_concentrated_enabled():
+        return False
     if not EXIT_OPTIMIZATION_ENABLED:
         return False
     if live_conservative_lock_active():
@@ -7026,6 +7099,8 @@ def effective_strategy_rating_enabled() -> bool:
 
 def effective_smart_stops_enabled() -> bool:
     """Smart ATR stops with reeval — paper / Realistic Research; live opt-in."""
+    if paper_lab_concentrated_enabled():
+        return False
     if not PAPER_SMART_STOPS:
         return False
     if (

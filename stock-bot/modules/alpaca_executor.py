@@ -1,12 +1,15 @@
 """Canonical Alpaca paper-trading executor (notional orders, crypto formatting)."""
 
+import json
 import logging
 import math
 import time
 import os
+from pathlib import Path
 from types import SimpleNamespace
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, TypeVar
+from zoneinfo import ZoneInfo
 
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
@@ -30,6 +33,53 @@ T = TypeVar("T")
 # Session-level skip list for symbols Alpaca rejects as unknown/untradable (e.g. SKY-USD).
 _UNKNOWN_ASSETS: set[str] = set()
 _TRADABLE_ASSETS: set[str] = set()
+_ET = ZoneInfo("America/New_York")
+
+
+def _lab_sold_today_path() -> Path:
+    marker = os.getenv("PAPER_JOURNAL_CSV") or os.getenv("HEARTBEAT_FILE")
+    if marker:
+        return Path(marker).parent / "lab_sold_today.json"
+    root = os.getenv("PYTHONTRADING_ROOT") or "."
+    return Path(root) / "data" / "lab_sold_today.json"
+
+
+def _et_today() -> str:
+    return datetime.now(timezone.utc).astimezone(_ET).date().isoformat()
+
+
+def _lab_sold_today(symbol: str) -> bool:
+    path = _lab_sold_today_path()
+    if not path.is_file():
+        return False
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if str(payload.get("date") or "") != _et_today():
+        return False
+    sold = payload.get("symbols") or []
+    return config.normalize_symbol(symbol) in {config.normalize_symbol(s) for s in sold}
+
+
+def _record_lab_sold_today(symbol: str) -> None:
+    path = _lab_sold_today_path()
+    today = _et_today()
+    payload = {"date": today, "symbols": []}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if str(loaded.get("date") or "") == today:
+                payload = loaded
+        except (OSError, json.JSONDecodeError):
+            pass
+    symbols = [config.normalize_symbol(s) for s in (payload.get("symbols") or [])]
+    sym = config.normalize_symbol(symbol)
+    if sym not in symbols:
+        symbols.append(sym)
+    payload = {"date": today, "symbols": symbols}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 class AlpacaExecutor:
@@ -262,6 +312,8 @@ class AlpacaExecutor:
                     pass
                 raise
         self._invalidate_cache()
+        if config.paper_lab_concentrated_enabled() and str(side).lower() == "sell":
+            _record_lab_sold_today(symbol)
         self._track_order(
             submitted,
             symbol=symbol,
@@ -1468,6 +1520,13 @@ class AlpacaExecutor:
         if target_notional is None:
             return None
         if side_lower == "buy":
+            if config.paper_lab_concentrated_enabled() and _lab_sold_today(symbol):
+                logger.info(
+                    "execute_order blocked: lab same-day rebuy",
+                    extra={"symbol": symbol},
+                )
+                log_event("lab_same_day_rebuy_block", symbol=symbol)
+                return None
             if self._blocks_new_active_ticker(symbol):
                 logger.info(
                     "execute_order blocked: max active tickers",
@@ -1713,7 +1772,8 @@ class AlpacaExecutor:
                 continue
             pos_val = self._position_market_value(pos)
             over = pos_val - cap_val
-            if over < min_n:
+            min_trim = max(min_n, config.effective_concentration_trim_min_notional(equity))
+            if over < min_trim:
                 continue
             excess.append(
                 {

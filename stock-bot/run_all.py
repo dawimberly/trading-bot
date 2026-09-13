@@ -2144,6 +2144,12 @@ def _print_startup_banner(startup_equity: float | None = None):
         research_line = config.format_research_mode_banner()
         if research_line:
             print(f"--- {research_line} ---")
+        lab_line = config.format_paper_lab_banner()
+        if lab_line:
+            print(f"--- {lab_line} ---")
+        v2_line = config.format_paper_v2_calm_banner()
+        if v2_line:
+            print(f"--- {v2_line} ---")
         try:
             from modules.pipeline_strategies import load_pipeline_data
             from modules.market_context import current_regime_from_data
