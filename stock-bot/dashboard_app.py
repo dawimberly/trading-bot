@@ -1719,26 +1719,57 @@ def _load_daily_closes(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | No
     return out if not out.empty else None
 
 
-def _market_open_countdown(heartbeat: dict | None) -> str:
-    scan = (heartbeat or {}).get("scan_schedule") or {}
-    if scan.get("market_open"):
-        return "Open"
-    session_open = scan.get("session_open") or scan.get("orders_start")
-    if not session_open:
-        return "—"
+def _secs_phrase(secs: float) -> str:
+    if secs <= 0:
+        return "Soon"
+    hours = int(secs // 3600)
+    mins = int((secs % 3600) // 60)
+    if hours >= 24:
+        return f"{hours // 24}d {hours % 24}h"
+    if hours <= 0:
+        return f"{max(1, mins)}m"
+    return f"{hours}h {mins}m"
+
+
+def _countdown_from_iso(raw) -> str | None:
+    if not raw:
+        return None
     try:
-        open_dt = pd.Timestamp(session_open)
-        now = pd.Timestamp.now(tz=open_dt.tz)
-        secs = (open_dt - now).total_seconds()
-        if secs <= 0:
-            return "Soon"
-        hours = int(secs // 3600)
-        mins = int((secs % 3600) // 60)
-        if hours >= 24:
-            return f"{hours // 24}d {hours % 24}h"
-        return f"{hours}h {mins}m"
+        target = pd.Timestamp(raw)
+        now = pd.Timestamp.now(tz=target.tz) if target.tzinfo else pd.Timestamp.now()
+        return _secs_phrase((target - now).total_seconds())
     except Exception:
-        return str(session_open)[:16]
+        return None
+
+
+def _market_open_countdown(heartbeat: dict | None) -> str:
+    """Session clock for the MARKET tile: Open, or time until the next open."""
+    hb = heartbeat or {}
+    scan = hb.get("scan_schedule") if isinstance(hb.get("scan_schedule"), dict) else {}
+    is_open = scan.get("market_open")
+    if is_open is None:
+        is_open = hb.get("equity_session_open")
+    if is_open:
+        return "Open"
+    until_open = _countdown_from_iso(scan.get("session_open") or scan.get("orders_start"))
+    if until_open:
+        return until_open
+    try:
+        from modules.market_hours import nyse_rth_status
+
+        status = nyse_rth_status()
+    except Exception:
+        return "Closed"
+    if status.get("is_open"):
+        return "Open"
+    nxt = status.get("next_open")
+    if nxt is None:
+        return "Closed"
+    try:
+        now = pd.Timestamp.now(tz=nxt.tzinfo)
+        return _secs_phrase((pd.Timestamp(nxt) - now).total_seconds())
+    except Exception:
+        return "Closed"
 
 
 def _regime_color(regime: str) -> str:
@@ -2330,72 +2361,69 @@ class PaperBookPanel(ctk.CTkFrame):
             text_color=COLORS["muted"],
             anchor="w",
         ).pack(anchor="w")
-        num_row = ctk.CTkFrame(eq_row, fg_color="transparent")
-        num_row.pack(fill="x")
         self._equity = ctk.CTkLabel(
-            num_row,
+            eq_row,
             text="$—",
             font=ctk.CTkFont(family="Georgia", size=44, weight="bold"),
             text_color=COLORS["text"],
             anchor="w",
         )
-        self._equity.pack(side="left")
-        today_box = ctk.CTkFrame(num_row, fg_color="transparent")
-        today_box.pack(side="right", padx=(12, 0))
-        ctk.CTkLabel(
-            today_box,
-            text="DAILY P&L",
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-            anchor="e",
-        ).pack(anchor="e")
-        self._today = ctk.CTkLabel(
-            today_box,
-            text="—",
-            font=ctk.CTkFont(family="Segoe UI", size=16),
-            text_color=COLORS["green"],
-            anchor="e",
-        )
-        self._today.pack(anchor="e")
+        self._equity.pack(anchor="w")
 
         stats = ctk.CTkFrame(card, fg_color="transparent")
-        stats.pack(fill="x", padx=22, pady=(16, 18))
-        for col in range(5):
+        stats.pack(fill="x", padx=18, pady=(14, 16))
+        for col in range(6):
             stats.grid_columnconfigure(col, weight=1, uniform="stat")
 
-        def _stat(col: int, caption: str) -> tuple[ctk.CTkFrame, ctk.CTkLabel]:
-            box = ctk.CTkFrame(stats, fg_color="transparent")
-            box.grid(row=0, column=col, sticky="nw", padx=(0, 12))
+        def _stat_window(
+            col: int, caption: str, *, extra_sub: bool = False
+        ) -> tuple[ctk.CTkFrame, ctk.CTkLabel, ctk.CTkLabel | None]:
+            box = ctk.CTkFrame(
+                stats,
+                fg_color=COLORS["surface2"],
+                corner_radius=8,
+                border_width=1,
+                border_color=COLORS["border"],
+            )
+            box.grid(row=0, column=col, sticky="nsew", padx=4, pady=2)
+            inner = ctk.CTkFrame(box, fg_color="transparent")
+            inner.pack(fill="both", expand=True, padx=10, pady=8)
             ctk.CTkLabel(
-                box,
+                inner,
                 text=caption,
                 font=_ctk_font("caption"),
                 text_color=COLORS["muted"],
                 anchor="w",
             ).pack(anchor="w")
             val = ctk.CTkLabel(
-                box,
+                inner,
                 text="—",
-                font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=18, weight="bold"),
                 text_color=COLORS["text"],
                 anchor="w",
+                wraplength=160,
+                justify="left",
             )
             val.pack(anchor="w")
-            return box, val
+            sub = None
+            if extra_sub:
+                sub = ctk.CTkLabel(
+                    inner,
+                    text="",
+                    font=_ctk_font("caption"),
+                    text_color=COLORS["muted"],
+                    anchor="w",
+                )
+                sub.pack(anchor="w")
+            return box, val, sub
 
-        cash_box, self._cash = _stat(0, "CASH")
-        self._cash_sub = ctk.CTkLabel(
-            cash_box,
-            text="",
-            font=_ctk_font("caption"),
-            text_color=COLORS["muted"],
-            anchor="w",
-        )
-        self._cash_sub.pack(anchor="w")
-        _, self._invested = _stat(1, "INVESTED")
-        _, self._positions = _stat(2, "POSITIONS")
-        _, self._unrealized = _stat(3, "UNREALIZED")
-        _, self._market = _stat(4, "MARKET")
+        _, self._cash, self._cash_sub = _stat_window(0, "CASH", extra_sub=True)
+        _, self._invested, _ = _stat_window(1, "INVESTED")
+        _, self._positions, _ = _stat_window(2, "POSITIONS")
+        _, self._today, self._today_sub = _stat_window(3, "DAILY P&L", extra_sub=True)
+        _, self._unrealized, _ = _stat_window(4, "UNREALIZED")
+        _, self._market, _ = _stat_window(5, "MARKET")
+        self._market.configure(text=_market_open_countdown(None))
 
         self.sleeve = SleeveMixCard(self)
         self.sleeve.pack(fill="x", pady=(16, 0))
@@ -2422,13 +2450,12 @@ class PaperBookPanel(ctk.CTkFrame):
     def set_today(self, today_pnl: float, equity: float) -> None:
         if equity <= 0:
             self._today.configure(text="—", text_color=COLORS["muted"])
+            self._today_sub.configure(text="")
             return
         pct = 100.0 * today_pnl / equity
         color = COLORS["green"] if today_pnl >= 0 else COLORS["red"]
-        self._today.configure(
-            text=f"{pct:+.2f}%   ·   ${today_pnl:+,.2f}",
-            text_color=color,
-        )
+        self._today.configure(text=f"${today_pnl:+,.2f}", text_color=color)
+        self._today_sub.configure(text=f"{pct:+.2f}%", text_color=color)
 
     def _pick(self, book_id: str) -> None:
         if callable(self._on_select):
@@ -3736,7 +3763,6 @@ class TradingDashboardApp(ctk.CTk):
             self._tab_positions.configure(fg_color=COLORS["bg"])
         except Exception:
             pass
-        self._tab_positions.grid_columnconfigure(0, weight=1)
         if self._paper_book:
             self._paper_panel = PaperBookPanel(
                 self._tab_positions,
