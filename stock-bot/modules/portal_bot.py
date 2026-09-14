@@ -92,12 +92,15 @@ def _bot_subprocess_env(base: dict[str, str] | None = None) -> dict[str, str]:
 def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]:
     migrate_user_to_books(username)
     env = _bot_subprocess_env()
+    from config import isolate_book_alpaca_env
+
     bd = book_dir(username, book_id)
+    book_env_path = ensure_book_env(username, book_id)
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
-    env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
+    env["PYTHONTRADING_ENV_FILE"] = str(book_env_path)
     env["PORTAL_MANAGED_BOT"] = "1"
     env["TRADING_BOOK_ID"] = book_id
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
@@ -140,7 +143,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             from config import clear_paper_research_env
 
             env = clear_paper_research_env(env)
-    return env
+    return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 
 def _child_pids(pid: int) -> list[int]:

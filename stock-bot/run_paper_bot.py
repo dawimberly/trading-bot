@@ -151,7 +151,10 @@ def main() -> None:
     from modules.logging_utils import setup_project_logging
 
     setup_project_logging()
-    load_dotenv(find_dotenv())
+    # Portal-managed books already pointed PYTHONTRADING_ENV_FILE at the book
+    # .env. find_dotenv() would load stock-bot/.env and fill PAPER_APCA_* (Lab).
+    if not os.getenv("PYTHONTRADING_ENV_FILE", "").strip():
+        load_dotenv(find_dotenv())
 
     env = os.environ.copy()
     env = _apply_paper_research_env(env)
@@ -169,7 +172,14 @@ def main() -> None:
 
     env.setdefault("HEARTBEAT_FILE", "paper_chase_heartbeat.json")
     env.setdefault("PAPER_JOURNAL_CSV", "paper_chase_journal.csv")
-    if env.get("PAPER_APCA_API_KEY_ID") and env.get("PAPER_APCA_API_SECRET_KEY"):
+    env = config.isolate_book_alpaca_env(env)
+    # Hand-launched (no book id): keep the old research-key opt-in.
+    if (
+        not env.get("TRADING_BOOK_ID")
+        and not env.get("PORTAL_MANAGED_BOT")
+        and env.get("PAPER_APCA_API_KEY_ID")
+        and env.get("PAPER_APCA_API_SECRET_KEY")
+    ):
         env.setdefault("PAPER_CHASE_USE_RESEARCH_KEYS", "yes")
 
     crypto_enabled = _crypto_vol_enabled(env)

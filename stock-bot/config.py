@@ -9,7 +9,7 @@ import sys
 import warnings
 from pathlib import Path
 
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv, find_dotenv, dotenv_values
 
 _CONFIG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = _CONFIG_DIR
@@ -67,6 +67,7 @@ def _load_project_dotenv() -> None:
         if stock_env.is_file():
             load_dotenv(stock_env, override=False)
             _append_loaded_env(loaded, stock_env)
+        isolate_book_alpaca_os_environ(Path(env_override))
         _normalize_alpaca_env_keys()
         if loaded:
             os.environ["PYTHONTRADING_LOADED_ENV"] = ";".join(loaded)
@@ -155,6 +156,27 @@ _ALPACA_ENV_KEYS = (
     "ALLOW_LIVE_TRADING",
 )
 
+# Keys that must come from the active book .env, never from a sibling book
+# or stock-bot/.env PAPER_APCA_* (that pair is the Lab $94k blotter).
+_BOOK_ALPACA_CREDENTIAL_KEYS = (
+    "APCA_API_KEY_ID",
+    "APCA_API_SECRET_KEY",
+    "ALPACA_API_KEY",
+    "ALPACA_SECRET_KEY",
+    "PAPER_APCA_API_KEY_ID",
+    "PAPER_APCA_API_SECRET_KEY",
+    "SOCIAL_APCA_API_KEY_ID",
+    "SOCIAL_APCA_API_SECRET_KEY",
+    "APCA_API_BASE_URL",
+)
+
+_ROOT_ONLY_PAPER_KEYS = (
+    "PAPER_APCA_API_KEY_ID",
+    "PAPER_APCA_API_SECRET_KEY",
+    "SOCIAL_APCA_API_KEY_ID",
+    "SOCIAL_APCA_API_SECRET_KEY",
+)
+
 
 def _strip_env(val: str | None) -> str:
     """Strip whitespace, optional quotes, and UTF-8 BOM artifacts from env values."""
@@ -175,6 +197,70 @@ def _normalize_alpaca_env_keys() -> None:
         cleaned = _strip_env(raw)
         if cleaned != raw:
             os.environ[key] = cleaned
+
+
+def _book_file_credential_map(book_env_path: Path | str | None) -> dict[str, str]:
+    path = Path(book_env_path) if book_env_path else Path()
+    if not path.is_file():
+        return {}
+    vals = dotenv_values(path)
+    out: dict[str, str] = {}
+    for key in _BOOK_ALPACA_CREDENTIAL_KEYS:
+        raw = vals.get(key)
+        if raw is None:
+            continue
+        cleaned = _strip_env(str(raw))
+        if cleaned:
+            out[key] = cleaned
+    return out
+
+
+def isolate_book_alpaca_env(
+    env: dict[str, str],
+    *,
+    book_env_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Portal/paper books trade APCA_* from their own .env, never root PAPER_APCA_*.
+
+    stock-bot/.env PAPER_APCA_* is the Lab blotter. run_paper_bot used to
+    set PAPER_CHASE_USE_RESEARCH_KEYS when those were inherited, so a v2
+    process with Medium flags traded the $94k Lab account.
+    """
+    out = dict(env)
+    book_id = (out.get("TRADING_BOOK_ID") or "").strip()
+    portal = (out.get("PORTAL_MANAGED_BOT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    path = book_env_path or out.get("PYTHONTRADING_ENV_FILE") or ""
+    if not (portal or book_id or path):
+        return out
+    book_creds = _book_file_credential_map(path)
+    if portal or book_id:
+        for key in _BOOK_ALPACA_CREDENTIAL_KEYS:
+            out.pop(key, None)
+        out.update(book_creds)
+        out["PAPER_CHASE_USE_RESEARCH_KEYS"] = "false"
+        return out
+    for key in _ROOT_ONLY_PAPER_KEYS:
+        if key not in book_creds:
+            out.pop(key, None)
+    return out
+
+
+def isolate_book_alpaca_os_environ(book_env_path: Path | str) -> None:
+    """Drop root PAPER_APCA_* from os.environ when the book file does not set them."""
+    isolated = isolate_book_alpaca_env(dict(os.environ), book_env_path=book_env_path)
+    for key in _ROOT_ONLY_PAPER_KEYS:
+        if key not in isolated:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = isolated[key]
+    os.environ["PAPER_CHASE_USE_RESEARCH_KEYS"] = isolated.get(
+        "PAPER_CHASE_USE_RESEARCH_KEYS", "false"
+    )
 
 
 def _sync_trading_mode_flags(*, skip_root_override: bool = False) -> None:
