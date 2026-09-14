@@ -108,6 +108,7 @@ from modules.portal_bot import (  # noqa: E402
     bot_status_label,
     read_bot_log_tail,
     refresh_bot,
+    restart_all_bots,
     restart_bot,
     start_bot,
     stop_bot,
@@ -2339,18 +2340,27 @@ class PaperBookPanel(ctk.CTkFrame):
             anchor="w",
         )
         self._equity.pack(side="left")
+        today_box = ctk.CTkFrame(num_row, fg_color="transparent")
+        today_box.pack(side="right", padx=(12, 0))
+        ctk.CTkLabel(
+            today_box,
+            text="DAILY P&L",
+            font=_ctk_font("caption"),
+            text_color=COLORS["muted"],
+            anchor="e",
+        ).pack(anchor="e")
         self._today = ctk.CTkLabel(
-            num_row,
-            text="",
+            today_box,
+            text="—",
             font=ctk.CTkFont(family="Segoe UI", size=16),
             text_color=COLORS["green"],
             anchor="e",
         )
-        self._today.pack(side="right")
+        self._today.pack(anchor="e")
 
         stats = ctk.CTkFrame(card, fg_color="transparent")
         stats.pack(fill="x", padx=22, pady=(16, 18))
-        for col in range(4):
+        for col in range(5):
             stats.grid_columnconfigure(col, weight=1, uniform="stat")
 
         def _stat(col: int, caption: str) -> tuple[ctk.CTkFrame, ctk.CTkLabel]:
@@ -2384,8 +2394,8 @@ class PaperBookPanel(ctk.CTkFrame):
         self._cash_sub.pack(anchor="w")
         _, self._invested = _stat(1, "INVESTED")
         _, self._positions = _stat(2, "POSITIONS")
-        _, self._book = _stat(3, "BOOK")
-        self._book.configure(text=book_id)
+        _, self._unrealized = _stat(3, "UNREALIZED")
+        _, self._market = _stat(4, "MARKET")
 
         self.sleeve = SleeveMixCard(self)
         self.sleeve.pack(fill="x", pady=(16, 0))
@@ -2395,8 +2405,8 @@ class PaperBookPanel(ctk.CTkFrame):
             "cash": self,
             "invested": _LabelMetric(self._invested),
             "positions": _LabelMetric(self._positions),
-            "pnl": _LabelMetric(self._today),
-            "market": _LabelMetric(self._today),
+            "pnl": _LabelMetric(self._unrealized),
+            "market": _LabelMetric(self._market),
         }
 
     def set(self, text: str, color: str | None = None) -> None:
@@ -2411,12 +2421,12 @@ class PaperBookPanel(ctk.CTkFrame):
 
     def set_today(self, today_pnl: float, equity: float) -> None:
         if equity <= 0:
-            self._today.configure(text="")
+            self._today.configure(text="—", text_color=COLORS["muted"])
             return
         pct = 100.0 * today_pnl / equity
         color = COLORS["green"] if today_pnl >= 0 else COLORS["red"]
         self._today.configure(
-            text=f"{pct:+.2f}% today   ·   ${today_pnl:+,.2f}",
+            text=f"{pct:+.2f}%   ·   ${today_pnl:+,.2f}",
             text_color=color,
         )
 
@@ -2438,8 +2448,6 @@ class PaperBookPanel(ctk.CTkFrame):
                     btn.configure(fg_color="#8a3a3a", text_color="#f4f4f0")
             else:
                 btn.configure(fg_color="transparent", text_color=COLORS["muted"])
-        if hasattr(self, "_book"):
-            self._book.configure(text=book_id)
 
 
 class DataTable(ctk.CTkFrame):
@@ -3527,8 +3535,8 @@ class TradingDashboardApp(ctk.CTk):
         ).grid(row=0, column=4, padx=3, pady=2, sticky="e")
         self._restart_bot_btn = ctk.CTkButton(
             controls_row,
-            text="Restart Bot",
-            width=96,
+            text="Restart Both",
+            width=108,
             fg_color=COLORS["small_bg"],
             hover_color=COLORS["small"],
             text_color=COLORS["amber"],
@@ -3687,7 +3695,7 @@ class TradingDashboardApp(ctk.CTk):
                 ("cash", "Cash", 18),
                 ("invested", "Invested", 12),
                 ("positions", "Positions", 10),
-                ("pnl", "Open P&L", 16),
+                ("pnl", "Unrealized P&L", 16),
                 ("market", "Market", 16),
             )
             for col, (key, title, width) in enumerate(keys):
@@ -4415,14 +4423,26 @@ class TradingDashboardApp(ctk.CTk):
             command=self._on_stop_bot,
             **btn,
         ).pack(side="left", padx=(0, 6))
-        ctk.CTkButton(
+        self._restart_bot_btn = ctk.CTkButton(
+            inner,
+            text="Restart Both",
+            width=108,
+            fg_color=COLORS["small_bg"],
+            hover_color=COLORS["small"],
+            text_color=COLORS["amber"],
+            command=self._on_restart_bot,
+            **btn,
+        )
+        self._restart_bot_btn.pack(side="left", padx=(0, 6))
+        self._refresh_btn = ctk.CTkButton(
             inner,
             text="Refresh",
             width=72,
             fg_color=COLORS["surface2"],
             command=self._on_manual_refresh,
             **btn,
-        ).pack(side="left", padx=(0, 6))
+        )
+        self._refresh_btn.pack(side="left", padx=(0, 6))
         ctk.CTkButton(
             inner,
             text="Sell",
@@ -4564,7 +4584,7 @@ class TradingDashboardApp(ctk.CTk):
     def _set_bot_action_buttons_busy(self, busy: bool, *, status: str | None = None) -> None:
         state = "disabled" if busy else "normal"
         refresh_bot_text = "…" if busy else "Refresh Bot"
-        restart_text = "…" if busy else "Restart Bot"
+        restart_text = "…" if busy else "Restart Both"
         try:
             self._refresh_btn.configure(state=state)
             self._refresh_bot_btn.configure(text=refresh_bot_text, state=state)
@@ -5735,6 +5755,18 @@ class TradingDashboardApp(ctk.CTk):
         )
         bar = ctk.CTkFrame(shell, fg_color="transparent")
         bar.grid(row=3, column=0, sticky="ew")
+        self._restart_bot_btn = ctk.CTkButton(
+            bar,
+            text="Restart Both",
+            width=108,
+            height=28,
+            command=self._on_restart_bot,
+            fg_color=COLORS["small_bg"],
+            hover_color=COLORS["small"],
+            text_color=COLORS["amber"],
+            font=_ctk_font("caption"),
+        )
+        self._restart_bot_btn.pack(side="left")
         ctk.CTkButton(
             bar,
             text="Refresh",
@@ -5745,7 +5777,7 @@ class TradingDashboardApp(ctk.CTk):
             hover_color=COLORS["accent_hover"],
             text_color=COLORS["bg"],
             font=_ctk_font("caption"),
-        ).pack(side="left")
+        ).pack(side="left", padx=(8, 0))
         ctk.CTkButton(
             bar,
             text="Close",
@@ -6108,7 +6140,6 @@ class TradingDashboardApp(ctk.CTk):
                     except Exception:
                         today = 0.0
             self._paper_panel.set_today(today, equity)
-            self._paper_panel._book.configure(text=self._book_id)
 
         small_acct = equity > 0 and config.is_small_account(equity)
         regime = "—"
@@ -7021,22 +7052,42 @@ class TradingDashboardApp(ctk.CTk):
         self.refresh_data()
 
     def _on_restart_bot(self) -> None:
-        if not has_alpaca_config(self._username, self._book_id):
-            messagebox.showwarning(
-                "API keys",
-                f"Add API keys for {book_label(self._book_id)} first (☰ menu).",
-            )
-            return
         if not messagebox.askyesno(
-            "Restart Bot",
-            f"Restart the bot for {book_label(self._book_id)}?\n\n"
-            "This kills the current process tree (supervisor + trading loop), "
-            "then starts a new process in the correct paper/live mode.\n"
-            "Open positions are not closed.\n\nContinue?",
+            "Restart Both",
+            "Restart paper + live bots?\n\n"
+            "This stops every portal book with keys, clears stray processes, "
+            "then starts them again. Open positions are not closed.\n\n"
+            "Does not depend on which book is selected.\n\nContinue?",
             icon="warning",
         ):
             return
-        self._restart_book_async(self._book_id)
+        self._restart_both_bots_async()
+
+    def _restart_both_bots_async(self) -> None:
+        self._set_bot_action_buttons_busy(
+            True,
+            status="Restarting paper + live…",
+        )
+
+        def _worker() -> None:
+            ok, msg = restart_all_bots(self._username)
+
+            def _finish() -> None:
+                self._set_bot_action_buttons_busy(False)
+                if ok:
+                    messagebox.showinfo(
+                        "Restart Both",
+                        f"{msg}\n\nHeartbeats may take ~60 seconds to refresh.",
+                    )
+                else:
+                    messagebox.showwarning("Restart Both", msg)
+                self.refresh_data()
+
+            self.after(0, _finish)
+
+        threading.Thread(
+            target=_worker, daemon=True, name="dashboard-restart-both"
+        ).start()
 
     def _on_refresh_bot(self) -> None:
         if not has_alpaca_config(self._username, self._book_id):
