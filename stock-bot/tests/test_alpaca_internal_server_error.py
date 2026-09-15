@@ -57,6 +57,15 @@ def test_unknown_asset_still_skippable():
     assert is_skippable_order_error(exc) is True
 
 
+def test_not_fractionable_is_skippable():
+    from alpaca.common.exceptions import APIError
+    from modules.alpaca_client import is_not_fractionable_error
+
+    exc = APIError('{"code":40310000,"message":"asset \\"PS\\" is not fractionable"}')
+    assert is_not_fractionable_error(exc) is True
+    assert is_skippable_order_error(exc) is True
+
+
 def test_call_with_retry_retries_json_500(monkeypatch):
     monkeypatch.setattr("modules.alpaca_client.RETRY_BASE_DELAY_SEC", 0.0)
     from alpaca.common.exceptions import APIError

@@ -1344,7 +1344,7 @@ def main():
         )
         if config.paper_aggressive_context() and vti_result.get("enabled"):
             print(
-                f"--- Dynamic VTI: {vti_result.get('target_pct', 0):.0%} target "
+                f"--- VTI core: {vti_result.get('target_pct', 0):.0%} target "
                 f"(vol={vol_label}/{vol_score:.4f}, stress={macro_stress_flag}) ---"
             )
         if vti_result.get("action"):

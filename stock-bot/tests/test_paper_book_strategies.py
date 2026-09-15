@@ -113,3 +113,58 @@ def test_live_without_dynamic_sizing_still_pauses_rhyme_e(monkeypatch):
     monkeypatch.setattr(config, "effective_regime_dynamic_sizing", lambda: False)
     monkeypatch.setattr(config, "effective_paper_soft_pause", lambda: False)
     assert regime_entries_paused("RHYME_E: Steady_Bearish_Decline") is True
+
+
+def test_medium_user_bot_env_owns_fixed_33_67():
+    """Medium SoT pins fixed VTI; Lab must not steal that block."""
+    from pathlib import Path
+
+    from modules.portal_bot import user_bot_env
+    from modules.portal_paths import bind_project_root
+
+    bind_project_root(Path(__file__).resolve().parents[1])
+    u = "dawimberly"
+    v2 = user_bot_env(u, "alpaca_paper_v2")
+    lab = user_bot_env(u, "alpaca_paper")
+    assert v2.get("PAPER_MEDIUM_STRATEGY") == "true"
+    assert v2.get("PAPER_DYNAMIC_VTI") == "false"
+    assert v2.get("PAPER_VTI_CORE_PCT") == "0.33"
+    assert v2.get("NYSE_SLEEVE_CAP_PCT") == "0.67"
+    assert v2.get("VTI_REBALANCE_CADENCE") == "weekly"
+    assert v2.get("ATR_STOP_MULTIPLIER") == "2.0"
+    assert lab.get("PAPER_LAB_CONCENTRATED") == "true"
+    assert lab.get("MAX_ACTIVE_TICKERS") == "4"
+    # Dynamic VTI is retired on both paper books; Lab is not Medium 33/67.
+    assert lab.get("PAPER_DYNAMIC_VTI") == "false"
+    assert lab.get("PAPER_VTI_CORE_PCT") != "0.33"
+    assert lab.get("VTI_REBALANCE_CADENCE") != "weekly"
+
+
+def test_live_user_bot_env_owns_fixed_33_67_weekly():
+    from pathlib import Path
+
+    from modules.portal_bot import user_bot_env
+    from modules.portal_paths import bind_project_root
+
+    bind_project_root(Path(__file__).resolve().parents[1])
+    live = user_bot_env("dawimberly", "alpaca_live")
+    assert live.get("LIVE_VTI_CORE_PCT") == "0.33"
+    assert live.get("LIVE_SMALL_ACTIVE_SLEEVE_PCT") == "0.67"
+    assert live.get("LIVE_ACTIVE_SLEEVE_CHOICE") == "nyse"
+    assert live.get("VTI_REBALANCE_CADENCE") == "weekly"
+    assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.67"
+
+
+def test_dotenv_overlay_includes_medium_vti_keys():
+    import inspect
+
+    src = inspect.getsource(config._load_project_dotenv)
+    for key in (
+        "PAPER_DYNAMIC_VTI",
+        "PAPER_VTI_CORE_PCT",
+        "NYSE_SLEEVE_CAP_PCT",
+        "PAPER_NYSE_MAX_EXPOSURE_PCT",
+        "LIVE_VTI_CORE_PCT",
+        "VTI_REBALANCE_CADENCE",
+    ):
+        assert f'"{key}"' in src

@@ -36,9 +36,21 @@ def _research_version() -> str:
 
 
 def _paper_research_tape() -> str:
+    try:
+        import config
+
+        if config.paper_medium_strategy_enabled():
+            vti = "FIXED VTI 33/67"
+        elif not getattr(config, "PAPER_DYNAMIC_VTI_ENABLED", True):
+            pct = float(getattr(config, "PAPER_VTI_CORE_PCT", 0.4) or 0.4)
+            vti = f"FIXED VTI {pct:.0%}"
+        else:
+            vti = "SMART DYNAMIC VTI 40–75%"
+    except Exception:
+        vti = "FIXED VTI"
     return (
         f"PAPER RESEARCH v{_research_version()}   ·   "
-        "SMART DYNAMIC VTI 40–75%   ·   "
+        f"{vti}   ·   "
         "NYSE SLEEVE   ·   THINKING ON   ·   JOURNAL = FILL"
     )
 

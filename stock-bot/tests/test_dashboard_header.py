@@ -48,7 +48,7 @@ def test_live_tape_without_heartbeat_does_not_claim_vti_pct():
 def test_paper_tape_without_heartbeat_is_research_not_nyse_100():
     tape = header_tape_text(paper=True)
     assert "PAPER RESEARCH" in tape
-    assert "SMART DYNAMIC VTI 40–75%" in tape
+    assert "FIXED VTI" in tape or "SMART DYNAMIC VTI" in tape
     assert "NYSE SLEEVE" in tape
     assert "NYSE MOMENTUM" not in tape
     _assert_no_nyse_100(tape)
@@ -107,7 +107,7 @@ def test_paper_nyse_only_heartbeat_does_not_print_nyse_100():
     assert holdings_are_nyse_only_slogan(hb)
     tape = header_tape_text(paper=True, heartbeat=hb)
     assert "PAPER RESEARCH" in tape
-    assert "SMART DYNAMIC VTI 40–75%" in tape
+    assert "FIXED VTI" in tape or "SMART DYNAMIC VTI" in tape
     assert "NYSE 100%" not in tape
     assert "NYSE 98%" not in tape
     _assert_no_nyse_100(tape)

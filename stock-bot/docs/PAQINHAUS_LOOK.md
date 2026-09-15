@@ -35,13 +35,16 @@ Red is **live money + losses + errors**. Never decorative.
 ## Layout (top → bottom)
 
 1. 6px cyan hairline across the full window.
-2. Header: kicker + giant **Stock-bot** + NYSE stamp on the left. Running/halted chip + Paper/Live book switcher on the right.
-3. Cyan tape row from `dashboard_header.py`: paper = Realistic Research / Smart Dynamic VTI 40–75% (or mixed holdings); live = LIVE / holdings. Never `NYSE 100% · VTI CORE OFF · …`.
+2. Header: kicker + giant **Stock-bot** + PAPER/LIVE stamp on the left. Running/halted chip + book controls on the right.
+3. Cyan **scrolling** tape row from `dashboard_header.header_tape_text` (marquee in `dashboard_app`). Paper = research / holdings mix; live = LIVE / holdings. Never `NYSE 100% · VTI CORE OFF · …`.
 4. **LIVE TRADING — REAL MONEY ACCOUNT** banner only on the live book. Loud red. Do not size options on ~$300.
 5. Status pills: book, regime, gates, health, bot, heartbeat, conviction.
-6. Metric row: Equity, Cash %, Invested %, Unrealized P&L, Next market. Equity is the largest cream number.
+6. Metric row: Equity, Cash, Invested, Positions, Unrealized P&L, Market.
 7. Tabs: Positions / Overview / Trades / Wisdom / Charts.
-8. Active tab is cyan fill + near-black label. Inactive is cream on surface.
+8. **Positions tab (locked):** open-positions table expands first and shows **at least 10 tickers** without page-scroll; compact sleeve mix + collapsed Scanners under the table. Do not put a tall sleeve/hero block above the table on the desktop path.
+9. Active tab is cyan fill + near-black label. Inactive is cream on surface.
+
+**Desktop entry** opens `dashboard_app.py --book alpaca_paper_v2` (full chrome). Never `--paper-book` for the daily launcher — that strips the tape.
 
 Paper book ≈ $97k. Live book ≈ $300. Switching books must change the stack, banner, and title kicker.
 

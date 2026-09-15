@@ -119,6 +119,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
 
         env = apply_realistic_research_env(env)
         if book_id == "alpaca_paper":
+            # Lab: concentrated 4×25% — not the Medium 33/67 pin.
             env["PAPER_LAB_CONCENTRATED"] = "true"
             env["PAPER_SMART_STOPS"] = "false"
             env["MAX_ACTIVE_TICKERS"] = "4"
@@ -126,6 +127,48 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PER_NAME_MAX_PCT"] = "0.25"
             env["STOP_LOSS_PCT"] = "0.08"
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
+            env["METAL_SLEEVE_ENABLED"] = "false"
+            # Dynamic VTI is retired. Clear inherited Medium 33/67; Lab stays
+            # concentrated 4×25% with Research fixed core (not 40–75% slider).
+            for key in (
+                "PAPER_DYNAMIC_VTI",
+                "PAPER_DYNAMIC_VTI_ENABLED",
+                "PAPER_VTI_CORE_PCT",
+                "VTI_CORE_PCT",
+                "DYNAMIC_VTI_PAPER_FLOOR",
+                "DYNAMIC_VTI_PAPER_CEILING",
+                "DYNAMIC_VTI_FLOOR_MIN",
+                "DYNAMIC_VTI_DEFAULT_PCT",
+                "DYNAMIC_VTI_STRESS_PCT",
+                "DYNAMIC_VTI_CALM_PCT",
+                "DYNAMIC_VTI_OPTIONAL_ENABLED",
+                "PAPER_ACTIVE_SLEEVE_BOOST",
+                "NYSE_SLEEVE_CAP_PCT",
+                "PAPER_NYSE_SLEEVE_CAP_PCT",
+                "PAPER_NYSE_HIGH_CASH_CAP_PCT",
+                "PAPER_NYSE_MAX_EXPOSURE_PCT",
+                "PAPER_REGIME_WEAK_SLEEVE_MAX_PCT",
+            ):
+                env.pop(key, None)
+            from config import REALISTIC_RESEARCH_ENV
+
+            env["PAPER_DYNAMIC_VTI"] = "false"
+            env["PAPER_DYNAMIC_VTI_ENABLED"] = "false"
+            env["PAPER_VTI_CORE_PCT"] = REALISTIC_RESEARCH_ENV.get(
+                "PAPER_VTI_CORE_PCT", "0.40"
+            )
+        elif book_id == "alpaca_paper_v2":
+            # Medium SoT: 15 names, 2× ATR, fixed 33/67 VTI (overrides Research Dynamic VTI).
+            env["PAPER_MEDIUM_STRATEGY"] = "true"
+            env["MAX_ACTIVE_TICKERS"] = "15"
+            env["PAPER_POSITION_MAX_HOLD_BARS"] = "30"
+            env["EXIT_OPTIMIZATION_MAX_HOLD_BARS"] = "30"
+            env["EXIT_OPTIMIZATION_ENABLED"] = "false"
+            env["PAPER_SMART_STOPS"] = "true"
+            env["ATR_STOP_MULTIPLIER"] = "2.0"
+            env["STOP_LOSS_REEVAL_PCTS"] = "[-50,-50]"
+            env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
+            env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
             env["PAPER_DYNAMIC_VTI"] = "false"
             env["PAPER_DYNAMIC_VTI_ENABLED"] = "false"
             env["PAPER_VTI_CORE_PCT"] = "0.33"
@@ -144,17 +187,8 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PAPER_NYSE_MAX_EXPOSURE_PCT"] = "0.67"
             env["PAPER_REGIME_WEAK_SLEEVE_MAX_PCT"] = "0.67"
             env["METAL_SLEEVE_ENABLED"] = "false"
-        elif book_id == "alpaca_paper_v2":
-            env["PAPER_MEDIUM_STRATEGY"] = "true"
-            env["MAX_ACTIVE_TICKERS"] = "15"
-            env["PAPER_POSITION_MAX_HOLD_BARS"] = "30"
-            env["EXIT_OPTIMIZATION_MAX_HOLD_BARS"] = "30"
-            env["EXIT_OPTIMIZATION_ENABLED"] = "false"
-            env["PAPER_SMART_STOPS"] = "true"
-            env["ATR_STOP_MULTIPLIER"] = "2.0"
-            env["STOP_LOSS_REEVAL_PCTS"] = "[-50,-50]"
-            env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
-            env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
+            # Same weekly VTI resize cadence as Live 33/67.
+            env["VTI_REBALANCE_CADENCE"] = "weekly"
     else:
         env.pop("PAPER_CHASE_MODE", None)
         if book_id == "alpaca_live":
@@ -163,6 +197,14 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env = clear_paper_research_env(env)
             # Skip $1 drip trims on a ~$300 book (same floor as Medium).
             env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
+            # Live SoT: fixed 33/67 VTI/NYSE, weekly resize (not every cycle).
+            env["LIVE_VTI_CORE_PCT"] = "0.33"
+            env["LIVE_SMALL_ACTIVE_SLEEVE_PCT"] = "0.67"
+            env["LIVE_ACTIVE_SLEEVE_CHOICE"] = "nyse"
+            env["SMALL_ACCOUNT_VTI_CORE_PCT"] = "0.33"
+            env["VTI_CORE_PCT"] = "0.33"
+            env["NYSE_SLEEVE_CAP_PCT"] = "0.67"
+            env["VTI_REBALANCE_CADENCE"] = "weekly"
     return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 
@@ -228,21 +270,6 @@ def _descendant_pids(root: int) -> set[int]:
         stack.extend(_child_pids(pid))
     seen.discard(root)
     return seen
-
-
-def _portal_launched(cmd: str) -> bool:
-    return " -u " in f" {cmd} "
-
-
-def _paper_run_all_child(username: str) -> int | None:
-    supervisor = bot_pid(username, "alpaca_paper")
-    if supervisor is None:
-        return None
-    for pid in sorted(_descendant_pids(supervisor)):
-        cmd = _process_cmdline(pid) or ""
-        if "run_all.py" in cmd and not _portal_launched(cmd):
-            return pid
-    return None
 
 
 def _paper_allowed_descendants(supervisor: int) -> set[int]:
@@ -366,50 +393,6 @@ def _tracked_book_pids(username: str) -> set[int]:
         if pid is not None:
             pids.add(pid)
     return pids
-
-
-def trim_portal_duplicate_bots(username: str) -> tuple[int, str]:
-    """Remove extra portal-launched supervisors and stray paper run_all workers."""
-    live = bot_pid(username, "alpaca_live")
-    paper = bot_pid(username, "alpaca_paper")
-    stopped = 0
-    notes: list[str] = []
-    for pid in _find_script_pids("run_paper_bot.py"):
-        if paper is not None and pid == paper:
-            continue
-        cmd = _process_cmdline(pid) or ""
-        if not _portal_launched(cmd):
-            continue
-        ok, msg = _graceful_stop_pid(pid)
-        if ok:
-            stopped += 1
-        else:
-            notes.append(msg)
-    paper_supervisor = paper
-    for pid in _find_script_pids("run_all.py"):
-        if live is not None and pid == live:
-            continue
-        if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
-            parent = _parent_pid(pid)
-            pcmd = _process_cmdline(parent) or "" if parent else ""
-            if parent and "run_all.py" in pcmd:
-                ok, msg = _graceful_stop_pid(pid)
-                if ok:
-                    stopped += 1
-                else:
-                    notes.append(msg)
-            continue
-        cmd = _process_cmdline(pid) or ""
-        if _portal_launched(cmd):
-            ok, msg = _graceful_stop_pid(pid)
-            if ok:
-                stopped += 1
-            else:
-                notes.append(msg)
-    summary = f"Trimmed {stopped} duplicate bot process(es)." if stopped else "No duplicate bot processes."
-    if notes:
-        summary += " " + "; ".join(notes)
-    return stopped, summary
 
 
 def stop_orphan_project_bots(
@@ -575,29 +558,39 @@ def restart_all_bots(username: str) -> tuple[bool, str]:
     """Restart every keyed book (Lab, Medium, Live) without orphan-killing siblings."""
     messages: list[str] = []
     ok_all = True
-    restarted_any = False
 
-    for book_id in BOOKS:
-        if not book_enabled(book_id) or not _book_has_keys(username, book_id):
-            continue
-        pid = bot_pid(username, book_id)
-        if pid is not None:
-            _graceful_stop_pid(pid)
+    books_to_restart = [
+        book_id
+        for book_id in BOOKS
+        if book_enabled(book_id) and _book_has_keys(username, book_id)
+    ]
+    if not books_to_restart:
+        return False, "No books with API keys found to restart."
+
+    # Full stop per book (taskkill /T + wait + orphan sweep with siblings preserved).
+    for book_id in books_to_restart:
+        if bot_pid(username, book_id) is None and not bot_running(username, book_id):
             book_pid_path(username, book_id).unlink(missing_ok=True)
-    time.sleep(1.0)
-
-    for book_id in BOOKS:
-        if not book_enabled(book_id) or not _book_has_keys(username, book_id):
             continue
-        restarted_any = True
+        ok_stop, stop_msg = stop_bot(username, book_id)
+        if not ok_stop and "No bot running" not in stop_msg:
+            ok_all = False
+            messages.append(f"--- {book_id} (stop) ---\n{stop_msg}")
+    time.sleep(0.8)
+
+    for book_id in books_to_restart:
+        # Preserve already-restarted siblings; do not wipe other books.
         ok, msg = start_bot(username, book_id, skip_orphan_stop=True)
         prefix = "Bot restarted successfully" if ok else "Bot failed to start"
         mode = "paper" if _is_paper_book(username, book_id) else "live"
         messages.append(f"--- {book_id} ---\n{prefix} ({mode} mode).\n{msg}")
         ok_all = ok_all and ok
-    if not restarted_any:
-        return False, "No books with API keys found to restart."
-    prefix = "All 3 books restarted" if ok_all else "Restart finished with errors"
+
+    n = len(books_to_restart)
+    if ok_all:
+        prefix = f"All {n} books restarted" if n != 3 else "All 3 books restarted"
+    else:
+        prefix = "Restart finished with errors"
     return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
 
 

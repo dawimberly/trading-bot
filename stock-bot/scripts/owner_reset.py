@@ -92,54 +92,66 @@ def _live_preserve_pids(username: str) -> set[int]:
     return preserve
 
 
-def _clear_paper_pid_only(username: str) -> None:
+def _clear_paper_pid_only(username: str, book_id: str | None = None) -> None:
     from modules.portal_bot import book_pid_path
+    from modules.trading_books import PAPER_SOT_BOOK_ID
 
-    path = book_pid_path(username, "alpaca_paper")
+    path = book_pid_path(username, book_id or PAPER_SOT_BOOK_ID)
     if path.is_file():
         path.unlink(missing_ok=True)
 
 
 def clean_restart_paper_only(username: str) -> tuple[bool, str]:
-    """Kill orphans (preserve live), start paper bot only — no live restart or dashboard."""
+    """Kill orphans (preserve live + Lab), restart Paper SoT only — no live/dashboard."""
     from modules.portal_bot import (
+        bot_pid,
         bot_running,
         start_bot,
         stop_bot,
         stop_orphan_project_bots,
     )
     from modules.portal_paths import bind_project_root, has_alpaca_config
+    from modules.trading_books import PAPER_BOOK_IDS, PAPER_SOT_BOOK_ID as SOT
 
     bind_project_root(ROOT)
 
-    if not has_alpaca_config(username, "alpaca_paper"):
-        return False, "alpaca_paper: Alpaca keys missing in portal — aborting (paper only)."
+    if not has_alpaca_config(username, SOT):
+        return False, f"{SOT}: Alpaca keys missing in portal — aborting (paper only)."
 
-    _clear_paper_pid_only(username)
+    _clear_paper_pid_only(username, SOT)
 
-    if bot_running(username, "alpaca_paper"):
-        _ok, stop_msg = stop_bot(username, "alpaca_paper")
+    if bot_running(username, SOT):
+        _ok, stop_msg = stop_bot(username, SOT)
         if not _ok:
-            return False, f"stop paper: {stop_msg}"
+            return False, f"stop paper SoT: {stop_msg}"
         time.sleep(1.0)
 
+    # Preserve live + any other paper books (e.g. Lab) while restarting SoT.
     preserve = _live_preserve_pids(username)
+    for paper_id in PAPER_BOOK_IDS:
+        if paper_id == SOT:
+            continue
+        pid = bot_pid(username, paper_id)
+        if pid is not None:
+            preserve.add(pid)
+
     stopped, orphan_msg = stop_orphan_project_bots(
         preserve_pids=preserve, username=username
     )
     if stopped:
         time.sleep(1.0)
 
-    ok, msg = start_bot(username, "alpaca_paper", skip_orphan_stop=True)
-    detail = orphan_msg if orphan_msg else "Paper bot started."
+    ok, msg = start_bot(username, SOT, skip_orphan_stop=True)
+    detail = orphan_msg if orphan_msg else "Paper SoT bot started."
     return ok, f"{msg} | {detail}" if ok else msg
 
 
 def wait_for_paper_heartbeat(username: str, timeout_sec: int = 75) -> tuple[bool, str]:
-    """Poll the paper book heartbeat until it is fresh (bot responding)."""
+    """Poll the Paper SoT (alpaca_paper_v2) heartbeat until it is fresh."""
     from modules.portal_bot import book_heartbeat_path
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
 
-    path = book_heartbeat_path(username, "alpaca_paper")
+    path = book_heartbeat_path(username, SOT)
     deadline = time.monotonic() + max(10, timeout_sec)
     last_age: float | None = None
     while time.monotonic() < deadline:
@@ -288,24 +300,25 @@ def _default_username() -> str:
 
 
 def _run_paper_only(username: str, *, verify: bool) -> int:
-    """Force-restart only the paper bot with strong orphan killing (live preserved)."""
+    """Force-restart Paper SoT (alpaca_paper_v2); live + Lab preserved."""
     from modules.portal_paths import bind_project_root
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
 
     bind_project_root(ROOT)
 
-    _log("Paper-only force restart (live bot preserved)...")
+    _log(f"Paper-only force restart of {SOT} (live + Lab preserved)...")
     ok, msg = clean_restart_paper_only(username)
     _log(msg if ok else f"[ERROR] {msg}")
     if not ok:
-        _log("Bot restart FAILED — check portal Alpaca keys for alpaca_paper.")
+        _log(f"Bot restart FAILED — check portal Alpaca keys for {SOT}.")
         return 1
 
     if verify:
-        _log("Verifying paper bot is responding (waiting for fresh heartbeat)...")
+        _log("Verifying Paper SoT is responding (waiting for fresh heartbeat)...")
         fresh, detail = wait_for_paper_heartbeat(username)
         _log(f"Heartbeat: {detail}")
         if fresh:
-            _log("Bot restarted successfully — paper bot is RESPONDING.")
+            _log("Bot restarted successfully — Paper SoT is RESPONDING.")
             return 0
         _log(
             "Bot restarted, but heartbeat not confirmed yet. Give it ~60s, "
@@ -313,7 +326,7 @@ def _run_paper_only(username: str, *, verify: bool) -> int:
         )
         return 0
 
-    _log("Bot restarted successfully (paper only). Wait ~60s for a fresh heartbeat.")
+    _log("Bot restarted successfully (Paper SoT only). Wait ~60s for a fresh heartbeat.")
     return 0
 
 
@@ -327,12 +340,12 @@ def main() -> int:
     parser.add_argument(
         "--paper-only",
         action="store_true",
-        help="Force-restart only the paper bot (live bot preserved)",
+        help="Force-restart Paper SoT (alpaca_paper_v2); live + Lab preserved",
     )
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="Wait for a fresh paper heartbeat and confirm the bot is responding",
+        help="Wait for a fresh Paper SoT heartbeat and confirm the bot is responding",
     )
     parser.add_argument(
         "--force-reset",

@@ -1,0 +1,22 @@
+---
+description: Locked Paper SoT monitor look — do not regress
+alwaysApply: true
+---
+
+# Locked Paper SoT monitor look
+
+Owner-signed desktop UI (do not “simplify” or swap layouts):
+
+1. **Launcher**: `PythonTrading Paper.exe` → `dashboard_app.py --book alpaca_paper_v2`
+2. **Chrome**: full Stock-bot header + **cyan scrolling tape** under the header (not `--paper-book`, which strips tape)
+3. **Positions**: table is the main tab body; **≥10 rows visible** without scrolling the page; sleeve mix stays compact under the table; scanners stay collapsed by default
+4. Book is always Medium SoT (`alpaca_paper_v2`) from the desktop entry
+
+## Do not
+
+- Default the desktop entry to `--paper-book` or `_show_paper_book_page`
+- Hide `_tape_bar` / kill the marquee on the desktop path
+- Shrink the positions Treeview floor below 10 visible rows
+- Point Desktop at `launch_monitor.bat` without `--book alpaca_paper_v2`
+
+See also: `desktop-paper-launcher.mdc`, `stock-bot/docs/PAQINHAUS_LOOK.md`

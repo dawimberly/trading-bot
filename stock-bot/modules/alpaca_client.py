@@ -206,7 +206,7 @@ def is_unknown_asset_error(exc: BaseException) -> bool:
 
 
 def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation, unknown asset, or insufficient-qty 403 — do not crash the cycle."""
+    """422 notional/qty validation, unknown asset, or known 403 rejects — do not crash the cycle."""
     if not isinstance(exc, APIError):
         return is_unknown_asset_error(exc)
     status = alpaca_http_status(exc)
@@ -217,7 +217,15 @@ def is_skippable_order_error(exc: BaseException) -> bool:
         return True
     if status == 403 and "insufficient qty" in msg:
         return True
+    # Notional orders fail on non-fractionable equities (e.g. PS) — skip/retry as shares.
+    if "not fractionable" in msg or "is not fractionable" in msg:
+        return True
     return False
+
+
+def is_not_fractionable_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "not fractionable" in msg or "is not fractionable" in msg
 
 
 def call_with_retry(

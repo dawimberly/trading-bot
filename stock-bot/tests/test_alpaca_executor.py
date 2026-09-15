@@ -119,6 +119,57 @@ def test_submit_order_signature_accepts_side():
     assert "op" not in params
 
 
+def test_execute_order_retries_whole_shares_when_not_fractionable(monkeypatch):
+    executor = AlpacaExecutor.__new__(AlpacaExecutor)
+    executor.dry_run = False
+    executor._equity_trading_allowed = lambda symbol: True
+    executor._cancel_open_orders_for = lambda symbol: None
+    executor.get_order_params = lambda symbol: ("PS", "day", False)
+    executor.compute_notional = lambda: 250.0
+    executor._atr_adjust_notional = lambda symbol, n: n
+    executor._skip_if_notional_invalid = lambda n, **k: n
+    executor._blocks_new_active_ticker = lambda symbol: False
+    executor._apply_concentration_cap = lambda symbol, n: n
+    executor._min_notional = lambda: 1.0
+    executor._account = SimpleNamespace(equity=100000.0)
+    executor._find_position = lambda symbol: None
+    executor._asset_tradable = lambda symbol: True
+    executor._estimate_buy_price = lambda symbol: 25.0
+    executor_module._NON_FRACTIONABLE_ASSETS.discard("PS")
+
+    calls: list[dict] = []
+
+    def fake_submit(order, *, symbol, side, reason="", sleeve=None, notional=None, qty=None):
+        calls.append(
+            {
+                "has_notional": getattr(order, "notional", None) is not None,
+                "qty": getattr(order, "qty", None),
+                "side": side,
+            }
+        )
+        if getattr(order, "notional", None) is not None:
+            raise executor_module.AlpacaValidationError(
+                '{"code":40310000,"message":"asset \\"PS\\" is not fractionable"}'
+            )
+        return SimpleNamespace(id="ord-ps-whole")
+
+    executor._submit_order = fake_submit
+    monkeypatch.setattr(
+        executor_module,
+        "is_not_fractionable_error",
+        lambda exc: "not fractionable" in str(exc).lower(),
+    )
+
+    result = executor.execute_order("PS", "Buy", notional=250.0, reason="test")
+    assert result is not None
+    assert getattr(result, "id", None) == "ord-ps-whole"
+    assert len(calls) == 2
+    assert calls[0]["has_notional"] is True
+    assert float(calls[1]["qty"]) == 10.0
+    assert "PS" in executor_module._NON_FRACTIONABLE_ASSETS
+    executor_module._NON_FRACTIONABLE_ASSETS.discard("PS")
+
+
 def test_position_available_qty_prefers_qty_available():
     pos = SimpleNamespace(qty=128.0, qty_available=0.011)
     assert AlpacaExecutor._position_available_qty(pos) == 0.011

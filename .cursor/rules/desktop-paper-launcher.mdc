@@ -1,0 +1,40 @@
+---
+description: Keep desktop Paper SoT launcher in sync after dashboard/appearance changes
+alwaysApply: true
+---
+
+# Desktop Paper SoT launcher
+
+The owner's **only** desktop trading UI entry:
+
+- Desktop: `PythonTrading Paper.exe` (real exe — custom icon, **no shortcut arrow**)
+- Built from: `stock-bot/scripts/launch_paper_book_desktop.py` → `stock-bot/dist/PythonTradingPaper.exe`
+- Opens: `dashboard_app.py --book alpaca_paper_v2` → **Medium SoT**, full Stock-bot chrome, **cyan scrolling tape**
+- Icon: `stock-bot/assets/pythontrading_paper.ico` (embedded in the exe)
+- Never use `--paper-book` for the desktop entry (that strips the header/tape)
+- Never point the desktop entry at `launch_monitor.bat` without `--book` (last-book / wrong book)
+
+## After any change, reinstall the desktop launcher
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File stock-bot/scripts/create_monitor_shortcut.ps1
+```
+
+Use `-Rebuild` if the icon or launcher script changed:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File stock-bot/scripts/create_monitor_shortcut.ps1 -Rebuild
+```
+
+Trigger this when you edit any of:
+
+- `stock-bot/dashboard_app.py`
+- `stock-bot/dashboard_header.py`
+- `stock-bot/launch_paper_book.bat`
+- `stock-bot/scripts/launch_paper_book_desktop.py`
+- `stock-bot/scripts/create_monitor_shortcut.ps1`
+- `stock-bot/assets/pythontrading_paper.ico`
+- dashboard appearance / paper-book layout
+
+Do this in the same turn as the edit. Remove stale `.lnk` / `.bat` duplicates if reported.
+

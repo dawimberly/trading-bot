@@ -57,6 +57,32 @@ def _load_project_dotenv() -> None:
         "PAPER_MAX_POSITION_PCT",
         "PER_NAME_MAX_PCT",
         "STOP_LOSS_PCT",
+        # Medium fixed 33/67 — survive book .env after Realistic Research defaults.
+        "PAPER_DYNAMIC_VTI",
+        "PAPER_DYNAMIC_VTI_ENABLED",
+        "PAPER_VTI_CORE_PCT",
+        "VTI_CORE_PCT",
+        "DYNAMIC_VTI_PAPER_FLOOR",
+        "DYNAMIC_VTI_PAPER_CEILING",
+        "DYNAMIC_VTI_FLOOR_MIN",
+        "DYNAMIC_VTI_DEFAULT_PCT",
+        "DYNAMIC_VTI_STRESS_PCT",
+        "DYNAMIC_VTI_CALM_PCT",
+        "DYNAMIC_VTI_OPTIONAL_ENABLED",
+        "PAPER_ACTIVE_SLEEVE_BOOST",
+        "NYSE_SLEEVE_CAP_PCT",
+        "PAPER_NYSE_SLEEVE_CAP_PCT",
+        "PAPER_NYSE_HIGH_CASH_CAP_PCT",
+        "PAPER_NYSE_MAX_EXPOSURE_PCT",
+        "PAPER_REGIME_WEAK_SLEEVE_MAX_PCT",
+        "METAL_SLEEVE_ENABLED",
+        # Live / Medium weekly 33/67
+        "LIVE_VTI_CORE_PCT",
+        "LIVE_SMALL_ACTIVE_SLEEVE_PCT",
+        "LIVE_ACTIVE_SLEEVE_CHOICE",
+        "SMALL_ACCOUNT_VTI_CORE_PCT",
+        "VTI_REBALANCE_CADENCE",
+        "NYSE_SLEEVE_CAP_PCT",
     )
     launch_overlay = {k: os.environ[k] for k in overlay_keys if k in os.environ}
     if env_override and os.path.isfile(env_override):
@@ -610,6 +636,8 @@ VTI_CORE_PCT = float(os.getenv("VTI_CORE_PCT", "0.80"))
 VTI_CORE_SYMBOL = os.getenv("VTI_CORE_SYMBOL", "VTI").strip().upper()
 # Rebalance VTI when |current - target| / equity exceeds this (avoids daily churn)
 VTI_CORE_REBALANCE_DRIFT_PCT = float(os.getenv("VTI_CORE_REBALANCE_DRIFT_PCT", "0.02"))
+# drift = every cycle (band); weekly = one resize per ISO week (Live + Medium SoT).
+VTI_REBALANCE_CADENCE = os.getenv("VTI_REBALANCE_CADENCE", "drift").strip().lower()
 
 # Paper research book (PAPER_APCA_*) — uses REALISTIC_RESEARCH_PROFILE defaults below.
 PAPER_AGGRESSIVE_ENABLED = os.getenv("PAPER_AGGRESSIVE", "true").lower() in (
@@ -1678,6 +1706,8 @@ PAPER_REGIME_A_SIZING_MULT = float(os.getenv("PAPER_REGIME_A_SIZING_MULT", "1.2"
 PAPER_REGIME_B_SIZING_MULT = float(os.getenv("PAPER_REGIME_B_SIZING_MULT", "0.30"))
 PAPER_REGIME_C_SIZING_MULT = float(os.getenv("PAPER_REGIME_C_SIZING_MULT", "1.0"))
 PAPER_REGIME_D_SIZING_MULT = float(os.getenv("PAPER_REGIME_D_SIZING_MULT", "0.7"))
+# RHYME_E (Steady_Bearish_Decline): intentional 1.60× for paper Best Paper lock
+# (protective shorts + dip path); not a typo vs B/D shrink. README documents 1.60×.
 PAPER_REGIME_E_SIZING_MULT = float(os.getenv("PAPER_REGIME_E_SIZING_MULT", "1.60"))
 # Weak RHYME (B/D/E): per-sleeve exposure ceiling as fraction of equity.
 PAPER_REGIME_WEAK_SLEEVE_MAX_PCT = float(os.getenv("PAPER_REGIME_WEAK_SLEEVE_MAX_PCT", "0.25"))
@@ -2237,14 +2267,13 @@ SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
 )
 SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
 SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
-# Live Conservative profile (alpaca_live) — separate from Paper Research v1.5.4 FINAL LOCK.
-# High VTI + SPY-trend sleeve + safety stack (GARCH/ATR/exits/corr/tail); research sleeves OFF.
-LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.85"))
-LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.05"))
-# v1.1c 365d evidence: SPY MA200 best risk-adjusted live sleeve (PF 114, 98% win vs NYSE unrealized).
-LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "spy").strip().lower()
+# Live book (alpaca_live) — fixed 33/67 VTI/NYSE (same SoT as Paper Medium).
+# Weekly VTI resize via VTI_REBALANCE_CADENCE=weekly (not every cycle).
+LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.33"))
+LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.67"))
+LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "nyse").strip().lower()
 LIVE_CONSERVATIVE_ENABLED = _env_bool_first("LIVE_CONSERVATIVE_ENABLED", default="true")
-LIVE_CONSERVATIVE_LABEL = "Live Conservative"
+LIVE_CONSERVATIVE_LABEL = "Live 33/67"
 LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
     "vti_core_pct": LIVE_VTI_CORE_PCT,
     "active_sleeve_pct": LIVE_SMALL_ACTIVE_SLEEVE_PCT,
@@ -2254,8 +2283,8 @@ LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
 }
 # Locked when enforce_live_conservative_profile() runs (live book / Profile A).
 LIVE_CONSERVATIVE_LOCKED_ON: tuple[str, ...] = (
-    "SPY trend (LIVE_ACTIVE_SLEEVE_CHOICE=spy)",
-    "High VTI core (LIVE_VTI_CORE_PCT; no optional 0% floor)",
+    "NYSE active sleeve (LIVE_ACTIVE_SLEEVE_CHOICE=nyse)",
+    "Fixed VTI core 33% (LIVE_VTI_CORE_PCT; weekly resize)",
     "GARCH vol sizing (GARCH_VOL_LIVE_ENABLED via live enforce)",
     "Tail-risk controls",
     "Correlation guard",
@@ -2689,7 +2718,7 @@ def telegram_alert_policy_summary() -> str:
     else:
         bits.append("yield alerts=off")
     if TELEGRAM_ALERT_FILLS:
-        bits.append(f"fills≥${telegram_fill_min_usd():.0f}")
+        bits.append(f"fills>=${telegram_fill_min_usd():.0f}")
     if TELEGRAM_ALERT_ERRORS:
         bits.append("errors")
     if ERROR_WATCHER_ENABLED:
@@ -2967,11 +2996,11 @@ def enforce_live_conservative_profile() -> None:
     if is_realistic_research_active():
         return
 
-    # --- High VTI + SPY trend sleeve ---
+    # --- Fixed 33/67 VTI/NYSE (env from portal user_bot_env wins) ---
     if not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
         SMALL_ACCOUNT_VTI_CORE_PCT = LIVE_VTI_CORE_PCT
     if not _env_explicit("LIVE_ACTIVE_SLEEVE_CHOICE"):
-        LIVE_ACTIVE_SLEEVE_CHOICE = "spy"
+        LIVE_ACTIVE_SLEEVE_CHOICE = "nyse"
 
     # --- Live ON (safety / sizing stack) ---
     if not _env_explicit("GARCH_VOL_ENABLED"):
@@ -3019,31 +3048,28 @@ def format_live_conservative_banner() -> str:
         "cash": "cash buffer",
     }
     sleeve = sleeve_labels.get(LIVE_ACTIVE_SLEEVE_CHOICE, LIVE_ACTIVE_SLEEVE_CHOICE)
-    legacy_active = max(
-        0.0, 1.0 - LIVE_VTI_CORE_PCT - LIVE_SMALL_ACTIVE_SLEEVE_PCT
-    )
     garch = "ON" if GARCH_VOL_LIVE_ENABLED and GARCH_VOL_ENABLED else "OFF"
+    cadence = effective_vti_rebalance_cadence()
     return (
-        f"{LIVE_CONSERVATIVE_LABEL} {LIVE_VTI_CORE_PCT:.0%}/{legacy_active:.0%}: "
+        f"{LIVE_CONSERVATIVE_LABEL}: "
         f"{LIVE_VTI_CORE_PCT:.0%} VTI | {LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {sleeve} | "
-        f"{legacy_active:.0%} NYSE/active | "
         f"GARCH {garch} | ATR/exits/corr/tail ON | "
-        f"scanners/shorts/stat-arb OFF | "
+        f"VTI resize {cadence} | "
         f"{SMALL_ACCOUNT_RISK_PER_TRADE:.0%} risk | ${SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max/order"
     )
 
 
 def format_live_conservative_headline() -> str:
-    """Prominent Live Conservative FINAL LOCK line (mirrors paper FINAL LOCK headline)."""
+    """Prominent Live FINAL LOCK line (mirrors paper FINAL LOCK headline)."""
     on = " | ".join(
         (
-            "SPY trend",
-            f"High VTI {LIVE_VTI_CORE_PCT:.0%}",
+            f"{LIVE_VTI_CORE_PCT:.0%}/{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} VTI/NYSE",
             "GARCH",
             "Tail risk",
             "Corr guard",
             "ATR",
             "Exits",
+            f"VTI {effective_vti_rebalance_cadence()}",
         )
     )
     off = "Stat Arb / shorts / RVOL-ORB-Catalyst / optional VTI floor / SPY-like / ARIMA / Daily Bank"
@@ -3056,7 +3082,8 @@ def format_live_conservative_headline() -> str:
 def get_live_profile_summary() -> str:
     return (
         f"{LIVE_CONSERVATIVE_LABEL}: {LIVE_VTI_CORE_PCT:.0%} VTI | "
-        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY trend | GARCH ON | "
+        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {LIVE_ACTIVE_SLEEVE_CHOICE.upper()} | "
+        f"GARCH ON | weekly VTI resize | "
         f"ATR/exits/corr/tail ON | scanners/shorts/stat-arb OFF | "
         f"crypto OFF | thinking OFF | static universe"
     )
@@ -4571,7 +4598,7 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("POSITIONING_OVERLAY_ENABLED", "COT_OVERLAY_ENABLED"):
         POSITIONING_OVERLAY_ENABLED = False
     if not _env_explicit("PAPER_DYNAMIC_VTI", "PAPER_DYNAMIC_VTI_ENABLED"):
-        PAPER_DYNAMIC_VTI_ENABLED = True
+        PAPER_DYNAMIC_VTI_ENABLED = False
     if not _env_explicit("DYNAMIC_VTI_PAPER_FLOOR"):
         DYNAMIC_VTI_PAPER_FLOOR = 0.40
     if not _env_explicit("DYNAMIC_VTI_DEFAULT_PCT"):
@@ -5079,8 +5106,8 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_AGGRESSIVE": "true",
     "VTI_CORE_PCT": "0.80",
     "PAPER_VTI_CORE_PCT": "0.40",
-    "PAPER_DYNAMIC_VTI": "true",
-    "PAPER_DYNAMIC_VTI_ENABLED": "true",
+    "PAPER_DYNAMIC_VTI": "false",
+    "PAPER_DYNAMIC_VTI_ENABLED": "false",
     "DYNAMIC_VTI_PAPER_FLOOR": "0.40",
     "DYNAMIC_VTI_PAPER_CEILING": "0.75",
     "DYNAMIC_VTI_DEFAULT_PCT": "0.65",
@@ -5387,7 +5414,7 @@ def format_paper_live_profile_line() -> str:
     return (
         f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive FINAL LOCK) | "
         f"{REALISTIC_RESEARCH_TAGLINE} | Live Bot: {LIVE_CONSERVATIVE_LABEL} "
-        f"{LIVE_VTI_CORE_PCT:.0%} VTI + SPY trend + GARCH/ATR/exits/corr/tail"
+        f"{LIVE_CONSERVATIVE_LABEL} {LIVE_VTI_CORE_PCT:.0%} VTI + NYSE active + GARCH/ATR/exits/corr/tail"
     )
 
 
@@ -5405,9 +5432,14 @@ def format_universe_pool_label() -> str:
 
 def format_realistic_research_headline() -> str:
     """Prominent version line for paper bot startup (v1.5.4 FINAL LOCK)."""
+    vti_bit = (
+        f"fixed VTI {float(PAPER_VTI_CORE_PCT):.0%}"
+        if not PAPER_DYNAMIC_VTI_ENABLED
+        else "Dynamic VTI LOCKED 40-75% (>=40% floor)"
+    )
     features = (
         "FINAL LOCK | RHYME primary | HMM soft | GARCH vol | Daily Banking | "
-        "Stat Arb quality | Dynamic VTI LOCKED 40-75% (>=40% floor) | SPY-like ON | "
+        f"Stat Arb quality | {vti_bit} | SPY-like ON | "
         "ARIMA OFF | RVOL/ORB/Catalyst/ATR | Shorts 8-18%"
     )
     return (
@@ -5455,10 +5487,17 @@ def format_realistic_research_banner() -> str:
 
 def format_realistic_research_startup_lines() -> list[str]:
     """Multi-line startup block: headline, stat arb, profile details."""
+    detail = REALISTIC_RESEARCH_FEATURE_DETAIL
+    if not PAPER_DYNAMIC_VTI_ENABLED:
+        detail = detail.replace(
+            "Smart Dynamic VTI LOCKED (40-75%, hard floor >=40%; "
+            "tiers stress 75% / default 65% / calm 50%)",
+            f"fixed VTI {float(PAPER_VTI_CORE_PCT):.0%} (Dynamic VTI off)",
+        )
     lines = [
         f">>> {REALISTIC_RESEARCH_TAGLINE} <<<",
         format_realistic_research_headline(),
-        f">>> {REALISTIC_RESEARCH_FEATURE_DETAIL} <<<",
+        f">>> {detail} <<<",
     ]
     stat_line = format_stat_arb_research_line()
     if stat_line:
@@ -7383,6 +7422,11 @@ def effective_vti_rebalance_drift_pct() -> float:
     if paper_only_sleeves_active():
         return PAPER_VTI_REBALANCE_DRIFT_PCT
     return VTI_CORE_REBALANCE_DRIFT_PCT
+
+
+def effective_vti_rebalance_cadence() -> str:
+    raw = (os.getenv("VTI_REBALANCE_CADENCE") or VTI_REBALANCE_CADENCE or "drift").strip().lower()
+    return "weekly" if raw in ("weekly", "week", "1w") else "drift"
 
 
 def get_vti_core_pct(

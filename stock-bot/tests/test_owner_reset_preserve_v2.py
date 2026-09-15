@@ -104,3 +104,65 @@ def test_default_daily_start_uses_preserve_path(monkeypatch):
     rc = owner_reset.main()
     assert rc == 0
     assert calls == ["daily"]
+
+
+def test_clean_restart_paper_only_targets_sot(monkeypatch):
+    """--paper-only / autostart / recover must restart alpaca_paper_v2, not Lab."""
+    calls: list[tuple] = []
+
+    monkeypatch.setattr(
+        "modules.portal_paths.bind_project_root", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        "modules.portal_paths.has_alpaca_config",
+        lambda username, book_id: book_id == "alpaca_paper_v2",
+    )
+    monkeypatch.setattr(owner_reset, "_clear_paper_pid_only", lambda u, b=None: calls.append(("clear", b)))
+    monkeypatch.setattr(
+        "modules.portal_bot.bot_running",
+        lambda username, book_id="alpaca_paper": False,
+    )
+    monkeypatch.setattr(
+        "modules.portal_bot.bot_pid",
+        lambda username, book_id="alpaca_paper": 55 if book_id == "alpaca_paper" else None,
+    )
+    monkeypatch.setattr(owner_reset, "_live_preserve_pids", lambda *_a, **_k: {99})
+
+    def fake_orphan(*, preserve_pids=None, username=None):
+        calls.append(("orphan", frozenset(preserve_pids or set()), username))
+        return 0, "No orphan bot processes."
+
+    monkeypatch.setattr("modules.portal_bot.stop_orphan_project_bots", fake_orphan)
+
+    def fake_start(username, book_id="alpaca_paper", *, skip_orphan_stop=False):
+        calls.append(("start", book_id, skip_orphan_stop))
+        return True, f"started {book_id}"
+
+    monkeypatch.setattr("modules.portal_bot.start_bot", fake_start)
+
+    ok, msg = owner_reset.clean_restart_paper_only("dawimberly")
+    assert ok is True
+    assert ("clear", "alpaca_paper_v2") in calls
+    assert ("start", "alpaca_paper_v2", True) in calls
+    orphan = next(c for c in calls if c[0] == "orphan")
+    assert 99 in orphan[1]  # live
+    assert 55 in orphan[1]  # Lab preserved
+    assert "alpaca_paper_v2" in msg or "started" in msg.lower()
+
+
+def test_wait_for_paper_heartbeat_uses_sot_path(tmp_path, monkeypatch):
+    hb = tmp_path / "bot_heartbeat.json"
+    hb.write_text(
+        json.dumps({"timestamp": datetime.now().isoformat()}), encoding="utf-8"
+    )
+    seen: list[str] = []
+
+    def fake_path(username, book_id):
+        seen.append(book_id)
+        return hb
+
+    monkeypatch.setattr("modules.portal_bot.book_heartbeat_path", fake_path)
+    ok, detail = owner_reset.wait_for_paper_heartbeat("dawimberly", timeout_sec=10)
+    assert ok is True
+    assert seen == ["alpaca_paper_v2"]
+    assert "fresh" in detail

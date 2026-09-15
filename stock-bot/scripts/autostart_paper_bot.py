@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Autonomous overnight paper-bot startup + 9:00 AM ET pre-market Telegram summary.
+"""Autonomous overnight Paper SoT startup + 9:00 AM ET pre-market Telegram summary.
 
-Paper book (alpaca_paper) only — does not start or stop the live bot.
+Paper SoT (alpaca_paper_v2) only — does not start or stop live or Lab.
 
 Run from stock-bot/:
   python scripts/autostart_paper_bot.py
@@ -85,8 +85,9 @@ def _today_et() -> str:
 
 def _load_heartbeat(username: str) -> dict | None:
     from modules.portal_paths import book_heartbeat_path
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
 
-    path = book_heartbeat_path(username, "alpaca_paper")
+    path = book_heartbeat_path(username, SOT)
     if not path.is_file():
         return None
     try:
@@ -317,9 +318,11 @@ def format_premarket_report_text(
     color = health.get("color", "")
     now = datetime.now(_ET).strftime("%Y-%m-%d %H:%M:%S ET")
 
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
+
     lines = [
         f"Pre-Market Report — {now}",
-        f"User: {username} | Book: alpaca_paper | RR v{config.REALISTIC_RESEARCH_VERSION}",
+        f"User: {username} | Book: {SOT} | RR v{config.REALISTIC_RESEARCH_VERSION}",
         "",
         "=== Startup ===",
         start_msg,

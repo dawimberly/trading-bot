@@ -52,3 +52,39 @@ def test_restart_aborts_if_old_pid_still_tracked(monkeypatch):
     ok, msg = portal_bot.restart_bot("owner", "alpaca_paper")
     assert ok is False
     assert "still running" in msg.lower()
+
+
+def test_restart_all_bots_stops_then_starts_each_keyed_book(monkeypatch):
+    """Dashboard Restart All 3 must use full stop_bot, not bare PID unlink."""
+    stops: list[str] = []
+    starts: list[tuple[str, bool]] = []
+    books = ("alpaca_live", "alpaca_paper", "alpaca_paper_v2")
+
+    monkeypatch.setattr(portal_bot, "book_enabled", lambda *_a, **_k: True)
+    monkeypatch.setattr(portal_bot, "_book_has_keys", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        portal_bot,
+        "bot_pid",
+        lambda username, book_id="alpaca_paper": 100 + books.index(book_id),
+    )
+    monkeypatch.setattr(portal_bot, "bot_running", lambda *_a, **_k: True)
+    monkeypatch.setattr(portal_bot, "_is_paper_book", lambda u, b: b != "alpaca_live")
+    monkeypatch.setattr(portal_bot.time, "sleep", lambda *_a, **_k: None)
+
+    def fake_stop(username, book_id="alpaca_paper"):
+        stops.append(book_id)
+        return True, f"stopped {book_id}"
+
+    def fake_start(username, book_id="alpaca_paper", *, skip_orphan_stop=False):
+        starts.append((book_id, skip_orphan_stop))
+        return True, f"started {book_id}"
+
+    monkeypatch.setattr(portal_bot, "stop_bot", fake_stop)
+    monkeypatch.setattr(portal_bot, "start_bot", fake_start)
+
+    ok, msg = portal_bot.restart_all_bots("dawimberly")
+    assert ok is True
+    assert stops == list(books)
+    assert [b for b, _ in starts] == list(books)
+    assert all(skip for _, skip in starts)
+    assert "All 3 books restarted" in msg
