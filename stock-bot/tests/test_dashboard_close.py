@@ -58,12 +58,13 @@ def test_titlebar_x_always_shuts_down_not_tray():
     assert "_start_tray" not in body
 
 
-def test_restart_both_button_is_wired():
+def test_restart_all_three_button_is_wired():
     src = _src()
-    assert 'text="Restart Both"' in src
-    assert "def _restart_both_bots_async(" in src
+    assert 'text="Restart All 3"' in src
+    assert "def _restart_all_bots_async(" in src
     assert "restart_all_bots(" in src
-    assert 'status="Restarting paper + live…"' in src
+    assert 'status="Restarting all 3 books…"' in src
+    assert "Restart paper + live" not in src
 
 
 def test_wm_delete_and_alt_f4_bound():

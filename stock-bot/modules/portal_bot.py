@@ -126,6 +126,24 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PER_NAME_MAX_PCT"] = "0.25"
             env["STOP_LOSS_PCT"] = "0.08"
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
+            env["PAPER_DYNAMIC_VTI"] = "false"
+            env["PAPER_DYNAMIC_VTI_ENABLED"] = "false"
+            env["PAPER_VTI_CORE_PCT"] = "0.33"
+            env["VTI_CORE_PCT"] = "0.33"
+            env["DYNAMIC_VTI_PAPER_FLOOR"] = "0.33"
+            env["DYNAMIC_VTI_PAPER_CEILING"] = "0.33"
+            env["DYNAMIC_VTI_FLOOR_MIN"] = "0.33"
+            env["DYNAMIC_VTI_DEFAULT_PCT"] = "0.33"
+            env["DYNAMIC_VTI_STRESS_PCT"] = "0.33"
+            env["DYNAMIC_VTI_CALM_PCT"] = "0.33"
+            env["DYNAMIC_VTI_OPTIONAL_ENABLED"] = "false"
+            env["PAPER_ACTIVE_SLEEVE_BOOST"] = "1.0"
+            env["NYSE_SLEEVE_CAP_PCT"] = "0.67"
+            env["PAPER_NYSE_SLEEVE_CAP_PCT"] = "0.67"
+            env["PAPER_NYSE_HIGH_CASH_CAP_PCT"] = "0.67"
+            env["PAPER_NYSE_MAX_EXPOSURE_PCT"] = "0.67"
+            env["PAPER_REGIME_WEAK_SLEEVE_MAX_PCT"] = "0.67"
+            env["METAL_SLEEVE_ENABLED"] = "false"
         elif book_id == "alpaca_paper_v2":
             env["PAPER_MEDIUM_STRATEGY"] = "true"
             env["MAX_ACTIVE_TICKERS"] = "15"
@@ -143,6 +161,8 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             from config import clear_paper_research_env
 
             env = clear_paper_research_env(env)
+            # Skip $1 drip trims on a ~$300 book (same floor as Medium).
+            env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
     return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 
@@ -552,21 +572,19 @@ def _book_has_keys(username: str, book_id: str) -> bool:
 
 
 def restart_all_bots(username: str) -> tuple[bool, str]:
-    """Gracefully restart every configured book that has API keys."""
+    """Restart every keyed book (Lab, Medium, Live) without orphan-killing siblings."""
     messages: list[str] = []
     ok_all = True
     restarted_any = False
 
-    # Stop every book first, then one orphan sweep — avoids killing live run_all
-    # while starting paper (both use run_all.py on disk).
     for book_id in BOOKS:
         if not book_enabled(book_id) or not _book_has_keys(username, book_id):
             continue
-        if bot_running(username, book_id):
-            stop_bot(username, book_id)
-    stopped, orphan_msg = stop_orphan_project_bots(username=username)
-    if stopped:
-        time.sleep(1.0)
+        pid = bot_pid(username, book_id)
+        if pid is not None:
+            _graceful_stop_pid(pid)
+            book_pid_path(username, book_id).unlink(missing_ok=True)
+    time.sleep(1.0)
 
     for book_id in BOOKS:
         if not book_enabled(book_id) or not _book_has_keys(username, book_id):
@@ -579,9 +597,7 @@ def restart_all_bots(username: str) -> tuple[bool, str]:
         ok_all = ok_all and ok
     if not restarted_any:
         return False, "No books with API keys found to restart."
-    if stopped:
-        messages.insert(0, f"(Pre-start cleanup: {orphan_msg})")
-    prefix = "All bots restarted" if ok_all else "Restart finished with errors"
+    prefix = "All 3 books restarted" if ok_all else "Restart finished with errors"
     return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
 
 

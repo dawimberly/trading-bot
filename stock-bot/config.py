@@ -1516,7 +1516,8 @@ _paper_aggressive_ctx = False
 
 # --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
 FUND_CASH_BUFFER_PCT = 0.15
-SPY_SLEEVE_CAP_PCT = 0.45
+# Retired SPY momentum sleeve (cap 0). SPY remains a regular NYSE-eligible name.
+SPY_SLEEVE_CAP_PCT = float(os.getenv("SPY_SLEEVE_CAP_PCT", "0"))
 # Base NYSE momentum sleeve; paper/research uses effective_nyse_sleeve_cap_pct() (0.18–0.22).
 NYSE_SLEEVE_CAP_PCT = float(os.getenv("NYSE_SLEEVE_CAP_PCT", "0.20"))
 # Dedicated stat-arb sleeve (paper/research) — independent of NYSE momentum cap.
@@ -2878,14 +2879,26 @@ def effective_halt_resume_drawdown_pct() -> float:
 
 
 def paper_sleeve_hard_cap_pct(sleeve_key: str) -> float | None:
+    # SPY sleeve is retired on every paper book, not only paper-aggressive.
+    if sleeve_key == "spy" and PAPER_TRADING:
+        return PAPER_SPY_MAX_EXPOSURE_PCT
     if not paper_aggressive_context():
         return None
     caps = {
-        "spy": PAPER_SPY_MAX_EXPOSURE_PCT,
         "nyse": PAPER_NYSE_MAX_EXPOSURE_PCT,
         "crypto": PAPER_CRYPTO_MAX_EXPOSURE_PCT,
     }
     return caps.get(sleeve_key)
+
+
+def spy_sleeve_enabled() -> bool:
+    """Dedicated SPY sleeve (cap + MA trend fill). Off does not ban SPY as a NYSE name."""
+    if float(SPY_SLEEVE_CAP_PCT) <= 0:
+        return False
+    hard = paper_sleeve_hard_cap_pct("spy")
+    if hard is not None and float(hard) <= 0:
+        return False
+    return True
 
 
 def set_backtest_live_conservative_context(enabled: bool) -> None:
@@ -3635,12 +3648,11 @@ def load_screener_universe_tickers() -> list[str] | None:
 
 
 def _nyse_eligible_symbol(symbol: str) -> bool:
-    return (
-        not is_crypto(symbol)
-        and symbol != SPY_BOT_SYMBOL
-        and symbol != VTI_CORE_SYMBOL
-        and not is_metal_symbol(symbol)
-    )
+    if is_crypto(symbol) or is_metal_symbol(symbol) or symbol == VTI_CORE_SYMBOL:
+        return False
+    if symbol == SPY_BOT_SYMBOL:
+        return not spy_sleeve_enabled()
+    return True
 
 
 def nyse_momentum_universe(data_columns) -> list[str]:
@@ -5086,6 +5098,8 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "DYNAMIC_VTI_OPTIONAL_LIVE": "false",
     "CORE_ALLOCATOR_LOCKED": "false",
     "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
+    "SPY_SLEEVE_CAP_PCT": "0",
+    "PAPER_SPY_MAX_EXPOSURE_PCT": "0",
     "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "300",
     "PAPER_MAX_EQUITY_TRADES": "3",
     "DEEP_HISTORY_ENABLED": "true",
@@ -7706,13 +7720,20 @@ def _live_conservative_sleeve_boost(sleeve: str | None) -> float:
 
 
 def effective_sleeve_cap(base_pct: float, *, sleeve: str | None = None) -> float:
+    if float(base_pct) <= 0:
+        return 0.0
     if sleeve == "stat_arb" and effective_stat_arb_sleeve_cap_enabled():
         return round(STAT_ARB_SLEEVE_CAP_PCT * active_sleeve_scale(), 6)
     if live_conservative_profile_active():
         cap = round(base_pct * _live_small_active_baseline_scale(), 6)
         cap = round(cap + _live_conservative_sleeve_boost(sleeve), 6)
-        return cap
-    return round(base_pct * active_sleeve_scale(), 6)
+    else:
+        cap = round(base_pct * active_sleeve_scale(), 6)
+    if sleeve:
+        hard = paper_sleeve_hard_cap_pct(sleeve)
+        if hard is not None:
+            cap = min(float(cap), float(hard))
+    return cap
 
 
 def effective_stat_arb_sleeve_cap_enabled() -> bool:
@@ -7813,7 +7834,7 @@ def fund_allocation_pct() -> dict[str, float]:
     )
     return {
         "vti_core": vti_core_allocation_pct(),
-        "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
+        "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT, sleeve="spy"),
         "crypto": crypto_cap,
         "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),
         "stat_arb": stat_arb_cap,

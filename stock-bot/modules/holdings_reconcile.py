@@ -105,11 +105,13 @@ def trim_over_cap_sleeves(executor: AlpacaExecutor) -> list[dict]:
 
     sleeve_defs = (
         ("crypto", config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT), executor.crypto_sleeve_value, AlpacaExecutor._is_crypto_position),
-        ("spy", config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT), executor.spy_sleeve_value, AlpacaExecutor._is_spy_position),
+        ("spy", config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy"), executor.spy_sleeve_value, AlpacaExecutor._is_spy_position),
         ("nyse", config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT), executor.nyse_sleeve_value, AlpacaExecutor._is_nyse_sleeve_position),
     )
 
     for name, cap_pct, value_fn, pred in sleeve_defs:
+        if name == "spy" and not config.spy_sleeve_enabled():
+            continue
         cap = equity * cap_pct
         value = value_fn()
         excess = round(value - cap, 2)

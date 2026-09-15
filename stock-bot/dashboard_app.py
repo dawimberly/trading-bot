@@ -2280,7 +2280,7 @@ class _LabelMetric:
 
 _DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
     ("alpaca_paper_v2", "Paper", "Medium 33/67 (15 names, 30d hold)"),
-    ("alpaca_paper", "Paper aggressive", "Paper aggressive"),
+    ("alpaca_paper", "Paper aggressive", "33/67 VTI/NYSE"),
     ("alpaca_live", "Live", "Live Profile A — do not size options"),
 )
 
@@ -3562,8 +3562,8 @@ class TradingDashboardApp(ctk.CTk):
         ).grid(row=0, column=4, padx=3, pady=2, sticky="e")
         self._restart_bot_btn = ctk.CTkButton(
             controls_row,
-            text="Restart Both",
-            width=108,
+            text="Restart All 3",
+            width=118,
             fg_color=COLORS["small_bg"],
             hover_color=COLORS["small"],
             text_color=COLORS["amber"],
@@ -4451,8 +4451,8 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left", padx=(0, 6))
         self._restart_bot_btn = ctk.CTkButton(
             inner,
-            text="Restart Both",
-            width=108,
+            text="Restart All 3",
+            width=118,
             fg_color=COLORS["small_bg"],
             hover_color=COLORS["small"],
             text_color=COLORS["amber"],
@@ -4610,7 +4610,7 @@ class TradingDashboardApp(ctk.CTk):
     def _set_bot_action_buttons_busy(self, busy: bool, *, status: str | None = None) -> None:
         state = "disabled" if busy else "normal"
         refresh_bot_text = "…" if busy else "Refresh Bot"
-        restart_text = "…" if busy else "Restart Both"
+        restart_text = "…" if busy else "Restart All 3"
         try:
             self._refresh_btn.configure(state=state)
             self._refresh_bot_btn.configure(text=refresh_bot_text, state=state)
@@ -5783,8 +5783,8 @@ class TradingDashboardApp(ctk.CTk):
         bar.grid(row=3, column=0, sticky="ew")
         self._restart_bot_btn = ctk.CTkButton(
             bar,
-            text="Restart Both",
-            width=108,
+            text="Restart All 3",
+            width=118,
             height=28,
             command=self._on_restart_bot,
             fg_color=COLORS["small_bg"],
@@ -7079,20 +7079,20 @@ class TradingDashboardApp(ctk.CTk):
 
     def _on_restart_bot(self) -> None:
         if not messagebox.askyesno(
-            "Restart Both",
-            "Restart paper + live bots?\n\n"
-            "This stops every portal book with keys, clears stray processes, "
-            "then starts them again. Open positions are not closed.\n\n"
+            "Restart All 3",
+            "Restart Lab, Medium, and Live?\n\n"
+            "Stops each book on its own PID, then starts all three. "
+            "Open positions are not closed.\n\n"
             "Does not depend on which book is selected.\n\nContinue?",
             icon="warning",
         ):
             return
-        self._restart_both_bots_async()
+        self._restart_all_bots_async()
 
-    def _restart_both_bots_async(self) -> None:
+    def _restart_all_bots_async(self) -> None:
         self._set_bot_action_buttons_busy(
             True,
-            status="Restarting paper + live…",
+            status="Restarting all 3 books…",
         )
 
         def _worker() -> None:
@@ -7102,17 +7102,17 @@ class TradingDashboardApp(ctk.CTk):
                 self._set_bot_action_buttons_busy(False)
                 if ok:
                     messagebox.showinfo(
-                        "Restart Both",
+                        "Restart All 3",
                         f"{msg}\n\nHeartbeats may take ~60 seconds to refresh.",
                     )
                 else:
-                    messagebox.showwarning("Restart Both", msg)
+                    messagebox.showwarning("Restart All 3", msg)
                 self.refresh_data()
 
             self.after(0, _finish)
 
         threading.Thread(
-            target=_worker, daemon=True, name="dashboard-restart-both"
+            target=_worker, daemon=True, name="dashboard-restart-all"
         ).start()
 
     def _on_refresh_bot(self) -> None:

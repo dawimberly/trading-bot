@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import config
 from modules import alpaca_executor as ae
 from modules.alpaca_executor import AlpacaExecutor
+from modules.pipeline_strategies import regime_entries_paused
 from modules.position_exits import _max_hold_bars
 
 
@@ -100,3 +101,15 @@ def test_medium_name_cap_skips_when_session_closed(monkeypatch):
     ex = AlpacaExecutor.__new__(AlpacaExecutor)
     ex.equity_session_open = False
     assert ex.trim_over_active_tickers(dry_run=True) == []
+
+
+def test_dynamic_sizing_does_not_hard_pause_rhyme_e(monkeypatch):
+    monkeypatch.setattr(config, "effective_regime_dynamic_sizing", lambda: True)
+    assert regime_entries_paused("RHYME_E: Steady_Bearish_Decline") is False
+    assert regime_entries_paused("RHYME_B: Panic_Volatility") is False
+
+
+def test_live_without_dynamic_sizing_still_pauses_rhyme_e(monkeypatch):
+    monkeypatch.setattr(config, "effective_regime_dynamic_sizing", lambda: False)
+    monkeypatch.setattr(config, "effective_paper_soft_pause", lambda: False)
+    assert regime_entries_paused("RHYME_E: Steady_Bearish_Decline") is True

@@ -294,6 +294,9 @@ def regime_entries_paused(regime, data=None, sentiment=None):
             return True
     except ImportError:
         pass
+    # Paper aggressive: size RHYME_B/E instead of freezing entries.
+    if config.effective_regime_dynamic_sizing():
+        return False
     if regime in PAUSED_REGIMES:
         return True
     if not config.DERIVED_BEAR_PAUSE_ENABLED or data is None:
@@ -1193,7 +1196,7 @@ def _is_nyse_momentum_position(symbol: str) -> bool:
     sym = config.normalize_symbol(symbol)
     if config.is_crypto(sym):
         return False
-    if sym == config.SPY_BOT_SYMBOL:
+    if sym == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled():
         return False
     if config.is_metal_symbol(sym):
         return False
@@ -1352,6 +1355,8 @@ def _spy_buy_intent(
 ):
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
+    if not config.spy_sleeve_enabled():
+        return False
     if regime_entries_paused(regime, data) or config.effective_yield_gate(
         yield_gated, regime=regime
     ):
@@ -1452,7 +1457,7 @@ def resolve_cycle_deploy(
         return
 
     rooms = {}
-    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
+    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy")
     crypto_cap = config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
     nyse_cap = config.effective_nyse_sleeve_cap_pct()
     if hasattr(executor, "_get_account"):
@@ -1593,6 +1598,8 @@ def run_spy_strategy(
     """Buy SPY when above MA — a simple bet that the broad market keeps rising."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
+    if not config.spy_sleeve_enabled():
+        return 0
     if regime_entries_paused(regime, data):
         return 0
     if config.effective_yield_gate(yield_gated, regime=regime):
@@ -2213,7 +2220,9 @@ def summarize_entry_skip_reason(
 ) -> str:
     """Return a token describing why no entries fired this cycle (for skip funnel)."""
     yield_gated = config.effective_yield_gate(yield_gated, regime=regime)
-    if wisdom_paused and not config.effective_paper_soft_pause():
+    if wisdom_paused and not (
+        config.effective_paper_soft_pause() or config.effective_regime_dynamic_sizing()
+    ):
         return "wisdom_paused"
     if regime_entries_paused(regime, data):
         if config.effective_paper_soft_pause():

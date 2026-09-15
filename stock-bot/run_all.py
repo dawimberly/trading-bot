@@ -399,7 +399,7 @@ def _write_heartbeat(
                 data=heartbeat_data,
                 insider_state=insider_state,
             ),
-            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy"),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
             "metal": config.METAL_SLEEVE_CAP_PCT if config.metal_sleeve_enabled() else 0.0,
@@ -555,7 +555,13 @@ def main():
         pass
 
     try:
-        guard_summary = executor.enforce_portfolio_guards(dry_run=bool(executor.dry_run))
+        # Live: first cycles after a mid-session start used to nibble
+        # concentration_guard_trim (XOM ~$1) before regime pause applied.
+        skip_conc = (not config.PAPER_TRADING) and _main_cycle_count <= 2
+        guard_summary = executor.enforce_portfolio_guards(
+            dry_run=bool(executor.dry_run),
+            skip_concentration=skip_conc,
+        )
         if _main_cycle_count <= 2 or guard_summary.get("concentration_trims") or any(
             a.get("status") in ("dry_run", "closed", "submitted")
             for a in (guard_summary.get("dust_actions") or [])

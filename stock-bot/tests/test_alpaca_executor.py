@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 import modules
@@ -108,6 +109,14 @@ def test_execute_full_exit_caps_qty_to_available_xle(monkeypatch):
     assert submitted_qty <= tiny_avail
     assert submitted_qty < stale_qty
     assert submitted_qty > 0
+
+
+def test_submit_order_signature_accepts_side():
+    """A later _submit_order(op=) must not shadow the real side=/reason= method."""
+    params = inspect.signature(AlpacaExecutor._submit_order).parameters
+    assert "side" in params
+    assert "reason" in params
+    assert "op" not in params
 
 
 def test_position_available_qty_prefers_qty_available():

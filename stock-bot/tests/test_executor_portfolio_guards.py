@@ -124,3 +124,10 @@ def test_execute_exit_with_auto_dust_uses_ten_dollar_default(monkeypatch):
     assert result.status == "dry_run"
     assert seen["max_notional"] == 10.0
     assert seen["dry_run"] is True
+
+
+def test_enforce_portfolio_guards_can_skip_concentration():
+    positions = [_pos("FAT", 100, 100.0)]
+    ex = _make_executor(positions, equity=100_000.0, dry_run=True)
+    summary = ex.enforce_portfolio_guards(dry_run=True, skip_concentration=True)
+    assert summary["concentration_trims"] == []

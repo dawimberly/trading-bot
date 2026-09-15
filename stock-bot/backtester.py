@@ -318,6 +318,8 @@ class BacktestExecutor:
 
     @staticmethod
     def _is_spy_position(symbol):
+        if not config.spy_sleeve_enabled():
+            return False
         return config.normalize_symbol(symbol) == config.SPY_BOT_SYMBOL
 
     @staticmethod

@@ -62,7 +62,7 @@ def target_sleeves(
         crypto_target = 0.0
 
     return {
-        "spy": equity * config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+        "spy": equity * config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy"),
         "crypto": crypto_target,
         "nyse": equity * config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
         "cash_buffer": equity * config.effective_cash_buffer_pct(),
@@ -139,6 +139,8 @@ def _deploy_spy(
     dry_run: bool,
     yield_gated: bool = False,
 ) -> list[dict]:
+    if not config.spy_sleeve_enabled() or target_value <= 0:
+        return []
     if regime in PAUSED_REGIMES or yield_gated:
         return []
     symbol = config.SPY_BOT_SYMBOL
@@ -197,7 +199,7 @@ def _deploy_nyse(
         c
         for c in data.columns
         if not config.is_crypto(c)
-        and c != config.SPY_BOT_SYMBOL
+        and (c != config.SPY_BOT_SYMBOL or not config.spy_sleeve_enabled())
         and not config.is_metal_symbol(c)
     ]
     ranked = _equity_momentum_candidates(data, equity_cols)
@@ -257,21 +259,24 @@ def rebalance_to_targets(
     actions: list[dict] = []
 
     for sleeve in SLEEVE_ORDER:
+        if sleeve == "spy" and not config.spy_sleeve_enabled():
+            continue
         actions.extend(
             _reduce_sleeve(executor, sleeve, targets[sleeve], dry_run=dry_run)
         )
 
     if market_open:
-        actions.extend(
-            _deploy_spy(
-                executor,
-                data,
-                regime,
-                targets["spy"],
-                dry_run=dry_run,
-                yield_gated=yield_gated,
+        if config.spy_sleeve_enabled():
+            actions.extend(
+                _deploy_spy(
+                    executor,
+                    data,
+                    regime,
+                    targets["spy"],
+                    dry_run=dry_run,
+                    yield_gated=yield_gated,
+                )
             )
-        )
         actions.extend(
             _deploy_nyse(executor, data, regime, targets["nyse"], dry_run=dry_run)
         )

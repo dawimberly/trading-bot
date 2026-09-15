@@ -134,7 +134,9 @@ def _sleeve_predicate(executor, sleeve_key: str):
 
 def _per_name_cap_exempt(sym: str) -> bool:
     """Core trend sleeves are capped by sleeve limits, not per-name %."""
-    return sym in (config.VTI_CORE_SYMBOL, config.SPY_BOT_SYMBOL)
+    if sym == config.VTI_CORE_SYMBOL:
+        return True
+    return sym == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled()
 
 
 def cap_per_name_buy_notional(
@@ -308,9 +310,11 @@ def _trailing_stop_hit(entry: float, peak: float, current: float) -> bool:
 
 
 def _is_tactical_long(sym: str) -> bool:
-    """Max-hold / trailing apply to NYSE picks, not core SPY/VTI trend holds."""
+    """Max-hold / trailing apply to NYSE picks, not core VTI (or SPY sleeve) holds."""
     sym = config.normalize_symbol(sym)
-    if sym in (config.VTI_CORE_SYMBOL, config.SPY_BOT_SYMBOL):
+    if sym == config.VTI_CORE_SYMBOL:
+        return False
+    if sym == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled():
         return False
     if config.is_crypto(sym):
         return False

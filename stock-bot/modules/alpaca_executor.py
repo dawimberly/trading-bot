@@ -460,6 +460,9 @@ class AlpacaExecutor:
         if key == "vti_core":
             return config.vti_core_allocation_pct()
 
+        if key == "spy" and not config.spy_sleeve_enabled():
+            return 0.0
+
         if key == "nyse" and (
             config.paper_aggressive_context() or config.is_realistic_research_active()
         ):
@@ -487,6 +490,9 @@ class AlpacaExecutor:
         pod_key = key if key in ("spy", "crypto", "nyse", "stat_arb") else None
         if pod_key:
             pct *= self.pod_risk_scale(pod_key)
+        hard = config.paper_sleeve_hard_cap_pct(key)
+        if hard is not None:
+            pct = min(float(pct), float(hard))
         return pct
 
     def _account_equity(self) -> float:
@@ -529,25 +535,6 @@ class AlpacaExecutor:
             )
             return None
         return n
-
-    def _submit_order(self, order, *, symbol: str, op: str):
-        """Submit with pre-flight notional guard; validation errors return None."""
-        req_notional = getattr(order, "notional", None)
-        if req_notional is not None:
-            valid = self._skip_if_notional_invalid(req_notional, symbol=symbol, op=op)
-            if valid is None:
-                return None
-            if valid != req_notional:
-                order = MarketOrderRequest(
-                    symbol=order.symbol,
-                    notional=valid,
-                    side=order.side,
-                    time_in_force=order.time_in_force,
-                )
-        try:
-            return self._api("submit_order", self.client.submit_order, order_data=order)
-        except AlpacaValidationError:
-            return None
 
     def _max_notional(self) -> float:
         return config.effective_max_notional_per_order(self._account_equity())
@@ -618,7 +605,11 @@ class AlpacaExecutor:
 
     @staticmethod
     def _order_status(order) -> str:
-        return str(getattr(order, "status", "")).lower()
+        raw = getattr(order, "status", "")
+        if hasattr(raw, "value"):
+            raw = raw.value
+        text = str(raw or "").lower()
+        return text.replace("orderstatus.", "").replace("order_status.", "")
 
     @staticmethod
     def _order_side_label(order, fallback: str = "") -> str:
@@ -636,7 +627,7 @@ class AlpacaExecutor:
         norm = config.normalize_symbol(symbol)
         if config.is_crypto(symbol):
             return "Crypto"
-        if norm == config.SPY_BOT_SYMBOL:
+        if norm == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled():
             return "SPY"
         if config.is_metal_symbol(symbol):
             return "Metal"
@@ -864,6 +855,8 @@ class AlpacaExecutor:
 
     @staticmethod
     def _is_spy_position(pos):
+        if not config.spy_sleeve_enabled():
+            return False
         return pos.symbol.replace("/", "-") == config.SPY_BOT_SYMBOL
 
     @staticmethod
@@ -1673,12 +1666,10 @@ class AlpacaExecutor:
 
     @staticmethod
     def _core_exempt_symbols() -> frozenset[str]:
-        return frozenset(
-            {
-                config.normalize_symbol(config.VTI_CORE_SYMBOL),
-                config.normalize_symbol(config.SPY_BOT_SYMBOL),
-            }
-        )
+        syms = {config.normalize_symbol(config.VTI_CORE_SYMBOL)}
+        if config.spy_sleeve_enabled():
+            syms.add(config.normalize_symbol(config.SPY_BOT_SYMBOL))
+        return frozenset(syms)
 
     def _is_core_exempt(self, symbol: str) -> bool:
         return config.normalize_symbol(symbol) in self._core_exempt_symbols()
@@ -1876,13 +1867,22 @@ class AlpacaExecutor:
             actions.append(action)
         return actions
 
-    def enforce_portfolio_guards(self, *, dry_run: bool | None = None) -> dict:
+    def enforce_portfolio_guards(
+        self,
+        *,
+        dry_run: bool | None = None,
+        skip_concentration: bool = False,
+    ) -> dict:
         """Run concentration trim + auto-dust cleaner. Returns a summary dict."""
         use_dry = self.dry_run if dry_run is None else bool(dry_run)
         self.refresh_cache()
         active = self.list_active_tickers()
         name_cap = self.trim_over_active_tickers(dry_run=use_dry)
-        concentration = self.trim_concentration_excess(dry_run=use_dry)
+        concentration = (
+            []
+            if skip_concentration
+            else self.trim_concentration_excess(dry_run=use_dry)
+        )
         dust: list[dict] = []
         if config.effective_auto_dust_cleaner_enabled():
             dust = self.cleanup_dust_positions(
