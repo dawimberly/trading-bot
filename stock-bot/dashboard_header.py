@@ -172,18 +172,56 @@ def sleeve_mix_rows(
     ]
 
 
-def header_tape_text(*, paper: bool, heartbeat: dict[str, Any] | None = None) -> str:
-    """Cyan tape under the header. Never claim the NYSE-only 100% experiment."""
-    holdings = _usable_holdings_bits(heartbeat)
-    if paper:
-        if holdings:
-            tape = f"PAPER RESEARCH v{_research_version()}   ·   " + "   ·   ".join(holdings)
-        else:
-            tape = _paper_research_tape()
-    elif holdings:
-        tape = "LIVE HOLDINGS   ·   " + "   ·   ".join(holdings)
-    else:
-        tape = _live_fallback_tape()
+def _today_tape_bit() -> str:
+    from datetime import datetime
+
+    return datetime.now().strftime("%A · %b %d, %Y")
+
+
+def _book_strategy_tape(*, paper: bool, book_id: str | None = None) -> str:
+    """Stable strategy line for the cyan marquee — not live holdings."""
+    bid = (book_id or "").strip().lower()
+    today = _today_tape_bit()
+    if not paper:
+        return (
+            f"{today}   ·   LIVE PROFILE A   ·   "
+            "33/67 VTI + NYSE ACTIVE   ·   REAL MONEY   ·   DO NOT SIZE OPTIONS"
+        )
+    try:
+        import config
+
+        if bid == "alpaca_paper_v2" or (
+            not bid and config.paper_medium_strategy_enabled()
+        ):
+            return (
+                f"{today}   ·   MEDIUM SoT (alpaca_paper_v2)   ·   "
+                "15 NAMES · 30D HOLD · ATR 2.0×   ·   "
+                f"FIXED VTI 33/67   ·   RESEARCH v{_research_version()}"
+            )
+        if bid == "alpaca_paper":
+            return (
+                f"{today}   ·   PAPER LAB (alpaca_paper)   ·   "
+                "4 NAMES ~25%   ·   10D HOLD · HALF @ +12%   ·   "
+                f"RESEARCH v{_research_version()}"
+            )
+    except Exception:
+        pass
+    return f"{today}   ·   {_paper_research_tape()}"
+
+
+def header_tape_text(
+    *,
+    paper: bool,
+    heartbeat: dict[str, Any] | None = None,
+    book_id: str | None = None,
+) -> str:
+    """Cyan tape under the header: date + strategy (not live holdings churn).
+
+    ``heartbeat`` is accepted for call-site compatibility but ignored — the
+    marquee is look/strategy chrome, not a second equity ticker.
+    """
+    _ = heartbeat
+    tape = _book_strategy_tape(paper=paper, book_id=book_id)
     if _NYSE_100_RE.search(tape):
-        return _paper_research_tape() if paper else _live_fallback_tape()
+        return _book_strategy_tape(paper=paper, book_id=None)
     return tape

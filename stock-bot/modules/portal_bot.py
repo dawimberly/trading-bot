@@ -414,12 +414,12 @@ def stop_orphan_project_bots(
             if pid in preserve:
                 continue
             live_supervisor = bot_pid(username, "alpaca_live") if username else None
-            if live_supervisor is not None and _is_descendant_of(live_supervisor, pid):
+            if live_supervisor is not None and _is_descendant_of(pid, live_supervisor):
                 continue
             skip_paper = False
             for paper_id in PAPER_BOOK_IDS:
                 paper_supervisor = bot_pid(username, paper_id) if username else None
-                if paper_supervisor is not None and _is_descendant_of(paper_supervisor, pid):
+                if paper_supervisor is not None and _is_descendant_of(pid, paper_supervisor):
                     skip_paper = True
                     break
             if skip_paper:

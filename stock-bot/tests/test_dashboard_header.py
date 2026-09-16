@@ -39,22 +39,20 @@ def test_paper_stamp_is_paper():
 
 
 def test_live_tape_without_heartbeat_does_not_claim_vti_pct():
-    tape = header_tape_text(paper=False)
+    tape = header_tape_text(paper=False, book_id="alpaca_live")
     assert "LIVE" in tape
     assert "VTI CORE 85" not in tape
     _assert_no_nyse_100(tape)
 
 
 def test_paper_tape_without_heartbeat_is_research_not_nyse_100():
-    tape = header_tape_text(paper=True)
-    assert "PAPER RESEARCH" in tape
-    assert "FIXED VTI" in tape or "SMART DYNAMIC VTI" in tape
-    assert "NYSE SLEEVE" in tape
+    tape = header_tape_text(paper=True, book_id="alpaca_paper_v2")
+    assert "MEDIUM" in tape or "PAPER RESEARCH" in tape or "FIXED VTI" in tape
     assert "NYSE MOMENTUM" not in tape
     _assert_no_nyse_100(tape)
 
 
-def test_live_tape_uses_heartbeat_holdings():
+def test_live_tape_is_strategy_not_live_holdings_churn():
     hb = {
         "equity": 320.0,
         "cash": 40.0,
@@ -65,16 +63,15 @@ def test_live_tape_uses_heartbeat_holdings():
             "nyse_value": 152.0,
         },
     }
-    tape = header_tape_text(paper=False, heartbeat=hb)
-    assert "LIVE HOLDINGS" in tape
-    assert "VTI 30%" in tape
-    assert "SPY 10%" in tape
-    assert "NYSE 48%" in tape
-    assert "CASH 12%" in tape
+    tape = header_tape_text(paper=False, heartbeat=hb, book_id="alpaca_live")
+    assert "LIVE" in tape
+    assert "PROFILE A" in tape or "REAL MONEY" in tape
+    # Date + strategy chrome — not a second holdings ticker.
+    assert "LIVE HOLDINGS" not in tape
     _assert_no_nyse_100(tape)
 
 
-def test_paper_tape_uses_mixed_holdings_not_nyse_slogan():
+def test_paper_medium_tape_has_date_and_strategy():
     hb = {
         "equity": 100_000.0,
         "cash": 10_000.0,
@@ -85,11 +82,11 @@ def test_paper_tape_uses_mixed_holdings_not_nyse_slogan():
             "spy_value": 8_000.0,
         },
     }
-    tape = header_tape_text(paper=True, heartbeat=hb)
-    assert "PAPER RESEARCH" in tape
-    assert "VTI 55%" in tape
-    assert "NYSE 22%" in tape
-    assert "SPY 8%" in tape
+    tape = header_tape_text(paper=True, heartbeat=hb, book_id="alpaca_paper_v2")
+    assert "MEDIUM" in tape
+    assert "15 NAMES" in tape
+    assert "33/67" in tape
+    assert "VTI 55%" not in tape
     _assert_no_nyse_100(tape)
 
 
@@ -105,9 +102,7 @@ def test_paper_nyse_only_heartbeat_does_not_print_nyse_100():
         },
     }
     assert holdings_are_nyse_only_slogan(hb)
-    tape = header_tape_text(paper=True, heartbeat=hb)
-    assert "PAPER RESEARCH" in tape
-    assert "FIXED VTI" in tape or "SMART DYNAMIC VTI" in tape
+    tape = header_tape_text(paper=True, heartbeat=hb, book_id="alpaca_paper_v2")
     assert "NYSE 100%" not in tape
     assert "NYSE 98%" not in tape
     _assert_no_nyse_100(tape)
@@ -122,7 +117,7 @@ def test_live_nyse_only_heartbeat_does_not_print_nyse_100():
             "nyse_value": 300.0,
         },
     }
-    tape = header_tape_text(paper=False, heartbeat=hb)
+    tape = header_tape_text(paper=False, heartbeat=hb, book_id="alpaca_live")
     assert "LIVE" in tape
     _assert_no_nyse_100(tape)
     assert "NYSE 94%" not in tape

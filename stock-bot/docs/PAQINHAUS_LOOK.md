@@ -36,7 +36,7 @@ Red is **live money + losses + errors**. Never decorative.
 
 1. 6px cyan hairline across the full window.
 2. Header: kicker + giant **Stock-bot** + PAPER/LIVE stamp on the left. Running/halted chip + book controls on the right.
-3. Cyan **scrolling** tape row from `dashboard_header.header_tape_text` (marquee in `dashboard_app`). Paper = research / holdings mix; live = LIVE / holdings. Never `NYSE 100% · VTI CORE OFF · …`.
+3. Cyan **scrolling** tape: today's date + book strategy (Medium SoT / Lab / Live Profile A). Not a live holdings ticker. Never `NYSE 100% · VTI CORE OFF · …`.
 4. **LIVE TRADING — REAL MONEY ACCOUNT** banner only on the live book. Loud red. Do not size options on ~$300.
 5. Status pills: book, regime, gates, health, bot, heartbeat, conviction.
 6. Metric row: Equity, Cash, Invested, Positions, Unrealized P&L, Market.

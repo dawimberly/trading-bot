@@ -3394,7 +3394,9 @@ class TradingDashboardApp(ctk.CTk):
         self._tape_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=32, corner_radius=0)
         self._tape_bar.pack(fill="x", pady=(0, 0))
         self._tape_bar.pack_propagate(False)
-        self._tape_base = header_tape_text(paper=_book_is_paper(self._book_id))
+        self._tape_base = header_tape_text(
+            paper=_book_is_paper(self._book_id), book_id=self._book_id
+        )
         self._tape_offset = 0
         self._header_tape = ctk.CTkLabel(
             self._tape_bar,
@@ -3402,8 +3404,9 @@ class TradingDashboardApp(ctk.CTk):
             font=_ctk_font("tape"),
             text_color=COLORS["bg"],
             anchor="w",
+            justify="left",
         )
-        self._header_tape.place(relx=0, rely=0.5, anchor="w", x=12)
+        self._header_tape.pack(fill="both", expand=True, padx=12, pady=0)
         self._tape_marquee_job: str | None = None
         self.after(200, self._start_tape_marquee)
 
@@ -4450,17 +4453,54 @@ class TradingDashboardApp(ctk.CTk):
             need = 10 * 34 + 28
             h = int(table.winfo_height() or 0)
             if h < need:
+                # Request height without locking pack_propagate — that frozen the UI.
                 table.configure(height=need)
-                table.pack_propagate(False)
-            else:
-                table.pack_propagate(True)
             table._tree.configure(height=max(12, (max(h, need) - 16) // 34))
             table._fit_tree_to_frame()
         except Exception:
             pass
 
+    def _tape_tk_font(self):
+        """Tk font matching the tape label for width measurement."""
+        import tkinter.font as tkfont
+
+        cached = getattr(self, "_tape_tk_font_obj", None)
+        if cached is not None:
+            return cached
+        family = _resolve_font_family("tape")
+        self._tape_tk_font_obj = tkfont.Font(family=family, size=11, weight="bold")
+        return self._tape_tk_font_obj
+
+    def _tape_visible_chars(self) -> int:
+        """Characters needed to fill the cyan bar edge-to-edge."""
+        try:
+            w = int(self._tape_bar.winfo_width() or 0)
+        except Exception:
+            w = 0
+        if w < 80:
+            try:
+                w = int(self.winfo_width() or 1400)
+            except Exception:
+                w = 1400
+        target = max(200, w - 24)
+        sample = ((getattr(self, "_tape_base", None) or "W") + "   ·   ") * 8
+        font = self._tape_tk_font()
+        # Grow until measured text meets the bar width (Bungee/Impact are wide).
+        lo, hi = 40, min(400, len(sample))
+        best = lo
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            px = int(font.measure(sample[:mid]))
+            if px <= target:
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        # Nudge past 3/4-full: measure often undershoots bold display faces.
+        return max(48, min(400, int(best * 1.35) + 8))
+
     def _start_tape_marquee(self) -> None:
-        """Cyan ticker under the header — scrolls research/holdings text."""
+        """Slow cyan ticker — date + strategy; not live holdings."""
         job = getattr(self, "_tape_marquee_job", None)
         if job is not None:
             try:
@@ -4468,6 +4508,10 @@ class TradingDashboardApp(ctk.CTk):
             except Exception:
                 pass
             self._tape_marquee_job = None
+        self._tape_base = header_tape_text(
+            paper=_book_is_paper(self._book_id), book_id=self._book_id
+        )
+        self._tape_offset = 0
         self._tick_tape_marquee()
 
     def _tick_tape_marquee(self) -> None:
@@ -4478,16 +4522,18 @@ class TradingDashboardApp(ctk.CTk):
         loop = base + sep
         n = len(loop)
         if n < 2:
-            self._tape_marquee_job = self.after(200, self._tick_tape_marquee)
+            self._tape_marquee_job = self.after(1000, self._tick_tape_marquee)
             return
+        vis = self._tape_visible_chars()
         self._tape_offset = (int(getattr(self, "_tape_offset", 0)) + 1) % n
-        doubled = loop * 3
-        shown = doubled[self._tape_offset : self._tape_offset + 96]
+        reps = max(4, (vis // n) + 4)
+        doubled = loop * reps
+        shown = doubled[self._tape_offset : self._tape_offset + vis]
         try:
             self._header_tape.configure(text=shown)
         except Exception:
             pass
-        self._tape_marquee_job = self.after(55, self._tick_tape_marquee)
+        self._tape_marquee_job = self.after(220, self._tick_tape_marquee)
 
     def _restyle_paper_book_window(self) -> None:
         """Grok book-monitor page: hide Stock-bot poster. Keep Start/Stop/tabs."""
@@ -4614,12 +4660,11 @@ class TradingDashboardApp(ctk.CTk):
         if hasattr(self, "_header_stamp"):
             self._header_stamp.configure(text=header_stamp_text(paper=is_paper))
         if hasattr(self, "_header_tape"):
-            self._tape_base = header_tape_text(paper=is_paper, heartbeat=heartbeat)
-            self._tape_offset = 0
-            try:
-                self._header_tape.configure(text=self._tape_base)
-            except Exception:
-                pass
+            # Strategy + date only — do not rewrite from heartbeat each refresh.
+            next_base = header_tape_text(paper=is_paper, book_id=self._book_id)
+            if next_base != getattr(self, "_tape_base", None):
+                self._tape_base = next_base
+                self._tape_offset = 0
 
     def _open_book_menu(self) -> None:
         BookMenu(
