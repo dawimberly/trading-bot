@@ -2283,6 +2283,26 @@ class _LabelMetric:
         self._label.configure(**kw)
 
 
+class _UnrealizedMetric:
+    """Title-bar unrealized $ and % as two labeled tiles."""
+
+    def __init__(self, dollar: ctk.CTkLabel, pct: ctk.CTkLabel):
+        self._dollar = dollar
+        self._pct = pct
+
+    def set(self, text: str, color: str | None = None) -> None:
+        raw = str(text).strip()
+        dollar, pct = raw, ""
+        if "(" in raw and ")" in raw:
+            dollar = raw.split("(", 1)[0].strip()
+            pct = raw[raw.find("(") + 1 : raw.rfind(")")].strip()
+        elif "  " in raw:
+            dollar, pct = raw.split("  ", 1)
+        color = color or COLORS["text"]
+        self._dollar.configure(text=dollar or "—", text_color=color)
+        self._pct.configure(text=pct or "—", text_color=color)
+
+
 _DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
     ("alpaca_paper_v2", "Paper", "Medium 33/67 (15 names, 30d hold)"),
     ("alpaca_paper", "Paper aggressive", "Lab 4 names ~25%"),
@@ -2377,7 +2397,7 @@ class PaperBookPanel(ctk.CTkFrame):
 
         stats = ctk.CTkFrame(card, fg_color="transparent")
         stats.pack(fill="x", padx=18, pady=(14, 16))
-        for col in range(6):
+        for col in range(7):
             stats.grid_columnconfigure(col, weight=1, uniform="stat")
 
         def _stat_window(
@@ -2426,8 +2446,9 @@ class PaperBookPanel(ctk.CTkFrame):
         _, self._invested, _ = _stat_window(1, "INVESTED")
         _, self._positions, _ = _stat_window(2, "POSITIONS")
         _, self._today, self._today_sub = _stat_window(3, "DAILY P&L", extra_sub=True)
-        _, self._unrealized, _ = _stat_window(4, "UNREALIZED")
-        _, self._market, _ = _stat_window(5, "MARKET")
+        _, self._unrealized, _ = _stat_window(4, "UNREALIZED $")
+        _, self._unrealized_pct, _ = _stat_window(5, "UNREALIZED %")
+        _, self._market, _ = _stat_window(6, "MARKET")
         self._market.configure(text=_market_open_countdown(None))
 
         self.sleeve = SleeveMixCard(self)
@@ -2438,7 +2459,7 @@ class PaperBookPanel(ctk.CTkFrame):
             "cash": self,
             "invested": _LabelMetric(self._invested),
             "positions": _LabelMetric(self._positions),
-            "pnl": _LabelMetric(self._unrealized),
+            "pnl": _UnrealizedMetric(self._unrealized, self._unrealized_pct),
             "market": _LabelMetric(self._market),
         }
 
@@ -2530,7 +2551,8 @@ class DataTable(ctk.CTkFrame):
             "WT": "_weight",
             "QTY": "_qty",
             "VALUE": "_value",
-            "UNREALIZED": "_pnl",
+            "UNREALIZED $": "_pnl",
+            "UNREALIZED %": "_pnl_pct",
             "Days": "_days",
             "Bought": "Bought",
             "Sold": "Sold",
@@ -2561,7 +2583,8 @@ class DataTable(ctk.CTkFrame):
                     "QTY": 80,
                     "WT": 72,
                     "VALUE": 110,
-                    "UNREALIZED": 160,
+                    "UNREALIZED $": 108,
+                    "UNREALIZED %": 96,
                     "Side": 56,
                     "Opened": 128,
                     "Days": 48,
@@ -2619,7 +2642,8 @@ class DataTable(ctk.CTkFrame):
                 "Weight %",
                 "WT",
                 "VALUE",
-                "UNREALIZED",
+                "UNREALIZED $",
+                "UNREALIZED %",
                 "Notional",
             )
             if col in left_cols:
@@ -2641,7 +2665,8 @@ class DataTable(ctk.CTkFrame):
                     "Sleeve",
                     "Value $",
                     "VALUE",
-                    "UNREALIZED",
+                    "UNREALIZED $",
+                    "UNREALIZED %",
                 ),
             )
         self._tree.tag_configure("oddrow", background=COLORS["surface"])
@@ -3736,7 +3761,8 @@ class TradingDashboardApp(ctk.CTk):
                 ("cash", "Cash", 18),
                 ("invested", "Invested", 12),
                 ("positions", "Positions", 10),
-                ("pnl", "Unrealized P&L", 16),
+                ("pnl", "Unrealized $", 14),
+                ("pnl_pct", "Unrealized %", 12),
                 ("market", "Market", 16),
             )
             for col, (key, title, width) in enumerate(keys):
@@ -3841,7 +3867,7 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left")
         self._positions_table = DataTable(
             self._tab_positions,
-            ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED"],
+            ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED $", "UNREALIZED %"],
             height=12,
             large=True,
         )
@@ -5844,7 +5870,7 @@ class TradingDashboardApp(ctk.CTk):
         ).pack(side="left")
         self._positions_table = DataTable(
             pos_card,
-            ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED"],
+            ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED $", "UNREALIZED %"],
             height=22,
             large=True,
         )
@@ -6229,9 +6255,15 @@ class TradingDashboardApp(ctk.CTk):
             npos = len(positions_df)
         if "positions" in self._metric_cards:
             self._metric_cards["positions"].set(str(npos) if npos else "0")
-        self._metric_cards["pnl"].set(
-            f"${upl:+,.2f}", color=COLORS["green"] if upl >= 0 else COLORS["red"]
-        )
+        upl_pct = (100.0 * upl / equity) if equity > 0 else 0.0
+        pnl_color = COLORS["green"] if upl >= 0 else COLORS["red"]
+        if "pnl_pct" in self._metric_cards:
+            self._metric_cards["pnl"].set(f"${upl:+,.2f}", color=pnl_color)
+            self._metric_cards["pnl_pct"].set(f"{upl_pct:+.2f}%", color=pnl_color)
+        else:
+            self._metric_cards["pnl"].set(
+                f"${upl:+,.2f} ({upl_pct:+.2f}%)", color=pnl_color
+            )
         self._metric_cards["market"].set(_market_open_countdown(heartbeat))
         if getattr(self, "_sleeve_mix", None) is not None:
             self._sleeve_mix.set_mix(heartbeat, equity=equity, cash=cash)
@@ -6621,7 +6653,8 @@ class TradingDashboardApp(ctk.CTk):
                     "QTY": qty_s,
                     "WT": f"{weight:.1f}%",
                     "VALUE": f"${market_value:,.2f}",
-                    "UNREALIZED": f"${pnl:+,.2f}  ({pnl_pct:+.2f}%)",
+                    "UNREALIZED $": f"${pnl:+,.2f}",
+                    "UNREALIZED %": f"{pnl_pct:+.2f}%",
                     "_qty": qty,
                     "_entry": entry,
                     "_current": current,

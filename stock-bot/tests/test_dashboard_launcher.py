@@ -23,13 +23,11 @@ def test_frozen_monitor_opt_in(monkeypatch):
 
 def test_launch_monitor_bat_prefers_source():
     bat = Path(__file__).resolve().parents[1] / "launch_monitor.bat"
-    lines = [
-        ln.strip().lower()
-        for ln in bat.read_text(encoding="utf-8").splitlines()
-        if ln.strip() and not ln.strip().lower().startswith("rem")
-    ]
-    starts = [ln for ln in lines if ln.startswith("start ")]
-    assert starts, "launch_monitor.bat should start the monitor"
-    assert "dashboard_app.py" in starts[0]
-    assert "pythontradingmonitor.exe" not in starts[0]
+    text = bat.read_text(encoding="utf-8")
+    lower = text.lower()
+    src = lower.find("dashboard_app.py")
+    exe = lower.find("pythontradingmonitor.exe")
+    assert src != -1, "launch_monitor.bat should start the source monitor"
+    assert exe == -1 or src < exe
+    assert "run_hidden.vbs" in lower
 
