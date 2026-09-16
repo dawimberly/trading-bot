@@ -181,7 +181,7 @@ _FONT_ROLE_CANDIDATES = {
 }
 
 FONTS = {
-    "hero": ("display", 52, "bold"),
+        "hero": ("display", 44, "bold"),
     "hero_sub": ("display", 28, "bold"),
     "title": ("display", 22, "bold"),
     "heading": ("display", 16, "bold"),
@@ -248,6 +248,9 @@ def _apply_dark_treeview_styles() -> None:
     names = ("Treeview", "Dash.Treeview", "Dash.Large.Treeview")
     for name in names:
         row_h = 34 if "Large" in name else 26
+        # Positions (Large) uses a tighter row so more tickers fit without shrinking type much.
+        if "Large" in name:
+            row_h = 28
         font = ("Segoe UI", 12) if "Large" in name else ("Segoe UI", 10)
         head_font = ("Segoe UI", 11, "bold") if "Large" in name else ("Segoe UI", 10, "bold")
         style.configure(
@@ -1989,13 +1992,13 @@ class MetricCard(ctk.CTkFrame):
         **kwargs,
     ):
         self._hero = hero
-        pad_x = 12 if hero else 10
-        pad_y = 7 if hero else 8
+        pad_x = 10 if hero else 8
+        pad_y = 5 if hero else 4
         if hero:
-            kwargs.setdefault("height", 52)
+            kwargs.setdefault("height", 48)
         super().__init__(
             master,
-            corner_radius=14,
+            corner_radius=10,
             fg_color=COLORS["card"],
             border_width=1,
             border_color=COLORS["border"],
@@ -2010,7 +2013,7 @@ class MetricCard(ctk.CTkFrame):
             text_color=COLORS["muted"],
         )
         self._title.pack(anchor="w", padx=pad_x, pady=(pad_y, 0))
-        value_size = 22 if hero else 16
+        value_size = 20 if hero else 15
         self._value = ctk.CTkLabel(
             self,
             text="—",
@@ -2035,78 +2038,73 @@ class MetricCard(ctk.CTkFrame):
 
 
 class CopyableChip:
-    """Readonly tk.Entry so status chips can be highlighted and Ctrl+C copied."""
+    """Status pill: CTkLabel sized to text (tk.Entry hid text on Windows)."""
 
     def __init__(self, parent, text: str, fg: str, text_color: str, *, width: int = 16):
-        self._var = tk.StringVar(value=text)
-        self._entry = tk.Entry(
+        del width  # call sites still pass width; size follows text instead
+        self._text = str(text)
+        self._label = ctk.CTkLabel(
             parent,
-            textvariable=self._var,
-            readonlybackground=fg,
-            disabledbackground=fg,
-            background=fg,
-            fg=text_color,
-            insertbackground=text_color,
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["border"],
-            highlightcolor=COLORS["accent"],
-            font=("Segoe UI", 10),
-            width=width,
-            takefocus=True,
+            text=self._text,
+            fg_color=fg,
+            text_color=text_color,
+            corner_radius=4,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            padx=8,
+            pady=2,
+            cursor="hand2",
         )
-        self._entry.configure(state="readonly")
-        self._entry.pack(side="left", padx=(0, 6), ipady=2)
+        self._label.pack(side="left", padx=(0, 6))
+        self._label.bind("<Button-1>", self._copy)
 
     def _as_widget(self, other):
-        return getattr(other, "_entry", other)
+        return getattr(other, "_label", other)
 
     def pack(self, **kw):
         if "before" in kw:
             kw["before"] = self._as_widget(kw["before"])
         if "after" in kw:
             kw["after"] = self._as_widget(kw["after"])
-        self._entry.pack(**kw)
+        self._label.pack(**kw)
 
     def pack_forget(self) -> None:
-        self._entry.pack_forget()
+        self._label.pack_forget()
 
     def configure(self, **kw) -> None:
         text = kw.pop("text", None)
         fg = kw.pop("fg_color", None)
         tc = kw.pop("text_color", None)
-        self._entry.configure(state="normal")
-        if text is not None:
-            self._var.set(str(text))
         opts: dict = {}
-        if fg:
-            opts["readonlybackground"] = fg
-            opts["disabledbackground"] = fg
-            opts["background"] = fg
-        if tc:
-            opts["fg"] = tc
-            opts["insertbackground"] = tc
+        if text is not None:
+            self._text = str(text)
+            opts["text"] = self._text
+        if fg is not None:
+            opts["fg_color"] = fg
+        if tc is not None:
+            opts["text_color"] = tc
         if opts:
-            self._entry.configure(**opts)
-        self._entry.configure(state="readonly")
+            self._label.configure(**opts)
+
+    def _copy(self, _event=None):
+        try:
+            self._label.clipboard_clear()
+            self._label.clipboard_append(self._text)
+        except tk.TclError:
+            pass
 
 
 class CopyableMetric:
-    """Caption + value in pixels so the number is never a zero-width box."""
+    """Caption + value tile sized to its text (no fixed empty box)."""
 
     def __init__(self, master, title: str, *, width: int = 16):
-        px = max(210, int(width) * 12)
+        del width  # kept for call-site compatibility
         self._frame = ctk.CTkFrame(
             master,
             fg_color=COLORS["surface2"],
-            corner_radius=8,
+            corner_radius=6,
             border_width=1,
             border_color=COLORS["border"],
-            width=px,
-            height=72,
         )
-        self._frame.grid_propagate(False)
         self._caption = ctk.CTkLabel(
             self._frame,
             text=title.upper(),
@@ -2114,15 +2112,15 @@ class CopyableMetric:
             text_color=COLORS["muted"],
             anchor="w",
         )
-        self._caption.place(x=10, y=8)
+        self._caption.pack(anchor="w", padx=8, pady=(4, 0))
         self._value = ctk.CTkLabel(
             self._frame,
             text="—",
-            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=COLORS["text"],
             anchor="w",
         )
-        self._value.place(x=10, y=30)
+        self._value.pack(anchor="w", padx=8, pady=(0, 4))
         self._text = "—"
         self._frame.bind("<Button-1>", self._copy)
         self._caption.bind("<Button-1>", self._copy)
@@ -2696,10 +2694,10 @@ class DataTable(ctk.CTkFrame):
         h = int(self.winfo_height() or 0)
         if h < 60:
             return
-        row_h = 34 if self._large else 26
-        # Positions need ≥10 names visible; other large tables keep a floor of 8.
-        floor = 10 if self._large else 6
-        rows = max(floor, (h - 16) // row_h)
+        row_h = 28 if self._large else 26
+        # Positions need ≥14 names visible when space allows.
+        floor = 14 if self._large else 6
+        rows = max(floor, (h - 12) // row_h)
         if str(self._tree.cget("height")) != str(rows):
             self._tree.configure(height=rows)
 
@@ -3389,7 +3387,7 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._header_bar.pack(fill="x", padx=10, pady=(10, 0))
+        self._header_bar.pack(fill="x", padx=6, pady=(4, 0))
 
         self._tape_bar = ctk.CTkFrame(self, fg_color=COLORS["accent"], height=32, corner_radius=0)
         self._tape_bar.pack(fill="x", pady=(0, 0))
@@ -3413,7 +3411,7 @@ class TradingDashboardApp(ctk.CTk):
         self._book_var = ctk.StringVar(value=dropdown_label_for_book(self._book_id))
 
         header_inner = ctk.CTkFrame(self._header_bar, fg_color="transparent")
-        header_inner.pack(fill="x", padx=14, pady=(4, 4))
+        header_inner.pack(fill="x", padx=10, pady=(2, 2))
         header_inner.grid_columnconfigure(0, weight=1)
         header_inner.grid_columnconfigure(1, weight=0)
 
@@ -3488,7 +3486,7 @@ class TradingDashboardApp(ctk.CTk):
             wraplength=520,
             justify="left",
         )
-        self._live_equity_label.grid(row=3, column=0, sticky="w", pady=(4, 0))
+        self._live_equity_label.grid(row=3, column=0, sticky="w", pady=(2, 0))
         self._since_start_label = ctk.CTkLabel(
             title_block,
             text="Since Start: —",
@@ -3662,7 +3660,7 @@ class TradingDashboardApp(ctk.CTk):
 
         top_stack = ctk.CTkFrame(self, fg_color="transparent")
         self._top_stack = top_stack
-        top_stack.pack(fill="x", padx=14, pady=(0, 4))
+        top_stack.pack(fill="x", padx=6, pady=(0, 2))
 
         # Status pills: Live/Paper · Small Account · Regime · Bot
         status_row = ctk.CTkFrame(
@@ -3672,9 +3670,9 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        status_row.pack(fill="x", pady=(0, 4))
+        status_row.pack(fill="x", pady=(0, 2))
         status_inner = ctk.CTkFrame(status_row, fg_color="transparent")
-        status_inner.pack(fill="x", padx=8, pady=3)
+        status_inner.pack(fill="x", padx=6, pady=2)
 
         def _pill(parent, text: str, fg: str, text_color: str, *, width: int = 16) -> CopyableChip:
             return CopyableChip(parent, text, fg, text_color, width=width)
@@ -3723,12 +3721,12 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        stats_banner.pack(fill="x", pady=(0, 4))
+        stats_banner.pack(fill="x", pady=(0, 2))
         stats_inner = ctk.CTkFrame(stats_banner, fg_color="transparent")
-        stats_inner.pack(fill="x", padx=8, pady=4)
-        self._stats_line1 = CopyableLines(stats_inner, height=2)
+        stats_inner.pack(fill="x", padx=6, pady=2)
+        self._stats_line1 = CopyableLines(stats_inner, height=1)
         self._stats_line1.configure(text="Account Total: —")
-        self._stats_line2 = CopyableLines(stats_inner, height=2)
+        self._stats_line2 = CopyableLines(stats_inner, height=1)
         self._stats_line2.configure(text="Daily Breaker: —   ·   Insight: —")
         self._status_row = status_row
         self._stats_banner = stats_banner
@@ -3755,9 +3753,9 @@ class TradingDashboardApp(ctk.CTk):
                 border_width=1,
                 border_color=COLORS["border"],
             )
-            hero_row.pack(fill="x", pady=(0, 4))
+            hero_row.pack(fill="x", pady=(0, 2))
             hero_inner = ctk.CTkFrame(hero_row, fg_color="transparent")
-            hero_inner.pack(fill="x", padx=8, pady=4)
+            hero_inner.pack(anchor="w", padx=6, pady=2)
             self._metric_cards = {}
             keys = (
                 ("equity", "Equity", 16),
@@ -3769,11 +3767,10 @@ class TradingDashboardApp(ctk.CTk):
                 ("market", "Market", 16),
             )
             for col, (key, title, width) in enumerate(keys):
-                hero_inner.grid_columnconfigure(col, weight=1, minsize=140)
                 self._metric_cards[key] = CopyableMetric(hero_inner, title, width=width)
-                self._metric_cards[key].grid(row=0, column=col, sticky="nsew", padx=3, pady=1)
-            spark_wrap = ctk.CTkFrame(hero_inner, fg_color="transparent", width=120, height=56)
-            spark_wrap.grid(row=0, column=len(keys), sticky="nsew", padx=(8, 0))
+                self._metric_cards[key].grid(row=0, column=col, sticky="w", padx=(0, 6), pady=0)
+            spark_wrap = ctk.CTkFrame(hero_inner, fg_color="transparent", width=96, height=40)
+            spark_wrap.grid(row=0, column=len(keys), sticky="w", padx=(2, 0))
             spark_wrap.grid_propagate(False)
             self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent")
             self._spark_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
@@ -3791,12 +3788,12 @@ class TradingDashboardApp(ctk.CTk):
             text_color=COLORS["text"],
             text_color_disabled=COLORS["muted"],
         )
-        self._tabs.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        self._tabs.pack(fill="both", expand=True, padx=6, pady=(0, 2))
         try:
             self._tabs._segmented_button.configure(
                 font=_ctk_font("body"),
-                height=36,
-                corner_radius=10,
+                height=30,
+                corner_radius=8,
             )
         except Exception:
             pass
@@ -3820,10 +3817,10 @@ class TradingDashboardApp(ctk.CTk):
         self._pos_south.pack(side="bottom", fill="x")
         if not self._paper_book:
             self._sleeve_mix = SleeveMixCard(self._pos_south)
-            self._sleeve_mix.pack(fill="x", padx=10, pady=(0, 4))
+            self._sleeve_mix.pack(fill="x", padx=4, pady=(0, 2))
         pos_head = ctk.CTkFrame(self._tab_positions, fg_color="transparent")
         self._pos_head = pos_head
-        pos_head.pack(side="top", fill="x", padx=12, pady=(8, 2))
+        pos_head.pack(side="top", fill="x", padx=6, pady=(4, 2))
         ctk.CTkLabel(
             pos_head,
             text="Open Positions",
@@ -3871,10 +3868,10 @@ class TradingDashboardApp(ctk.CTk):
         self._positions_table = DataTable(
             self._tab_positions,
             ["SYMBOL", "SLEEVE", "QTY", "WT", "VALUE", "UNREALIZED $", "UNREALIZED %"],
-            height=12,
+            height=16,
             large=True,
         )
-        self._positions_table.pack(fill="both", expand=True, padx=10, pady=(0, 4))
+        self._positions_table.pack(fill="both", expand=True, padx=4, pady=(0, 2))
         self._positions_empty_label = ctk.CTkLabel(
             self._positions_table,
             text="No open positions\nCash idle until the next rebalance cycle.",
@@ -4308,7 +4305,7 @@ class TradingDashboardApp(ctk.CTk):
             border_color=COLORS["border"],
             height=28,
         )
-        self._scanners_bar.pack(fill="x", padx=10, pady=(0, 6))
+        self._scanners_bar.pack(fill="x", padx=4, pady=(0, 2))
         self._scanners_bar.pack_propagate(False)
         self._scanners_shown = False
         self._scanners_toggle = ctk.CTkButton(
@@ -4366,7 +4363,7 @@ class TradingDashboardApp(ctk.CTk):
 
         # Footer — charts/tray plus always-visible Log out / Close
         self._footer = ctk.CTkFrame(self, fg_color="transparent")
-        self._footer.pack(fill="x", padx=14, pady=(0, 10))
+        self._footer.pack(fill="x", padx=6, pady=(0, 4))
         footer_inner = ctk.CTkFrame(self._footer, fg_color="transparent")
         footer_inner.pack(fill="x")
         self._charts_var = ctk.BooleanVar(value=False)
@@ -4444,18 +4441,17 @@ class TradingDashboardApp(ctk.CTk):
                 self.after(800, lambda: self._maybe_auto_start_bot(quiet=True))
 
     def _ensure_positions_rows_visible(self) -> None:
-        """Keep ≥10 position rows on screen after layout settles."""
+        """Keep ≥14 position rows on screen after layout settles."""
         table = getattr(self, "_positions_table", None)
         if table is None:
             return
         try:
             table.update_idletasks()
-            need = 10 * 34 + 28
+            need = 14 * 28 + 24
             h = int(table.winfo_height() or 0)
             if h < need:
-                # Request height without locking pack_propagate — that frozen the UI.
                 table.configure(height=need)
-            table._tree.configure(height=max(12, (max(h, need) - 16) // 34))
+            table._tree.configure(height=max(14, (max(h, need) - 12) // 28))
             table._fit_tree_to_frame()
         except Exception:
             pass

@@ -9,7 +9,7 @@ Owner-signed desktop UI (do not “simplify” or swap layouts):
 
 1. **Launcher**: `PythonTrading Paper.exe` → `dashboard_app.py --book alpaca_paper_v2`
 2. **Chrome**: full Stock-bot header + **cyan scrolling tape** under the header (not `--paper-book`, which strips tape)
-3. **Positions**: table is the main tab body; **≥10 rows visible** without scrolling the page; sleeve mix stays compact under the table; scanners stay collapsed by default
+3. **Positions**: table is the main tab body; **≥14 rows visible** when space allows; sleeve mix stays compact under the table; scanners stay collapsed by default; keep outer padding tight so the list uses the width
 4. Book is always Medium SoT (`alpaca_paper_v2`) from the desktop entry
 
 ## Do not
