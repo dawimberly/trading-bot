@@ -119,7 +119,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
 
         env = apply_realistic_research_env(env)
         if book_id == "alpaca_paper":
-            # Lab: concentrated 4×25% — not the Medium 33/67 pin.
+            # Lab: concentrated 4×25% — VTI core off (same as Medium).
             env["PAPER_LAB_CONCENTRATED"] = "true"
             env["PAPER_SMART_STOPS"] = "false"
             env["MAX_ACTIVE_TICKERS"] = "4"
@@ -128,13 +128,14 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["STOP_LOSS_PCT"] = "0.08"
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
             env["METAL_SLEEVE_ENABLED"] = "false"
-            # Dynamic VTI is retired. Clear inherited Medium 33/67; Lab stays
-            # concentrated 4×25% with Research fixed core (not 40–75% slider).
+            # Dynamic VTI is retired. Clear inherited Medium 33/67; Lab is
+            # concentrated 4×25% with Research VTI core OFF (full active).
             for key in (
                 "PAPER_DYNAMIC_VTI",
                 "PAPER_DYNAMIC_VTI_ENABLED",
                 "PAPER_VTI_CORE_PCT",
                 "VTI_CORE_PCT",
+                "VTI_CORE_ENABLED",
                 "DYNAMIC_VTI_PAPER_FLOOR",
                 "DYNAMIC_VTI_PAPER_CEILING",
                 "DYNAMIC_VTI_FLOOR_MIN",
@@ -142,6 +143,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
                 "DYNAMIC_VTI_STRESS_PCT",
                 "DYNAMIC_VTI_CALM_PCT",
                 "DYNAMIC_VTI_OPTIONAL_ENABLED",
+                "DYNAMIC_VTI_ALLOW_ZERO",
                 "PAPER_ACTIVE_SLEEVE_BOOST",
                 "NYSE_SLEEVE_CAP_PCT",
                 "PAPER_NYSE_SLEEVE_CAP_PCT",
@@ -150,15 +152,24 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
                 "PAPER_REGIME_WEAK_SLEEVE_MAX_PCT",
             ):
                 env.pop(key, None)
-            from config import REALISTIC_RESEARCH_ENV
-
+            env["VTI_CORE_ENABLED"] = "false"
             env["PAPER_DYNAMIC_VTI"] = "false"
             env["PAPER_DYNAMIC_VTI_ENABLED"] = "false"
-            env["PAPER_VTI_CORE_PCT"] = REALISTIC_RESEARCH_ENV.get(
-                "PAPER_VTI_CORE_PCT", "0.40"
-            )
+            env["PAPER_VTI_CORE_PCT"] = "0"
+            env["VTI_CORE_PCT"] = "0"
+            env["DYNAMIC_CORE_ENABLED"] = "false"
+            env["DYNAMIC_VTI_ALLOW_ZERO"] = "true"
+            env["DYNAMIC_VTI_PAPER_FLOOR"] = "0"
+            env["DYNAMIC_VTI_PAPER_CEILING"] = "0"
+            env["DYNAMIC_VTI_FLOOR_MIN"] = "0"
+            env["PAPER_ACTIVE_SLEEVE_BOOST"] = "1.0"
+            env["NYSE_SLEEVE_CAP_PCT"] = "0.95"
+            env["PAPER_NYSE_SLEEVE_CAP_PCT"] = "0.95"
+            env["PAPER_NYSE_HIGH_CASH_CAP_PCT"] = "0.95"
+            env["PAPER_NYSE_MAX_EXPOSURE_PCT"] = "0.95"
+            env["PAPER_REGIME_WEAK_SLEEVE_MAX_PCT"] = "0.95"
         elif book_id == "alpaca_paper_v2":
-            # Medium SoT: 15 names, 2× ATR, fixed 33/67 VTI (overrides Research Dynamic VTI).
+            # Medium SoT: 15 names, 2× ATR — VTI core OFF (full NYSE active).
             env["PAPER_MEDIUM_STRATEGY"] = "true"
             env["MAX_ACTIVE_TICKERS"] = "15"
             env["PAPER_POSITION_MAX_HOLD_BARS"] = "30"
@@ -171,24 +182,27 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
             env["PAPER_DYNAMIC_VTI"] = "false"
             env["PAPER_DYNAMIC_VTI_ENABLED"] = "false"
-            env["PAPER_VTI_CORE_PCT"] = "0.33"
-            env["VTI_CORE_PCT"] = "0.33"
-            env["DYNAMIC_VTI_PAPER_FLOOR"] = "0.33"
-            env["DYNAMIC_VTI_PAPER_CEILING"] = "0.33"
-            env["DYNAMIC_VTI_FLOOR_MIN"] = "0.33"
-            env["DYNAMIC_VTI_DEFAULT_PCT"] = "0.33"
-            env["DYNAMIC_VTI_STRESS_PCT"] = "0.33"
-            env["DYNAMIC_VTI_CALM_PCT"] = "0.33"
+            env["VTI_CORE_ENABLED"] = "false"
+            env["PAPER_VTI_CORE_PCT"] = "0"
+            env["VTI_CORE_PCT"] = "0"
+            env["DYNAMIC_CORE_ENABLED"] = "false"
+            env["DYNAMIC_VTI_ALLOW_ZERO"] = "true"
+            env["DYNAMIC_VTI_PAPER_FLOOR"] = "0"
+            env["DYNAMIC_VTI_PAPER_CEILING"] = "0"
+            env["DYNAMIC_VTI_FLOOR_MIN"] = "0"
+            env["DYNAMIC_VTI_DEFAULT_PCT"] = "0"
+            env["DYNAMIC_VTI_STRESS_PCT"] = "0"
+            env["DYNAMIC_VTI_CALM_PCT"] = "0"
             env["DYNAMIC_VTI_OPTIONAL_ENABLED"] = "false"
             env["PAPER_ACTIVE_SLEEVE_BOOST"] = "1.0"
-            env["NYSE_SLEEVE_CAP_PCT"] = "0.67"
-            env["PAPER_NYSE_SLEEVE_CAP_PCT"] = "0.67"
-            env["PAPER_NYSE_HIGH_CASH_CAP_PCT"] = "0.67"
-            env["PAPER_NYSE_MAX_EXPOSURE_PCT"] = "0.67"
-            env["PAPER_REGIME_WEAK_SLEEVE_MAX_PCT"] = "0.67"
+            env["NYSE_SLEEVE_CAP_PCT"] = "0.95"
+            env["PAPER_NYSE_SLEEVE_CAP_PCT"] = "0.95"
+            env["PAPER_NYSE_HIGH_CASH_CAP_PCT"] = "0.95"
+            env["PAPER_NYSE_MAX_EXPOSURE_PCT"] = "0.95"
+            env["PAPER_REGIME_WEAK_SLEEVE_MAX_PCT"] = "0.95"
             env["METAL_SLEEVE_ENABLED"] = "false"
-            # Same weekly VTI resize cadence as Live 33/67.
-            env["VTI_REBALANCE_CADENCE"] = "weekly"
+            # Drift cadence so leftover VTI unwinds immediately (not weekly hold).
+            env["VTI_REBALANCE_CADENCE"] = "drift"
     else:
         env.pop("PAPER_CHASE_MODE", None)
         if book_id == "alpaca_live":
@@ -197,14 +211,17 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env = clear_paper_research_env(env)
             # Skip $1 drip trims on a ~$300 book (same floor as Medium).
             env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
-            # Live SoT: fixed 33/67 VTI/NYSE, weekly resize (not every cycle).
-            env["LIVE_VTI_CORE_PCT"] = "0.33"
-            env["LIVE_SMALL_ACTIVE_SLEEVE_PCT"] = "0.67"
+            # Live: VTI core OFF — NYSE active only (no more 33/67 ballast).
+            env["VTI_CORE_ENABLED"] = "false"
+            env["LIVE_VTI_CORE_PCT"] = "0"
+            env["LIVE_SMALL_ACTIVE_SLEEVE_PCT"] = "0.95"
             env["LIVE_ACTIVE_SLEEVE_CHOICE"] = "nyse"
-            env["SMALL_ACCOUNT_VTI_CORE_PCT"] = "0.33"
-            env["VTI_CORE_PCT"] = "0.33"
-            env["NYSE_SLEEVE_CAP_PCT"] = "0.67"
-            env["VTI_REBALANCE_CADENCE"] = "weekly"
+            env["SMALL_ACCOUNT_VTI_CORE_PCT"] = "0"
+            env["VTI_CORE_PCT"] = "0"
+            env["DYNAMIC_CORE_ENABLED"] = "false"
+            env["DYNAMIC_VTI_ALLOW_ZERO"] = "true"
+            env["NYSE_SLEEVE_CAP_PCT"] = "0.95"
+            env["VTI_REBALANCE_CADENCE"] = "drift"
     return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 

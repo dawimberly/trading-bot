@@ -2273,7 +2273,7 @@ LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.33"))
 LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.67"))
 LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "nyse").strip().lower()
 LIVE_CONSERVATIVE_ENABLED = _env_bool_first("LIVE_CONSERVATIVE_ENABLED", default="true")
-LIVE_CONSERVATIVE_LABEL = "Live 33/67"
+LIVE_CONSERVATIVE_LABEL = "Live NYSE (VTI off)"
 LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
     "vti_core_pct": LIVE_VTI_CORE_PCT,
     "active_sleeve_pct": LIVE_SMALL_ACTIVE_SLEEVE_PCT,
@@ -5104,18 +5104,22 @@ def enforce_realistic_research_profile() -> None:
 # Subprocess env defaults for portal paper book / run_paper_bot (live book must not inherit).
 REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_AGGRESSIVE": "true",
-    "VTI_CORE_PCT": "0.80",
-    "PAPER_VTI_CORE_PCT": "0.40",
+    # Research / Lab / Medium: no VTI ballast — full active (Live also VTI off).
+    "VTI_CORE_ENABLED": "false",
+    "VTI_CORE_PCT": "0",
+    "PAPER_VTI_CORE_PCT": "0",
     "PAPER_DYNAMIC_VTI": "false",
     "PAPER_DYNAMIC_VTI_ENABLED": "false",
-    "DYNAMIC_VTI_PAPER_FLOOR": "0.40",
-    "DYNAMIC_VTI_PAPER_CEILING": "0.75",
-    "DYNAMIC_VTI_DEFAULT_PCT": "0.65",
-    "DYNAMIC_VTI_CALM_PCT": "0.50",
-    "DYNAMIC_VTI_STRESS_PCT": "0.75",
-    "DYNAMIC_VTI_OPTIONAL_ENABLED": "true",
-    "DYNAMIC_VTI_ALLOW_ZERO": "false",
-    "DYNAMIC_VTI_FLOOR_MIN": "0.40",
+    "DYNAMIC_VTI_PAPER_FLOOR": "0",
+    "DYNAMIC_VTI_PAPER_CEILING": "0",
+    "DYNAMIC_VTI_DEFAULT_PCT": "0",
+    "DYNAMIC_VTI_CALM_PCT": "0",
+    "DYNAMIC_VTI_STRESS_PCT": "0",
+    "DYNAMIC_VTI_OPTIONAL_ENABLED": "false",
+    "DYNAMIC_VTI_ALLOW_ZERO": "true",
+    "DYNAMIC_VTI_FLOOR_MIN": "0",
+    "DYNAMIC_CORE_ENABLED": "false",
+    "CORE_ALLOCATOR_LOCKED": "false",
     "SPY_LIKE_UNIVERSE": (
         "SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO"
     ),
@@ -5123,7 +5127,6 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "SPY_LIKE_BOOST_MULT": "1.10",
     "SPY_LIKE_BOOST_LIVE_ENABLED": "false",
     "DYNAMIC_VTI_OPTIONAL_LIVE": "false",
-    "CORE_ALLOCATOR_LOCKED": "false",
     "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
     "SPY_SLEEVE_CAP_PCT": "0",
     "PAPER_SPY_MAX_EXPOSURE_PCT": "0",
@@ -5330,10 +5333,11 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_DUST_SKIP_CHUNK_FRAC": "0.02",
     "PAPER_EXCESS_CASH_SLEEVE_BOOST": "1.12",
     "PAPER_YIELD_GATE_OVERRIDE": "true",
-    "PAPER_NYSE_SLEEVE_CAP_PCT": "0.20",
-    "PAPER_NYSE_HIGH_CASH_CAP_PCT": "0.22",
-    "PAPER_NYSE_MAX_EXPOSURE_PCT": "0.22",
-    "NYSE_SLEEVE_CAP_PCT": "0.20",
+    # With VTI off, Research needs NYSE room for concentrated / active names.
+    "PAPER_NYSE_SLEEVE_CAP_PCT": "0.95",
+    "PAPER_NYSE_HIGH_CASH_CAP_PCT": "0.95",
+    "PAPER_NYSE_MAX_EXPOSURE_PCT": "0.95",
+    "NYSE_SLEEVE_CAP_PCT": "0.95",
     "SECTOR_EXPANSION_SIZE": "45",
     "SECTOR_MAX_TOTAL_TICKERS": "180",
     "MAX_ACTIVE_SECTORS_STRONG": "4",

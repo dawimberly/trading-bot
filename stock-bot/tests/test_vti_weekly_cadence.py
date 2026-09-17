@@ -79,3 +79,24 @@ def test_drift_cadence_does_not_write_weekly_state(monkeypatch, tmp_path):
     r = vti_core.rebalance_vti_core(ex, market_open=True)
     assert r.get("skipped") is True
     assert not state.is_file()
+
+
+def test_core_off_unwinds_leftover_vti(monkeypatch):
+    monkeypatch.setattr(config, "vti_core_enabled", lambda: False)
+    monkeypatch.setattr(config, "effective_min_notional", lambda eq: 1.0)
+    monkeypatch.setattr(config, "VTI_CORE_SYMBOL", "VTI")
+
+    ex = _FakeEx(equity=1000.0, cash=100.0, vti_value=400.0)
+
+    def _sell(symbol, notional):
+        ex.orders.append(("sell", symbol, notional))
+        ex.vti_value = 0.0
+        return {"id": "2"}
+
+    ex.execute_reduce_notional = _sell
+    r = vti_core.rebalance_vti_core(ex, market_open=True)
+    assert r.get("action") == "sell"
+    assert r.get("ok") is True
+    assert r.get("reason") == "core off; unwind leftover VTI"
+    assert ex.orders == [("sell", "VTI", 400.0)]
+    assert r.get("current_value") == 0.0

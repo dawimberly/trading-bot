@@ -115,8 +115,8 @@ def test_live_without_dynamic_sizing_still_pauses_rhyme_e(monkeypatch):
     assert regime_entries_paused("RHYME_E: Steady_Bearish_Decline") is True
 
 
-def test_medium_user_bot_env_owns_fixed_33_67():
-    """Medium SoT pins fixed VTI; Lab must not steal that block."""
+def test_medium_user_bot_env_vti_core_off():
+    """Medium SoT keeps 15-name ATR profile; VTI core is off (no 33/67)."""
     from pathlib import Path
 
     from modules.portal_bot import user_bot_env
@@ -128,19 +128,20 @@ def test_medium_user_bot_env_owns_fixed_33_67():
     lab = user_bot_env(u, "alpaca_paper")
     assert v2.get("PAPER_MEDIUM_STRATEGY") == "true"
     assert v2.get("PAPER_DYNAMIC_VTI") == "false"
-    assert v2.get("PAPER_VTI_CORE_PCT") == "0.33"
-    assert v2.get("NYSE_SLEEVE_CAP_PCT") == "0.67"
-    assert v2.get("VTI_REBALANCE_CADENCE") == "weekly"
+    assert v2.get("VTI_CORE_ENABLED") == "false"
+    assert v2.get("PAPER_VTI_CORE_PCT") == "0"
+    assert v2.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
+    assert v2.get("VTI_REBALANCE_CADENCE") == "drift"
     assert v2.get("ATR_STOP_MULTIPLIER") == "2.0"
     assert lab.get("PAPER_LAB_CONCENTRATED") == "true"
     assert lab.get("MAX_ACTIVE_TICKERS") == "4"
-    # Dynamic VTI is retired on both paper books; Lab is not Medium 33/67.
     assert lab.get("PAPER_DYNAMIC_VTI") == "false"
-    assert lab.get("PAPER_VTI_CORE_PCT") != "0.33"
-    assert lab.get("VTI_REBALANCE_CADENCE") != "weekly"
+    assert lab.get("VTI_CORE_ENABLED") == "false"
+    assert lab.get("PAPER_VTI_CORE_PCT") == "0"
+    assert lab.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
 
 
-def test_live_user_bot_env_owns_fixed_33_67_weekly():
+def test_live_user_bot_env_vti_core_off():
     from pathlib import Path
 
     from modules.portal_bot import user_bot_env
@@ -148,11 +149,12 @@ def test_live_user_bot_env_owns_fixed_33_67_weekly():
 
     bind_project_root(Path(__file__).resolve().parents[1])
     live = user_bot_env("dawimberly", "alpaca_live")
-    assert live.get("LIVE_VTI_CORE_PCT") == "0.33"
-    assert live.get("LIVE_SMALL_ACTIVE_SLEEVE_PCT") == "0.67"
+    assert live.get("VTI_CORE_ENABLED") == "false"
+    assert live.get("LIVE_VTI_CORE_PCT") == "0"
+    assert live.get("LIVE_SMALL_ACTIVE_SLEEVE_PCT") == "0.95"
     assert live.get("LIVE_ACTIVE_SLEEVE_CHOICE") == "nyse"
-    assert live.get("VTI_REBALANCE_CADENCE") == "weekly"
-    assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.67"
+    assert live.get("VTI_REBALANCE_CADENCE") == "drift"
+    assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
 
 
 def test_dotenv_overlay_includes_medium_vti_keys():

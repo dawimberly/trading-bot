@@ -84,14 +84,52 @@ def rebalance_vti_core(
     """
     Hold VTI at VTI_CORE_PCT of equity.
 
+    When core is disabled, still sell any leftover VTI (Paper Aggressive / Lab
+    must not keep a stranded ~40% core after VTI_CORE_ENABLED=false).
+
     Cadence:
       - drift (default): rebalance when |current - target| / equity exceeds band
       - weekly: one open-session resize evaluation per ISO week (Live + Medium SoT)
     """
-    if not config.vti_core_enabled():
-        return {"enabled": False}
     if not market_open:
-        return {"enabled": True, "skipped": True, "reason": "equity session closed"}
+        return {
+            "enabled": config.vti_core_enabled(),
+            "skipped": True,
+            "reason": "equity session closed",
+        }
+
+    # Core off: unwind stranded VTI, then stop managing.
+    if not config.vti_core_enabled():
+        current = round(vti_core_value(executor), 2)
+        if current <= 0:
+            return {"enabled": False, "flat": True, "current_value": 0.0}
+        account = executor._get_account()
+        equity = float(getattr(account, "equity", 0) or 0)
+        min_n = config.effective_min_notional(equity) if equity > 0 else 1.0
+        if current < min_n:
+            return {
+                "enabled": False,
+                "skipped": True,
+                "reason": "core off; leftover below min notional",
+                "current_value": current,
+            }
+        order = executor.execute_reduce_notional(config.VTI_CORE_SYMBOL, current)
+        ok = order is not None and (
+            executor.order_filled(order, max_wait=3.0) if order else False
+        )
+        if ok:
+            executor.refresh_cache()
+        return {
+            "enabled": False,
+            "action": "sell",
+            "notional": current,
+            "target_pct": 0.0,
+            "target_value": 0.0,
+            "current_value": round(vti_core_value(executor), 2) if ok else current,
+            "ok": ok,
+            "reason": "core off; unwind leftover VTI",
+            "skipped": not ok,
+        }
 
     cadence = config.effective_vti_rebalance_cadence()
     week = _iso_week_id()

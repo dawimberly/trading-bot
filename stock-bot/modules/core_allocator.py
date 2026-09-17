@@ -45,6 +45,9 @@ _state: dict[str, Any] = {
 
 
 def effective_dynamic_core_enabled() -> bool:
+    # No passive core → allocator must not keep choosing VTI @ 30-50%.
+    if not getattr(config, "VTI_CORE_ENABLED", True):
+        return False
     if not config.DYNAMIC_CORE_ENABLED:
         return False
     if config.paper_aggressive_context() or config.backtest_paper_sleeves_context():

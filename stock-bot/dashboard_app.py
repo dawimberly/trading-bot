@@ -253,11 +253,22 @@ def _apply_dark_treeview_styles() -> None:
             row_h = 28
         font = ("Segoe UI", 12) if "Large" in name else ("Segoe UI", 10)
         head_font = ("Segoe UI", 11, "bold") if "Large" in name else ("Segoe UI", 10, "bold")
+        # Drop the clam border so leftover body area does not flash system white.
+        try:
+            style.layout(
+                name,
+                [("Treeview.treearea", {"sticky": "nswe"})],
+            )
+        except Exception:
+            pass
         style.configure(
             name,
             background=COLORS["surface"],
             foreground=COLORS["text"],
             fieldbackground=COLORS["surface"],
+            bordercolor=COLORS["surface"],
+            lightcolor=COLORS["surface"],
+            darkcolor=COLORS["surface"],
             borderwidth=0,
             relief="flat",
             rowheight=row_h,
@@ -268,12 +279,20 @@ def _apply_dark_treeview_styles() -> None:
             background=COLORS["surface2"],
             foreground=COLORS["text_dim"],
             relief="flat",
+            borderwidth=0,
             font=head_font,
         )
         style.map(
             name,
-            background=[("selected", COLORS["accent"])],
-            foreground=[("selected", COLORS["bg"])],
+            background=[
+                ("selected", COLORS["accent"]),
+                ("!selected", COLORS["surface"]),
+            ],
+            foreground=[
+                ("selected", COLORS["bg"]),
+                ("!selected", COLORS["text"]),
+            ],
+            fieldbackground=[("!selected", COLORS["surface"])],
         )
         style.map(
             f"{name}.Heading",
@@ -1114,6 +1133,9 @@ def _collect_refresh_snapshot(
         _apply_user_paths(username, book_id)
         _reset_equity_cache()
 
+    # Keep Alpaca / scanners off _BOOK_ENV_LOCK. Book switch on the Tk thread
+    # used to wait here and freeze the window.
+    if True:
         heartbeat, heartbeat_path = None, book_heartbeat_path(username, book_id)
         hb_exc: str | None = None
         try:
@@ -2038,7 +2060,7 @@ class MetricCard(ctk.CTkFrame):
 
 
 class CopyableChip:
-    """Status pill: CTkLabel sized to text (tk.Entry hid text on Windows)."""
+    """Status pill: compact CTkLabel (tk.Entry hid text on Windows)."""
 
     def __init__(self, parent, text: str, fg: str, text_color: str, *, width: int = 16):
         del width  # call sites still pass width; size follows text instead
@@ -2049,12 +2071,13 @@ class CopyableChip:
             fg_color=fg,
             text_color=text_color,
             corner_radius=4,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            padx=8,
-            pady=2,
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            height=24,
+            padx=6,
+            pady=1,
             cursor="hand2",
         )
-        self._label.pack(side="left", padx=(0, 6))
+        self._label.pack(side="left", padx=(0, 4))
         self._label.bind("<Button-1>", self._copy)
 
     def _as_widget(self, other):
@@ -2302,7 +2325,7 @@ class _UnrealizedMetric:
 
 
 _DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
-    ("alpaca_paper_v2", "Paper", "Medium 33/67 (15 names, 30d hold)"),
+    ("alpaca_paper_v2", "Paper", "Medium SoT (15 names, 30d hold, VTI off)"),
     ("alpaca_paper", "Paper aggressive", "Lab 4 names ~25%"),
     ("alpaca_live", "Live", "Live Profile A — do not size options"),
 )
@@ -2564,6 +2587,14 @@ class DataTable(ctk.CTkFrame):
             style=style_name,
             selectmode="extended",
         )
+        try:
+            # Direct widget colors — Windows often ignores style fieldbackground alone.
+            self._tree.configure(
+                background=COLORS["surface"],
+                foreground=COLORS["text"],
+            )
+        except tk.TclError:
+            pass
         for col in columns:
             self._tree.heading(
                 col,
@@ -2700,6 +2731,25 @@ class DataTable(ctk.CTkFrame):
         rows = max(floor, (h - 12) // row_h)
         if str(self._tree.cget("height")) != str(rows):
             self._tree.configure(height=rows)
+        self._pad_dark_empty_rows()
+
+    def _pad_dark_empty_rows(self) -> None:
+        """Paint leftover Treeview body dark — Windows leaves empty slots white otherwise."""
+        try:
+            target = int(self._tree.cget("height") or 0)
+        except (tk.TclError, TypeError, ValueError):
+            return
+        if target <= 0:
+            return
+        for item in self._tree.get_children():
+            tags = self._tree.item(item, "tags") or ()
+            if "blank" in tags:
+                self._tree.delete(item)
+        blanks = [""] * len(self._columns)
+        while len(self._tree.get_children()) < target:
+            n = len(self._tree.get_children())
+            stripe = "evenrow" if n % 2 else "oddrow"
+            self._tree.insert("", "end", values=blanks, tags=(stripe, "blank"))
 
     def clear(self) -> None:
         for item in self._tree.get_children():
@@ -2771,7 +2821,10 @@ class DataTable(ctk.CTkFrame):
             if tag:
                 tags.append(tag)
             self._tree.insert("", "end", values=values, tags=tuple(tags))
-        self._fit_height()
+        if self._fit:
+            self._fit_height()
+        else:
+            self._pad_dark_empty_rows()
 
     def _fit_height(self) -> None:
         if not self._fit:
@@ -2822,11 +2875,17 @@ class DataTable(ctk.CTkFrame):
         sel = self._tree.selection()
         if not sel:
             return None
-        values = self._tree.item(sel[0], "values")
-        return {
-            col: values[i] if i < len(values) else ""
-            for i, col in enumerate(self._columns)
-        }
+        # Ignore dark spacer rows under the tickers.
+        for item in sel:
+            tags = self._tree.item(item, "tags") or ()
+            if "blank" in tags:
+                continue
+            values = self._tree.item(item, "values")
+            return {
+                col: values[i] if i < len(values) else ""
+                for i, col in enumerate(self._columns)
+            }
+        return None
 
 
 class ScrollTextPanel(ctk.CTkFrame):
@@ -3663,16 +3722,19 @@ class TradingDashboardApp(ctk.CTk):
         top_stack.pack(fill="x", padx=6, pady=(0, 2))
 
         # Status pills: Live/Paper · Small Account · Regime · Bot
+        # One row only — wrapping ate the Positions ticker table.
         status_row = ctk.CTkFrame(
             top_stack,
             fg_color=COLORS["card"],
             corner_radius=8,
             border_width=1,
             border_color=COLORS["border"],
+            height=34,
         )
         status_row.pack(fill="x", pady=(0, 2))
+        status_row.pack_propagate(False)
         status_inner = ctk.CTkFrame(status_row, fg_color="transparent")
-        status_inner.pack(fill="x", padx=6, pady=2)
+        status_inner.pack(fill="both", expand=True, padx=6, pady=2)
 
         def _pill(parent, text: str, fg: str, text_color: str, *, width: int = 16) -> CopyableChip:
             return CopyableChip(parent, text, fg, text_color, width=width)
@@ -3774,6 +3836,9 @@ class TradingDashboardApp(ctk.CTk):
             spark_wrap.grid_propagate(False)
             self._spark_frame = ctk.CTkFrame(spark_wrap, fg_color="transparent")
             self._spark_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+            # Cap hero so it cannot steal height from the positions ticker table.
+            hero_row.configure(height=56)
+            hero_row.pack_propagate(False)
 
         # Main tabbed content — positions, overview, trades, wisdom, charts
         self._tabs = ctk.CTkTabview(
@@ -4810,7 +4875,6 @@ class TradingDashboardApp(ctk.CTk):
         if not book_enabled(book_id):
             return
         self._book_id = book_id
-        self._apply_user_paths(self._username, book_id)
         self.title(f"PythonTrading — {book_label(book_id)}")
         if getattr(self, "_paper_panel", None) is not None:
             self._paper_panel.set_book(book_id)
@@ -4836,8 +4900,6 @@ class TradingDashboardApp(ctk.CTk):
         self._clear_book_panels_for_switch(book_id)
         paper = _book_is_paper(book_id)
         self._sync_header_chrome(paper=paper)
-        equity, cash, err = _fetch_book_equity(self._username, book_id, retries=2)
-        self._apply_equity_cash_ui(equity, cash, err, paper=paper)
         self._status_label.configure(text="Loading account data…")
         self._bot_badge.configure(text="Bot: …", text_color=COLORS["muted"])
         self.update_idletasks()
@@ -4846,7 +4908,7 @@ class TradingDashboardApp(ctk.CTk):
             self._show_setup_wizard()
             return
 
-        self.refresh_data()
+        self.refresh_data(force_positions=True)
 
     def _on_logout_click(self) -> None:
         callback = self._on_logout

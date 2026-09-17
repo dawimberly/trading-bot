@@ -85,7 +85,8 @@ def test_paper_medium_tape_has_date_and_strategy():
     tape = header_tape_text(paper=True, heartbeat=hb, book_id="alpaca_paper_v2")
     assert "MEDIUM" in tape
     assert "15 NAMES" in tape
-    assert "33/67" in tape
+    assert "VTI CORE OFF" in tape
+    assert "33/67" not in tape
     assert "VTI 55%" not in tape
     _assert_no_nyse_100(tape)
 
@@ -126,6 +127,18 @@ def test_live_nyse_only_heartbeat_does_not_print_nyse_100():
 def test_kickers():
     assert "LIVE" in header_kicker_text(paper=False)
     assert "PAPER" in header_kicker_text(paper=True)
+
+
+def test_switch_book_does_not_block_ui_on_alpaca():
+    src = (Path(__file__).resolve().parents[1] / "dashboard_app.py").read_text(
+        encoding="utf-8"
+    )
+    switch = src.split("def _switch_book", 1)[1].split("def _on_logout_click", 1)[0]
+    assert "_fetch_book_equity" not in switch
+    collect = src.split("def _collect_refresh_snapshot", 1)[1].split(
+        "def _journal_search_paths", 1
+    )[0]
+    assert "Keep Alpaca / scanners off _BOOK_ENV_LOCK" in collect
 
 
 def test_dashboard_app_source_has_no_nyse_100_chrome():

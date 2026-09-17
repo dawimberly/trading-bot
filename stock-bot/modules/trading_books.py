@@ -33,7 +33,7 @@ BOOKS: dict[str, BookSpec] = {
         "allow_live_default": False,
     },
     "alpaca_paper_v2": {
-        "label": "Alpaca Paper v2 (medium 33/67)",
+        "label": "Alpaca Paper v2 (medium SoT, VTI off)",
         "platform": "alpaca",
         "enabled": True,
         "default_paper": True,

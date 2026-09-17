@@ -40,7 +40,11 @@ def _paper_research_tape() -> str:
         import config
 
         if config.paper_medium_strategy_enabled():
-            vti = "FIXED VTI 33/67"
+            vti = "VTI CORE OFF"
+        elif not getattr(config, "VTI_CORE_ENABLED", True) or float(
+            getattr(config, "PAPER_VTI_CORE_PCT", 0) or 0
+        ) <= 0:
+            vti = "VTI CORE OFF"
         elif not getattr(config, "PAPER_DYNAMIC_VTI_ENABLED", True):
             pct = float(getattr(config, "PAPER_VTI_CORE_PCT", 0.4) or 0.4)
             vti = f"FIXED VTI {pct:.0%}"
@@ -185,7 +189,7 @@ def _book_strategy_tape(*, paper: bool, book_id: str | None = None) -> str:
     if not paper:
         return (
             f"{today}   ·   LIVE PROFILE A   ·   "
-            "33/67 VTI + NYSE ACTIVE   ·   REAL MONEY   ·   DO NOT SIZE OPTIONS"
+            "VTI CORE OFF · NYSE ACTIVE   ·   REAL MONEY   ·   DO NOT SIZE OPTIONS"
         )
     try:
         import config
@@ -196,7 +200,7 @@ def _book_strategy_tape(*, paper: bool, book_id: str | None = None) -> str:
             return (
                 f"{today}   ·   MEDIUM SoT (alpaca_paper_v2)   ·   "
                 "15 NAMES · 30D HOLD · ATR 2.0×   ·   "
-                f"FIXED VTI 33/67   ·   RESEARCH v{_research_version()}"
+                f"VTI CORE OFF   ·   RESEARCH v{_research_version()}"
             )
         if bid == "alpaca_paper":
             return (

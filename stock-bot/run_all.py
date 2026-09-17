@@ -1334,7 +1334,9 @@ def main():
                     f"--- Operating Layer: wisdom {wisdom_rec.get('action')} "
                     f"conv {wisdom_rec.get('conviction', 0):.2f} (no rebalance trigger) ---"
                 )
-    elif config.vti_core_enabled() and market_open:
+    elif market_open:
+        # Always run while open so VTI_CORE_ENABLED=false still unwinds leftover
+        # VTI (Paper Aggressive must not keep a stranded core).
         vti_result = rebalance_vti_core(
             executor,
             market_open=market_open,
@@ -1358,6 +1360,12 @@ def main():
             print(
                 f"--- VTI core: {vti_result.get('current_value', 0):,.2f} / "
                 f"{vti_result.get('target_value', 0):,.2f} ---"
+            )
+        elif vti_result.get("reason") == "core off; unwind leftover VTI":
+            print(
+                f"--- VTI core OFF: unwind leftover "
+                f"${vti_result.get('notional', 0):,.2f} "
+                f"({'ok' if vti_result.get('ok') else 'pending'}) ---"
             )
 
     options_result = None
