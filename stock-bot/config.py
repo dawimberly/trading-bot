@@ -3225,9 +3225,22 @@ def effective_risk_per_trade(
 
 
 def effective_per_name_max_pct() -> float:
-    """Strict per-name ceiling (default 8%)."""
+    """Strict per-name ceiling (default 8%).
+
+    PAPER_MAX_POSITION_PCT is a paper-research knob (root .env pins it to 8%).
+    Applying it to the live book silently clamped the live PER_NAME_MAX_PCT, so
+    it only narrows the ceiling on paper/backtest paths.
+    """
     if paper_lab_concentrated_enabled():
         return float(os.getenv("PAPER_MAX_POSITION_PCT", "0.25"))
+    paperish = (
+        PAPER_TRADING
+        or paper_aggressive_context()
+        or is_realistic_research_active()
+        or backtest_paper_sleeves_context()
+    )
+    if not paperish:
+        return float(PER_NAME_MAX_PCT)
     return min(float(PER_NAME_MAX_PCT), float(PAPER_MAX_POSITION_PCT))
 
 
