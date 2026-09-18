@@ -157,6 +157,37 @@ def test_live_user_bot_env_vti_core_off():
     assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
 
 
+def test_live_vti_off_effective_nyse_cap_not_frozen_10pct(monkeypatch):
+    """VTI-off Live must not keep Live Conservative's frozen ~10% NYSE baseline."""
+    monkeypatch.setattr(config, "PAPER_TRADING", False)
+    monkeypatch.setattr(config, "LIVE_CONSERVATIVE_ENABLED", True)
+    monkeypatch.setattr(config, "VTI_CORE_ENABLED", False)
+    monkeypatch.setattr(config, "LIVE_VTI_CORE_PCT", 0.0)
+    monkeypatch.setattr(config, "VTI_CORE_PCT", 0.0)
+    monkeypatch.setattr(config, "SMALL_ACCOUNT_VTI_CORE_PCT", 0.0)
+    monkeypatch.setattr(config, "NYSE_SLEEVE_CAP_PCT", 0.95)
+    monkeypatch.setattr(config, "SPY_SLEEVE_CAP_PCT", 0.0)
+    monkeypatch.setattr(config, "CRYPTO_SLEEVE_CAP_PCT", 0.0)
+    monkeypatch.setattr(config, "STAT_ARB_SLEEVE_CAP_ENABLED", False)
+    monkeypatch.setattr(config, "LIVE_ACTIVE_SLEEVE_CHOICE", "nyse")
+    monkeypatch.setattr(config, "LIVE_SMALL_ACTIVE_SLEEVE_PCT", 0.95)
+    monkeypatch.setattr(config, "paper_aggressive_context", lambda: False)
+    monkeypatch.setattr(config, "paper_only_sleeves_active", lambda: False)
+    monkeypatch.setattr(config, "is_realistic_research_active", lambda: False)
+    monkeypatch.setattr(config, "backtest_paper_sleeves_context", lambda: False)
+    monkeypatch.setattr(config, "backtest_live_conservative_context", lambda: False)
+    monkeypatch.setattr(config, "is_small_account", lambda equity=None: True)
+    monkeypatch.setattr(config, "metal_sleeve_enabled", lambda: False)
+    monkeypatch.setattr(config, "paper_sleeve_hard_cap_pct", lambda sleeve: None)
+
+    assert config.live_conservative_lock_active() is False
+    assert config.live_conservative_profile_active() is False
+    cap = config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT, sleeve="nyse")
+    assert cap >= 0.90, f"expected ~0.95 NYSE room, got frozen-style {cap}"
+    # effective_nyse_sleeve_cap_pct is paper-only expansion; Live uses fund_scaled.
+    assert config.effective_nyse_sleeve_cap_pct() >= 0.90
+
+
 def test_dotenv_overlay_includes_medium_vti_keys():
     import inspect
 

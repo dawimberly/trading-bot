@@ -2943,6 +2943,11 @@ def live_conservative_lock_active() -> bool:
     """True when Live Conservative feature lock applies (live book, not paper research)."""
     if not LIVE_CONSERVATIVE_ENABLED:
         return False
+    # VTI core off (Lab/Medium/Live SoT) — do not keep the frozen 10% active
+    # baseline that assumed an 85/15 or 33/67 VTI ballast. Check the flag, not
+    # vti_core_enabled(), to avoid recursion through vti_core_allocation_pct().
+    if not VTI_CORE_ENABLED:
+        return False
     if (
         PAPER_TRADING
         or paper_aggressive_context()
@@ -7747,7 +7752,11 @@ def apply_paper_wisdom_floor(wisdom: dict | None) -> dict | None:
 
 
 def _live_small_active_baseline_scale() -> float:
-    """Frozen 10% active fraction (pre-85% VTI) so NYSE cap stays unchanged."""
+    """Frozen 10% active fraction for legacy Live Conservative when VTI core is ON.
+
+    Unreachable when VTI_CORE_ENABLED=false (live_conservative_lock_active gates
+    that mode off so NYSE can use the full active sleeve).
+    """
     af = 0.10
     lf = long_fund_scale()
     long_sum = _long_sleeve_base_cap_sum()
