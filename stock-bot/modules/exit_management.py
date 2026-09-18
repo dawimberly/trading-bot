@@ -305,6 +305,23 @@ def exit_dashboard_status(*, days: int = 7) -> str:
     )
 
 
+def _daily_bar_atr(symbol: str) -> float | None:
+    """ATR from daily bars — the series the ATR stop multipliers were tuned on.
+
+    Live sizing data is a 5-minute close matrix, so calculate_atr() against it
+    returns a ~70-minute range. At 2x that is a 0.1%-0.2% stop instead of the
+    ~1.5% daily-ATR stop backtests validate, and fresh entries were being
+    stopped out within minutes on quote noise.
+    """
+    try:
+        from modules.data_loader import load_close_matrix
+        from modules.risk_management import calculate_atr
+
+        return calculate_atr(load_close_matrix(interval="1d"), symbol)
+    except Exception:
+        return None
+
+
 def resolve_symbol_atr_and_conviction(
     executor,
     symbol: str,
@@ -313,11 +330,11 @@ def resolve_symbol_atr_and_conviction(
 ) -> tuple[float, float]:
     """Best-effort ATR and conviction for exit plans."""
     data = getattr(executor, "_sizing_data", None)
-    atr = None
+    atr = _daily_bar_atr(symbol)
     try:
         from modules.risk_management import calculate_atr, compute_conviction_score
 
-        if data is not None:
+        if (atr is None or atr <= 0) and data is not None:
             atr = calculate_atr(data, symbol)
         conviction = compute_conviction_score(symbol, data, regime, sleeve="nyse")
     except Exception:
