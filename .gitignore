@@ -64,6 +64,61 @@ Thumbs.db
 .cursor/
 .grok/
 
+# --- Rotation backups (699 trading_history.jsonl.bak.* and friends) ---
+*.bak
+*.bak.*
+*.bak_*
+
+# --- Local caches / binary stores ---
+*.db
+stock-bot/data/cache/
+
+# --- Per-cycle state under data/ (results files below stay tracked) ---
+stock-bot/data/*_state.json
+stock-bot/data/*.flag
+stock-bot/data/*_pid.txt
+stock-bot/data/*.heartbeat.txt
+stock-bot/data/conviction_metrics.json
+stock-bot/data/correlation_guard.json
+stock-bot/data/dashboard_export.json
+stock-bot/data/deployment_cash_state.json
+stock-bot/data/exit_events.json
+stock-bot/data/insider_monitor_state.json
+stock-bot/data/last_summary_timestamp.json
+stock-bot/data/market_cap_cache.json
+stock-bot/data/session_uptime.json
+
+# --- Per-cycle state at stock-bot root ---
+stock-bot/alert_state.json
+stock-bot/spacex_ipo*.json
+stock-bot/spacex_ipo*.jsonl
+stock-bot/thinking_engine_*.json
+stock-bot/stat_arb_open_book.json
+
+# --- More per-cycle state / scratch runners ---
+stock-bot/data/tod_analysis_cache.json
+stock-bot/data/web_sentiment_live.json
+stock-bot/data/yield_gate_last_alert.json
+stock-bot/data/plan.json
+stock-bot/data/last_live_daily_summary.json
+stock-bot/data/dry_run_output.txt
+stock-bot/data/_*.bat
+stock-bot/data/_bt_monitor_pids.txt
+stock-bot/data/_bt_exp_365_runner.py
+stock-bot/data/backtest_experimental_err.txt
+stock-bot/wisdom_eval_state.json
+stock-bot/**/stat_arb_open_book.json
+stock-bot/sentiment/live/
+stock-bot/archive/
+stock-bot/data/historical_news_cache/
+stock-bot/data/intraday_cache/
+stock-bot/data/intraday_cache_15m/
+stock-bot/data/sector_backtest_cache.pkl
+stock-bot/data/screener_skipped.txt
+
+# --- Personal / billing, not code or research ---
+**/CURSOR_BILLING_REQUEST*.txt
+
 # --- Research OUTPUTS are intentionally tracked ---
 # Keep: scripts/analysis/*.json|*.md, reports/, scripts/research/**/runs/*.md|*.json,
 # docs/. These are results worth keeping, so no ignore rules for them.

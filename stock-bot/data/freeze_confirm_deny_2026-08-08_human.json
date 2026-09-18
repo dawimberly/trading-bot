@@ -1,0 +1,18 @@
+{
+  "recorded_at": "2026-08-08T16:22:00Z",
+  "week_ending": "2026-08-08",
+  "source": "chat",
+  "raw_reply": "FREEZE CONFIRM keep_freeze,keep_spy_off,no_live_change DENY no_new_sleeve HOLD daily_errors_present",
+  "decisions": {
+    "keep_freeze": "CONFIRM",
+    "keep_spy_off": "CONFIRM",
+    "no_live_change": "CONFIRM",
+    "no_new_sleeve": "DENY",
+    "daily_errors_present": "HOLD"
+  },
+  "actions_taken": "none — freeze-safe; no .env / live Profile A / sleeve changes",
+  "notes": [
+    "Paper SPY cap remains 0; metal cap 0; live unchanged.",
+    "daily_errors_present HOLD: 2026-08-08 log has 4x order_failed:cycle_error — Alpaca 'service temporary unavailable' ~07:26-07:35 ET; ops noise, not strategy retune."
+  ]
+}

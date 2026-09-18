@@ -1,0 +1,880 @@
+{
+  "seed_version": 2,
+  "generated_at": "2026-07-20T22:27:02.786416+00:00",
+  "note": "Weekday-aligned synthetic seed for paper backtests",
+  "trades": [
+    {
+      "date": "2025-01-27",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "BA",
+      "side": "sell",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-01-31",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-02-06",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-02-12",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-02-18",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-02-24",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "DIS",
+      "side": "sell",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-02-28",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-03-06",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-03-12",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-03-18",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-03-24",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "INTC",
+      "side": "sell",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-03-28",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-04-03",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-04-09",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-04-15",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-04-21",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "TSLA",
+      "side": "sell",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-04-25",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-05-01",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-05-07",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-05-13",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-05-19",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "BA",
+      "side": "sell",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-05-23",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-05-29",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-06-04",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-06-10",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-06-16",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "DIS",
+      "side": "sell",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-06-20",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-06-26",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-07-02",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-07-08",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-07-14",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "INTC",
+      "side": "sell",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-07-18",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-07-24",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-07-30",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-08-05",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-08-11",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "TSLA",
+      "side": "sell",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-08-15",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-08-21",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-08-27",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-09-02",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-09-08",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "BA",
+      "side": "sell",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-09-12",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-09-18",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-09-24",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-09-30",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-10-06",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "DIS",
+      "side": "sell",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-10-10",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-10-16",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-10-22",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-10-28",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-11-03",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "INTC",
+      "side": "sell",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-11-07",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-11-13",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-11-19",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-11-25",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-12-01",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "TSLA",
+      "side": "sell",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-12-05",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-12-11",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-12-17",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-12-23",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2025-12-29",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "BA",
+      "side": "sell",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-01-02",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-01-08",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-01-14",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-01-20",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-01-26",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "DIS",
+      "side": "sell",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-01-30",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-02-05",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-02-11",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-02-17",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-02-23",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "INTC",
+      "side": "sell",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-02-27",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-03-05",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-03-11",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-03-17",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-03-23",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "TSLA",
+      "side": "sell",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-03-27",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-04-02",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-04-08",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-04-14",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-04-20",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "BA",
+      "side": "sell",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-04-24",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-04-30",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-05-06",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-05-12",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-05-18",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "DIS",
+      "side": "sell",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-05-22",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-05-28",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "XOM",
+      "side": "buy",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-06-03",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "CRM",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-06-09",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "AMD",
+      "side": "buy",
+      "amount_usd": 18000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-06-15",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "INTC",
+      "side": "sell",
+      "amount_usd": 26000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-06-19",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "MSFT",
+      "side": "buy",
+      "amount_usd": 34000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-06-25",
+      "politician": "Dan Crenshaw",
+      "party": "R-TX",
+      "ticker": "AAPL",
+      "side": "buy",
+      "amount_usd": 42000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-07-01",
+      "politician": "Josh Gottheimer",
+      "party": "D-NJ",
+      "ticker": "AMZN",
+      "side": "buy",
+      "amount_usd": 50000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-07-07",
+      "politician": "Michael McCaul",
+      "party": "R-TX",
+      "ticker": "GOOGL",
+      "side": "buy",
+      "amount_usd": 58000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-07-13",
+      "politician": "Nancy Pelosi",
+      "party": "D-CA",
+      "ticker": "TSLA",
+      "side": "sell",
+      "amount_usd": 66000.0,
+      "source": "seed"
+    },
+    {
+      "date": "2026-07-17",
+      "politician": "Tommy Tuberville",
+      "party": "R-AL",
+      "ticker": "JPM",
+      "side": "buy",
+      "amount_usd": 10000.0,
+      "source": "seed"
+    }
+  ]
+}

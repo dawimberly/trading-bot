@@ -1,0 +1,27 @@
+{
+  "version": "1.5",
+  "tagline": "v1.5 \u2014 Locked & Ready",
+  "banner": "v1.5 Locked & Ready for Monday",
+  "feature_detail": "RVOL + ORB + Catalyst + ATR + Conviction + MTF + Exits + Corr Guard + Shorts + Stat Arb",
+  "locked_at": "2026-07-07T15:24:20",
+  "verify": {
+    "overall": "WARN",
+    "pass": 9,
+    "warn": 3,
+    "fail": 0,
+    "sections": [
+      "Profile & Config",
+      "RVOL Scanner",
+      "ORB Scanner",
+      "Catalyst Scoring",
+      "ATR Sizing",
+      "Insider Monitor",
+      "Protective Shorts",
+      "Bot Health Score",
+      "Strategy Performance",
+      "Dashboard",
+      "Telegram",
+      "Historical News"
+    ]
+  }
+}

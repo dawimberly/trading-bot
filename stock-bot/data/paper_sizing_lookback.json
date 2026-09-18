@@ -1,0 +1,143 @@
+{
+  "paper": {
+    "book": "paper",
+    "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper\\paper_journal.csv",
+    "window_start": "2026-06-24 11:53:58",
+    "window_end": "2026-07-24 11:53:58",
+    "rows_window": 4936,
+    "trade_rows": 0,
+    "buy_rows": 0,
+    "sell_rows": 0,
+    "event_counts": {
+      "exit_error": 2548,
+      "cycle": 2015,
+      "startup": 359,
+      "error": 14
+    },
+    "equity_start": 40135.28,
+    "equity_end": 97029.24,
+    "equity_return_pct": 141.755,
+    "sizing": {},
+    "top_realized": [],
+    "worst_realized": [],
+    "open_positions_sample": [],
+    "open_losers": [],
+    "last_sleeve_pnl_note": "CRYPTO +1.1% | NYSE -0.7% UW"
+  },
+  "live": {
+    "book": "live",
+    "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_live\\paper_journal.csv",
+    "window_start": "2026-07-11 10:35:29",
+    "window_end": "2026-07-18 10:35:29",
+    "rows_window": 1756,
+    "trade_rows": 0,
+    "buy_rows": 0,
+    "sell_rows": 0,
+    "event_counts": {
+      "cycle": 1738,
+      "startup": 17,
+      "error": 1
+    },
+    "equity_start": 24.21,
+    "equity_end": 296.57,
+    "equity_return_pct": 1124.99,
+    "sizing": {},
+    "top_realized": [],
+    "worst_realized": [],
+    "open_positions_sample": [],
+    "open_losers": [],
+    "last_sleeve_pnl_note": "SPY +0.9% | NYSE -1.0% UW"
+  },
+  "extra": {
+    "paper_chase_root": {
+      "book": "paper_chase_root",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\paper_chase_journal.csv",
+      "window_start": "2026-06-23 13:38:42",
+      "window_end": "2026-07-23 13:38:42",
+      "rows_window": 518,
+      "trade_rows": 0,
+      "buy_rows": 0,
+      "sell_rows": 0,
+      "event_counts": {
+        "error": 286,
+        "cycle": 207,
+        "startup": 24,
+        "exit_error": 1
+      },
+      "equity_start": 44366.48,
+      "equity_end": 95853.12,
+      "equity_return_pct": 116.049,
+      "sizing": {},
+      "last_sleeve_pnl_note": "NYSE -0.6% UW"
+    },
+    "paper_journal_root": {
+      "book": "paper_journal_root",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\paper_journal.csv",
+      "window_start": "2026-06-13 13:33:25",
+      "window_end": "2026-07-13 13:33:25",
+      "rows_window": 309,
+      "trade_rows": 0,
+      "buy_rows": 0,
+      "sell_rows": 0,
+      "event_counts": {
+        "cycle": 214,
+        "error": 54,
+        "startup": 41
+      },
+      "equity_start": 98979.16,
+      "equity_end": 30825.7,
+      "equity_return_pct": -68.856,
+      "sizing": {},
+      "last_sleeve_pnl_note": "CRYPTO +1.0% | NYSE -0.1% UW"
+    }
+  },
+  "heartbeats": {
+    "paper": {
+      "equity": null,
+      "sleeve_exposure": null,
+      "sleeve_caps": null,
+      "entry_skip_reason": null,
+      "regime": null,
+      "timestamp": "2026-08-14T12:22:33"
+    },
+    "live": {
+      "equity": 307.62,
+      "sleeve_exposure": {
+        "equity": 307.66,
+        "spy_value": 0.0,
+        "spy_cap": 0.0,
+        "crypto_value": 0.0,
+        "crypto_cap": 30.304510000000004,
+        "nyse_value": 0.0,
+        "nyse_cap": 30.304510000000004,
+        "vti_core_value": 261.506967,
+        "vti_core_cap": 261.511
+      },
+      "sleeve_caps": {
+        "vti_core": 0.85,
+        "spy": 0.0,
+        "crypto": 0.0985,
+        "nyse": 0.0985,
+        "metal": 0.0,
+        "cash_buffer": 0.0015
+      },
+      "entry_skip_reason": "yield_gated",
+      "regime": "RHYME_A: Euphoric_Volatility",
+      "timestamp": "2026-08-14T13:00:53.837263"
+    }
+  },
+  "paper_env_sizing": {
+    "PAPER_DYNAMIC_VTI": "true",
+    "PAPER_VTI_CORE_PCT": "0.40",
+    "DYNAMIC_VTI_PAPER_FLOOR": "0.35",
+    "DYNAMIC_VTI_PAPER_CEILING": "0.50",
+    "PAPER_MAX_EQUITY_TRADES": "3",
+    "PAPER_NYSE_SLEEVE_CAP_PCT": "0.20",
+    "PAPER_NYSE_PER_NAME_MAX_PCT": "0.025",
+    "PAPER_NYSE_MAX_OF_SLEEVE_PCT": "0.15",
+    "PAPER_NYSE_FAT_LOSER_ENABLED": "true",
+    "PAPER_NYSE_FAT_LOSER_OPEN_PCT": "-0.01",
+    "PAPER_NYSE_FAT_LOSER_TARGET_PCT": "0.005",
+    "DYNAMIC_VTI_DEFAULT_PCT": "0.45"
+  }
+}

@@ -1,0 +1,5 @@
+{"event": "ledger_rebuilt", "at": "2026-09-18T12:12:55", "backup": "trading_history.jsonl.bak.20260918_121255"}
+{"pair": "AAPL", "qty": 19.108481139, "price": 328.819436, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "CVX", "qty": 27.72326488, "price": 209.609872, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "DBB", "qty": 294.715798009, "price": 25.407756, "status": "open", "source": "alpaca_reconcile"}
+{"pair": "PFE", "qty": 338.953345601, "price": 27.757078, "status": "open", "source": "alpaca_reconcile"}
