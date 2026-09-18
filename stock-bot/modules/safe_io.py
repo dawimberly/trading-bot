@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,34 @@ def append_jsonl_line(path: Path | str, payload: dict[str, Any]) -> bool:
     except OSError:
         logger.warning("append_jsonl_line failed: %s", p, exc_info=True)
         return False
+
+
+def update_json_atomic(
+    path: Path | str,
+    mutate: Callable[[dict], dict],
+    *,
+    default: dict | None = None,
+    indent: int = 2,
+) -> bool:
+    """Read-modify-write a JSON object atomically; return False on failure."""
+    p = Path(path)
+    payload = read_json_file(p)
+    if not payload:
+        payload = dict(default or {})
+    try:
+        updated = mutate(payload)
+    except Exception:
+        logger.warning("update_json_atomic mutate failed: %s", p, exc_info=True)
+        return False
+    if not isinstance(updated, dict):
+        return False
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning("update_json_atomic mkdir failed: %s", p, exc_info=True)
+        return False
+    write_json_atomic(str(p), updated, indent=indent)
+    return True
 
 
 def write_json_atomic(path: str, payload: Any, *, indent: int = 2) -> None:

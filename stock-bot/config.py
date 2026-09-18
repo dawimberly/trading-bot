@@ -3563,7 +3563,7 @@ def effective_max_equity_trades() -> int:
         n = int(PAPER_MAX_EQUITY_TRADES)
     except (TypeError, ValueError):
         n = 3
-    return max(1, min(5, n))
+    return max(1, min(12, n))
 
 
 def account_cash_pct() -> float | None:
@@ -4395,6 +4395,7 @@ def enforce_realistic_research_profile() -> None:
     global VTI_CORE_PCT
     global PAPER_RISK_PER_TRADE
     global PAPER_RISK_CALM_BULL_PCT
+    global PAPER_MAX_EQUITY_TRADES
     global RISK_PER_TRADE
     global PAPER_POSITION_MAX_HOLD_BARS
     global PAPER_REGIME_B_SIZING_MULT
@@ -4593,7 +4594,8 @@ def enforce_realistic_research_profile() -> None:
     global PAPER_SOCIAL_SLEEVE_ENABLED
 
     if not _env_explicit("DYNAMIC_CORE_ENABLED"):
-        DYNAMIC_CORE_ENABLED = True
+        # Allocator picks a passive VTI/SPY core; retired with the VTI sleeve.
+        DYNAMIC_CORE_ENABLED = False
     if not _env_explicit("DEEP_HISTORY_ENABLED"):
         DEEP_HISTORY_ENABLED = True
     if not _env_explicit("DEEP_HISTORY_INDICATORS_ONLY"):
@@ -4604,21 +4606,23 @@ def enforce_realistic_research_profile() -> None:
         POSITIONING_OVERLAY_ENABLED = False
     if not _env_explicit("PAPER_DYNAMIC_VTI", "PAPER_DYNAMIC_VTI_ENABLED"):
         PAPER_DYNAMIC_VTI_ENABLED = False
+    # VTI core is retired on every book — one NYSE sleeve buys VTI/SPY/VOO like
+    # any other candidate. These must stay 0 or the in-process lock re-creates a
+    # 40/80% passive core whenever the portal env keys are absent.
     if not _env_explicit("DYNAMIC_VTI_PAPER_FLOOR"):
-        DYNAMIC_VTI_PAPER_FLOOR = 0.40
+        DYNAMIC_VTI_PAPER_FLOOR = 0.0
     if not _env_explicit("DYNAMIC_VTI_DEFAULT_PCT"):
-        DYNAMIC_VTI_DEFAULT_PCT = 0.65
+        DYNAMIC_VTI_DEFAULT_PCT = 0.0
     if not _env_explicit("DYNAMIC_VTI_CALM_PCT"):
-        DYNAMIC_VTI_CALM_PCT = 0.50
+        DYNAMIC_VTI_CALM_PCT = 0.0
     if not _env_explicit("DYNAMIC_VTI_STRESS_PCT"):
-        DYNAMIC_VTI_STRESS_PCT = 0.75
+        DYNAMIC_VTI_STRESS_PCT = 0.0
     if not _env_explicit("DYNAMIC_VTI_OPTIONAL_ENABLED", "VTI_OPTIONAL_FLOOR"):
-        DYNAMIC_VTI_OPTIONAL_ENABLED = True
+        DYNAMIC_VTI_OPTIONAL_ENABLED = False
     if not _env_explicit("DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL"):
-        # Safety rail: paper Dynamic VTI never below 40% (no zero-core path).
-        DYNAMIC_VTI_ALLOW_ZERO = False
+        DYNAMIC_VTI_ALLOW_ZERO = True
     if not _env_explicit("DYNAMIC_VTI_FLOOR_MIN"):
-        DYNAMIC_VTI_FLOOR_MIN = 0.40
+        DYNAMIC_VTI_FLOOR_MIN = 0.0
     if not _env_explicit("SPY_LIKE_BOOST_ENABLED", "PAPER_SPY_LIKE_BOOST_ENABLED"):
         SPY_LIKE_BOOST_ENABLED = True
     if not _env_explicit("PORTFOLIO_CONSTRUCTOR_ENABLED"):
@@ -4630,9 +4634,13 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("CORE_ALLOCATOR_LOCKED_CHOICE"):
         CORE_ALLOCATOR_LOCKED_CHOICE = "spy"
     if not _env_explicit("PAPER_VTI_CORE_PCT", "VTI_CORE_PCT"):
-        PAPER_VTI_CORE_PCT = 0.40
+        PAPER_VTI_CORE_PCT = 0.0
     if not _env_explicit("VTI_CORE_PCT"):
-        VTI_CORE_PCT = 0.80
+        VTI_CORE_PCT = 0.0
+    if not _env_explicit("PAPER_MAX_EQUITY_TRADES"):
+        # One NYSE sleeve carries the whole book; 3 entries/cycle cannot absorb
+        # freed cash across 15 name slots.
+        PAPER_MAX_EQUITY_TRADES = 12
     if not _env_explicit("PAPER_RISK_PER_TRADE", "RISK_PER_TRADE"):
         PAPER_RISK_PER_TRADE = 0.018
     if not _env_explicit("PAPER_RISK_CALM_BULL_PCT"):
@@ -5135,8 +5143,10 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
     "SPY_SLEEVE_CAP_PCT": "0",
     "PAPER_SPY_MAX_EXPOSURE_PCT": "0",
-    "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "300",
-    "PAPER_MAX_EQUITY_TRADES": "3",
+    # 300s killed full research cycles mid-flight (exit-42 restart loop, no
+    # completed cycle). Match heartbeat_watchdog's own paper default.
+    "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "900",
+    "PAPER_MAX_EQUITY_TRADES": "12",
     "DEEP_HISTORY_ENABLED": "true",
     "DEEP_HISTORY_INDICATORS_ONLY": "true",
     "RISK_PER_TRADE": "0.018",
@@ -7599,7 +7609,9 @@ def vti_core_allocation_pct(
         return dynamic
     if paper_only_sleeves_active():
         eq = equity if equity is not None and equity > 0 else (_account_equity or 0.0)
-        if eq > 0:
+        if eq > 0 and PAPER_DYNAMIC_VTI_ENABLED:
+            # Vol-scaled core only when Dynamic VTI is on; otherwise the fixed
+            # PAPER_VTI_CORE_PCT (0 on every book today) must win.
             pct = get_vti_core_pct(
                 eq,
                 vol_score=vol_score,

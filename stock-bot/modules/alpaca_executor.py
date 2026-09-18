@@ -1997,8 +1997,15 @@ class AlpacaExecutor:
         return [r.as_dict() for r in results]
 
     def trim_over_active_tickers(self, *, dry_run: bool | None = None) -> list[dict]:
-        """Sell smallest non-core names until count <= max active (Medium 15)."""
-        if not config.paper_medium_strategy_enabled():
+        """Sell smallest non-core names until count <= max active (Medium 15, Lab 4).
+
+        Lab must be included: without it an over-cap book can never open a new
+        name again (``_blocks_new_active_ticker``) and cash just accumulates.
+        """
+        if not (
+            config.paper_medium_strategy_enabled()
+            or config.paper_lab_concentrated_enabled()
+        ):
             return []
         if not getattr(self, "equity_session_open", True):
             return []
@@ -2017,16 +2024,19 @@ class AlpacaExecutor:
         overflow = len(ranked) - cap
         if overflow <= 0:
             return []
+        reason = (
+            "medium_name_cap"
+            if config.paper_medium_strategy_enabled()
+            else "lab_name_cap"
+        )
         actions: list[dict] = []
         for _mv, sym in ranked[:overflow]:
-            action = {"symbol": sym, "action": "sell", "reason": "medium_name_cap"}
+            action = {"symbol": sym, "action": "sell", "reason": reason}
             if use_dry:
                 action["status"] = "dry_run"
                 actions.append(action)
                 continue
-            submitted = self.execute_full_exit(
-                sym, reason="medium_name_cap", sleeve="NYSE"
-            )
+            submitted = self.execute_full_exit(sym, reason=reason, sleeve="NYSE")
             action["status"] = "submitted" if submitted is not None else "failed"
             actions.append(action)
         return actions
