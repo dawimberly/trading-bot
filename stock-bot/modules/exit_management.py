@@ -7,13 +7,24 @@ and protective short legs.
 from __future__ import annotations
 
 import logging
-
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
 import config
 
 logger = logging.getLogger(__name__)
+
+# Daily close matrix for stop ATR (not the live 5-minute sizing window).
+_DAILY_CLOSE_MATRIX = None
+_DAILY_CLOSE_MATRIX_MONO = 0.0
+_DAILY_CLOSE_TTL_SEC = 900.0
+
+
+def reset_daily_atr_cache() -> None:
+    global _DAILY_CLOSE_MATRIX, _DAILY_CLOSE_MATRIX_MONO
+    _DAILY_CLOSE_MATRIX = None
+    _DAILY_CLOSE_MATRIX_MONO = 0.0
 
 
 def _clamp01(val: float) -> float:
@@ -313,13 +324,33 @@ def _daily_bar_atr(symbol: str) -> float | None:
     ~1.5% daily-ATR stop backtests validate, and fresh entries were being
     stopped out within minutes on quote noise.
     """
+    global _DAILY_CLOSE_MATRIX, _DAILY_CLOSE_MATRIX_MONO
     try:
         from modules.data_loader import load_close_matrix
         from modules.risk_management import calculate_atr
 
-        return calculate_atr(load_close_matrix(interval="1d"), symbol)
+        now = time.monotonic()
+        if (
+            _DAILY_CLOSE_MATRIX is None
+            or (now - _DAILY_CLOSE_MATRIX_MONO) >= _DAILY_CLOSE_TTL_SEC
+        ):
+            _DAILY_CLOSE_MATRIX = load_close_matrix(interval="1d")
+            _DAILY_CLOSE_MATRIX_MONO = now
+        return calculate_atr(_DAILY_CLOSE_MATRIX, symbol)
     except Exception:
         return None
+
+
+def _entry_fallback_atr(executor, symbol: str) -> float:
+    """2% of entry — never a 5-minute range — when daily ATR is missing."""
+    try:
+        pos = executor._find_position(symbol)
+        entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+        if entry > 0:
+            return entry * 0.02
+    except Exception:
+        pass
+    return 1.0
 
 
 def resolve_symbol_atr_and_conviction(
@@ -328,22 +359,21 @@ def resolve_symbol_atr_and_conviction(
     *,
     regime: str | None = None,
 ) -> tuple[float, float]:
-    """Best-effort ATR and conviction for exit plans."""
+    """Best-effort ATR and conviction for exit plans.
+
+    Stop distance uses daily ATR only. The 5-minute sizing matrix is not a
+    fallback — 2× that range is a hair-trigger and was chopping Medium names
+    minutes after entry.
+    """
     data = getattr(executor, "_sizing_data", None)
     atr = _daily_bar_atr(symbol)
+    conviction = 0.5
     try:
-        from modules.risk_management import calculate_atr, compute_conviction_score
+        from modules.risk_management import compute_conviction_score
 
-        if (atr is None or atr <= 0) and data is not None:
-            atr = calculate_atr(data, symbol)
         conviction = compute_conviction_score(symbol, data, regime, sleeve="nyse")
     except Exception:
         conviction = 0.5
     if atr is None or atr <= 0:
-        try:
-            pos = executor._find_position(symbol)
-            entry = float(getattr(pos, "avg_entry_price", 0) or 0)
-            atr = entry * 0.02 if entry > 0 else 1.0
-        except Exception:
-            atr = 1.0
+        atr = _entry_fallback_atr(executor, symbol)
     return float(atr), float(conviction)
