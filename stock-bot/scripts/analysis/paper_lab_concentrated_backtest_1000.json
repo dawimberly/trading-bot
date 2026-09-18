@@ -1,0 +1,884 @@
+{
+  "research_only": true,
+  "note": "Isolated NYSE sleeve on $100k, close-to-close. Not v2/live. Paper aggressive still holds VTI in production.",
+  "lab": {
+    "start": "2023-07-21",
+    "end": "2026-09-13",
+    "bars": 1025,
+    "symbols": 247,
+    "trades": 336,
+    "win_rate": 61.3,
+    "avg_ret_pct": 3.919,
+    "med_ret_pct": 2.212,
+    "equity_end": 280993.32,
+    "book_ret_pct": 180.99,
+    "max_dd_pct": 30.02,
+    "exit_reasons": {
+      "lab_half": 46,
+      "lab_time": 211,
+      "lab_trail": 15,
+      "lab_disaster": 60,
+      "eod": 4
+    },
+    "trades_sample": [
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-05",
+        "bars": 3,
+        "entry": 41.56,
+        "exit": 51.13,
+        "ret_pct": 23.027,
+        "pnl": 2878.37,
+        "frac": 0.5,
+        "reason": "lab_half"
+      },
+      {
+        "symbol": "ETR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-14",
+        "bars": 10,
+        "entry": 73.3343,
+        "exit": 70.2319,
+        "ret_pct": -4.231,
+        "pnl": -1057.64,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-14",
+        "bars": 10,
+        "entry": 41.56,
+        "exit": 59.18,
+        "ret_pct": 42.397,
+        "pnl": 5299.57,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "BKNG",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-14",
+        "bars": 10,
+        "entry": 184.0331,
+        "exit": 195.6321,
+        "ret_pct": 6.303,
+        "pnl": 1575.68,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "IP",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-14",
+        "bars": 10,
+        "entry": 51.0552,
+        "exit": 52.333,
+        "ret_pct": 2.503,
+        "pnl": 625.67,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "COIN",
+        "entry_date": "2024-11-14",
+        "exit_date": "2024-11-18",
+        "bars": 2,
+        "entry": 278.84,
+        "exit": 325.41,
+        "ret_pct": 16.701,
+        "pnl": 2282.27,
+        "frac": 0.5,
+        "reason": "lab_half"
+      },
+      {
+        "symbol": "COIN",
+        "entry_date": "2024-11-14",
+        "exit_date": "2024-11-21",
+        "bars": 5,
+        "entry": 278.84,
+        "exit": 295.23,
+        "ret_pct": 5.878,
+        "pnl": 803.23,
+        "frac": 1.0,
+        "reason": "lab_trail"
+      },
+      {
+        "symbol": "TSLA",
+        "entry_date": "2024-11-14",
+        "exit_date": "2024-11-22",
+        "bars": 6,
+        "entry": 311.18,
+        "exit": 352.56,
+        "ret_pct": 13.298,
+        "pnl": 1817.17,
+        "frac": 0.5,
+        "reason": "lab_half"
+      },
+      {
+        "symbol": "SHOP",
+        "entry_date": "2024-11-14",
+        "exit_date": "2024-11-29",
+        "bars": 10,
+        "entry": 109.08,
+        "exit": 115.6,
+        "ret_pct": 5.977,
+        "pnl": 1633.61,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "TSLA",
+        "entry_date": "2024-11-14",
+        "exit_date": "2024-11-29",
+        "bars": 10,
+        "entry": 311.18,
+        "exit": 345.16,
+        "ret_pct": 10.92,
+        "pnl": 1492.2,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "WFC",
+        "entry_date": "2024-11-14",
+        "exit_date": "2024-11-29",
+        "bars": 10,
+        "entry": 70.0977,
+        "exit": 73.3426,
+        "ret_pct": 4.629,
+        "pnl": 1265.16,
+        "frac": 1.0,
+        "reason": "lab_time"
+      },
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-11-21",
+        "exit_date": "2024-12-03",
+        "bars": 7,
+        "entry": 61.36,
+        "exit": 70.96,
+        "ret_pct": 15.645,
+        "pnl": 2198.31,
+        "frac": 0.5,
+        "reason": "lab_half"
+      }
+    ],
+    "curve": [
+      {
+        "date": "2023-07-21",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-08-02",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-08-14",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-08-26",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-09-07",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-09-19",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-10-01",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-10-13",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-10-25",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-11-06",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-11-18",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-11-30",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-12-12",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2023-12-24",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-01-05",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-01-17",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-01-29",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-02-10",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-02-22",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-03-05",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-03-17",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-03-29",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-04-10",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-04-22",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-05-04",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-05-16",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-05-28",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-07-31",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-08-16",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-09-04",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-09-20",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-10-08",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-10-24",
+        "equity": 100000.0,
+        "open": 0
+      },
+      {
+        "date": "2024-11-11",
+        "equity": 102878.37,
+        "open": 4
+      },
+      {
+        "date": "2024-11-27",
+        "equity": 114224.32,
+        "open": 4
+      },
+      {
+        "date": "2024-12-16",
+        "equity": 131064.35,
+        "open": 4
+      },
+      {
+        "date": "2025-01-03",
+        "equity": 149964.45,
+        "open": 1
+      },
+      {
+        "date": "2025-01-23",
+        "equity": 150150.76,
+        "open": 3
+      },
+      {
+        "date": "2025-02-10",
+        "equity": 166740.94,
+        "open": 3
+      },
+      {
+        "date": "2025-02-27",
+        "equity": 147868.1,
+        "open": 4
+      },
+      {
+        "date": "2025-03-17",
+        "equity": 144275.22,
+        "open": 3
+      },
+      {
+        "date": "2025-03-29",
+        "equity": 138332.86,
+        "open": 4
+      },
+      {
+        "date": "2025-04-10",
+        "equity": 130486.87,
+        "open": 4
+      },
+      {
+        "date": "2025-04-22",
+        "equity": 121949.87,
+        "open": 4
+      },
+      {
+        "date": "2025-05-04",
+        "equity": 126906.13,
+        "open": 3
+      },
+      {
+        "date": "2025-05-16",
+        "equity": 121652.32,
+        "open": 3
+      },
+      {
+        "date": "2025-05-28",
+        "equity": 128920.5,
+        "open": 4
+      },
+      {
+        "date": "2025-06-09",
+        "equity": 130571.34,
+        "open": 4
+      },
+      {
+        "date": "2025-06-21",
+        "equity": 126659.27,
+        "open": 4
+      },
+      {
+        "date": "2025-07-03",
+        "equity": 126784.0,
+        "open": 4
+      },
+      {
+        "date": "2025-07-15",
+        "equity": 127796.63,
+        "open": 3
+      },
+      {
+        "date": "2025-07-27",
+        "equity": 139697.58,
+        "open": 3
+      },
+      {
+        "date": "2025-08-08",
+        "equity": 130518.15,
+        "open": 4
+      },
+      {
+        "date": "2025-08-20",
+        "equity": 134177.38,
+        "open": 3
+      },
+      {
+        "date": "2025-09-01",
+        "equity": 146000.95,
+        "open": 4
+      },
+      {
+        "date": "2025-09-13",
+        "equity": 149504.56,
+        "open": 4
+      },
+      {
+        "date": "2025-09-25",
+        "equity": 157376.09,
+        "open": 3
+      },
+      {
+        "date": "2025-10-07",
+        "equity": 178206.73,
+        "open": 4
+      },
+      {
+        "date": "2025-10-19",
+        "equity": 164788.7,
+        "open": 4
+      },
+      {
+        "date": "2025-10-31",
+        "equity": 177742.25,
+        "open": 3
+      },
+      {
+        "date": "2025-11-12",
+        "equity": 180034.04,
+        "open": 4
+      },
+      {
+        "date": "2025-11-24",
+        "equity": 171813.7,
+        "open": 3
+      },
+      {
+        "date": "2025-12-06",
+        "equity": 178537.77,
+        "open": 3
+      },
+      {
+        "date": "2025-12-18",
+        "equity": 179158.78,
+        "open": 2
+      },
+      {
+        "date": "2025-12-30",
+        "equity": 190119.87,
+        "open": 4
+      },
+      {
+        "date": "2026-01-11",
+        "equity": 204780.17,
+        "open": 4
+      },
+      {
+        "date": "2026-01-23",
+        "equity": 215636.63,
+        "open": 3
+      },
+      {
+        "date": "2026-02-04",
+        "equity": 185938.4,
+        "open": 2
+      },
+      {
+        "date": "2026-02-16",
+        "equity": 188695.07,
+        "open": 4
+      },
+      {
+        "date": "2026-02-28",
+        "equity": 188508.05,
+        "open": 4
+      },
+      {
+        "date": "2026-03-12",
+        "equity": 185915.77,
+        "open": 4
+      },
+      {
+        "date": "2026-03-24",
+        "equity": 189403.32,
+        "open": 4
+      },
+      {
+        "date": "2026-04-05",
+        "equity": 194968.7,
+        "open": 3
+      },
+      {
+        "date": "2026-04-17",
+        "equity": 204072.32,
+        "open": 4
+      },
+      {
+        "date": "2026-04-29",
+        "equity": 232507.13,
+        "open": 3
+      },
+      {
+        "date": "2026-05-11",
+        "equity": 270744.03,
+        "open": 4
+      },
+      {
+        "date": "2026-05-23",
+        "equity": 266404.97,
+        "open": 4
+      },
+      {
+        "date": "2026-06-04",
+        "equity": 303194.09,
+        "open": 4
+      },
+      {
+        "date": "2026-06-16",
+        "equity": 319725.45,
+        "open": 4
+      },
+      {
+        "date": "2026-06-28",
+        "equity": 297477.43,
+        "open": 4
+      },
+      {
+        "date": "2026-07-10",
+        "equity": 290696.73,
+        "open": 4
+      },
+      {
+        "date": "2026-07-22",
+        "equity": 275434.51,
+        "open": 2
+      },
+      {
+        "date": "2026-08-03",
+        "equity": 275006.83,
+        "open": 4
+      },
+      {
+        "date": "2026-08-15",
+        "equity": 297959.43,
+        "open": 3
+      },
+      {
+        "date": "2026-08-27",
+        "equity": 283588.47,
+        "open": 4
+      },
+      {
+        "date": "2026-09-08",
+        "equity": 286940.05,
+        "open": 3
+      }
+    ],
+    "curve_len": 1025
+  },
+  "atr_hold_15": {
+    "start": "2023-07-21",
+    "end": "2026-09-13",
+    "bars": 1025,
+    "symbols": 247,
+    "trades": 551,
+    "win_rate": 39.0,
+    "avg_ret_pct": 2.906,
+    "med_ret_pct": -2.436,
+    "equity_end": 191831.56,
+    "book_ret_pct": 91.83,
+    "max_dd_pct": 9.97,
+    "exit_reasons": {
+      "stop": 321,
+      "time": 215,
+      "eod": 15
+    },
+    "trades_sample": [
+      {
+        "symbol": "ETR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-01",
+        "bars": 1,
+        "entry": 73.3343,
+        "exit": 68.6011,
+        "ret_pct": -6.454,
+        "reason": "stop"
+      },
+      {
+        "symbol": "WMB",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-01",
+        "bars": 1,
+        "entry": 49.1034,
+        "exit": 48.344,
+        "ret_pct": -1.547,
+        "reason": "stop"
+      },
+      {
+        "symbol": "BMY",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-01",
+        "bars": 1,
+        "entry": 51.3925,
+        "exit": 50.0564,
+        "ret_pct": -2.6,
+        "reason": "stop"
+      },
+      {
+        "symbol": "KMI",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-01",
+        "bars": 1,
+        "entry": 22.8235,
+        "exit": 22.5162,
+        "ret_pct": -1.346,
+        "reason": "stop"
+      },
+      {
+        "symbol": "DLR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-06",
+        "bars": 4,
+        "entry": 169.4815,
+        "exit": 165.0978,
+        "ret_pct": -2.587,
+        "reason": "stop"
+      },
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 41.56,
+        "exit": 76.07,
+        "ret_pct": 83.037,
+        "reason": "time"
+      },
+      {
+        "symbol": "BKNG",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 184.0331,
+        "exit": 206.0728,
+        "ret_pct": 11.976,
+        "reason": "time"
+      },
+      {
+        "symbol": "IP",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 51.0552,
+        "exit": 51.4738,
+        "ret_pct": 0.82,
+        "reason": "time"
+      },
+      {
+        "symbol": "WFC",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 62.1521,
+        "exit": 67.8253,
+        "ret_pct": 9.128,
+        "reason": "time"
+      },
+      {
+        "symbol": "MS",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 111.25,
+        "exit": 121.9204,
+        "ret_pct": 9.591,
+        "reason": "time"
+      },
+      {
+        "symbol": "MRVL",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 79.7432,
+        "exit": 120.217,
+        "ret_pct": 50.755,
+        "reason": "time"
+      },
+      {
+        "symbol": "MTB",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 184.0116,
+        "exit": 189.532,
+        "ret_pct": 3.0,
+        "reason": "time"
+      }
+    ]
+  },
+  "atr_hold_4x25": {
+    "start": "2023-07-21",
+    "end": "2026-09-13",
+    "bars": 1025,
+    "symbols": 247,
+    "trades": 161,
+    "win_rate": 35.4,
+    "avg_ret_pct": 3.56,
+    "med_ret_pct": -3.68,
+    "equity_end": 287523.2,
+    "book_ret_pct": 187.52,
+    "max_dd_pct": 38.99,
+    "exit_reasons": {
+      "stop": 98,
+      "time": 59,
+      "eod": 4
+    },
+    "trades_sample": [
+      {
+        "symbol": "ETR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-11-01",
+        "bars": 1,
+        "entry": 73.3343,
+        "exit": 68.6011,
+        "ret_pct": -6.454,
+        "reason": "stop"
+      },
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 41.56,
+        "exit": 76.07,
+        "ret_pct": 83.037,
+        "reason": "time"
+      },
+      {
+        "symbol": "BKNG",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 184.0331,
+        "exit": 206.0728,
+        "ret_pct": 11.976,
+        "reason": "time"
+      },
+      {
+        "symbol": "IP",
+        "entry_date": "2024-10-31",
+        "exit_date": "2024-12-13",
+        "bars": 30,
+        "entry": 51.0552,
+        "exit": 51.4738,
+        "ret_pct": 0.82,
+        "reason": "time"
+      },
+      {
+        "symbol": "MRVL",
+        "entry_date": "2024-11-01",
+        "exit_date": "2024-12-16",
+        "bars": 30,
+        "entry": 84.3818,
+        "exit": 124.2086,
+        "ret_pct": 47.198,
+        "reason": "time"
+      },
+      {
+        "symbol": "MRVL",
+        "entry_date": "2024-12-16",
+        "exit_date": "2024-12-17",
+        "bars": 1,
+        "entry": 124.2086,
+        "exit": 111.736,
+        "ret_pct": -10.042,
+        "reason": "stop"
+      },
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-12-13",
+        "exit_date": "2024-12-18",
+        "bars": 3,
+        "entry": 76.07,
+        "exit": 71.51,
+        "ret_pct": -5.994,
+        "reason": "stop"
+      },
+      {
+        "symbol": "AVGO",
+        "entry_date": "2024-12-17",
+        "exit_date": "2024-12-19",
+        "bars": 2,
+        "entry": 236.571,
+        "exit": 214.9947,
+        "ret_pct": -9.12,
+        "reason": "stop"
+      },
+      {
+        "symbol": "TSLA",
+        "entry_date": "2024-12-13",
+        "exit_date": "2024-12-31",
+        "bars": 11,
+        "entry": 436.23,
+        "exit": 403.84,
+        "ret_pct": -7.425,
+        "reason": "stop"
+      },
+      {
+        "symbol": "PLTR",
+        "entry_date": "2024-12-18",
+        "exit_date": "2025-01-10",
+        "bars": 14,
+        "entry": 71.51,
+        "exit": 67.26,
+        "ret_pct": -5.943,
+        "reason": "stop"
+      },
+      {
+        "symbol": "ONDS",
+        "entry_date": "2024-12-13",
+        "exit_date": "2025-01-30",
+        "bars": 30,
+        "entry": 1.4,
+        "exit": 1.69,
+        "ret_pct": 20.714,
+        "reason": "time"
+      },
+      {
+        "symbol": "MRVL",
+        "entry_date": "2024-12-19",
+        "exit_date": "2025-02-05",
+        "bars": 30,
+        "entry": 108.6104,
+        "exit": 115.9856,
+        "ret_pct": 6.791,
+        "reason": "time"
+      }
+    ]
+  },
+  "spy_bh_pct": 45.31
+}

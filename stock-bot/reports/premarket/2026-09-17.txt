@@ -1,0 +1,81 @@
+Pre-Market Report — 2026-09-17 00:03:56 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 3576). First heartbeat may take up to 60s. | Stopped 2 orphan bot process(es).
+Heartbeat age: 3759.359548s
+Equity: $100,034.46
+
+=== Bot Health ===
+Score: 88/100 (Excellent) — Green
+  • Bear regime managed (E)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • All-time Sharpe negative (-0.89)
+  • Tail-risk sizing cut (0.70x)
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_E: Steady_Bearish_Decline
+Bubble Risk: 42/100
+
+=== Insider Signals (top 3) ===
+• AZTA | cluster_buy | s94 — Cluster buy: 5 insiders purchased Azenta, Inc.
+• SNOW | executive_sell | s94 $1.9M — CEO sale - Snowflake Inc. ($1.9M)
+• CHYM | executive_sell | s93 $109.3M — executive sale - Chime Financial, Inc. ($109.3M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 35 returned
+
+Top signals (up to 5)
+  AZTA   cluster_buy      score= 94  Cluster buy: 5 insiders purchased Azenta, Inc.
+  SNOW   executive_sell   score= 94  CEO sale - Snowflake Inc. ($1.9M)
+  CHYM   executive_sell   score= 93  executive sale - Chime Financial, Inc. ($109.3M)
+  CHYM   executive_sell   score= 93  executive sale - Chime Financial, Inc. ($109.3M)
+  SNOW   executive_sell   score= 88  executive sale - Snowflake Inc. ($2.4M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: AZTA T1; cluster buys: KRYS (3 insiders); exec sells -> short wa
+
+Applied boosts
+  momentum  AZTA: +0.280
+  momentum  KRYS: +0.180
+  stat_arb  AZTA: x1.220
+  stat_arb  KRYS: x1.150
+  short     SNOW: base=0.420 role=cfo
+  short     CHYM: base=0.420 role=executive
+  short     ITGR: base=0.420 role=executive
+  short     CNXN: base=0.420 role=executive
+  short     GCMG: base=0.420 role=cfo
+  short     GCT: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 41.9
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 35 | Boost: 1 clusters, 12 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

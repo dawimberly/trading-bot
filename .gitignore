@@ -1,71 +1,69 @@
-# Secrets — never commit (template only: .env.example with placeholders)
+# --- Secrets (never commit; .env.example files are tracked on purpose) ---
 .env
-.env.local
-.env.*.local
-**/data/portal/users/
-.venv/
-stock-bot/.venv/
-venv/
+.env.*
+!.env.example
+!.env.portal.example
+*.pem
+*.key
 
-# Python
+# --- Python ---
 __pycache__/
-**/modules/__pycache__/
 *.py[cod]
+.venv/
+venv/
+venv311/
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Runtime data
-market_data.db
-*.log
-trading_history.jsonl
-portfolio_state.json
-stat_arb_open_book.json
-thinking_engine_state.json
-thinking_engine_last.json
-trading_safety_state.json
-**/thinking_engine_analysis_output.json
-
-# Consolidated runtime dirs (stock-bot)
-stock-bot/data/
-stock-bot/archive/
-stock-bot/data/**
-stock-bot/archive/**
-
-# Root purge backup (reversible)
-backup_root_purge_*/
-
-# PyInstaller / frozen EXE output (rebuild locally)
+# --- Build artifacts (PyInstaller; ~92 MB, rebuilt on every launcher change) ---
+build/
 dist/
-stock-bot/dist/
-stock-bot/build/
-pod_risk_state.json
-bot_heartbeat.log
-bot_logs.log
-bot_heartbeat.json
-alert_state.json
-paper_journal.csv
-fund_*.csv
-wisdom_journal.csv
-wisdom_eval_state.json
-wisdom_evaluations.jsonl
-wisdom_monthly_history.jsonl
-wisdom_scorecard.json
-wisdom_monthly_*.json
-kraken_autopilot_state.json
-kraken_capabilities.json
-spacex_ipo_listing.json
-spacex_ipo_listing_history.jsonl
-spacex_ipo_monitor.json
-spacex_ipo_monitor_history.jsonl
-volatility_sleeve_state.json
-trading_history.jsonl.bak.*
-sentiment/live/*.json
-web_sentiment_live.json
-sentiment/sources/youtube/*/transcripts/*.txt
-sentiment/sources/youtube/*/sync_state.json
-sentiment/sources/youtube/*/manifest.jsonl
-sentiment/social_sleeve_journal.csv
+*.spec.bak
 
-# IDE
+# --- Logs ---
+logs/
+*.log
+!scripts/research/**/*.log
+
+# --- Agent chat transcripts (~65 MB, not source) ---
+chats/
+trading-bot-chats/
+
+# --- Bot runtime state: rewritten every cycle, conflicts on every pull ---
+bot_heartbeat.json
+*_heartbeat.json
+*_heartbeat.json.lock
+bot.pid
+*.pid
+*.lock
+core_allocator_state.json
+trading_safety_state.json
+thinking_news_cache.json
+crypto_vol_journal.csv
+paper_journal.csv
+paper_journal.csv.bak*
+wisdom_journal.csv
+wisdom_scorecard.json
+*.tmp
+*.tmp.*
+
+# Per-user portal books hold live API keys and per-cycle state.
+stock-bot/data/portal/users/
+
+# --- Sentiment source sync state (re-fetched, not authored) ---
+stock-bot/sentiment/sources/**/sync_state.json
+stock-bot/sentiment/sources/**/manifest.jsonl
+
+# --- Local editor / OS ---
+.DS_Store
+Thumbs.db
 .idea/
-.vscode/
-.cursor/mcp.json
+# .cursor holds mcp.json with API keys; rules are shared via the repo copy.
+.cursor/
+.grok/
+
+# --- Research OUTPUTS are intentionally tracked ---
+# Keep: scripts/analysis/*.json|*.md, reports/, scripts/research/**/runs/*.md|*.json,
+# docs/. These are results worth keeping, so no ignore rules for them.

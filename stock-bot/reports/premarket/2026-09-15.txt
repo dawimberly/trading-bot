@@ -1,0 +1,78 @@
+Pre-Market Report — 2026-09-15 00:05:38 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 5628). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3745.530685s
+Equity: $93,966.81
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Bear regime managed (E)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • All-time Sharpe negative (-0.89)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • RHYME_E bear — elevated caution
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_E: Steady_Bearish_Decline
+Bubble Risk: 40/100
+
+=== Insider Signals (top 3) ===
+• OWL | executive_sell | s93 $29776.4B — executive sale - BLUE OWL CAPITAL INC. ($29776.4B)
+• RFIL | cluster_buy | s88 — Cluster buy: 4 insiders purchased R F INDUSTRIES LTD
+• AVNW | executive_sell | s84 $206K — CEO sale - AVIAT NETWORKS, INC. ($206K)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 31 returned
+
+Top signals (up to 5)
+  OWL    executive_sell   score= 93  executive sale - BLUE OWL CAPITAL INC. ($29776.4B)
+  RFIL   cluster_buy      score= 88  Cluster buy: 4 insiders purchased R F INDUSTRIES LTD
+  AVNW   executive_sell   score= 84  CEO sale - AVIAT NETWORKS, INC. ($206K)
+  VHC    executive_sell   score= 84  CEO sale - VirnetX Holding Corp ($232K)
+  DTST   executive_sell   score= 78  executive sale - Data Storage Corp ($10K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: VHC T1; cluster buys: RFIL (4 insiders); exec sells -> short wat
+
+Applied boosts
+  momentum  RFIL: +0.180
+  stat_arb  RFIL: x1.150
+  short     OWL: base=0.420 role=executive
+  short     VHC: base=0.420 role=ceo
+  short     AVNW: base=0.420 role=ceo
+  short     CLOV: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 40.1
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 1 | Quality signals: 33 | Boost: 1 clusters, 4 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

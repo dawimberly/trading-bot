@@ -1,0 +1,82 @@
+Pre-Market Report — 2026-09-14 00:04:48 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 26900). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3743.130283s
+Equity: $94,394.53
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Bear regime managed (E)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (2)
+  • All-time Sharpe negative (-0.09)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • RHYME_E bear — elevated caution
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_E: Steady_Bearish_Decline
+Bubble Risk: 40/100
+
+=== Insider Signals (top 3) ===
+• SPAI | executive_sell | s94 $4.0M — CEO sale - Safe Pro Group Inc. ($4.0M)
+• ALHC | executive_sell | s94 $7.1M — CEO sale - Alignment Healthcare, Inc. ($7.1M)
+• OCGN | executive_sell | s89 $589K — CEO sale - Ocugen, Inc. ($589K)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 35 returned
+
+Top signals (up to 5)
+  SPAI   executive_sell   score= 94  CEO sale - Safe Pro Group Inc. ($4.0M)
+  ALHC   executive_sell   score= 94  CEO sale - Alignment Healthcare, Inc. ($7.1M)
+  OCGN   executive_sell   score= 89  CEO sale - Ocugen, Inc. ($589K)
+  ALHC   executive_sell   score= 88  executive sale - Alignment Healthcare, Inc. ($1.6M)
+  WBD    executive_sell   score= 88  executive sale - Warner Bros. Discovery, Inc. ($5.6M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: KULR (3 insiders), TNYA (2 insiders); exec sells -> short watch: A
+
+Applied boosts
+  momentum  KULR: +0.180
+  momentum  TNYA: +0.080
+  stat_arb  KULR: x1.150
+  stat_arb  TNYA: x1.060
+  short     ALHC: base=0.420 role=executive
+  short     SPAI: base=0.420 role=ceo
+  short     OCGN: base=0.420 role=ceo
+  short     WBD: base=0.420 role=executive
+  short     AARD: base=0.420 role=cfo
+  short     TLS: base=0.420 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 40.0
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 36 | Boost: 2 clusters, 7 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.
