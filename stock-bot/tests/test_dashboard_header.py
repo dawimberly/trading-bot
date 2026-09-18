@@ -71,6 +71,16 @@ def test_live_tape_is_strategy_not_live_holdings_churn():
     _assert_no_nyse_100(tape)
 
 
+def test_paper_lab_tape_has_8_name_trail_stack():
+    tape = header_tape_text(paper=True, book_id="alpaca_paper")
+    assert "PAPER LAB" in tape
+    assert "8 NAMES" in tape
+    assert "30D HOLD" in tape
+    assert "TRAIL HIGH" in tape
+    assert "4 NAMES" not in tape
+    _assert_no_nyse_100(tape)
+
+
 def test_paper_medium_tape_has_date_and_strategy():
     hb = {
         "equity": 100_000.0,

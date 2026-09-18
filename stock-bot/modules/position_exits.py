@@ -155,6 +155,10 @@ def run_position_exits(
             stop_hit = True
 
         if lab:
+            peak_gain = (peak - entry) / entry if entry > 0 else 0.0
+            if peak_gain >= config.paper_lab_trail_arm_pct():
+                meta["lab_trail_armed"] = True
+                meta_cache[symbol] = meta
             half_pct = config.paper_lab_half_gain_pct()
             if not meta.get("lab_half_taken") and pnl_pct >= half_pct:
                 try:
@@ -187,7 +191,7 @@ def run_position_exits(
                         )
                 continue
             trail_hit = False
-            if meta.get("lab_half_taken"):
+            if meta.get("lab_trail_armed") or meta.get("lab_half_taken"):
                 trail_hit = current <= peak * (1.0 - config.paper_lab_trail_pct())
             hold_hit = (
                 age_bars is not None and age_bars >= config.paper_lab_max_hold_days()

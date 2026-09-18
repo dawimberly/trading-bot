@@ -41,7 +41,7 @@ Red is **live money + losses + errors**. Never decorative.
 5. Status pills: book, regime, gates, health, bot, heartbeat, conviction.
 6. Metric row: Equity, Cash, Invested, Positions, Unrealized P&L, Market.
 7. Tabs: Positions / Overview / Trades / Wisdom / Charts.
-8. **Positions tab (locked):** open-positions table expands first and shows **at least 10 tickers** without page-scroll; compact sleeve mix + collapsed Scanners under the table. Do not put a tall sleeve/hero block above the table on the desktop path.
+8. **Positions tab (locked):** open-positions table expands first and shows **at least 10 tickers** without page-scroll; compact sleeve mix under the table. Scanner / insider / RVOL / ORB / shorts panels stay **off** this tab (they log; they must not steal table height). Do not put a tall sleeve/hero block above the table on the desktop path.
 9. Active tab is cyan fill + near-black label. Inactive is cream on surface.
 
 **Desktop entry** opens `dashboard_app.py --book alpaca_paper_v2` (full chrome). Never `--paper-book` for the daily launcher — that strips the tape.

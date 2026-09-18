@@ -45,6 +45,12 @@ def _load_project_dotenv() -> None:
         "TRADING_BOOK_ID",
         "PAPER_MEDIUM_STRATEGY",
         "PAPER_LAB_CONCENTRATED",
+        "PAPER_LAB_MAX_NAMES",
+        "PAPER_LAB_MAX_HOLD_DAYS",
+        "PAPER_LAB_HALF_GAIN_PCT",
+        "PAPER_LAB_TRAIL_ARM_PCT",
+        "PAPER_LAB_TRAIL_PCT",
+        "PAPER_LAB_DISASTER_PCT",
         "MAX_ACTIVE_TICKERS",
         "ATR_STOP_MULTIPLIER",
         "PAPER_POSITION_MAX_HOLD_BARS",
@@ -3232,7 +3238,7 @@ def effective_per_name_max_pct() -> float:
     it only narrows the ceiling on paper/backtest paths.
     """
     if paper_lab_concentrated_enabled():
-        return float(os.getenv("PAPER_MAX_POSITION_PCT", "0.25"))
+        return float(os.getenv("PAPER_MAX_POSITION_PCT", "0.15"))
     paperish = (
         PAPER_TRADING
         or paper_aggressive_context()
@@ -5842,7 +5848,7 @@ def trading_book_id() -> str:
 
 
 def paper_lab_concentrated_enabled() -> bool:
-    """alpaca_paper lab only: 4 names, no ATR drip, scale-out + trail."""
+    """alpaca_paper lab only: 8 names, 30d, trail-from-peak, optional half."""
     if trading_book_id() != "alpaca_paper":
         return False
     return os.getenv("PAPER_LAB_CONCENTRATED", "false").lower() in ("1", "true", "yes")
@@ -5856,11 +5862,16 @@ def paper_medium_strategy_enabled() -> bool:
 
 
 def paper_lab_max_names() -> int:
-    return max(1, int(os.getenv("PAPER_LAB_MAX_NAMES", "4")))
+    return max(1, int(os.getenv("PAPER_LAB_MAX_NAMES", "8")))
 
 
 def paper_lab_half_gain_pct() -> float:
-    return float(os.getenv("PAPER_LAB_HALF_GAIN_PCT", "0.12"))
+    return float(os.getenv("PAPER_LAB_HALF_GAIN_PCT", "0.20"))
+
+
+def paper_lab_trail_arm_pct() -> float:
+    """Arm an 8% peak trail once the name is up this much from entry."""
+    return float(os.getenv("PAPER_LAB_TRAIL_ARM_PCT", "0.10"))
 
 
 def paper_lab_trail_pct() -> float:
@@ -5868,11 +5879,11 @@ def paper_lab_trail_pct() -> float:
 
 
 def paper_lab_disaster_pct() -> float:
-    return float(os.getenv("PAPER_LAB_DISASTER_PCT", "0.08"))
+    return float(os.getenv("PAPER_LAB_DISASTER_PCT", "0.10"))
 
 
 def paper_lab_max_hold_days() -> int:
-    return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "10")))
+    return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "30")))
 
 
 def research_mode_ready() -> bool:
@@ -5886,9 +5897,9 @@ def format_paper_lab_banner() -> str | None:
     if not paper_lab_concentrated_enabled():
         return None
     return (
-        "PAPER LAB ON (alpaca_paper only): 4 names ~25% | "
-        "no ATR/size-reduce | disaster -8% | 10d time | "
-        "half @ +12% then trail 8% off high | no same-day rebuy"
+        "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
+        "disaster -10% | 30d time | trail 8% off high after +10% | "
+        "half @ +20% | no same-day rebuy"
     )
 
 

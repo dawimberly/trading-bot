@@ -2326,7 +2326,7 @@ class _UnrealizedMetric:
 
 _DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
     ("alpaca_paper_v2", "Paper", "Medium SoT (15 names, 30d hold, VTI off)"),
-    ("alpaca_paper", "Paper aggressive", "Lab 4 names ~25%"),
+    ("alpaca_paper", "Paper aggressive", "Lab 8 names, 30d, trail the high"),
     ("alpaca_live", "Live", "Live Profile A — do not size options"),
 )
 
@@ -3945,6 +3945,9 @@ class TradingDashboardApp(ctk.CTk):
             justify="center",
         )
 
+        # Scanner panels stay unmapped on Positions so the open-positions table
+        # keeps the height. Hits still go through the bot logs.
+        self._scanners_shown = False
         self._insider_expanded = True
         self._insider_section = ctk.CTkFrame(
             self._pos_south,
@@ -3953,7 +3956,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._insider_section.pack(fill="x", padx=10, pady=(0, 3))
         insider_head = ctk.CTkFrame(self._insider_section, fg_color="transparent")
         insider_head.pack(fill="x", padx=8, pady=(2, 1))
         self._insider_toggle_btn = ctk.CTkButton(
@@ -4003,7 +4005,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
         rvol_head = ctk.CTkFrame(self._rvol_section, fg_color="transparent")
         rvol_head.pack(fill="x", padx=8, pady=(2, 1))
         self._rvol_toggle_btn = ctk.CTkButton(
@@ -4053,7 +4054,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
         orb_mom_head = ctk.CTkFrame(self._orb_mom_section, fg_color="transparent")
         orb_mom_head.pack(fill="x", padx=8, pady=(2, 1))
         self._orb_mom_toggle_btn = ctk.CTkButton(
@@ -4103,7 +4103,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
         sector_rot_head = ctk.CTkFrame(self._sector_rot_section, fg_color="transparent")
         sector_rot_head.pack(fill="x", padx=8, pady=(2, 1))
         self._sector_rot_toggle_btn = ctk.CTkButton(
@@ -4153,7 +4152,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
         vol_bo_head = ctk.CTkFrame(self._vol_bo_section, fg_color="transparent")
         vol_bo_head.pack(fill="x", padx=8, pady=(2, 1))
         self._vol_bo_toggle_btn = ctk.CTkButton(
@@ -4203,7 +4201,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
         strategy_head = ctk.CTkFrame(self._strategy_section, fg_color="transparent")
         strategy_head.pack(fill="x", padx=8, pady=(2, 1))
         self._strategy_toggle_btn = ctk.CTkButton(
@@ -4253,7 +4250,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
         sharpe_head = ctk.CTkFrame(self._sharpe_section, fg_color="transparent")
         sharpe_head.pack(fill="x", padx=8, pady=(2, 1))
         self._sharpe_toggle_btn = ctk.CTkButton(
@@ -4312,7 +4308,6 @@ class TradingDashboardApp(ctk.CTk):
             border_width=1,
             border_color=COLORS["border"],
         )
-        self._short_section.pack(fill="x", padx=10, pady=(0, 3))
         short_head = ctk.CTkFrame(self._short_section, fg_color="transparent")
         short_head.pack(fill="x", padx=8, pady=(2, 1))
         self._short_toggle_btn = ctk.CTkButton(
@@ -4370,9 +4365,7 @@ class TradingDashboardApp(ctk.CTk):
             border_color=COLORS["border"],
             height=28,
         )
-        self._scanners_bar.pack(fill="x", padx=4, pady=(0, 2))
         self._scanners_bar.pack_propagate(False)
-        self._scanners_shown = False
         self._scanners_toggle = ctk.CTkButton(
             self._scanners_bar,
             text="▶ Scanners",
@@ -5201,7 +5194,7 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._rvol_section.pack_forget()
             return
-        self._rvol_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._rvol_section)
         if err:
             self._rvol_table.clear()
             self._rvol_status.configure(text=err[:120], text_color=COLORS["amber"])
@@ -5244,7 +5237,7 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._orb_mom_section.pack_forget()
             return
-        self._orb_mom_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._orb_mom_section)
         live = " · LIVE opt-in" if config.orb_momentum_live_sleeve_enabled() else " · paper"
         if err:
             self._orb_mom_table.clear()
@@ -5280,7 +5273,7 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._sector_rot_section.pack_forget()
             return
-        self._sector_rot_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._sector_rot_section)
         live = (
             " · LIVE opt-in"
             if config.sector_rotation_live_sleeve_enabled()
@@ -5320,7 +5313,7 @@ class TradingDashboardApp(ctk.CTk):
         if not show:
             self._vol_bo_section.pack_forget()
             return
-        self._vol_bo_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._vol_bo_section)
         if err:
             self._vol_bo_table.clear()
             self._vol_bo_status.configure(text=err[:140], text_color=COLORS["amber"])
@@ -5356,7 +5349,7 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._strategy_section.pack_forget()
             return
-        self._strategy_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._strategy_section)
         status_base = "Rolling 30d · Excellent/Good/Fair/Weak ratings"
         if mtf_summary:
             status_base = f"{status_base} · {mtf_summary}"
@@ -5400,7 +5393,7 @@ class TradingDashboardApp(ctk.CTk):
         err: str | None,
     ) -> None:
         self._sharpe_empty_label.place_forget()
-        self._sharpe_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._sharpe_section)
         if err:
             self._sharpe_table.clear()
             self._sharpe_summary.configure(text="")
@@ -5481,7 +5474,7 @@ class TradingDashboardApp(ctk.CTk):
         if not book_paper:
             self._short_section.pack_forget()
             return
-        self._short_section.pack(fill="x", padx=10, pady=(0, 3))
+        self._sync_aux_section_pack(self._short_section)
         if err:
             self._short_table.clear()
             self._short_status.configure(text=err[:120], text_color=COLORS["amber"])
@@ -5509,8 +5502,40 @@ class TradingDashboardApp(ctk.CTk):
             return
         self._short_table.set_rows(rows, tag_col="_tag")
 
+    def _sync_aux_section_pack(self, section) -> None:
+        """Keep scanner panels off Positions unless the owner opened Scanners."""
+        if getattr(self, "_scanners_shown", False) and not getattr(self, "_paper_book", False):
+            kwargs = {"fill": "x", "padx": 10, "pady": (0, 3)}
+            bar = getattr(self, "_scanners_bar", None)
+            if bar is not None:
+                try:
+                    if bar.winfo_ismapped():
+                        section.pack(before=bar, **kwargs)
+                        return
+                except Exception:
+                    pass
+            section.pack(**kwargs)
+            return
+        try:
+            section.pack_forget()
+        except Exception:
+            pass
+
+    def _hide_positions_aux_sections(self) -> None:
+        for sec in getattr(self, "_aux_sections", ()):
+            try:
+                sec.pack_forget()
+            except Exception:
+                pass
+        bar = getattr(self, "_scanners_bar", None)
+        if bar is not None:
+            try:
+                bar.pack_forget()
+            except Exception:
+                pass
+
     def _collapse_positions_aux_sections(self) -> None:
-        """Fold scanner bodies and hide the stacked frames until Scanners is opened."""
+        """Fold scanner bodies and keep them off the Positions tab."""
         for attr, body, btn, title in (
             ("_insider_expanded", self._insider_body, self._insider_toggle_btn, "Insider Signals"),
             ("_rvol_expanded", self._rvol_body, self._rvol_toggle_btn, "RVOL & ORB"),
@@ -5534,28 +5559,22 @@ class TradingDashboardApp(ctk.CTk):
             self._sharpe_section,
             self._short_section,
         )
-        for sec in self._aux_sections:
-            sec.pack_forget()
         self._scanners_shown = False
+        self._hide_positions_aux_sections()
         if getattr(self, "_scanners_toggle", None) is not None:
             self._scanners_toggle.configure(text="▶ Scanners")
 
     def _toggle_scanner_windows(self) -> None:
-        if getattr(self, "_paper_book", False):
-            return
-        self._scanners_shown = not self._scanners_shown
-        if self._scanners_shown:
-            for sec in self._aux_sections:
-                sec.pack(fill="x", padx=10, pady=(0, 3), before=self._scanners_bar)
-            self._scanners_toggle.configure(text="▼ Scanners")
-        else:
-            for sec in self._aux_sections:
-                sec.pack_forget()
+        # Positions tab stays positions-first. Scanner UI is off; hits go to bot logs.
+        self._scanners_shown = False
+        self._hide_positions_aux_sections()
+        if getattr(self, "_scanners_toggle", None) is not None:
             self._scanners_toggle.configure(text="▶ Scanners")
         try:
             self._positions_table._fit_tree_to_frame()
         except Exception:
             pass
+        self.after_idle(self._ensure_positions_rows_visible)
 
     def _toggle_insider_section(self) -> None:
         self._insider_expanded = not self._insider_expanded
@@ -5567,6 +5586,7 @@ class TradingDashboardApp(ctk.CTk):
             self._insider_body.pack_forget()
 
     def _fill_insider_signals(self, rows: list[dict] | None, err: str | None) -> None:
+        self._sync_aux_section_pack(self._insider_section)
         self._insider_empty_label.place_forget()
         if err:
             self._insider_table.clear()
@@ -5598,6 +5618,7 @@ class TradingDashboardApp(ctk.CTk):
             self._draw_charts()
         elif self._active_tab == "Positions":
             _apply_dark_treeview_styles()
+            self.after_idle(self._ensure_positions_rows_visible)
             if not _positions_cache_fresh(self._username, self._book_id):
                 self.refresh_data(force_positions=True)
 
@@ -6486,6 +6507,9 @@ class TradingDashboardApp(ctk.CTk):
             book_paper=bool(snap.get("book_paper", _book_is_paper(self._book_id))),
         )
         self._fill_wisdom(scorecard, scorecard_src, heartbeat)
+        if not getattr(self, "_scanners_shown", False):
+            self._hide_positions_aux_sections()
+        self.after_idle(self._ensure_positions_rows_visible)
 
     def _apply_refresh_snapshot(self, snap: dict, *, include_charts: bool = False) -> None:
         self._apply_refresh_core(snap)

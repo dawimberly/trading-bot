@@ -31,6 +31,11 @@ def test_lab_not_medium(monkeypatch):
     assert config.paper_lab_concentrated_enabled() is True
     assert config.paper_medium_strategy_enabled() is False
     assert config.effective_max_active_tickers() == config.paper_lab_max_names()
+    assert config.paper_lab_max_names() == 8
+    assert config.paper_lab_max_hold_days() == 30
+    assert config.paper_lab_half_gain_pct() == 0.20
+    assert config.paper_lab_trail_arm_pct() == 0.10
+    assert config.paper_lab_disaster_pct() == 0.10
 
 
 def test_live_book_gets_neither(monkeypatch):
@@ -134,7 +139,12 @@ def test_medium_user_bot_env_vti_core_off():
     assert v2.get("VTI_REBALANCE_CADENCE") == "drift"
     assert v2.get("ATR_STOP_MULTIPLIER") == "2.0"
     assert lab.get("PAPER_LAB_CONCENTRATED") == "true"
-    assert lab.get("MAX_ACTIVE_TICKERS") == "4"
+    assert lab.get("MAX_ACTIVE_TICKERS") == "8"
+    assert lab.get("PAPER_LAB_MAX_NAMES") == "8"
+    assert lab.get("PAPER_LAB_MAX_HOLD_DAYS") == "30"
+    assert lab.get("PAPER_LAB_HALF_GAIN_PCT") == "0.20"
+    assert lab.get("PAPER_LAB_TRAIL_ARM_PCT") == "0.10"
+    assert lab.get("PAPER_MAX_POSITION_PCT") == "0.15"
     assert lab.get("PAPER_DYNAMIC_VTI") == "false"
     assert lab.get("VTI_CORE_ENABLED") == "false"
     assert lab.get("PAPER_VTI_CORE_PCT") == "0"
@@ -199,5 +209,8 @@ def test_dotenv_overlay_includes_medium_vti_keys():
         "PAPER_NYSE_MAX_EXPOSURE_PCT",
         "LIVE_VTI_CORE_PCT",
         "VTI_REBALANCE_CADENCE",
+        "PAPER_LAB_MAX_NAMES",
+        "PAPER_LAB_TRAIL_ARM_PCT",
+        "PAPER_LAB_MAX_HOLD_DAYS",
     ):
         assert f'"{key}"' in src

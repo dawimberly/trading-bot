@@ -119,17 +119,24 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
 
         env = apply_realistic_research_env(env)
         if book_id == "alpaca_paper":
-            # Lab: concentrated 4×25% — VTI core off (same as Medium).
+            # Aggressive lab: 8 names, 30d, trail-from-peak (not 4×25 / 10d).
             env["PAPER_LAB_CONCENTRATED"] = "true"
             env["PAPER_SMART_STOPS"] = "false"
-            env["MAX_ACTIVE_TICKERS"] = "4"
-            env["PAPER_MAX_POSITION_PCT"] = "0.25"
-            env["PER_NAME_MAX_PCT"] = "0.25"
-            env["STOP_LOSS_PCT"] = "0.08"
+            env["MAX_ACTIVE_TICKERS"] = "8"
+            env["PAPER_LAB_MAX_NAMES"] = "8"
+            env["PAPER_MAX_POSITION_PCT"] = "0.15"
+            env["PER_NAME_MAX_PCT"] = "0.15"
+            env["STOP_LOSS_PCT"] = "0.10"
+            env["PAPER_LAB_MAX_HOLD_DAYS"] = "30"
+            env["PAPER_LAB_HALF_GAIN_PCT"] = "0.20"
+            env["PAPER_LAB_TRAIL_ARM_PCT"] = "0.10"
+            env["PAPER_LAB_TRAIL_PCT"] = "0.08"
+            env["PAPER_LAB_DISASTER_PCT"] = "0.10"
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
             env["METAL_SLEEVE_ENABLED"] = "false"
+            env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
             # Dynamic VTI is retired. Clear inherited Medium 33/67; Lab is
-            # concentrated 4×25% with Research VTI core OFF (full active).
+            # concentrated 8-name NYSE with Research VTI core OFF (full active).
             for key in (
                 "PAPER_DYNAMIC_VTI",
                 "PAPER_DYNAMIC_VTI_ENABLED",
