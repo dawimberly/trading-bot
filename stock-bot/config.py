@@ -2266,7 +2266,11 @@ SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
     os.getenv("SMALL_ACCOUNT_EQUITY_THRESHOLD", "500")
 )
 SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
-SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
+# Flat per-order cap for small books. $10 could not fill one name in a single
+# order (per-name concentration cap is 8% of equity, ~$24 on a $300 book), so
+# idle cash drained in $10 slices. effective_max_notional_per_order still holds
+# the 25%-of-equity guard above this.
+SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "25"))
 # Live book (alpaca_live) — fixed 33/67 VTI/NYSE (same SoT as Paper Medium).
 # Weekly VTI resize via VTI_REBALANCE_CADENCE=weekly (not every cycle).
 LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.33"))
