@@ -205,7 +205,8 @@ def _book_strategy_tape(*, paper: bool, book_id: str | None = None) -> str:
         if bid == "alpaca_paper":
             return (
                 f"{today}   ·   PAPER LAB (alpaca_paper)   ·   "
-                "8 NAMES ≤15%   ·   30D HOLD · TRAIL HIGH @ +10%   ·   "
+                "8 NAMES ≤15%   ·   IDLE-CASH ADD ≤30% IF FULL   ·   "
+                "30D HOLD · TRAIL HIGH @ +10%   ·   "
                 f"HALF @ +20%   ·   RESEARCH v{_research_version()}"
             )
     except Exception:

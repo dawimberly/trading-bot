@@ -131,3 +131,69 @@ def test_enforce_portfolio_guards_can_skip_concentration():
     ex = _make_executor(positions, equity=100_000.0, dry_run=True)
     summary = ex.enforce_portfolio_guards(dry_run=True, skip_concentration=True)
     assert summary["concentration_trims"] == []
+
+
+def test_lab_fresh_add_allows_full_ticket_up_to_2x(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "fresh")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    monkeypatch.setenv("PER_NAME_MAX_PCT", "0.15")
+    ex = _make_executor([_pos("TWST", 150, 100.0)], equity=100_000.0)
+    ex._is_core_exempt = lambda sym: False
+    ex._position_market_value = lambda pos: float(pos.market_value)
+    capped = ex._apply_concentration_cap("TWST", 15_000.0)
+    assert capped is not None
+    assert abs(capped - 15_000.0) < 0.02
+    excess = ex.list_concentration_excess()
+    assert excess == []
+
+
+def test_lab_fresh_add_blocks_at_2x_cap(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "fresh")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    monkeypatch.setenv("PER_NAME_MAX_PCT", "0.15")
+    ex = _make_executor([_pos("TWST", 300, 100.0)], equity=100_000.0)
+    ex._is_core_exempt = lambda sym: False
+    ex._position_market_value = lambda pos: float(pos.market_value)
+    assert ex._apply_concentration_cap("TWST", 500.0) is None
+    excess = ex.list_concentration_excess()
+    assert excess == []
+
+
+def test_lab_room_add_still_blocks_at_name_cap(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "room")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    monkeypatch.setenv("PER_NAME_MAX_PCT", "0.15")
+    ex = _make_executor([_pos("TWST", 150, 100.0)], equity=100_000.0)
+    assert ex._apply_concentration_cap("TWST", 500.0) is None
+
+
+def test_lab_idle_blocks_extra_ticket_while_slot_open(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "idle")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    monkeypatch.setenv("PER_NAME_MAX_PCT", "0.15")
+    monkeypatch.setenv("MAX_ACTIVE_TICKERS", "8")
+    ex = _make_executor([_pos("TWST", 150, 100.0)], equity=100_000.0)
+    ex.count_active_tickers = lambda: 3
+    assert ex._apply_concentration_cap("TWST", 15_000.0) is None
+
+
+def test_lab_idle_allows_extra_ticket_when_book_full(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "idle")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    monkeypatch.setenv("PER_NAME_MAX_PCT", "0.15")
+    monkeypatch.setenv("MAX_ACTIVE_TICKERS", "8")
+    ex = _make_executor([_pos("TWST", 150, 100.0)], equity=100_000.0)
+    ex.count_active_tickers = lambda: 8
+    capped = ex._apply_concentration_cap("TWST", 15_000.0)
+    assert capped is not None
+    assert abs(capped - 15_000.0) < 0.02

@@ -144,6 +144,8 @@ def test_medium_user_bot_env_vti_core_off():
     assert lab.get("PAPER_LAB_MAX_HOLD_DAYS") == "30"
     assert lab.get("PAPER_LAB_HALF_GAIN_PCT") == "0.20"
     assert lab.get("PAPER_LAB_TRAIL_ARM_PCT") == "0.10"
+    assert lab.get("PAPER_LAB_ADD_POLICY") == "idle"
+    assert lab.get("PAPER_LAB_ADD_MAX_MULT") == "2.0"
     assert lab.get("PAPER_MAX_POSITION_PCT") == "0.15"
     assert lab.get("PAPER_DYNAMIC_VTI") == "false"
     assert lab.get("VTI_CORE_ENABLED") == "false"
@@ -212,5 +214,88 @@ def test_dotenv_overlay_includes_medium_vti_keys():
         "PAPER_LAB_MAX_NAMES",
         "PAPER_LAB_TRAIL_ARM_PCT",
         "PAPER_LAB_MAX_HOLD_DAYS",
+        "PAPER_LAB_ADD_POLICY",
+        "PAPER_LAB_ADD_MAX_MULT",
     ):
         assert f'"{key}"' in src
+
+
+def test_lab_add_policy_defaults_idle_on_lab(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.delenv("PAPER_LAB_ADD_POLICY", raising=False)
+    assert config.paper_lab_add_policy() == "idle"
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "fresh")
+    assert config.paper_lab_add_policy() == "fresh"
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper_v2")
+    monkeypatch.setenv("PAPER_MEDIUM_STRATEGY", "true")
+    monkeypatch.delenv("PAPER_LAB_CONCENTRATED", raising=False)
+    assert config.paper_lab_add_policy() == "room"
+
+
+def test_lab_fresh_buy_room_is_full_ticket_until_2x(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "fresh")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    monkeypatch.setenv("PAPER_LAB_ADD_MAX_MULT", "2.0")
+    equity = 100_000.0
+    # Held at the 15% name cap: leftover-room would be 0; fresh allows another 15k.
+    room = config.concentration_buy_room(
+        current_val=15_000.0, equity=equity, has_position=True
+    )
+    assert abs(room - 15_000.0) < 0.02
+    hard = config.concentration_buy_room(
+        current_val=30_000.0, equity=equity, has_position=True
+    )
+    assert hard == 0.0
+    # New name is still 15%, not 30%.
+    fresh_new = config.concentration_buy_room(
+        current_val=0.0, equity=equity, has_position=False
+    )
+    assert abs(fresh_new - 15_000.0) < 0.02
+    banner = config.format_paper_lab_banner() or ""
+    assert "add=fresh" in banner
+
+
+def test_lab_idle_add_only_when_book_full(monkeypatch):
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_LAB_ADD_POLICY", "idle")
+    monkeypatch.setenv("PAPER_MAX_POSITION_PCT", "0.15")
+    equity = 100_000.0
+    leftover = config.concentration_buy_room(
+        current_val=8_000.0,
+        equity=equity,
+        has_position=True,
+        slots_full=False,
+    )
+    assert abs(leftover - 7_000.0) < 0.02
+    no_extra = config.concentration_buy_room(
+        current_val=15_000.0,
+        equity=equity,
+        has_position=True,
+        slots_full=False,
+    )
+    assert no_extra == 0.0
+    extra = config.concentration_buy_room(
+        current_val=15_000.0,
+        equity=equity,
+        has_position=True,
+        slots_full=True,
+        extra_ok=True,
+    )
+    assert abs(extra - 15_000.0) < 0.02
+    chasing = config.concentration_buy_room(
+        current_val=15_000.0,
+        equity=equity,
+        has_position=True,
+        slots_full=True,
+        extra_ok=False,
+    )
+    assert chasing == 0.0
+    assert config.paper_lab_extra_add_ok(gain_pct=0.12) is False
+    assert config.paper_lab_extra_add_ok(age_days=23) is False
+    assert config.paper_lab_extra_add_ok(gain_pct=0.04, age_days=10) is True
+    banner = config.format_paper_lab_banner() or ""
+    assert "idle-cash add" in banner

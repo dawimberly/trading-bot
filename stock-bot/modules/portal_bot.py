@@ -132,6 +132,10 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PAPER_LAB_TRAIL_ARM_PCT"] = "0.10"
             env["PAPER_LAB_TRAIL_PCT"] = "0.08"
             env["PAPER_LAB_DISASTER_PCT"] = "0.10"
+            # Idle cash can complete a 15% name, or add a second ticket up to
+            # 30% only when all 8 slots are full (cash would otherwise sit).
+            env["PAPER_LAB_ADD_POLICY"] = "idle"
+            env["PAPER_LAB_ADD_MAX_MULT"] = "2.0"
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
             env["METAL_SLEEVE_ENABLED"] = "false"
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"

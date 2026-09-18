@@ -51,6 +51,8 @@ def _load_project_dotenv() -> None:
         "PAPER_LAB_TRAIL_ARM_PCT",
         "PAPER_LAB_TRAIL_PCT",
         "PAPER_LAB_DISASTER_PCT",
+        "PAPER_LAB_ADD_POLICY",
+        "PAPER_LAB_ADD_MAX_MULT",
         "MAX_ACTIVE_TICKERS",
         "ATR_STOP_MULTIPLIER",
         "PAPER_POSITION_MAX_HOLD_BARS",
@@ -5886,6 +5888,86 @@ def paper_lab_max_hold_days() -> int:
     return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "30")))
 
 
+def paper_lab_add_policy() -> str:
+    """Lab-only add-on policy. Medium/live always leftover-room.
+
+    ``idle`` (Lab lock): top up leftover under the name cap; a second full
+    ticket (up to 2×) only when the book is full so cash would otherwise sit.
+    ``room``: leftover under the per-name cap only.
+    ``fresh``: size a re-signal as if the name were flat, up to 2×.
+    """
+    if not paper_lab_concentrated_enabled():
+        return "room"
+    raw = (os.getenv("PAPER_LAB_ADD_POLICY") or "idle").strip().lower()
+    if raw in {"idle", "idle_cash", "cash"}:
+        return "idle"
+    if raw in {"fresh", "fresh_ticket", "as_if_unheld", "pyramid"}:
+        return "fresh"
+    if raw in {"room", "leftover"}:
+        return "room"
+    return "idle"
+
+
+def paper_lab_add_max_mult() -> float:
+    """Hard ceiling on a Lab name when an extra ticket is allowed (default 2×)."""
+    try:
+        return max(1.0, float(os.getenv("PAPER_LAB_ADD_MAX_MULT", "2.0")))
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def paper_lab_extra_add_ok(
+    *,
+    gain_pct: float | None = None,
+    age_days: int | None = None,
+) -> bool:
+    """Block a 2× add into a name already trailing or late in the 30d clock."""
+    if gain_pct is not None and float(gain_pct) >= paper_lab_trail_arm_pct():
+        return False
+    late_from = max(1, paper_lab_max_hold_days() - 7)
+    if age_days is not None and int(age_days) >= late_from:
+        return False
+    return True
+
+
+def effective_per_name_trim_pct() -> float:
+    """Trim ceiling. Idle/fresh Lab may hold up to add-max-mult × the name cap."""
+    cap = effective_per_name_max_pct()
+    if paper_lab_add_policy() in {"fresh", "idle"}:
+        return cap * paper_lab_add_max_mult()
+    return cap
+
+
+def concentration_buy_room(
+    *,
+    current_val: float,
+    equity: float,
+    has_position: bool,
+    slots_full: bool = False,
+    extra_ok: bool = True,
+) -> float:
+    """USD room for a buy after the per-name cap (and Lab idle-cash extras)."""
+    if equity <= 0:
+        return 0.0
+    cap_val = float(equity) * effective_per_name_max_pct()
+    current = max(0.0, float(current_val or 0.0))
+    leftover = max(0.0, cap_val - current)
+    policy = paper_lab_add_policy()
+    if not has_position:
+        return leftover if leftover else cap_val
+    if policy == "fresh":
+        hard = cap_val * paper_lab_add_max_mult()
+        return max(0.0, min(cap_val, hard - current))
+    if policy == "idle":
+        if leftover > 0:
+            return leftover
+        if slots_full and extra_ok:
+            hard = cap_val * paper_lab_add_max_mult()
+            return max(0.0, min(cap_val, hard - current))
+        return 0.0
+    return leftover
+
+
 def research_mode_ready() -> bool:
     """Paper aggressive with stat arb sleeve (research / attribution stack)."""
     if not paper_aggressive_context():
@@ -5896,10 +5978,17 @@ def research_mode_ready() -> bool:
 def format_paper_lab_banner() -> str | None:
     if not paper_lab_concentrated_enabled():
         return None
+    add = paper_lab_add_policy()
+    if add == "idle":
+        add_bit = "idle-cash add (2× only if book full)"
+    elif add == "fresh":
+        add_bit = f"add=fresh (full ticket up to {paper_lab_add_max_mult():.0f}×)"
+    else:
+        add_bit = "add leftover-room only"
     return (
         "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
         "disaster -10% | 30d time | trail 8% off high after +10% | "
-        "half @ +20% | no same-day rebuy"
+        f"half @ +20% | {add_bit} | no same-day rebuy"
     )
 
 

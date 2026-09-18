@@ -1869,6 +1869,22 @@ class AlpacaExecutor:
             return False
         return self.count_active_tickers() >= config.effective_max_active_tickers()
 
+    def _lab_extra_add_ok(self, pos) -> bool:
+        """True when Lab may buy a second ticket (book-full idle cash)."""
+        if pos is None:
+            return True
+        entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+        current = float(getattr(pos, "current_price", 0) or 0)
+        gain = (current - entry) / entry if entry > 0 and current > 0 else None
+        age_days = None
+        try:
+            from modules.position_exits import _position_age_bars
+
+            age_days = _position_age_bars(pos)
+        except Exception:
+            age_days = None
+        return config.paper_lab_extra_add_ok(gain_pct=gain, age_days=age_days)
+
     def _apply_concentration_cap(self, symbol: str, notional: float) -> float | None:
         """Cap buy notional so position ≤ effective_per_name_max_pct of equity."""
         if not config.effective_concentration_guard_enabled():
@@ -1879,12 +1895,30 @@ class AlpacaExecutor:
         if equity <= 0 or notional is None:
             return notional
         sym = config.normalize_symbol(symbol)
-        cap_val = equity * config.effective_per_name_max_pct()
         current_val = 0.0
         pos = self._find_position(sym)
+        has_position = False
         if pos is not None:
             current_val = self._position_market_value(pos)
-        room = max(0.0, cap_val - current_val)
+            has_position = abs(float(getattr(pos, "qty", 0) or 0)) > 0
+        slots_full = False
+        extra_ok = True
+        if has_position:
+            try:
+                slots_full = (
+                    self.count_active_tickers()
+                    >= config.effective_max_active_tickers()
+                )
+            except Exception:
+                slots_full = False
+            extra_ok = self._lab_extra_add_ok(pos)
+        room = config.concentration_buy_room(
+            current_val=current_val,
+            equity=equity,
+            has_position=has_position,
+            slots_full=slots_full,
+            extra_ok=extra_ok,
+        )
         capped = min(float(notional), room)
         min_n = self._min_notional()
         if capped < min_n:
@@ -1914,7 +1948,7 @@ class AlpacaExecutor:
         equity = float(self._account_equity() or 0)
         if equity <= 0:
             return []
-        cap_pct = config.effective_per_name_max_pct()
+        cap_pct = config.effective_per_name_trim_pct()
         cap_val = equity * cap_pct
         min_n = self._min_notional()
         excess: list[dict] = []

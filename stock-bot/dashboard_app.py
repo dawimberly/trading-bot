@@ -2326,7 +2326,7 @@ class _UnrealizedMetric:
 
 _DISPLAY_BOOKS: tuple[tuple[str, str, str], ...] = (
     ("alpaca_paper_v2", "Paper", "Medium SoT (15 names, 30d hold, VTI off)"),
-    ("alpaca_paper", "Paper aggressive", "Lab 8 names, 30d, trail the high"),
+    ("alpaca_paper", "Paper aggressive", "Lab 8 names, idle-cash add, 30d, trail the high"),
     ("alpaca_live", "Live", "Live Profile A — do not size options"),
 )
 

@@ -77,6 +77,7 @@ def test_paper_lab_tape_has_8_name_trail_stack():
     assert "8 NAMES" in tape
     assert "30D HOLD" in tape
     assert "TRAIL HIGH" in tape
+    assert "IDLE-CASH" in tape
     assert "4 NAMES" not in tape
     _assert_no_nyse_100(tape)
 

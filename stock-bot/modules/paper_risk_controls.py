@@ -139,6 +139,19 @@ def _per_name_cap_exempt(sym: str) -> bool:
     return sym == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled()
 
 
+def _lab_slots_full(positions: dict) -> bool:
+    if not config.paper_lab_concentrated_enabled():
+        return False
+    n = 0
+    for key, qty in (positions or {}).items():
+        if float(qty or 0) <= 0:
+            continue
+        if _per_name_cap_exempt(config.normalize_symbol(key)):
+            continue
+        n += 1
+    return n >= config.effective_max_active_tickers()
+
+
 def cap_per_name_buy_notional(
     *,
     symbol: str,
@@ -156,7 +169,6 @@ def cap_per_name_buy_notional(
     sym = config.normalize_symbol(symbol)
     if _per_name_cap_exempt(sym):
         return notional
-    cap_val = equity * config.effective_per_name_max_pct()
     px = prices.get(sym)
     if px is None:
         px = prices.get(symbol)
@@ -169,7 +181,12 @@ def cap_per_name_buy_notional(
         # New name with no quote — cap order notional to the per-name ceiling.
         current_val = 0.0
         px = None
-    room = max(0.0, cap_val - current_val)
+    room = config.concentration_buy_room(
+        current_val=current_val,
+        equity=equity,
+        has_position=current_val > 0,
+        slots_full=_lab_slots_full(positions),
+    )
     capped = min(float(notional), room)
     min_n = config.effective_min_notional(equity)
     if capped < min_n:
@@ -185,7 +202,7 @@ def trim_per_name_overexposure(executor, prices) -> int:
     eq = portfolio.equity(prices)
     if eq <= 0:
         return 0
-    cap_val = eq * config.PAPER_MAX_POSITION_PCT
+    cap_val = eq * config.effective_per_name_trim_pct()
     min_n = config.effective_min_notional(eq)
     trims = 0
     for sym in sorted(portfolio.positions.keys()):

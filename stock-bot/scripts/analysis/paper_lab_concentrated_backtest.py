@@ -1,13 +1,18 @@
-"""Daily-bar backtest of the paper-lab concentrated book (research only).
+"""Daily-bar A/B of Lab add policy (research only).
 
-Not full `backtester.py` (no VTI / shorts / crypto). Same NYSE MA70 rank entry
-as `one_r_hit_backtest.py`. Lab rules:
+Not full `backtester.py` (no VTI / shorts / crypto). Same NYSE MA70 rank
+entry as `one_r_hit_backtest.py`. Current Lab stack:
 
-  - 4 names, 25% of equity each
-  - disaster -8% close
-  - 10-bar time stop
-  - sell half at +12% close, then trail remainder 8% off high
+  - 8 names, 15% of equity each
+  - disaster -10% close
+  - 30-bar time stop
+  - half at +20% close, trail 8% off high once up +10% from entry
   - no same-day rebuy
+
+A/B (one knob):
+
+  - room:  add only leftover under the 15% name cap
+  - fresh: size a re-signal as if the name were flat, hard cap 30%
 
 Usage (from stock-bot/):
   python scripts/analysis/paper_lab_concentrated_backtest.py --days 365
@@ -84,12 +89,15 @@ def run_lab(
     *,
     ma_win: int,
     warmup: int,
-    max_names: int = 4,
-    name_pct: float = 0.25,
-    disaster: float = 0.08,
-    half_gain: float = 0.12,
+    max_names: int = 8,
+    name_pct: float = 0.15,
+    disaster: float = 0.10,
+    half_gain: float = 0.20,
+    trail_arm: float = 0.10,
     trail_pct: float = 0.08,
-    max_hold: int = 10,
+    max_hold: int = 30,
+    add_policy: str = "room",
+    add_max_mult: float = 2.0,
 ) -> tuple[dict, list[dict]]:
     symbols = [c for c in _universe(data.columns) if c in data.columns]
     frame = data[symbols].apply(pd.to_numeric, errors="coerce")
@@ -103,6 +111,7 @@ def run_lab(
     equity = 100_000.0
     peak_eq = equity
     max_dd = 0.0
+    add_count = 0
     start_i = max(warmup, ma_win + 15)
 
     def mark_trade(sym, pos, exit_i, exit_px, reason, frac=1.0):
@@ -144,11 +153,16 @@ def run_lab(
                 mark_trade(sym, pos, i, px, "lab_time")
                 closed_today.append(sym)
                 continue
+            peak_gain = pos["peak"] / pos["entry"] - 1.0
+            if peak_gain >= trail_arm:
+                pos["trail_armed"] = True
             if not pos["half_taken"] and pnl_pct >= half_gain:
                 mark_trade(sym, pos, i, px, "lab_half", frac=0.5)
                 pos["qty"] *= 0.5
                 pos["half_taken"] = True
-            if pos["half_taken"] and px <= pos["peak"] * (1.0 - trail_pct):
+            if (pos["trail_armed"] or pos["half_taken"]) and px <= pos["peak"] * (
+                1.0 - trail_pct
+            ):
                 mark_trade(sym, pos, i, px, "lab_trail")
                 closed_today.append(sym)
         for sym in closed_today:
@@ -167,13 +181,11 @@ def run_lab(
 
         if i >= len(frame) - 1:
             break
-        if len(open_pos) >= max_names:
-            continue
         scores = []
         row_above = above.iloc[i]
         row_mom = mom.iloc[i]
         for sym in symbols:
-            if sym in open_pos or sym in closed_today:
+            if sym in closed_today:
                 continue
             if not bool(row_above.get(sym, False)):
                 continue
@@ -182,19 +194,53 @@ def run_lab(
                 continue
             scores.append((float(m), sym))
         scores.sort(reverse=True)
-        slots = max_names - len(open_pos)
         clip = equity * name_pct
-        for _m, sym in scores[:slots]:
+        cap_val = equity * name_pct
+        hard_val = cap_val * add_max_mult
+        min_add = clip * 0.25
+        deployed = 0.0
+        for held_sym, held_pos in open_pos.items():
+            held_px = float(px_row.get(held_sym, np.nan))
+            if np.isfinite(held_px) and held_px > 0:
+                deployed += held_pos["qty"] * held_px
+        cash_room = max(0.0, equity - deployed)
+        for _m, sym in scores:
             px = float(frame[sym].iloc[i])
             if not np.isfinite(px) or px <= 0:
                 continue
-            open_pos[sym] = {
-                "entry_i": i,
-                "entry": px,
-                "qty": clip / px,
-                "peak": px,
-                "half_taken": False,
-            }
+            pos = open_pos.get(sym)
+            if pos is None:
+                if len(open_pos) >= max_names:
+                    continue
+                ticket = min(clip, cash_room)
+                if ticket < min_add:
+                    continue
+                open_pos[sym] = {
+                    "entry_i": i,
+                    "entry": px,
+                    "qty": ticket / px,
+                    "peak": px,
+                    "half_taken": False,
+                    "trail_armed": False,
+                    "adds": 0,
+                }
+                cash_room -= ticket
+                continue
+            mv = pos["qty"] * px
+            if add_policy == "fresh":
+                room = min(clip, hard_val - mv, cash_room)
+            else:
+                room = min(cap_val - mv, cash_room)
+            if room < min_add:
+                continue
+            add_qty = room / px
+            old_cost = pos["qty"] * pos["entry"]
+            pos["qty"] += add_qty
+            pos["entry"] = (old_cost + room) / pos["qty"]
+            pos["peak"] = max(float(pos["peak"]), px)
+            pos["adds"] = int(pos.get("adds") or 0) + 1
+            add_count += 1
+            cash_room -= room
 
     last_i = len(frame) - 1
     for sym, pos in list(open_pos.items()):
@@ -212,6 +258,8 @@ def run_lab(
         int(len(frame) - start_i),
         len(symbols),
     )
+    summary["add_policy"] = add_policy
+    summary["adds"] = add_count
     summary["curve"] = curve[:: max(1, len(curve) // 80)]
     summary["curve_len"] = len(curve)
     return summary, trades
@@ -363,44 +411,44 @@ def main() -> int:
         return 1
     data = data.tail(need)
     warmup = ma_win + 15
-    lab, _trades = run_lab(data, ma_win=ma_win, warmup=warmup)
+    lab_room, _ = run_lab(data, ma_win=ma_win, warmup=warmup, add_policy="room")
+    lab_fresh, _ = run_lab(data, ma_win=ma_win, warmup=warmup, add_policy="fresh")
     atr15 = run_atr_hold(
         data, ma_win=ma_win, max_hold=30, max_active=15, warmup=warmup
     )
-    atr4 = run_atr_hold(
-        data,
-        ma_win=ma_win,
-        max_hold=30,
-        max_active=4,
-        warmup=warmup,
-        name_pct=0.25,
-    )
-    spy = _spy_bh(data, lab["start"], lab["end"])
+    spy = _spy_bh(data, lab_room["start"], lab_room["end"])
     payload = {
         "research_only": True,
         "note": (
             "Isolated NYSE sleeve on $100k, close-to-close. "
-            "Not v2/live. Paper aggressive still holds VTI in production."
+            "A/B is Lab leftover-room vs Lab fresh-ticket (2× cap). "
+            "Not v2/live."
         ),
-        "lab": lab,
+        "lab_room": lab_room,
+        "lab_fresh": lab_fresh,
         "atr_hold_15": atr15,
-        "atr_hold_4x25": atr4,
         "spy_bh_pct": spy,
     }
     # shrink curve in json for file size
     OUT_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print()
-    print(f"Window: {lab['start']} -> {lab['end']}  ({lab['bars']} bars, {lab['symbols']} names)")
-    print(f"{'policy':<16} {'trades':>7} {'win%':>7} {'avg%':>8} {'book%':>8} {'maxDD%':>8}  exits")
+    print(
+        f"Window: {lab_room['start']} -> {lab_room['end']}  "
+        f"({lab_room['bars']} bars, {lab_room['symbols']} names)"
+    )
+    print(
+        f"{'policy':<16} {'trades':>7} {'adds':>6} {'win%':>7} "
+        f"{'avg%':>8} {'book%':>8} {'maxDD%':>8}  exits"
+    )
     for label, r in (
-        ("lab_4x25", lab),
+        ("lab_room", lab_room),
+        ("lab_fresh", lab_fresh),
         ("atr_hold_15", atr15),
-        ("atr_4x25", atr4),
     ):
         er = r["exit_reasons"]
         exits = " ".join(f"{k}={v}" for k, v in sorted(er.items()))
         print(
-            f"{label:<16} {r['trades']:7d} {r['win_rate']:6.1f} "
+            f"{label:<16} {r['trades']:7d} {r.get('adds', 0):6d} {r['win_rate']:6.1f} "
             f"{r['avg_ret_pct']:7.2f} {r['book_ret_pct']:7.2f} {r['max_dd_pct']:7.2f}  {exits}"
         )
     if spy is not None:
