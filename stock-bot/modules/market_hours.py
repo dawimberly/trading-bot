@@ -10,6 +10,14 @@ from modules.alpaca_client import call_with_retry
 ET = ZoneInfo("America/New_York")
 
 
+def attach_local_tz(dt: datetime) -> datetime:
+    """Treat naive wall clocks as this machine's local zone, not UTC or ET."""
+    if dt.tzinfo is not None:
+        return dt
+    local = datetime.now().astimezone().tzinfo
+    return dt.replace(tzinfo=local)
+
+
 def is_equity_market_open(trading_client):
     """True during regular US equity hours (Alpaca clock)."""
     try:

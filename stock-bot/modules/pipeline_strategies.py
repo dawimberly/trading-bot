@@ -64,10 +64,9 @@ def _et_now_time(now=None) -> time | None:
         if now is None:
             return datetime.now(et).timetz().replace(tzinfo=None)
         if isinstance(now, datetime):
-            if now.tzinfo is None:
-                # Assume already ET/local wall time from live loop.
-                return now.time()
-            return now.astimezone(et).time()
+            from modules.market_hours import attach_local_tz
+
+            return attach_local_tz(now).astimezone(et).time()
         return None
     except Exception:
         return None
@@ -110,6 +109,9 @@ NYSE_PREF_ENTRY_END = time(14, 0)
 NYSE_RSI_MAX_OFF_PEAK = 70
 NYSE_RSI_MAX_PREF_WINDOW = 72
 NYSE_PREF_WINDOW_RANK_BOOST = 0.02
+# 45 minutes won the ET cooldown sweep vs 30 and 60.
+NYSE_OPEN_COOLDOWN_START = time(9, 30)
+NYSE_OPEN_COOLDOWN_END = time(10, 15)
 NYSE_RSI_PERIOD = 14
 
 
@@ -165,13 +167,13 @@ def _nyse_time_of_day_rank_boost(now=None) -> float:
 
 
 def _nyse_open_cooldown_active(now=None) -> bool:
-    """True during 9:30–10:00 ET (first 30 minutes). Daily backtests (bar index / midnight) skip."""
+    """True during 9:30–10:15 ET. Daily backtests (bar index / midnight) skip."""
     if isinstance(now, (int, float)):
         return False
     t = _et_now_time(now)
     if t is None:
         return False
-    return time(9, 30) <= t <= time(10, 0)
+    return NYSE_OPEN_COOLDOWN_START <= t <= NYSE_OPEN_COOLDOWN_END
 
 
 def _overnight_gap_pct(symbol: str, data) -> float | None:
@@ -262,7 +264,7 @@ def _nyse_momentum_quality_skip(symbol: str, data, now=None) -> str | None:
     if not config.effective_paper_momentum_quality_fixes():
         return None
     if _nyse_open_cooldown_active(now):
-        return "open cooldown (9:30-10:00 ET)"
+        return "open cooldown (9:30-10:15 ET)"
     gap = _overnight_gap_pct(symbol, data)
     if gap is not None and gap > 0.02:
         return f"overnight gap {gap:.1%} too large"

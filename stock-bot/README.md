@@ -467,7 +467,7 @@ Gated by **`PAPER_MOMENTUM_QUALITY_FIXES=true`** in the paper book `.env` (defau
 
 | Filter | Behavior |
 |--------|----------|
-| **Open cooldown** | No new NYSE momentum entries **9:30–10:00 ET** (blocks open chase / fade setups) |
+| **Open cooldown** | No new NYSE momentum entries **9:30–10:15 ET** (blocks open chase / fade setups) |
 | **Gap filter** | Skip entry if today’s open is **>2%** above prior close |
 | **One entry / day** | At most one NYSE momentum buy per symbol per calendar day (journal + in-memory) |
 | **Time-of-day bias** | **Prefer 12:00–14:00 ET**: +momentum rank boost; RSI allowed up to **72** in window vs **70** outside (does not block other hours) |
@@ -1788,7 +1788,7 @@ Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
 | `PAPER_STAT_ARB_Z_ENTRY_MAX` | No | High-vol Z entry ceiling (default `2.7`) |
 | `TELEGRAM_WEEKLY_LIVE_ENABLED` | No | Weekly summary on live book (default `false`) |
 | `USE_DYNAMIC_UNIVERSE` | No | Paper only: union fixed NYSE list + screener top 75 (~103 tickers); live stays fixed |
-| `PAPER_MOMENTUM_QUALITY_FIXES` | No | Paper only: NYSE open cooldown (9:30–10:00 ET), >2% gap skip, 1 entry/symbol/day, 12–14 ET bias, `exit_reason` + `entry_hour` on exits — default `false` |
+| `PAPER_MOMENTUM_QUALITY_FIXES` | No | Paper only: NYSE open cooldown (9:30–10:15 ET), >2% gap skip, 1 entry/symbol/day, 12–14 ET bias, `exit_reason` + `entry_hour` on exits — default `false` |
 | `WEEKLY_REVIEW_ENABLED` | No | Saturday paper research report + email (default `false`); test: `weekly_review.py --test` |
 
 Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.

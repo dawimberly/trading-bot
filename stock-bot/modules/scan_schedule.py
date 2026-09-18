@@ -6,15 +6,13 @@ import datetime
 from zoneinfo import ZoneInfo
 
 import config
-from modules.market_hours import is_equity_market_open
+from modules.market_hours import attach_local_tz, is_equity_market_open
 
 ET = ZoneInfo("America/New_York")
 
 
 def _aware(dt: datetime.datetime) -> datetime.datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=datetime.timezone.utc)
-    return dt
+    return attach_local_tz(dt)
 
 
 def _to_et(dt: datetime.datetime) -> datetime.datetime:

@@ -66,6 +66,7 @@ def run_backtest(
     warmup: int,
     take_1r: bool,
     stop_multiplier: float | None = None,
+    friday_flatten: bool = False,
 ) -> dict:
     symbols = [c for c in _universe(data.columns) if c in data.columns]
     frame = data[symbols].apply(pd.to_numeric, errors="coerce")
@@ -83,6 +84,7 @@ def run_backtest(
 
     for i in range(start_i, len(frame) - 1):
         closed_today: list[str] = []
+        is_friday = int(frame.index[i].weekday()) == 4
         for sym, pos in open_pos.items():
             series = frame[sym].to_numpy(dtype=float)
             exit_i, exit_px, reason, touched = walk_path(
@@ -116,10 +118,35 @@ def run_backtest(
         for sym in closed_today:
             open_pos.pop(sym, None)
 
+        if friday_flatten and is_friday and open_pos:
+            for sym, pos in list(open_pos.items()):
+                px = float(frame[sym].iloc[i])
+                if not np.isfinite(px) or px <= 0:
+                    continue
+                ret = px / pos["entry"] - 1.0
+                equity += pos["notional"] * ret
+                trades.append(
+                    {
+                        "symbol": sym,
+                        "entry_date": str(frame.index[pos["entry_i"]].date()),
+                        "exit_date": str(frame.index[i].date()),
+                        "bars": int(i - pos["entry_i"]),
+                        "entry": round(pos["entry"], 4),
+                        "exit": round(px, 4),
+                        "target_pct": round(pos["target_pct"] * 100.0, 3),
+                        "ret_pct": round(ret * 100.0, 3),
+                        "reason": "friday",
+                        "touched_1r": px >= pos["target"],
+                    }
+                )
+            open_pos.clear()
+
         peak = max(peak, equity)
         dd = (peak - equity) / peak if peak > 0 else 0.0
         max_dd = max(max_dd, dd)
 
+        if friday_flatten and int(frame.index[i].weekday()) >= 4:
+            continue
         if len(open_pos) >= max_active:
             continue
         scores = []
@@ -184,6 +211,7 @@ def run_backtest(
         "take_1r": take_1r,
         "stop_multiplier": stop_multiplier,
         "max_hold": max_hold,
+        "friday_flatten": bool(friday_flatten),
         "start": str(frame.index[start_i].date()),
         "end": str(frame.index[-1].date()),
         "bars": int(len(frame) - start_i),
@@ -200,7 +228,7 @@ def run_backtest(
         "max_dd_pct": round(max_dd * 100.0, 2),
         "exit_reasons": {
             k: sum(1 for t in trades if t["reason"] == k)
-            for k in ("1r", "stop", "time", "eod")
+            for k in ("1r", "stop", "time", "friday", "eod")
         },
         "trades_sample": trades[:8],
     }

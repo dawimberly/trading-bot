@@ -535,7 +535,7 @@ def _write_heartbeat(
 def main():
     global _last_equity, _last_cycle_schedule, _main_cycle_count
     _main_cycle_count += 1
-    now_ts = datetime.datetime.now()
+    now_ts = datetime.datetime.now(datetime.timezone.utc).astimezone()
     executor = _make_executor()
     schedule = equity_scan_state(executor.client, now_ts)
     _last_cycle_schedule = schedule
@@ -1584,7 +1584,7 @@ def main():
     if exits:
         print(f"--- Stop-loss exits: {exits} ---")
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone()
     resolve_cycle_deploy(
         data,
         executor,
