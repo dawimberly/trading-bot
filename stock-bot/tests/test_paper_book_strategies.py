@@ -299,3 +299,84 @@ def test_lab_idle_add_only_when_book_full(monkeypatch):
     assert config.paper_lab_extra_add_ok(gain_pct=0.04, age_days=10) is True
     banner = config.format_paper_lab_banner() or ""
     assert "idle-cash add" in banner
+
+
+def test_idle_cash_scale_in_gate_lab_medium_not_live(monkeypatch):
+    monkeypatch.setattr(config, "paper_aggressive_context", lambda: True)
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_live")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setenv("PAPER_MEDIUM_STRATEGY", "true")
+    assert config.paper_idle_cash_scale_in_active(0.40, equity=300, cash=120) is False
+
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.delenv("PAPER_MEDIUM_STRATEGY", raising=False)
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    assert config.paper_idle_cash_scale_in_active(0.40, equity=100_000, cash=40_000) is True
+    assert config.paper_idle_cash_scale_in_active(0.01, equity=100_000, cash=1_000) is False
+
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper_v2")
+    monkeypatch.delenv("PAPER_LAB_CONCENTRATED", raising=False)
+    monkeypatch.setenv("PAPER_MEDIUM_STRATEGY", "true")
+    assert config.paper_idle_cash_scale_in_active(0.40, equity=100_000, cash=40_000) is True
+
+
+def test_idle_cash_scale_in_adds_held_skips_knives_and_new_names(monkeypatch):
+    import pandas as pd
+    from modules.pipeline_strategies import run_idle_cash_scale_in
+
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setattr(config, "paper_idle_cash_scale_in_active", lambda **k: True)
+
+    idx = pd.RangeIndex(60)
+    data = pd.DataFrame(
+        {
+            "AAPL": [100.0 + i * 0.05 for i in range(60)],
+            "MSFT": [80.0 + i * 0.04 for i in range(60)],
+            "NEW": [50.0 + i * 0.10 for i in range(60)],
+        },
+        index=idx,
+    )
+    buys = []
+
+    class Exec:
+        equity_session_open = True
+
+        def list_active_tickers(self):
+            return ["AAPL", "MSFT"]
+
+        def _find_position(self, symbol):
+            if symbol == "AAPL":
+                return SimpleNamespace(avg_entry_price=100.0, current_price=103.0)
+            if symbol == "MSFT":
+                return SimpleNamespace(avg_entry_price=100.0, current_price=88.0)
+            return None
+
+        def _get_account(self):
+            return SimpleNamespace(equity=100_000.0, cash=40_000.0)
+
+        def compute_nyse_notional(self):
+            return 2500.0
+
+        def execute_order(self, symbol, side, notional=None, reason=None, sleeve=None):
+            buys.append((symbol, side, reason))
+            return {"id": "1"}
+
+    n = run_idle_cash_scale_in(data, Exec(), "RHYME_D: Range_Bound_Neutral", 100, {})
+    assert n == 1
+    assert buys == [("AAPL", "buy", "AAPL/IDLE_CASH")]
+    assert all(sym != "NEW" for sym, *_ in buys)
+
+
+def test_idle_cash_scale_in_skips_when_session_closed(monkeypatch):
+    from modules.pipeline_strategies import run_idle_cash_scale_in
+
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setattr(config, "paper_idle_cash_scale_in_active", lambda **k: True)
+    ex = SimpleNamespace(
+        equity_session_open=False,
+        list_active_tickers=lambda: ["AAPL"],
+        _get_account=lambda: SimpleNamespace(equity=100_000.0, cash=40_000.0),
+    )
+    assert run_idle_cash_scale_in(None, ex, "RHYME_D: Range_Bound_Neutral", 100, {}) == 0

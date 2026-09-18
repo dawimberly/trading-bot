@@ -5863,6 +5863,24 @@ def paper_medium_strategy_enabled() -> bool:
     return os.getenv("PAPER_MEDIUM_STRATEGY", "false").lower() in ("1", "true", "yes")
 
 
+def paper_idle_cash_scale_in_active(
+    cash_pct: float | None = None,
+    *,
+    equity: float | None = None,
+    cash: float | None = None,
+) -> bool:
+    """Lab/Medium only: put parked cash into names already held.
+
+    Live never qualifies. Requires the paper high-cash deploy threshold so this
+    is a leftover-VTI drain, not a permanent extra entry style.
+    """
+    if trading_book_id() == "alpaca_live":
+        return False
+    if not (paper_lab_concentrated_enabled() or paper_medium_strategy_enabled()):
+        return False
+    return paper_deploy_aggressive(cash_pct, equity=equity, cash=cash)
+
+
 def paper_lab_max_names() -> int:
     return max(1, int(os.getenv("PAPER_LAB_MAX_NAMES", "8")))
 

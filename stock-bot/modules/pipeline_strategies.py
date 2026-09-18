@@ -1169,6 +1169,12 @@ def _executor_equity(executor) -> float:
     return float(executor._get_account().equity)
 
 
+def _executor_cash(executor) -> float:
+    if hasattr(executor, "portfolio"):
+        return float(executor.portfolio.cash)
+    return float(executor._get_account().cash)
+
+
 def _apply_ipo_buy_notional(
     symbol: str,
     notional: float,
@@ -1839,6 +1845,138 @@ def run_equity_strategy(
     return trades
 
 
+def _held_active_symbols(executor) -> list[str]:
+    if hasattr(executor, "list_active_tickers"):
+        try:
+            return [config.normalize_symbol(s) for s in executor.list_active_tickers()]
+        except Exception:
+            pass
+    if hasattr(executor, "portfolio"):
+        held = []
+        for sym, qty in (executor.portfolio.positions or {}).items():
+            if float(qty or 0) <= 0:
+                continue
+            name = config.normalize_symbol(sym)
+            if name == "VTI":
+                continue
+            held.append(name)
+        return sorted(set(held))
+    return []
+
+
+def _held_relative_strength(symbol: str, data) -> float:
+    """current / MA50 - 1; unknown names sort last."""
+    if data is None or not hasattr(data, "columns") or symbol not in data.columns:
+        return -1.0
+    prices = data[symbol].dropna()
+    if len(prices) < 20:
+        return -1.0
+    window = min(50, len(prices))
+    ma = float(prices.rolling(window).mean().iloc[-1])
+    current = float(prices.iloc[-1])
+    if ma <= 0 or current <= 0:
+        return -1.0
+    return current / ma - 1.0
+
+
+def _held_add_not_a_knife(executor, symbol: str) -> bool:
+    finder = getattr(executor, "_find_position", None)
+    if finder is None:
+        return True
+    try:
+        pos = finder(symbol)
+    except Exception:
+        return True
+    if pos is None:
+        return False
+    entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+    current = float(getattr(pos, "current_price", 0) or 0)
+    if entry <= 0 or current <= 0:
+        return True
+    disaster = abs(
+        config.paper_lab_disaster_pct()
+        if config.paper_lab_concentrated_enabled()
+        else 0.10
+    )
+    return (current - entry) / entry > -disaster
+
+
+def run_idle_cash_scale_in(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    max_trades=MAX_EQUITY_TRADES,
+    log_fn=None,
+) -> int:
+    """Paper Lab/Medium: when cash is parked, add to held names with room.
+
+    Does not open new tickers and never runs on Live. Skips the open-chop
+    window and names already at a disaster loss; one add per name per cooldown.
+    """
+    if max_trades <= 0:
+        return 0
+    if not getattr(executor, "equity_session_open", True):
+        return 0
+    if _nyse_open_cooldown_active(now):
+        return 0
+    try:
+        equity = _executor_equity(executor)
+        cash = _executor_cash(executor)
+    except Exception:
+        return 0
+    if not config.paper_idle_cash_scale_in_active(equity=equity, cash=cash):
+        return 0
+    held = _held_active_symbols(executor)
+    if not held:
+        return 0
+
+    ranked = sorted(held, key=lambda s: _held_relative_strength(s, data), reverse=True)
+    eligible = [s for s in ranked if _held_add_not_a_knife(executor, s)]
+    if not eligible:
+        return 0
+    fair = round(cash * 0.95 / len(eligible), 2)
+    trades = 0
+    for symbol in eligible:
+        if trades >= max_trades:
+            break
+        pair_key = symbol + "/IDLE_CASH"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        ticket = None
+        if hasattr(executor, "compute_nyse_notional"):
+            ticket = executor.compute_nyse_notional()
+            if ticket is None:
+                continue
+        notional = max(ticket or 0.0, fair)
+        if notional <= 0:
+            continue
+        order = executor.execute_order(
+            symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
+        )
+        if not _count_if_filled(executor, order):
+            continue
+        pair_cooldown[pair_key] = now
+        trades += 1
+        if log_fn:
+            if notional is None:
+                notional = getattr(executor, "compute_notional", lambda: "")()
+            log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+    if trades:
+        logger.info("idle-cash scale-in filled %s held-name add(s)", trades)
+    return trades
+
+
 def run_nyse_momentum_and_stat_arb(
     data,
     executor,
@@ -1880,6 +2018,19 @@ def run_nyse_momentum_and_stat_arb(
         full_data=full_data,
         bar_idx=bar_idx,
     )
+    leftover = max(0, int(max_trades) - int(trades))
+    if leftover:
+        trades += run_idle_cash_scale_in(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+            max_trades=leftover,
+            log_fn=log_fn,
+        )
     if config.effective_stat_arb_enabled() and not config.effective_equity_pairs_enabled():
         from modules.stat_arb_sleeve import run_equity_stat_arb
 
