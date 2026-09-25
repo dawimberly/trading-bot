@@ -1,0 +1,166 @@
+{
+  "research_only": true,
+  "generated": "2026-09-25 21:48 UTC",
+  "days": 365,
+  "ma_win": 70,
+  "max_hold": 30,
+  "max_active": 15,
+  "cost_rt_bps": 10.0,
+  "rule": "Full book only. Sell the weakest name that is up >=5% and flat/down over 3 sessions when a free name is further above its MA.",
+  "verdict": "MIXED \u2014 book +7.75pp, max DD -0.69pp. Next 10 sessions the challenger averaged 2.33% vs -0.27% for the stalled name, and won the matchup 53.1% of the time.",
+  "arm_grid": [
+    {
+      "arm_pct": 1.0,
+      "rotations": 124,
+      "book_ret_pct": 61.54,
+      "d_book_pp": -3.23,
+      "max_dd_pct": 6.73,
+      "d_dd_pp": -1.69,
+      "fwd10_held_pct": 1.73,
+      "fwd10_chall_pct": 1.31,
+      "fwd10_beat_pct": 43.8
+    },
+    {
+      "arm_pct": 2.0,
+      "rotations": 100,
+      "book_ret_pct": 51.85,
+      "d_book_pp": -12.92,
+      "max_dd_pct": 6.99,
+      "d_dd_pp": -1.43,
+      "fwd10_held_pct": 2.59,
+      "fwd10_chall_pct": 1.01,
+      "fwd10_beat_pct": 42.7
+    },
+    {
+      "arm_pct": 3.0,
+      "rotations": 100,
+      "book_ret_pct": 63.31,
+      "d_book_pp": -1.46,
+      "max_dd_pct": 6.58,
+      "d_dd_pp": -1.84,
+      "fwd10_held_pct": 1.61,
+      "fwd10_chall_pct": 0.22,
+      "fwd10_beat_pct": 46.9
+    },
+    {
+      "arm_pct": 4.0,
+      "rotations": 83,
+      "book_ret_pct": 70.11,
+      "d_book_pp": 5.34,
+      "max_dd_pct": 7.22,
+      "d_dd_pp": -1.2,
+      "fwd10_held_pct": 0.09,
+      "fwd10_chall_pct": 1.11,
+      "fwd10_beat_pct": 51.9
+    },
+    {
+      "arm_pct": 5.0,
+      "rotations": 66,
+      "book_ret_pct": 72.52,
+      "d_book_pp": 7.75,
+      "max_dd_pct": 7.73,
+      "d_dd_pp": -0.69,
+      "fwd10_held_pct": -0.27,
+      "fwd10_chall_pct": 2.33,
+      "fwd10_beat_pct": 53.1
+    },
+    {
+      "arm_pct": 6.0,
+      "rotations": 61,
+      "book_ret_pct": 68.12,
+      "d_book_pp": 3.35,
+      "max_dd_pct": 7.65,
+      "d_dd_pp": -0.77,
+      "fwd10_held_pct": -0.43,
+      "fwd10_chall_pct": 1.55,
+      "fwd10_beat_pct": 52.5
+    },
+    {
+      "arm_pct": 7.0,
+      "rotations": 46,
+      "book_ret_pct": 67.5,
+      "d_book_pp": 2.73,
+      "max_dd_pct": 6.96,
+      "d_dd_pp": -1.46,
+      "fwd10_held_pct": 1.44,
+      "fwd10_chall_pct": 0.56,
+      "fwd10_beat_pct": 48.8
+    },
+    {
+      "arm_pct": 8.0,
+      "rotations": 45,
+      "book_ret_pct": 69.27,
+      "d_book_pp": 4.5,
+      "max_dd_pct": 6.06,
+      "d_dd_pp": -2.36,
+      "fwd10_held_pct": 1.07,
+      "fwd10_chall_pct": 0.97,
+      "fwd10_beat_pct": 50.0
+    },
+    {
+      "arm_pct": 9.0,
+      "rotations": 49,
+      "book_ret_pct": 78.84,
+      "d_book_pp": 14.07,
+      "max_dd_pct": 6.82,
+      "d_dd_pp": -1.6,
+      "fwd10_held_pct": 0.85,
+      "fwd10_chall_pct": 3.44,
+      "fwd10_beat_pct": 50.0
+    },
+    {
+      "arm_pct": 10.0,
+      "rotations": 36,
+      "book_ret_pct": 68.16,
+      "d_book_pp": 3.39,
+      "max_dd_pct": 6.82,
+      "d_dd_pp": -1.6,
+      "fwd10_held_pct": 2.71,
+      "fwd10_chall_pct": 2.98,
+      "fwd10_beat_pct": 45.7
+    }
+  ],
+  "baseline": {
+    "start": "2025-09-01",
+    "end": "2026-09-25",
+    "trades": 351,
+    "win_rate": 39.3,
+    "book_ret_pct": 64.77,
+    "max_dd_pct": 8.42,
+    "exit_reasons": {
+      "1r": 0,
+      "stop": 198,
+      "time": 138,
+      "friday": 0,
+      "gain_fade": 0,
+      "fat_loser": 0,
+      "stall_rotate": 0,
+      "eod": 15
+    }
+  },
+  "treatment": {
+    "start": "2025-09-01",
+    "end": "2026-09-25",
+    "trades": 395,
+    "win_rate": 41.5,
+    "book_ret_pct": 72.52,
+    "max_dd_pct": 7.73,
+    "exit_reasons": {
+      "1r": 0,
+      "stop": 221,
+      "time": 93,
+      "friday": 0,
+      "gain_fade": 0,
+      "fat_loser": 0,
+      "stall_rotate": 66,
+      "eod": 15
+    },
+    "stall_rotations": 66,
+    "stall_fwd5_held_pct": 0.76,
+    "stall_fwd5_chall_pct": 1.17,
+    "stall_fwd5_chall_beat_pct": 58.5,
+    "stall_fwd10_held_pct": -0.27,
+    "stall_fwd10_chall_pct": 2.33,
+    "stall_fwd10_chall_beat_pct": 53.1
+  }
+}

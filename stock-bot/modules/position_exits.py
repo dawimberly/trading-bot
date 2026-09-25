@@ -35,6 +35,55 @@ def _position_entry_hour_et(pos) -> str:
     return f"{et.hour:02d}:00"
 
 
+def _exit_hold_fields(pos) -> dict:
+    """Entry price, entry hour, and minutes held. Measurement only."""
+    try:
+        entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+    except (TypeError, ValueError):
+        entry = 0.0
+    hold = ""
+    created = getattr(pos, "created_at", None) or getattr(pos, "createdAt", None)
+    if isinstance(created, str):
+        try:
+            created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except ValueError:
+            created = None
+    if created is not None:
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        try:
+            hold = int((datetime.now(timezone.utc) - created).total_seconds() // 60)
+        except Exception:
+            hold = ""
+    return {
+        "entry_price": round(entry, 4) if entry > 0 else "",
+        "entry_hour": _position_entry_hour_et(pos),
+        "hold_minutes": hold,
+    }
+
+
+def _log_position_exit(
+    journal,
+    journal_path,
+    pos,
+    symbol,
+    side,
+    reason,
+    equity,
+    *,
+    exit_reason="",
+) -> None:
+    journal.log_exit(
+        symbol,
+        side,
+        reason,
+        equity,
+        journal_path=journal_path,
+        exit_reason=exit_reason,
+        **_exit_hold_fields(pos),
+    )
+
+
 def _trailing_stop_hit(
     entry: float,
     peak: float,
@@ -177,12 +226,15 @@ def run_position_exits(
                             f"LAB HALF: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
                         )
                         if journal:
-                            journal.log_exit(
+                            _log_position_exit(
+                                journal,
+                                journal_path,
+                                pos,
                                 symbol,
                                 "sell",
                                 f"lab_half_scale {pnl_pct:.2%}",
                                 equity,
-                                journal_path=journal_path,
+                                exit_reason="lab_half_scale",
                             )
                 except Exception as e:
                     if journal:
@@ -221,12 +273,14 @@ def run_position_exits(
                     f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
                 )
                 if journal:
-                    journal.log_exit(
+                    _log_position_exit(
+                        journal,
+                        journal_path,
+                        pos,
                         symbol,
                         side,
                         reason,
                         equity,
-                        journal_path=journal_path,
                         exit_reason=exit_code,
                     )
             except Exception as e:
@@ -273,12 +327,15 @@ def run_position_exits(
                             f"SMART STOP REDUCE: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
                         )
                         if journal:
-                            journal.log_exit(
+                            _log_position_exit(
+                                journal,
+                                journal_path,
+                                pos,
                                 symbol,
                                 "sell",
                                 decision.get("reason") or "smart_size_reduce",
                                 equity,
-                                journal_path=journal_path,
+                                exit_reason=decision.get("exit_code") or "smart_size_reduce",
                             )
                 except Exception as e:
                     if journal:
@@ -352,12 +409,15 @@ def run_position_exits(
                             f"PARTIAL EXIT: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
                         )
                         if journal:
-                            journal.log_exit(
+                            _log_position_exit(
+                                journal,
+                                journal_path,
+                                pos,
                                 symbol,
                                 "sell",
                                 f"partial_1r {pnl_pct:.2%}",
                                 equity,
-                                journal_path=journal_path,
+                                exit_reason="partial_1r",
                             )
                 except Exception as e:
                     if journal:
@@ -434,21 +494,16 @@ def run_position_exits(
 
             risk_manager._log_event(f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})")
             if journal:
-                entry_hour = _position_entry_hour_et(pos) if quality else ""
-                if quality:
-                    journal.log_exit(
-                        symbol,
-                        side,
-                        reason,
-                        equity,
-                        journal_path=journal_path,
-                        exit_reason=exit_code,
-                        entry_hour=entry_hour,
-                    )
-                else:
-                    journal.log_exit(
-                        symbol, side, reason, equity, journal_path=journal_path
-                    )
+                _log_position_exit(
+                    journal,
+                    journal_path,
+                    pos,
+                    symbol,
+                    side,
+                    reason,
+                    equity,
+                    exit_reason=exit_code,
+                )
         except Exception as e:
             if journal:
                 journal.log_event(

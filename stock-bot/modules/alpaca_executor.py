@@ -728,12 +728,25 @@ class AlpacaExecutor:
         oid = str(getattr(order, "id", "") or "")
         if not oid:
             return
-        self._order_notify_ctx[oid] = {
+        ctx = {
             "symbol": config.normalize_symbol(symbol),
             "side": side.capitalize() if side else self._order_side_label(order),
             "reason": reason,
             "sleeve": sleeve or self._infer_sleeve(symbol),
         }
+        if str(side or "").lower() == "sell":
+            pos = self._find_position(symbol)
+            if pos is not None:
+                try:
+                    entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+                except (TypeError, ValueError):
+                    entry = 0.0
+                if entry > 0:
+                    ctx["entry_price"] = entry
+                created = getattr(pos, "created_at", None) or getattr(pos, "createdAt", None)
+                if created is not None:
+                    ctx["opened_at"] = created
+        self._order_notify_ctx[oid] = ctx
 
     def _emit_fill_notification(self, order, details: dict) -> None:
         if not details or not details.get("filled"):
@@ -774,6 +787,17 @@ class AlpacaExecutor:
             }
         )
         self._notified_order_ids.add(oid)
+        self._journal_fill(
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            price=avg,
+            notional=notional,
+            order_id=oid,
+            partial=bool(details.get("partial")),
+            ctx=ctx,
+            equity_after=equity_after,
+        )
         try:
             from modules import error_watcher
 
@@ -787,6 +811,66 @@ class AlpacaExecutor:
             )
         except Exception:
             pass
+
+    def _journal_fill(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        qty: float,
+        price: float,
+        notional,
+        order_id: str,
+        partial: bool,
+        ctx: dict,
+        equity_after,
+    ) -> None:
+        """Write the fill blotter. Never raises into the order path."""
+        try:
+            from modules.trade_journal import compute_realized_pnl, log_fill
+
+            side_l = str(side or "").lower()
+            entry = ctx.get("entry_price") or ""
+            pnl = ""
+            pnl_pct = ""
+            hold = ""
+            if side_l.startswith("sell") and entry:
+                got = compute_realized_pnl(qty, price, entry, is_sell=True)
+                if got is not None:
+                    pnl = round(got, 2)
+                    pnl_pct = round((float(price) / float(entry) - 1.0) * 100.0, 4)
+            opened = ctx.get("opened_at")
+            if opened is not None and side_l.startswith("sell"):
+                if isinstance(opened, str):
+                    opened = datetime.fromisoformat(opened.replace("Z", "+00:00"))
+                if getattr(opened, "tzinfo", None) is None:
+                    opened = opened.replace(tzinfo=timezone.utc)
+                hold = int((datetime.now(timezone.utc) - opened).total_seconds() // 60)
+            cash = ""
+            try:
+                cash = round(float(getattr(self._account, "cash", 0) or 0), 2)
+            except (TypeError, ValueError):
+                cash = ""
+            log_fill(
+                symbol,
+                "sell" if side_l.startswith("sell") else "buy",
+                qty=qty,
+                price=price if price > 0 else "",
+                notional=notional if notional else "",
+                sleeve=ctx.get("sleeve") or "",
+                reason=ctx.get("reason") or "",
+                order_id=order_id,
+                equity=round(float(equity_after), 2) if equity_after else "",
+                cash=cash,
+                book="paper" if self.paper else "live",
+                realized_pnl=pnl,
+                realized_pnl_pct=pnl_pct,
+                is_partial="1" if partial else "0",
+                entry_price=entry if side_l.startswith("sell") else (price if price > 0 else ""),
+                hold_minutes=hold,
+            )
+        except Exception:
+            logger.debug("journal fill skipped", exc_info=True)
 
     def order_filled(self, order, max_wait=5.0, *, require_complete: bool = True):
         """True when Alpaca confirms fill (poll market orders; optional partial OK)."""

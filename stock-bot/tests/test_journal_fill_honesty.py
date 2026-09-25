@@ -69,6 +69,51 @@ def test_log_fill_writes_qty_price_sleeve(tmp_path, monkeypatch):
     assert closed[0]["exit_reason"] == "smart_atr_stop"
 
 
+def test_log_fill_records_entry_hold_and_trade_id(tmp_path, monkeypatch):
+    path = tmp_path / "paper_journal.csv"
+    open_path = tmp_path / "open_trade_ids.json"
+    monkeypatch.setattr("config.PAPER_JOURNAL_CSV", str(path), raising=False)
+    monkeypatch.setattr(
+        "modules.trade_journal._OPEN_TRADES_PATH", open_path, raising=False
+    )
+    log_fill(
+        "AAPL",
+        "buy",
+        qty=2,
+        price=10.0,
+        notional=20.0,
+        sleeve="NYSE",
+        order_id="buy-1",
+        book="paper",
+        journal_path=str(path),
+    )
+    log_fill(
+        "AAPL",
+        "sell",
+        qty=2,
+        price=10.5,
+        notional=21.0,
+        sleeve="NYSE",
+        reason="stall_rotate",
+        order_id="sell-1",
+        book="paper",
+        is_partial="0",
+        journal_path=str(path),
+    )
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    buy = next(r for r in rows if r["event"] == "fill" and r["side"] == "buy")
+    sell = next(r for r in rows if r["event"] == "fill" and r["side"] == "sell")
+    assert buy["trade_id"] == "buy-1"
+    assert buy["entry_price"] == "10.0"
+    assert buy["entry_hour"]
+    assert sell["trade_id"] == "buy-1"
+    assert sell["entry_price"] == "10.0"
+    assert sell["entry_hour"] == buy["entry_hour"]
+    assert int(sell["hold_minutes"]) >= 0
+    assert sell["realized_pnl"] == "1.0"
+
+
 def test_prefer_fill_and_side_split():
     import pandas as pd
 

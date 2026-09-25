@@ -39,6 +39,39 @@ JOURNAL_COLUMNS = (
 ENTRY_EVENTS = frozenset({"signal", "fill", "game_plan", "entry", "buy"})
 EXIT_EVENTS = frozenset({"exit", "sell", "close"})
 TRADE_EVENTS = ENTRY_EVENTS | EXIT_EVENTS | frozenset({"game_plan"})
+_BUY_SIDES = frozenset({"buy", "long", "b"})
+_SELL_SIDES = frozenset({"sell", "short", "s", "sell_short"})
+
+
+def row_is_entry(event, side) -> bool:
+    ev = str(event or "").strip().lower()
+    sd = str(side or "").strip().lower()
+    if sd in _SELL_SIDES:
+        return False
+    if sd in _BUY_SIDES:
+        return ev not in EXIT_EVENTS
+    return ev in ("entry", "buy")
+
+
+def row_is_exit(event, side) -> bool:
+    ev = str(event or "").strip().lower()
+    sd = str(side or "").strip().lower()
+    if sd in _BUY_SIDES:
+        return False
+    if sd in _SELL_SIDES:
+        return True
+    return ev in EXIT_EVENTS
+
+
+def prefer_fill_rows(df):
+    """Use event=fill rows when the journal has them; otherwise other trade rows."""
+    if df is None or getattr(df, "empty", True) or "event" not in getattr(df, "columns", []):
+        return df
+    ev = df["event"].astype(str).str.strip().str.lower()
+    fills = df.loc[ev.eq("fill")]
+    if not fills.empty:
+        return fills.copy()
+    return df.loc[ev.isin(TRADE_EVENTS)].copy()
 
 
 @dataclass

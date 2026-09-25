@@ -4,7 +4,7 @@
 # Owner approval required before any change is promoted
 """Paper-book weekly research note (institutional / academic cadence).
 
-Saturday pipeline:
+Saturday pipeline (Medium SoT ``alpaca_paper_v2``, not Lab):
   1) Collect 7d paper performance from cleaned journals (jump-filtered)
   2) Score vs explicit mandate (success / failure)
   3) Form exactly ONE single-factor hypothesis (scientific method)
@@ -13,6 +13,7 @@ Saturday pipeline:
   6) Optionally open the report (--open)
 
 Never writes .env. Never touches live. Owner must promote APPROVE'd lines manually.
+Override book with WEEKLY_REVIEW_BOOK=alpaca_paper (Lab) only if you mean to.
 
 Run:
   python scripts/analysis/weekly_review.py
@@ -45,6 +46,9 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import find_dotenv, load_dotenv  # noqa: E402
 
+from modules.csv_utils import read_csv_file  # noqa: E402
+from modules.trading_books import PAPER_SOT_BOOK_ID  # noqa: E402
+
 LOOKBACK_DAYS = 7
 BACKTEST_DAYS = 90
 BACKTEST_TIMEOUT_SEC = int(os.getenv("WEEKLY_REVIEW_BACKTEST_TIMEOUT_SEC", "3600"))
@@ -57,9 +61,24 @@ EQUITY_JUMP_PCT = float(os.getenv("WEEKLY_REVIEW_EQUITY_JUMP_PCT", "0.25"))
 EQUITY_JUMP_RATIO = float(os.getenv("WEEKLY_REVIEW_EQUITY_JUMP_RATIO", "5.0"))
 SHARPE_SCALE = math.sqrt(252)
 
-PAPER_BOOK = ROOT / "data" / "portal" / "users" / "dawimberly" / "books" / "alpaca_paper"
-LIVE_BOOK = PAPER_BOOK.parent / "alpaca_live"
 NYSE_REVIEW_MD = ROOT / "scripts" / "analysis" / "nyse_entry_quality_review.md"
+
+
+def _portal_username() -> str:
+    return (os.getenv("PORTAL_USERNAME") or "dawimberly").strip().lower() or "dawimberly"
+
+
+def _review_book_id() -> str:
+    raw = (os.getenv("WEEKLY_REVIEW_BOOK") or "").strip()
+    return raw or PAPER_SOT_BOOK_ID
+
+
+def _paper_book() -> Path:
+    return ROOT / "data" / "portal" / "users" / _portal_username() / "books" / _review_book_id()
+
+
+def _live_book() -> Path:
+    return ROOT / "data" / "portal" / "users" / _portal_username() / "books" / "alpaca_live"
 
 Decision = Literal["APPROVE", "REJECT", "HOLD"]
 
@@ -200,6 +219,8 @@ class Hypothesis:
     expected_outcome: str
     falsification: str
     confounders: list[str] = field(default_factory=list)
+    # Set when the sleeve made money and a tighten must not be tested.
+    hold_reason: str = ""
 
     @property
     def env_line(self) -> str:
@@ -292,16 +313,19 @@ def _parse_ts(series: pd.Series) -> pd.Series:
 
 
 def _load_csv(path: Path) -> pd.DataFrame:
+    """Load a journal without dying on ragged rows (extra commas in notes)."""
     if not path.is_file():
         return pd.DataFrame()
     try:
-        df = pd.read_csv(path)
+        df = read_csv_file(path)
     except Exception:
         return pd.DataFrame()
     if df.empty or "timestamp" not in df.columns:
         return df
     df = df.copy()
     df["timestamp"] = _parse_ts(df["timestamp"])
+    if "equity" in df.columns:
+        df["equity"] = pd.to_numeric(df["equity"], errors="coerce")
     return df.dropna(subset=["timestamp"]).sort_values("timestamp")
 
 
@@ -315,12 +339,12 @@ def _load_json(path: Path) -> Any:
 
 
 def _paper_journal_candidates() -> list[Path]:
-    return [
-        PAPER_BOOK / "paper_journal.csv",
-        ROOT / "paper_chase_journal.csv",
-        Path(os.getenv("PAPER_JOURNAL_CSV", "")),
-        ROOT / "paper_journal.csv",
-    ]
+    """Medium SoT journal first. Do not fall through to Lab / root journals."""
+    paths = [_paper_book() / "paper_journal.csv"]
+    env_path = (os.getenv("PAPER_JOURNAL_CSV") or "").strip()
+    if env_path:
+        paths.append(Path(env_path) if Path(env_path).is_absolute() else ROOT / env_path)
+    return paths
 
 
 def _load_book_journal(book_dir: Path) -> tuple[pd.DataFrame, str]:
@@ -329,7 +353,7 @@ def _load_book_journal(book_dir: Path) -> tuple[pd.DataFrame, str]:
     df = _load_csv(path)
     if df.empty or "equity" not in df.columns:
         return pd.DataFrame(), "none"
-    return df, path.name
+    return df, f"{book_dir.name}/{path.name}"
 
 
 def _load_best_paper_journal() -> tuple[pd.DataFrame, str]:
@@ -350,10 +374,10 @@ def _load_best_paper_journal() -> tuple[pd.DataFrame, str]:
 
             seg, meta = filter_journal(df, book_type="paper")
             if not seg.empty:
-                return seg, f"{p.name}+wisdom_filter({meta.get('split_reason') or meta.get('fallback') or 'ok'})"
+                return seg, f"{p.parent.name}/{p.name}+wisdom_filter({meta.get('split_reason') or meta.get('fallback') or 'ok'})"
         except Exception:
             pass
-        return df, p.name
+        return df, f"{p.parent.name}/{p.name}"
     return pd.DataFrame(), "none"
 
 
@@ -446,44 +470,111 @@ def _risk_from_curve(curve: pd.Series) -> RiskMetrics:
     return rm
 
 
-def _extract_pnl(note: str) -> float | None:
-    if not note:
+def _coerce_float(val: Any) -> float | None:
+    if val is None or (isinstance(val, float) and math.isnan(val)):
         return None
+    text = str(val).strip()
+    if not text or text.lower() in ("nan", "none"):
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _row_sleeve(row: Any) -> tuple[str, bool]:
+    """Sleeve label, and whether it was inferred from the symbol.
+
+    Blank journal sleeves are filled with ``sleeve_for_symbol`` so NYSE closes
+    are not dumped into ``unknown``.
+    """
+    raw = row.get("sleeve") if hasattr(row, "get") else None
+    text = "" if raw is None else str(raw).strip().lower()
+    if text in ("", "nan", "none", "unknown"):
+        text = ""
+    if text:
+        return text, False
+    for key in ("symbol", "ticker"):
+        val = row.get(key) if hasattr(row, "get") else None
+        if val is None or (isinstance(val, float) and math.isnan(val)):
+            continue
+        sym = str(val).strip()
+        if not sym or sym.lower() in ("nan", "none"):
+            continue
+        from modules.cost_basis import sleeve_for_symbol
+
+        return sleeve_for_symbol(sym).lower(), True
+    return "unknown", False
+
+
+def _trade_outcome(row: Any) -> tuple[float | None, bool | None]:
+    """Dollar P&L when the journal has one; otherwise win/loss from a % note.
+
+    ``smart_atr_stop -1.79%`` is a losing close, not -1.79 dollars.
+    """
+    note = ""
+    if hasattr(row, "get"):
+        pnl = _coerce_float(row.get("realized_pnl"))
+        if pnl is not None:
+            return pnl, pnl > 0
+        note = str(row.get("notes") or row.get("exit_reason") or "")
+    else:
+        note = str(row or "")
+    m = re.search(r"pnl[=:]?\s*([+-]?\d+\.?\d*)\s*%", note, re.I)
+    if m:
+        return None, float(m.group(1)) > 0
     m = re.search(r"pnl[=:]?\s*([+-]?\d+\.?\d*)", note, re.I)
     if m:
-        return float(m.group(1))
-    # stop_loss -6.89% style: treat as return mark, not USD — still directional
+        pnl = float(m.group(1))
+        return pnl, pnl > 0
     m = re.search(r"([+-]?\d+\.?\d+)\s*%", note)
     if m:
-        return float(m.group(1))
-    return None
+        return None, float(m.group(1)) > 0
+    return None, None
 
 
-def _closed_trade_stats(journal: pd.DataFrame, cutoff: datetime) -> tuple[list[float], dict[str, SleeveStats]]:
+def _extract_pnl(note: str) -> float | None:
+    pnl, _win = _trade_outcome(note)
+    return pnl
+
+
+def _apply_trade_outcome(st: SleeveStats, row: Any, pnls: list[float]) -> tuple[bool, bool]:
+    """Update sleeve stats. Returns (percent-only close, unresolved outcome)."""
+    st.realized_trades += 1
+    pnl, win = _trade_outcome(row)
+    directional_only = pnl is None and win is not None
+    if pnl is not None:
+        st.realized_pnl += pnl
+        pnls.append(pnl)
+    if win is True:
+        st.realized_wins += 1
+    return directional_only, win is None
+
+
+def _closed_trade_stats(
+    journal: pd.DataFrame, cutoff: datetime
+) -> tuple[list[float], dict[str, SleeveStats], int, int]:
     sleeves: dict[str, SleeveStats] = {}
     pnls: list[float] = []
+    inferred = 0
+    directional_only = 0
     if journal.empty or "event" not in journal.columns:
-        return pnls, sleeves
+        return pnls, sleeves, inferred, directional_only
     df = journal[journal["timestamp"] >= cutoff].copy()
     if df.empty:
-        return pnls, sleeves
+        return pnls, sleeves, inferred, directional_only
     ev = df["event"].astype(str).str.lower()
     exits = df[ev.isin(TRADE_EVENTS)]
     for _, row in exits.iterrows():
-        sleeve = str(row.get("sleeve") or "").strip().lower() or "unknown"
-        if sleeve in ("", "nan", "none"):
-            sleeve = "unknown"
+        sleeve, was_inferred = _row_sleeve(row)
+        if was_inferred:
+            inferred += 1
         st = sleeves.setdefault(sleeve, SleeveStats(name=sleeve, source="realized"))
         st.source = "realized" if st.source == "none" else ("mixed" if st.source != "realized" else "realized")
-        st.realized_trades += 1
-        note = str(row.get("notes") or "")
-        pnl = _extract_pnl(note)
-        if pnl is not None:
-            st.realized_pnl += pnl
-            pnls.append(pnl)
-            if pnl > 0:
-                st.realized_wins += 1
-    return pnls, sleeves
+        pct_only, _unresolved = _apply_trade_outcome(st, row, pnls)
+        if pct_only:
+            directional_only += 1
+    return pnls, sleeves, inferred, directional_only
 
 
 def _merge_crypto_realized(sleeves: dict[str, SleeveStats], cutoff: datetime) -> None:
@@ -500,12 +591,7 @@ def _merge_crypto_realized(sleeves: dict[str, SleeveStats], cutoff: datetime) ->
     st = sleeves.setdefault("crypto", SleeveStats(name="crypto", source="realized"))
     st.source = "mixed" if st.source == "unrealized" else "realized"
     for _, row in sells.iterrows():
-        st.realized_trades += 1
-        pnl = _extract_pnl(str(row.get("notes") or row.get("exit_reason") or ""))
-        if pnl is not None:
-            st.realized_pnl += pnl
-            if pnl > 0:
-                st.realized_wins += 1
+        _apply_trade_outcome(st, row, [])
 
 
 def _attach_unrealized(sleeves: dict[str, SleeveStats], hb: dict | None) -> None:
@@ -526,7 +612,7 @@ def _attach_unrealized(sleeves: dict[str, SleeveStats], hb: dict | None) -> None
 
 def _wisdom_daily_scores(cutoff: datetime) -> list[dict[str, Any]]:
     scores: list[dict[str, Any]] = []
-    scorecard = _load_json(ROOT / "wisdom_scorecard.json") or _load_json(PAPER_BOOK / "wisdom_scorecard.json")
+    scorecard = _load_json(ROOT / "wisdom_scorecard.json") or _load_json(_paper_book() / "wisdom_scorecard.json")
     if isinstance(scorecard, dict):
         live = scorecard.get("live") or {}
         ret = live.get("return_pct")
@@ -542,7 +628,7 @@ def _wisdom_daily_scores(cutoff: datetime) -> list[dict[str, Any]]:
                     "source": "wisdom_scorecard.live",
                 }
             )
-    for path in (PAPER_BOOK / "wisdom_journal.csv", ROOT / "wisdom_journal.csv"):
+    for path in (_paper_book() / "wisdom_journal.csv", ROOT / "wisdom_journal.csv"):
         df = _load_csv(path)
         if df.empty or "equity" not in df.columns:
             continue
@@ -620,8 +706,8 @@ def _period_return_from_journal(book_dir: Path, days: int) -> tuple[RiskMetrics,
 
 def _collect_live_paper_delta() -> LivePaperDelta:
     delta = LivePaperDelta()
-    paper_risk, paper_src = _period_return_from_journal(PAPER_BOOK, LOOKBACK_DAYS)
-    live_risk, live_src = _period_return_from_journal(LIVE_BOOK, LOOKBACK_DAYS)
+    paper_risk, paper_src = _period_return_from_journal(_paper_book(), LOOKBACK_DAYS)
+    live_risk, live_src = _period_return_from_journal(_live_book(), LOOKBACK_DAYS)
     delta.paper_return_pct = paper_risk.period_return_pct
     delta.live_return_pct = live_risk.period_return_pct
     delta.paper_sharpe = paper_risk.sharpe
@@ -701,10 +787,10 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
     df = journal[journal["timestamp"] >= cutoff].copy()
     ev = df["event"].astype(str).str.lower()
     exits = df[ev.isin(TRADE_EVENTS)]
-    if "sleeve" in exits.columns:
-        nyse = exits[exits["sleeve"].astype(str).str.lower() == "nyse"]
+    if exits.empty:
+        nyse = exits
     else:
-        nyse = exits.iloc[0:0]
+        nyse = exits[exits.apply(lambda r: _row_sleeve(r)[0] == "nyse", axis=1)]
     nq.journal_exits = int(len(nyse))
     if nq.journal_exits == 0:
         nq.notes.append("No NYSE closed trades in 7d window.")
@@ -715,27 +801,37 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
 
     open_pnls: list[float] = []
     midday_pnls: list[float] = []
+    open_wins = open_scored = 0
+    mid_wins = mid_scored = 0
     for _, row in nyse.iterrows():
         eh = row.get("entry_hour", "")
         if pd.notna(eh) and str(eh).strip():
             nq.with_entry_hour += 1
         hour = _hour_from_entry_hour(str(eh) if pd.notna(eh) else "")
-        pnl = _extract_pnl(str(row.get("notes") or ""))
+        pnl, win = _trade_outcome(row)
         if hour is not None and 9 <= hour < 10:
             nq.open_chase_trades += 1
             if pnl is not None:
                 open_pnls.append(pnl)
+            if win is not None:
+                open_scored += 1
+                open_wins += int(win)
         elif hour is not None and 12 <= hour < 14:
             nq.midday_trades += 1
             if pnl is not None:
                 midday_pnls.append(pnl)
+            if win is not None:
+                mid_scored += 1
+                mid_wins += int(win)
 
     if open_pnls:
         nq.open_chase_avg_pnl = float(np.mean(open_pnls))
-        nq.open_chase_win_rate = 100.0 * sum(1 for p in open_pnls if p > 0) / len(open_pnls)
+    if open_scored:
+        nq.open_chase_win_rate = 100.0 * open_wins / open_scored
     if midday_pnls:
         nq.midday_avg_pnl = float(np.mean(midday_pnls))
-        nq.midday_win_rate = 100.0 * sum(1 for p in midday_pnls if p > 0) / len(midday_pnls)
+    if mid_scored:
+        nq.midday_win_rate = 100.0 * mid_wins / mid_scored
     if nq.with_entry_hour == 0:
         nq.notes.append(
             "No `entry_hour` on NYSE exits yet — hour buckets empty until post-deploy closes."
@@ -748,7 +844,7 @@ def collect_performance() -> tuple[PerfSummary, list[dict], dict | None]:
     cutoff = now - timedelta(days=LOOKBACK_DAYS)
     journal, equity_source = _load_best_paper_journal()
 
-    hb = _load_json(PAPER_BOOK / "bot_heartbeat.json") or _load_json(ROOT / "bot_heartbeat.json")
+    hb = _load_json(_paper_book() / "bot_heartbeat.json")
     wisdom_scores = _wisdom_daily_scores(cutoff)
 
     summary = PerfSummary()
@@ -787,7 +883,7 @@ def collect_performance() -> tuple[PerfSummary, list[dict], dict | None]:
     else:
         summary.quality = DataQuality(grade="C", equity_source="none", notes=["No paper journal equity."])
 
-    pnls, sleeves = _closed_trade_stats(journal, cutoff)
+    pnls, sleeves, inferred_sleeves, directional_only = _closed_trade_stats(journal, cutoff)
     _merge_crypto_realized(sleeves, cutoff)
     _attach_unrealized(sleeves, hb)
 
@@ -812,6 +908,15 @@ def collect_performance() -> tuple[PerfSummary, list[dict], dict | None]:
     )
     summary.quality.rows_raw = summary.quality.rows_raw
     summary.quality.rows_clean = summary.risk.n_days
+    if inferred_sleeves:
+        summary.notes.append(
+            f"Sleeve inferred from symbol on {inferred_sleeves} close(s) with a blank sleeve column."
+        )
+    if directional_only:
+        summary.notes.append(
+            f"{directional_only} close(s) have a return sign and no dollar PnL — "
+            "win rate uses that sign; sleeve dollars stay mark-to-market."
+        )
     if summary.closed_trades == 0 and any(s.unrealized_pnl != 0 for s in sleeves.values()):
         summary.notes.append(
             "No closed trades in window — sleeve ranking uses mark-to-market (unrealized) only."
@@ -883,6 +988,46 @@ def _current_env_value(key: str, default: str) -> str:
     return str(os.getenv(key, default))
 
 
+def _sleeve_rank_line(summary: PerfSummary) -> str:
+    if (
+        summary.best_sleeve == summary.worst_sleeve
+        and summary.best_sleeve not in ("", "n/a")
+    ):
+        return (
+            f"Only ranked sleeve **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.0f})"
+        )
+    return (
+        f"Best **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.0f}) · "
+        f"Worst **{summary.worst_sleeve}** ({summary.worst_sleeve_pnl:+.0f})"
+    )
+
+
+def _ranked_sleeves(summary: PerfSummary) -> list[tuple[str, float]]:
+    return [
+        (name, st.contribution)
+        for name, st in summary.sleeves.items()
+        if name != "unknown" and (st.realized_trades > 0 or abs(st.contribution) > 1e-9)
+    ]
+
+
+def _profitable_sleeve_hold(summary: PerfSummary, worst: str, contrib: float) -> str | None:
+    """Refuse a cut when the chosen sleeve made money, or it is the only sleeve."""
+    ranked = _ranked_sleeves(summary)
+    if len(ranked) == 1 and ranked[0][1] > 0 and worst == ranked[0][0]:
+        name, pnl = ranked[0]
+        return (
+            f"Only ranked sleeve is {name} at {pnl:+.2f}. "
+            "A single positive sleeve is HOLD."
+        )
+    direction = SLEEVE_PARAM.get(worst, ("", "", "tighten"))[2]
+    if direction == "tighten" and contrib > 0 and worst not in ("overall", "unknown", "n/a", ""):
+        return (
+            f"{worst} contributed {contrib:+.2f} this window. "
+            "Do not tighten a sleeve that made money."
+        )
+    return None
+
+
 def _nudge_value(raw: str, direction: str) -> str:
     try:
         val = float(raw)
@@ -918,17 +1063,11 @@ def form_hypothesis(summary: PerfSummary, hb: dict | None) -> Hypothesis:
 
     key, default, direction = SLEEVE_PARAM.get(worst, SLEEVE_PARAM["overall"])
     current = _current_env_value(key, default)
-    proposed = _nudge_value(current, direction)
     st = summary.sleeves.get(worst)
-    contrib = summary.worst_sleeve_pnl
+    contrib = st.contribution if st is not None else float(summary.worst_sleeve_pnl or 0.0)
     contrib_bps = (contrib / equity * 1e4) if equity > 0 else None
+    hold = _profitable_sleeve_hold(summary, worst, contrib)
 
-    what = (
-        f"Single factor under investigation: {worst} sleeve is the weakest "
-        f"{LOOKBACK_DAYS}d contributor (contrib={contrib:+.2f}"
-        + (f", {contrib_bps:.1f} bps of book" if contrib_bps is not None else "")
-        + ")."
-    )
     why = (
         f"Regime={summary.regime}. Data grade={summary.quality.grade}. "
         f"Closed trades={summary.closed_trades}. "
@@ -936,20 +1075,36 @@ def form_hypothesis(summary: PerfSummary, hb: dict | None) -> Hypothesis:
         "Under a single-factor discipline we adjust only the exposure/risk lever "
         "mapped to this sleeve — not an omnibus retune."
     )
-    mechanism = (
-        f"{'Raise' if direction == 'raise' else 'Tighten'} `{key}` "
-        f"from {current} → {proposed} to change that sleeve's capital allocation "
-        "while holding all other policy constants fixed."
-    )
-    expected = (
-        f"On a {BACKTEST_DAYS}d paper-aggressive backtest, proposed config should improve "
-        "Sharpe and not worsen max-DD magnitude materially (ΔSharpe>+0.05, ΔReturn≥−0.5pp, "
-        "Δ|DD|≤+0.5pp)."
-    )
-    falsification = (
-        "Reject if proposed Sharpe worsens by >0.05, or return drops >1pp with worse |DD|, "
-        "or data grade remains C with no closed-trade corroboration."
-    )
+    if hold:
+        proposed = current
+        what = hold
+        mechanism = f"Keep `{key}` at {current}. No sleeve-cap change this week."
+        expected = (
+            "No 90d A/B — a tighten is not tested while this sleeve's contribution is positive."
+        )
+        falsification = "Revisit only if that sleeve's contribution turns negative."
+    else:
+        proposed = _nudge_value(current, direction)
+        what = (
+            f"Single factor under investigation: {worst} sleeve is the weakest "
+            f"{LOOKBACK_DAYS}d contributor (contrib={contrib:+.2f}"
+            + (f", {contrib_bps:.1f} bps of book" if contrib_bps is not None else "")
+            + ")."
+        )
+        mechanism = (
+            f"{'Raise' if direction == 'raise' else 'Tighten'} `{key}` "
+            f"from {current} → {proposed} to change that sleeve's capital allocation "
+            "while holding all other policy constants fixed."
+        )
+        expected = (
+            f"On a {BACKTEST_DAYS}d paper-aggressive backtest, proposed config should improve "
+            "Sharpe and not worsen max-DD magnitude materially (ΔSharpe>+0.05, ΔReturn≥−0.5pp, "
+            "Δ|DD|≤+0.5pp)."
+        )
+        falsification = (
+            "Reject if proposed Sharpe worsens by >0.05, or return drops >1pp with worse |DD|, "
+            "or data grade remains C with no closed-trade corroboration."
+        )
     confounders = [
         "7d sample is short vs parameter half-life — A/B is 90d to compensate",
         "Mark-to-market sleeve PnL ≠ closed PnL when exits are sparse",
@@ -966,6 +1121,7 @@ def form_hypothesis(summary: PerfSummary, hb: dict | None) -> Hypothesis:
         expected_outcome=expected,
         falsification=falsification,
         confounders=confounders,
+        hold_reason=hold or "",
     )
 
 
@@ -1235,12 +1391,16 @@ def build_markdown(
     lines: list[str] = [
         f"# Paper Weekly Research — {review_date.isoformat()}",
         "",
-        "_Paper book only. Never auto-applies `.env`. Live Profile A is read-only here._",
+        f"_Medium SoT (`{_review_book_id()}`). Never auto-applies `.env`. Live Profile A is read-only here._",
         "",
         "## Executive Decision",
         f"**{decision}** — {rationale}",
         "",
-        f"Treatment under review: `{hypothesis.env_line}`"
+        (
+            f"Treatment under review: none — keep `{hypothesis.env_key}={hypothesis.current_value}`"
+            if hypothesis.hold_reason
+            else f"Treatment under review: `{hypothesis.env_line}`"
+        )
         + (" · _monitor only_" if monitor_only else ""),
         "",
         "## Mandate",
@@ -1321,8 +1481,7 @@ def build_markdown(
                 "",
                 "## Sleeve Attribution (mark-to-market)",
                 "_Realized closes sparse — contrib = realized + unrealized from heartbeat._",
-                f"Best **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.0f}) · "
-                f"Worst **{summary.worst_sleeve}** ({summary.worst_sleeve_pnl:+.0f})",
+                _sleeve_rank_line(summary),
                 "",
                 "| Sleeve | Realized | Unrealized | Contrib | Cls | Src |",
                 "|--------|----------|------------|---------|-----|-----|",
@@ -1340,8 +1499,7 @@ def build_markdown(
             [
                 "",
                 "## Sleeve Attribution",
-                f"Best **{summary.best_sleeve}** ({summary.best_sleeve_pnl:+.0f}) · "
-                f"Worst **{summary.worst_sleeve}** ({summary.worst_sleeve_pnl:+.0f})",
+                _sleeve_rank_line(summary),
                 "",
                 "| Sleeve | Cls | Win% | Contrib | Src |",
                 "|--------|-----|------|---------|-----|",
@@ -1411,17 +1569,27 @@ def build_markdown(
     for n in live_paper.notes[:2]:
         lines.append(f"- {n}")
 
+    if hypothesis.hold_reason:
+        proposed_line = (
+            f"**Proposed change:** none (keep `{hypothesis.env_key}={hypothesis.current_value}`)"
+        )
+    else:
+        proposed_line = (
+            f"**Proposed change:** `{hypothesis.env_key}={hypothesis.proposed_value}` "
+            f"(current `{hypothesis.current_value}`)"
+        )
     lines.extend(
         [
             "",
             "## Hypothesis (single factor)",
-            f"**Proposed change:** `{hypothesis.env_key}={hypothesis.proposed_value}` "
-            f"(current `{hypothesis.current_value}`)",
+            proposed_line,
             f"**Rationale:** {hypothesis.what}",
             f"**Mechanism:** {hypothesis.mechanism}",
         ]
     )
-    if monitor_only:
+    if hypothesis.hold_reason:
+        lines.append(f"**Status:** {hypothesis.expected_outcome}")
+    elif monitor_only:
         lines.append(
             "**Status: Data too sparse — monitor only.** "
             "Do not apply without grade B+ data and a passing 90d A/B."
@@ -1464,7 +1632,15 @@ def build_markdown(
             "## Implementation (paper only)",
         ]
     )
-    if monitor_only:
+    if hypothesis.hold_reason:
+        lines.extend(
+            [
+                "**No paper change.**",
+                f"Keep `{hypothesis.env_key}={hypothesis.current_value}`.",
+                "Do **not** copy to live.",
+            ]
+        )
+    elif monitor_only:
         lines.extend(
             [
                 "**Monitor only** — no `.env` change this week.",
@@ -1586,6 +1762,10 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print(f"[weekly_review] Research date (Saturday): {review_date.isoformat()}", flush=True)
+    print(
+        f"[weekly_review] Paper book: {_review_book_id()} ({_paper_book()})",
+        flush=True,
+    )
     print("[weekly_review] 1/5 collect + QC", flush=True)
     summary, wisdom_scores, hb = collect_performance()
     goals = score_goals(summary)
@@ -1609,7 +1789,17 @@ def main(argv: list[str] | None = None) -> int:
 
     monitor_only = _is_sparse_week(summary)
 
-    if args.skip_backtest:
+    if hypothesis.hold_reason:
+        print("[weekly_review] 3/5 backtest skipped — positive sleeve", flush=True)
+        baseline = BacktestMetrics(ok=False, error="skipped — sleeve contribution positive")
+        proposed = BacktestMetrics(ok=False, error="skipped — sleeve contribution positive")
+        decision = "HOLD"
+        detail = hypothesis.hold_reason
+        rationale = (
+            f"HOLD — {hypothesis.hold_reason} "
+            f"Keep `{hypothesis.env_key}={hypothesis.current_value}`."
+        )
+    elif args.skip_backtest:
         print("[weekly_review] 3/5 backtest SKIPPED", flush=True)
         baseline = BacktestMetrics(ok=False, error="skipped")
         proposed = BacktestMetrics(ok=False, error="skipped")
