@@ -24,6 +24,8 @@ was the only overlay cell that cleared the NYSE-walk promote rule
 (+9.0 pp book, DD better) — **hold only**, 242 RTH bars, extra turnover.
 Wired 2026-09-26 on Lab 8 portal (`PAPER_NYSE_A2B1_ENABLED`). Still needs a
 full-stack second window before calling it a promote. Not Medium/live.
+Saturday pack: `python scripts/analysis/lab_a2b1_week.py` (A2B1 fires vs
+fat-loser leak; also appended by `weekly_review`).
 
 **STRICT vs FULL on employed Lab 8 / VTI=0** (365d 2025-11-14→2026-09-20):
 STRICT +1.60% / 0.16 / −11.90%; FULL +7.66% / 0.57 / −12.38% (dDD +0.48pp).

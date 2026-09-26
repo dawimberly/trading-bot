@@ -1718,7 +1718,7 @@ python scripts/analysis/weekly_review.py --test
 python scripts/analysis/weekly_review.py --skip-backtest   # smoke only
 ```
 
-Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
+Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`. The Saturday pack also appends a Lab 8 A2B1 / fat-loser tally (`data/lab_a2b1_week_latest.md`; standalone: `python scripts/analysis/lab_a2b1_week.py`). Advisory only — does not write `.env`.
 
 The NYSE hour table is **sale hour**: the exit timestamp converted from the machine clock to ET. It does not use blank `entry_hour`, and it is not an entry-quality score. `python scripts/analysis/eval_open_stop_gap.py` classifies those ATR exits as an overnight gap-through versus a session fade. The 2026-09-26 week was 8 fades and 1 open print (TGT). That script does not write `.env`.
 

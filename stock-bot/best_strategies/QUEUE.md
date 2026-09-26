@@ -9,6 +9,8 @@ Print the same list: `python best_strategies/status.py`
 
 - **A2B1** wired on Lab 8 (`PAPER_NYSE_A2B1_ENABLED=true`, 8%, skip Monday).
   Collect the full-stack second window. Not Medium/live.
+  Saturday tally: `python scripts/analysis/lab_a2b1_week.py` (also appended
+  by `weekly_review`). Fat-loser must stay 0 on all three books.
 
 ## Done this cycle (2026-09-20)
 

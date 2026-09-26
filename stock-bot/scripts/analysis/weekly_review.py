@@ -10,7 +10,8 @@ Saturday pipeline (Medium SoT ``alpaca_paper_v2``, not Lab):
   3) Form exactly ONE single-factor hypothesis (scientific method)
   4) Run controlled 90d A/B backtest (baseline vs env override)
   5) Write IC-style markdown + notify owner (email/Telegram)
-  6) Optionally open the report (--open)
+  6) Append Lab 8 A2B1 / fat-loser tally (advisory; not the Medium hypothesis)
+  7) Optionally open the report (--open)
 
 Never writes .env. Never touches live. Owner must promote APPROVE'd lines manually.
 Override book with WEEKLY_REVIEW_BOOK=alpaca_paper (Lab) only if you mean to.
@@ -44,6 +45,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from dotenv import find_dotenv, load_dotenv  # noqa: E402
 
@@ -1868,6 +1870,12 @@ def main(argv: list[str] | None = None) -> int:
         live_paper,
         monitor_only=monitor_only,
     )
+    try:
+        from lab_a2b1_week import append_to_weekly_review
+
+        md = append_to_weekly_review(md)
+    except Exception as exc:
+        print(f"[weekly_review] lab A2B1 tally skipped: {exc}", flush=True)
 
     print(f"[weekly_review] 4/5 write {out_path.name}", flush=True)
     out_path.write_text(md, encoding="utf-8")
