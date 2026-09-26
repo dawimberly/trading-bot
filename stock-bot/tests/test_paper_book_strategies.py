@@ -147,6 +147,10 @@ def test_medium_user_bot_env_vti_core_off():
     assert lab.get("PAPER_LAB_ADD_POLICY") == "idle"
     assert lab.get("PAPER_LAB_ADD_MAX_MULT") == "2.0"
     assert lab.get("PAPER_MAX_POSITION_PCT") == "0.15"
+    assert lab.get("PAPER_NYSE_A2B1_ENABLED") == "true"
+    assert lab.get("PAPER_NYSE_GAIN_EXIT_PCT") == "8"
+    assert lab.get("PAPER_NYSE_GAIN_EXIT_MODE") == "skip_monday"
+    assert v2.get("PAPER_NYSE_A2B1_ENABLED") == "false"
     assert lab.get("PAPER_DYNAMIC_VTI") == "false"
     assert lab.get("VTI_CORE_ENABLED") == "false"
     assert lab.get("PAPER_VTI_CORE_PCT") == "0"
@@ -167,6 +171,7 @@ def test_live_user_bot_env_vti_core_off():
     assert live.get("LIVE_ACTIVE_SLEEVE_CHOICE") == "nyse"
     assert live.get("VTI_REBALANCE_CADENCE") == "drift"
     assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
+    assert live.get("PAPER_NYSE_A2B1_ENABLED") == "false"
 
 
 def test_live_vti_off_effective_nyse_cap_not_frozen_10pct(monkeypatch):
@@ -216,6 +221,9 @@ def test_dotenv_overlay_includes_medium_vti_keys():
         "PAPER_LAB_MAX_HOLD_DAYS",
         "PAPER_LAB_ADD_POLICY",
         "PAPER_LAB_ADD_MAX_MULT",
+        "PAPER_NYSE_A2B1_ENABLED",
+        "PAPER_NYSE_GAIN_EXIT_PCT",
+        "PAPER_NYSE_GAIN_EXIT_MODE",
     ):
         assert f'"{key}"' in src
 

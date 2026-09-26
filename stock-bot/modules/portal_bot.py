@@ -139,6 +139,10 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
             env["METAL_SLEEVE_ENABLED"] = "false"
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
+            # Hold A2B1: ≥8% prior close-to-close → flatten next open, skip Mon.
+            env["PAPER_NYSE_A2B1_ENABLED"] = "true"
+            env["PAPER_NYSE_GAIN_EXIT_PCT"] = "8"
+            env["PAPER_NYSE_GAIN_EXIT_MODE"] = "skip_monday"
             # Dynamic VTI is retired. Clear inherited Medium 33/67; Lab is
             # concentrated 8-name NYSE with Research VTI core OFF (full active).
             for key in (
@@ -191,6 +195,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["STOP_LOSS_REEVAL_PCTS"] = "[-50,-50]"
             env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
+            env["PAPER_NYSE_A2B1_ENABLED"] = "false"
             env["PAPER_DYNAMIC_VTI"] = "false"
             env["PAPER_DYNAMIC_VTI_ENABLED"] = "false"
             env["VTI_CORE_ENABLED"] = "false"
@@ -233,6 +238,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["DYNAMIC_VTI_ALLOW_ZERO"] = "true"
             env["NYSE_SLEEVE_CAP_PCT"] = "0.95"
             env["VTI_REBALANCE_CADENCE"] = "drift"
+            env["PAPER_NYSE_A2B1_ENABLED"] = "false"
     return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 

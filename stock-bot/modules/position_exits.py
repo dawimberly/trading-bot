@@ -3,13 +3,130 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import math
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 import config
 
 logger = logging.getLogger(__name__)
 _ET = ZoneInfo("America/New_York")
+
+
+def a2b1_should_flatten(
+    weekday: int,
+    prior_ret: float | None,
+    *,
+    threshold: float = 0.08,
+    mode: str = "skip_monday",
+    entered_today: bool = False,
+) -> bool:
+    """Hold A2B1: flatten after a ≥threshold up-day, next open, skip Monday."""
+    if entered_today:
+        return False
+    if prior_ret is None:
+        return False
+    try:
+        ret = float(prior_ret)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(ret) or ret < float(threshold):
+        return False
+    mode_n = (mode or "skip_monday").strip().lower()
+    wd = int(weekday)
+    if mode_n == "skip_monday":
+        return wd != 0
+    if mode_n == "all_days":
+        return True
+    if mode_n == "thu_only":
+        return wd == 3
+    return False
+
+
+def prior_session_close_return(closes, *, as_of_date: date | None = None) -> float | None:
+    """Yesterday close / prior close − 1, dropping today's in-progress bar."""
+    if closes is None:
+        return None
+    pairs: list[tuple[date, float]] = []
+    try:
+        items = closes.items() if hasattr(closes, "items") else enumerate(closes)
+        for raw_idx, raw_px in items:
+            try:
+                px = float(raw_px)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(px) or px <= 0:
+                continue
+            idx_date: date | None = None
+            if isinstance(raw_idx, date) and not isinstance(raw_idx, datetime):
+                idx_date = raw_idx
+            elif isinstance(raw_idx, datetime):
+                idx_date = raw_idx.date()
+            else:
+                ts = getattr(raw_idx, "date", None)
+                if callable(ts):
+                    try:
+                        idx_date = ts()
+                    except Exception:
+                        idx_date = None
+                if idx_date is None and hasattr(raw_idx, "to_pydatetime"):
+                    try:
+                        idx_date = raw_idx.to_pydatetime().date()
+                    except Exception:
+                        idx_date = None
+            if idx_date is None:
+                pairs.append((date.min, px))
+            else:
+                pairs.append((idx_date, px))
+    except Exception:
+        return None
+    if len(pairs) < 2:
+        return None
+    as_of = as_of_date or datetime.now(_ET).date()
+    completed = [(d, px) for d, px in pairs if d != as_of]
+    if len(completed) < 2:
+        return None
+    _yest_d, yest = completed[-1]
+    _prev_d, prev = completed[-2]
+    if prev <= 0:
+        return None
+    return yest / prev - 1.0
+
+
+def _a2b1_prior_return(symbol: str, executor=None, now=None) -> float | None:
+    injected = getattr(executor, "_a2b1_prior_returns", None) if executor else None
+    if isinstance(injected, dict) and symbol in injected:
+        return injected[symbol]
+    as_of = now.date() if isinstance(now, datetime) else datetime.now(_ET).date()
+    cache = getattr(executor, "_a2b1_ret_cache", None) if executor else None
+    if cache is None:
+        cache = {}
+        if executor is not None:
+            executor._a2b1_ret_cache = cache
+    key = (as_of.isoformat(), symbol)
+    if key in cache:
+        return cache[key]
+    ret = None
+    try:
+        import yfinance as yf
+
+        hist = yf.Ticker(symbol).history(period="15d", auto_adjust=True)
+        if hist is not None and len(hist) >= 2 and "Close" in hist.columns:
+            ret = prior_session_close_return(hist["Close"], as_of_date=as_of)
+    except Exception as exc:
+        logger.debug("a2b1 prior close %s: %s", symbol, exc)
+        ret = None
+    cache[key] = ret
+    return ret
+
+
+def _et_weekday(now=None) -> int:
+    if isinstance(now, datetime):
+        dt = now
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_ET).weekday()
+    return datetime.now(_ET).weekday()
 
 
 def _position_symbol(raw_symbol):
@@ -204,6 +321,48 @@ def run_position_exits(
             stop_hit = True
 
         if lab:
+            if config.paper_nyse_a2b1_enabled():
+                entered_today = age_bars == 0
+                prior_ret = _a2b1_prior_return(symbol, executor)
+                if a2b1_should_flatten(
+                    _et_weekday(),
+                    prior_ret,
+                    threshold=config.paper_nyse_gain_exit_pct(),
+                    mode=config.paper_nyse_gain_exit_mode(),
+                    entered_today=entered_today,
+                ):
+                    try:
+                        order = executor.execute_full_exit(
+                            symbol, reason="a2b1_gain_fade", sleeve="NYSE"
+                        )
+                        if executor.order_filled(order):
+                            exits += 1
+                            peak_cache.pop(symbol, None)
+                            meta_cache.pop(symbol, None)
+                            risk_manager._log_event(
+                                f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} "
+                                f"(a2b1_gain_fade {prior_ret:.2%})"
+                            )
+                            if journal:
+                                _log_position_exit(
+                                    journal,
+                                    journal_path,
+                                    pos,
+                                    symbol,
+                                    "sell",
+                                    f"a2b1_gain_fade {prior_ret:.2%}",
+                                    equity,
+                                    exit_reason="a2b1_gain_fade",
+                                )
+                    except Exception as e:
+                        if journal:
+                            journal.log_event(
+                                "exit_error",
+                                symbol=symbol,
+                                notes=str(e),
+                                journal_path=journal_path,
+                            )
+                    continue
             peak_gain = (peak - entry) / entry if entry > 0 else 0.0
             if peak_gain >= config.paper_lab_trail_arm_pct():
                 meta["lab_trail_armed"] = True

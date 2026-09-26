@@ -62,6 +62,9 @@ def _load_project_dotenv() -> None:
         "STOP_LOSS_REEVAL_PCTS",
         "CONCENTRATION_TRIM_MIN_PCT",
         "PAPER_NYSE_FAT_LOSER_ENABLED",
+        "PAPER_NYSE_A2B1_ENABLED",
+        "PAPER_NYSE_GAIN_EXIT_PCT",
+        "PAPER_NYSE_GAIN_EXIT_MODE",
         "PAPER_MAX_POSITION_PCT",
         "PER_NAME_MAX_PCT",
         "STOP_LOSS_PCT",
@@ -5856,6 +5859,39 @@ def paper_lab_concentrated_enabled() -> bool:
     return os.getenv("PAPER_LAB_CONCENTRATED", "false").lower() in ("1", "true", "yes")
 
 
+def paper_nyse_a2b1_enabled() -> bool:
+    """Hold A2B1: flatten ≥8% next open, skip Monday. Lab 8 paper only."""
+    if not paper_lab_concentrated_enabled():
+        return False
+    return os.getenv("PAPER_NYSE_A2B1_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def paper_nyse_gain_exit_pct() -> float:
+    """A2B1 prior close-to-close threshold as a fraction (default 8%)."""
+    raw = os.getenv("PAPER_NYSE_GAIN_EXIT_PCT", "8")
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        val = 8.0
+    return val / 100.0 if val > 1.0 else max(0.0, val)
+
+
+def paper_nyse_gain_exit_mode() -> str:
+    raw = (os.getenv("PAPER_NYSE_GAIN_EXIT_MODE") or "skip_monday").strip().lower()
+    if raw in {"skip_monday", "skip-monday", "b1"}:
+        return "skip_monday"
+    if raw in {"all_days", "all", "b3"}:
+        return "all_days"
+    if raw in {"thu_only", "thursday", "b2"}:
+        return "thu_only"
+    return "skip_monday"
+
+
 def paper_medium_strategy_enabled() -> bool:
     """alpaca_paper_v2: 15 names, 30d hold, 2x ATR, no 1R, no micro-trims."""
     if trading_book_id() != "alpaca_paper_v2":
@@ -6003,10 +6039,14 @@ def format_paper_lab_banner() -> str | None:
         add_bit = f"add=fresh (full ticket up to {paper_lab_add_max_mult():.0f}×)"
     else:
         add_bit = "add leftover-room only"
+    a2b1 = ""
+    if paper_nyse_a2b1_enabled():
+        pct = paper_nyse_gain_exit_pct() * 100.0
+        a2b1 = f" | A2B1 ≥{pct:.0f}% next-open skip Mon"
     return (
         "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
         "disaster -10% | 30d time | trail 8% off high after +10% | "
-        f"half @ +20% | {add_bit} | no same-day rebuy"
+        f"half @ +20% | {add_bit} | no same-day rebuy{a2b1}"
     )
 
 
