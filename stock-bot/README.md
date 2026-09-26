@@ -1718,7 +1718,7 @@ Alerts are non-fatal: if Telegram is slow, trading continues.
 
 **Friday weekly summary:** With Telegram configured, the bot sends a weekly message after **4:30 PM ET on Fridays** once the market is closed. Manual test: `python scripts/weekly_telegram_summary.py --test`. Live book: `TELEGRAM_WEEKLY_LIVE_ENABLED=true`. Disable: `TELEGRAM_WEEKLY_SUMMARY_ENABLED=false`.
 
-**Saturday weekly review (paper research):** Advisory IC-style report with controlled 90d A/B backtest — **never** auto-applies `.env` changes. Enable on paper: `WEEKLY_REVIEW_ENABLED=true` (spawned from `run_paper_bot.py` on Saturdays, or Task Scheduler via `scripts/analysis/install_weekly_review_task.ps1`). Immediate test email any day:
+**Saturday weekly review (Medium SoT / `alpaca_paper_v2`):** Advisory IC-style report with controlled 90d A/B backtest — **never** auto-applies `.env` changes. Enable on paper: `WEEKLY_REVIEW_ENABLED=true` (spawned from `run_paper_bot.py` on Saturdays, or Task Scheduler via `scripts/analysis/install_weekly_review_task.ps1`). Immediate test email any day:
 
 ```powershell
 python scripts/analysis/weekly_review.py --test
@@ -1726,6 +1726,8 @@ python scripts/analysis/weekly_review.py --skip-backtest   # smoke only
 ```
 
 Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
+
+The NYSE hour table is **sale hour**: the exit timestamp converted from the machine clock to ET. It does not use blank `entry_hour`, and it is not an entry-quality score. `python scripts/analysis/eval_open_stop_gap.py` classifies those ATR exits as an overnight gap-through versus a session fade. The 2026-09-26 week was 8 fades and 1 open print (TGT). That script does not write `.env`.
 
 ## Environment variables
 
@@ -1790,6 +1792,7 @@ Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`.
 | `USE_DYNAMIC_UNIVERSE` | No | Paper only: union fixed NYSE list + screener top 75 (~103 tickers); live stays fixed |
 | `PAPER_MOMENTUM_QUALITY_FIXES` | No | Paper only: NYSE open cooldown (9:30–10:15 ET), >2% gap skip, 1 entry/symbol/day, 12–14 ET bias, `exit_reason` + `entry_hour` on exits — default `false` |
 | `WEEKLY_REVIEW_ENABLED` | No | Saturday paper research report + email (default `false`); test: `weekly_review.py --test` |
+| `WEEKLY_REVIEW_BOOK` | No | Saturday review book (default `alpaca_paper_v2` Medium SoT) |
 
 Legacy `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` still work as fallbacks.
 

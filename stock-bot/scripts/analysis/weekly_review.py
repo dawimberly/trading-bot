@@ -36,6 +36,7 @@ import traceback
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any, Literal
 
 import numpy as np
@@ -729,6 +730,33 @@ def _collect_live_paper_delta() -> LivePaperDelta:
     return delta
 
 
+_ET = ZoneInfo("America/New_York")
+
+
+def _sale_hour_et(raw) -> int | None:
+    """Hour in ET when the sell was logged. Journal stamps are the machine clock."""
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    try:
+        ts = pd.Timestamp(raw)
+    except Exception:
+        return None
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        local = datetime.now().astimezone().tzinfo
+        if local is None:
+            return None
+        try:
+            ts = ts.tz_localize(local, ambiguous=True, nonexistent="shift_forward")
+        except Exception:
+            return None
+    try:
+        return int(ts.tz_convert(_ET).hour)
+    except Exception:
+        return None
+
+
 def _hour_from_entry_hour(raw: str) -> int | None:
     if not raw or str(raw).lower() in ("nan", "none", ""):
         return None
@@ -794,9 +822,7 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
     nq.journal_exits = int(len(nyse))
     if nq.journal_exits == 0:
         nq.notes.append("No NYSE closed trades in 7d window.")
-        nq.notes.append(
-            "`entry_hour` populates on exits after quality-fixes deploy — journal may be sparse."
-        )
+        nq.notes.append("No NYSE sells in the 7d window, so sale-hour buckets are empty.")
         return nq
 
     open_pnls: list[float] = []
@@ -805,9 +831,9 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
     mid_wins = mid_scored = 0
     for _, row in nyse.iterrows():
         eh = row.get("entry_hour", "")
-        if pd.notna(eh) and str(eh).strip():
+        if pd.notna(eh) and str(eh).strip() and str(eh).lower() not in ("nan", "none"):
             nq.with_entry_hour += 1
-        hour = _hour_from_entry_hour(str(eh) if pd.notna(eh) else "")
+        hour = _sale_hour_et(row.get("timestamp"))
         pnl, win = _trade_outcome(row)
         if hour is not None and 9 <= hour < 10:
             nq.open_chase_trades += 1
@@ -832,10 +858,7 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
         nq.midday_avg_pnl = float(np.mean(midday_pnls))
     if mid_scored:
         nq.midday_win_rate = 100.0 * mid_wins / mid_scored
-    if nq.with_entry_hour == 0:
-        nq.notes.append(
-            "No `entry_hour` on NYSE exits yet — hour buckets empty until post-deploy closes."
-        )
+    nq.notes.append("Buckets use the sell timestamp converted to ET, not the entry hour.")
     return nq
 
 
@@ -1518,7 +1541,7 @@ def build_markdown(
         lines.extend(
             [
                 "",
-                "## NYSE Entry Quality",
+                "## NYSE sale hour",
                 (
                     f"`PAPER_MOMENTUM_QUALITY_FIXES`="
                     f"{'**on**' if nq.fixes_enabled else 'off'} · "
@@ -1529,7 +1552,7 @@ def build_markdown(
                 "| Window (ET) | Trades | Win% | Avg PnL |",
                 "|-------------|--------|------|---------|",
                 (
-                    f"| 9:30–10:00 open-chase | {nq.open_chase_trades} | "
+                    f"| 9:30–10:00 | {nq.open_chase_trades} | "
                     f"{_fmt_pct(nq.open_chase_win_rate, 0)} | {_fmt_num(nq.open_chase_avg_pnl)} |"
                 ),
                 (
