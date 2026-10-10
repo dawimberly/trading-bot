@@ -1,0 +1,33 @@
+Wheel + Politician tune — 365d A/B (2025-10-01 → 2026-07-20, 292 bars)
+
+Tunes applied
+  Wheel:     OTM 5%→4% | DTE 21→14 bars | manage 5→7 bars
+  Politician: lookback 45→60d | min $15k→$10k | size 2%→2.5% | fill lag 3d
+             weekday seed v2 + candidates_for_bar (PIT fill window)
+
+| Metric              | Baseline (sleeves OFF) | Tuned (both ON) | Delta        |
+|---------------------|------------------------|-----------------|--------------|
+| Total return        | +21.09%                | +11.17%         | −9.92 pp     |
+| Sharpe              | 1.35                   | 0.58            | −0.77        |
+| Max drawdown        | −5.91%                 | −9.69%          | −3.78 pp     |
+| VTI buy&hold        | +12.44%                | +12.44%         | —            |
+| vs VTI              | +8.65 pp               | −1.27 pp        | −9.92 pp     |
+| Final equity        | $12,109                | $11,117         | −$992        |
+
+Sleeve activity (tuned only)
+  Wheel:      premium $142.89 | drag $0.00 | net $142.89 | 22 manage cycles
+  Politician: 0 buys | $0 notional | 0 copy-days
+              (top ranked: Tuberville, Crenshaw, McCaul, Gottheimer)
+              Offline seed shows ~42 fill-eligible weekdays in-window;
+              live BT still 0 fills — likely cash/room starvation vs 5% sleeve cap.
+
+Verdict
+  Tuned Wheel is more active than the prior 90d smoke ($22 / 7 cycles) but
+  the combined opt-in sleeves underperformed baseline sharply: lower return,
+  weaker Sharpe, deeper DD, and lost the vs-VTI edge. Politician filters did
+  not contribute (0 copies). Keep both OFF for Realistic Research defaults;
+  Wheel needs cash-reserve / sizing redesign before another A/B.
+
+Artifacts
+  scripts/analysis/backtest_v154_wheel_pol_tune_ctrl_365.{txt,json}
+  scripts/analysis/backtest_v154_wheel_pol_tune_treat_365.{txt,json}

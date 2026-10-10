@@ -64,10 +64,9 @@ def _et_now_time(now=None) -> time | None:
         if now is None:
             return datetime.now(et).timetz().replace(tzinfo=None)
         if isinstance(now, datetime):
-            if now.tzinfo is None:
-                # Assume already ET/local wall time from live loop.
-                return now.time()
-            return now.astimezone(et).time()
+            from modules.market_hours import attach_local_tz
+
+            return attach_local_tz(now).astimezone(et).time()
         return None
     except Exception:
         return None
@@ -110,6 +109,9 @@ NYSE_PREF_ENTRY_END = time(14, 0)
 NYSE_RSI_MAX_OFF_PEAK = 70
 NYSE_RSI_MAX_PREF_WINDOW = 72
 NYSE_PREF_WINDOW_RANK_BOOST = 0.02
+# 45 minutes won the ET cooldown sweep vs 30 and 60.
+NYSE_OPEN_COOLDOWN_START = time(9, 30)
+NYSE_OPEN_COOLDOWN_END = time(10, 15)
 NYSE_RSI_PERIOD = 14
 
 
@@ -165,13 +167,13 @@ def _nyse_time_of_day_rank_boost(now=None) -> float:
 
 
 def _nyse_open_cooldown_active(now=None) -> bool:
-    """True during 9:30–10:00 ET (first 30 minutes). Daily backtests (bar index / midnight) skip."""
+    """True during 9:30–10:15 ET. Daily backtests (bar index / midnight) skip."""
     if isinstance(now, (int, float)):
         return False
     t = _et_now_time(now)
     if t is None:
         return False
-    return time(9, 30) <= t <= time(10, 0)
+    return NYSE_OPEN_COOLDOWN_START <= t <= NYSE_OPEN_COOLDOWN_END
 
 
 def _overnight_gap_pct(symbol: str, data) -> float | None:
@@ -262,7 +264,7 @@ def _nyse_momentum_quality_skip(symbol: str, data, now=None) -> str | None:
     if not config.effective_paper_momentum_quality_fixes():
         return None
     if _nyse_open_cooldown_active(now):
-        return "open cooldown (9:30-10:00 ET)"
+        return "open cooldown (9:30-10:15 ET)"
     gap = _overnight_gap_pct(symbol, data)
     if gap is not None and gap > 0.02:
         return f"overnight gap {gap:.1%} too large"
@@ -294,6 +296,9 @@ def regime_entries_paused(regime, data=None, sentiment=None):
             return True
     except ImportError:
         pass
+    # Paper aggressive: size RHYME_B/E instead of freezing entries.
+    if config.effective_regime_dynamic_sizing():
+        return False
     if regime in PAUSED_REGIMES:
         return True
     if not config.DERIVED_BEAR_PAUSE_ENABLED or data is None:
@@ -1164,6 +1169,12 @@ def _executor_equity(executor) -> float:
     return float(executor._get_account().equity)
 
 
+def _executor_cash(executor) -> float:
+    if hasattr(executor, "portfolio"):
+        return float(executor.portfolio.cash)
+    return float(executor._get_account().cash)
+
+
 def _apply_ipo_buy_notional(
     symbol: str,
     notional: float,
@@ -1193,7 +1204,7 @@ def _is_nyse_momentum_position(symbol: str) -> bool:
     sym = config.normalize_symbol(symbol)
     if config.is_crypto(sym):
         return False
-    if sym == config.SPY_BOT_SYMBOL:
+    if sym == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled():
         return False
     if config.is_metal_symbol(sym):
         return False
@@ -1352,6 +1363,8 @@ def _spy_buy_intent(
 ):
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
+    if not config.spy_sleeve_enabled():
+        return False
     if regime_entries_paused(regime, data) or config.effective_yield_gate(
         yield_gated, regime=regime
     ):
@@ -1452,7 +1465,7 @@ def resolve_cycle_deploy(
         return
 
     rooms = {}
-    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
+    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy")
     crypto_cap = config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
     nyse_cap = config.effective_nyse_sleeve_cap_pct()
     if hasattr(executor, "_get_account"):
@@ -1593,6 +1606,8 @@ def run_spy_strategy(
     """Buy SPY when above MA — a simple bet that the broad market keeps rising."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
+    if not config.spy_sleeve_enabled():
+        return 0
     if regime_entries_paused(regime, data):
         return 0
     if config.effective_yield_gate(yield_gated, regime=regime):
@@ -1830,6 +1845,138 @@ def run_equity_strategy(
     return trades
 
 
+def _held_active_symbols(executor) -> list[str]:
+    if hasattr(executor, "list_active_tickers"):
+        try:
+            return [config.normalize_symbol(s) for s in executor.list_active_tickers()]
+        except Exception:
+            pass
+    if hasattr(executor, "portfolio"):
+        held = []
+        for sym, qty in (executor.portfolio.positions or {}).items():
+            if float(qty or 0) <= 0:
+                continue
+            name = config.normalize_symbol(sym)
+            if name == "VTI":
+                continue
+            held.append(name)
+        return sorted(set(held))
+    return []
+
+
+def _held_relative_strength(symbol: str, data) -> float:
+    """current / MA50 - 1; unknown names sort last."""
+    if data is None or not hasattr(data, "columns") or symbol not in data.columns:
+        return -1.0
+    prices = data[symbol].dropna()
+    if len(prices) < 20:
+        return -1.0
+    window = min(50, len(prices))
+    ma = float(prices.rolling(window).mean().iloc[-1])
+    current = float(prices.iloc[-1])
+    if ma <= 0 or current <= 0:
+        return -1.0
+    return current / ma - 1.0
+
+
+def _held_add_not_a_knife(executor, symbol: str) -> bool:
+    finder = getattr(executor, "_find_position", None)
+    if finder is None:
+        return True
+    try:
+        pos = finder(symbol)
+    except Exception:
+        return True
+    if pos is None:
+        return False
+    entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+    current = float(getattr(pos, "current_price", 0) or 0)
+    if entry <= 0 or current <= 0:
+        return True
+    disaster = abs(
+        config.paper_lab_disaster_pct()
+        if config.paper_lab_concentrated_enabled()
+        else 0.10
+    )
+    return (current - entry) / entry > -disaster
+
+
+def run_idle_cash_scale_in(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    max_trades=MAX_EQUITY_TRADES,
+    log_fn=None,
+) -> int:
+    """Paper Lab/Medium: when cash is parked, add to held names with room.
+
+    Does not open new tickers and never runs on Live. Skips the open-chop
+    window and names already at a disaster loss; one add per name per cooldown.
+    """
+    if max_trades <= 0:
+        return 0
+    if not getattr(executor, "equity_session_open", True):
+        return 0
+    if _nyse_open_cooldown_active(now):
+        return 0
+    try:
+        equity = _executor_equity(executor)
+        cash = _executor_cash(executor)
+    except Exception:
+        return 0
+    if not config.paper_idle_cash_scale_in_active(equity=equity, cash=cash):
+        return 0
+    held = _held_active_symbols(executor)
+    if not held:
+        return 0
+
+    ranked = sorted(held, key=lambda s: _held_relative_strength(s, data), reverse=True)
+    eligible = [s for s in ranked if _held_add_not_a_knife(executor, s)]
+    if not eligible:
+        return 0
+    fair = round(cash * 0.95 / len(eligible), 2)
+    trades = 0
+    for symbol in eligible:
+        if trades >= max_trades:
+            break
+        pair_key = symbol + "/IDLE_CASH"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        ticket = None
+        if hasattr(executor, "compute_nyse_notional"):
+            ticket = executor.compute_nyse_notional()
+            if ticket is None:
+                continue
+        notional = max(ticket or 0.0, fair)
+        if notional <= 0:
+            continue
+        order = executor.execute_order(
+            symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
+        )
+        if not _count_if_filled(executor, order):
+            continue
+        pair_cooldown[pair_key] = now
+        trades += 1
+        if log_fn:
+            if notional is None:
+                notional = getattr(executor, "compute_notional", lambda: "")()
+            log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+    if trades:
+        logger.info("idle-cash scale-in filled %s held-name add(s)", trades)
+    return trades
+
+
 def run_nyse_momentum_and_stat_arb(
     data,
     executor,
@@ -1871,6 +2018,19 @@ def run_nyse_momentum_and_stat_arb(
         full_data=full_data,
         bar_idx=bar_idx,
     )
+    leftover = max(0, int(max_trades) - int(trades))
+    if leftover:
+        trades += run_idle_cash_scale_in(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+            max_trades=leftover,
+            log_fn=log_fn,
+        )
     if config.effective_stat_arb_enabled() and not config.effective_equity_pairs_enabled():
         from modules.stat_arb_sleeve import run_equity_stat_arb
 
@@ -2213,7 +2373,9 @@ def summarize_entry_skip_reason(
 ) -> str:
     """Return a token describing why no entries fired this cycle (for skip funnel)."""
     yield_gated = config.effective_yield_gate(yield_gated, regime=regime)
-    if wisdom_paused and not config.effective_paper_soft_pause():
+    if wisdom_paused and not (
+        config.effective_paper_soft_pause() or config.effective_regime_dynamic_sizing()
+    ):
         return "wisdom_paused"
     if regime_entries_paused(regime, data):
         if config.effective_paper_soft_pause():

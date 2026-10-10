@@ -29,6 +29,7 @@ GitHub is files. The live window is the Windows app `stock-bot/dashboard_app.py`
 ![Desktop monitor (paper v2)](stock-bot/docs/dashboard-paper-v2-2026-09-12.jpg)
 
 ## Quick start
+
 **Daily routine (owner, Live + Paper):** double-click **`Start_Bot_and_Dashboard.bat`** at the repo root. See [stock-bot/README.md — Daily usage](stock-bot/README.md#daily-usage-recommended).
 
 **Environment:** copy [`stock-bot/.env.example`](stock-bot/.env.example) → `stock-bot/.env` (placeholders only — never commit real keys).

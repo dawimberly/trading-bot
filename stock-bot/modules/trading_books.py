@@ -25,25 +25,26 @@ BOOKS: dict[str, BookSpec] = {
         "allow_live_default": True,
     },
     "alpaca_paper": {
-        "label": "Alpaca Paper",
+        "label": "Alpaca Paper (aggressive)",
         "platform": "alpaca",
         "enabled": True,
         "default_paper": True,
         "paper_chase": True,
         "allow_live_default": False,
     },
-    "kraken": {
-        "label": "Kraken",
-        "platform": "kraken",
-        "enabled": False,
-        "coming_soon": True,
-        "default_paper": False,
-        "paper_chase": False,
+    "alpaca_paper_v2": {
+        "label": "Alpaca Paper v2 (medium SoT, VTI off)",
+        "platform": "alpaca",
+        "enabled": True,
+        "default_paper": True,
+        "paper_chase": True,
         "allow_live_default": False,
     },
 }
 
 DEFAULT_BOOK_ID = "alpaca_live"
+PAPER_SOT_BOOK_ID = "alpaca_paper_v2"
+PAPER_BOOK_IDS = ("alpaca_paper", "alpaca_paper_v2")
 
 
 def list_books() -> list[tuple[str, BookSpec]]:

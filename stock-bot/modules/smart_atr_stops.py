@@ -114,13 +114,26 @@ def ensure_initial_stop(
     atr: float,
     side: str = "long",
 ) -> dict[str, Any]:
-    """Stamp default ATR stop on position meta if missing."""
+    """Stamp default ATR stop on position meta if missing.
+
+    Restamp when a later (daily) ATR implies a meaningfully wider stop. A
+    5-minute ATR can lock a 0.1% stop on first tick; that must not stick.
+    """
     row = dict(meta or {})
-    if row.get("smart_stop_price") and row.get("atr_stop_mult"):
-        return row
     mult = atr_stop_multiplier()
+    new_stop = compute_stop_price(entry, atr, multiplier=mult, side=side)
+    old_stop = row.get("smart_stop_price")
+    if old_stop and row.get("atr_stop_mult"):
+        try:
+            old_dist = abs(float(entry) - float(old_stop))
+            new_dist = abs(float(entry) - float(new_stop))
+        except (TypeError, ValueError):
+            old_dist, new_dist = 0.0, 0.0
+        if new_dist <= old_dist * 1.25:
+            return row
     row["atr_stop_mult"] = mult
-    row["smart_stop_price"] = compute_stop_price(entry, atr, multiplier=mult, side=side)
+    row["smart_stop_price"] = new_stop
+    row["smart_stop_atr"] = round(float(atr), 4)
     row.setdefault("smart_reeval_done", False)
     row.setdefault("smart_tightened", False)
     row.setdefault("smart_size_reduced", False)

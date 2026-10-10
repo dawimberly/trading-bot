@@ -1,0 +1,127 @@
+{
+  "saved_at": "2026-07-22T02:54:38.968141+00:00",
+  "profile": "paper-aggressive",
+  "days": 365,
+  "window": {
+    "start": "2025-10-03",
+    "end": "2026-07-21",
+    "sim_bars": 292
+  },
+  "mc_runs": 1,
+  "noise_level": 0.01,
+  "regime_noise": 0.1,
+  "seed": 42,
+  "fast_mode": false,
+  "summary": {
+    "return_pct": {
+      "metric": "return_pct",
+      "n": 0
+    },
+    "sharpe": {
+      "metric": "sharpe",
+      "n": 1,
+      "mean": -1.85,
+      "median": -1.85,
+      "std": 0.0,
+      "p5": -1.85,
+      "p25": -1.85,
+      "p75": -1.85,
+      "p95": -1.85,
+      "min": -1.85,
+      "max": -1.85
+    },
+    "max_drawdown_pct": {
+      "metric": "max_drawdown_pct",
+      "n": 1,
+      "mean": -3.09,
+      "median": -3.09,
+      "std": 0.0,
+      "p5": -3.09,
+      "p25": -3.09,
+      "p75": -3.09,
+      "p95": -3.09,
+      "min": -3.09,
+      "max": -3.09
+    },
+    "p_return_positive": 0.0,
+    "p_sharpe_gt_1": 0.0
+  },
+  "histograms": {
+    "return_pct": {
+      "bins": [],
+      "counts": []
+    },
+    "sharpe": {
+      "bins": [
+        -2.35,
+        -2.2667,
+        -2.1833,
+        -2.1,
+        -2.0167,
+        -1.9333,
+        -1.85,
+        -1.7667,
+        -1.6833,
+        -1.6,
+        -1.5167,
+        -1.4333,
+        -1.35
+      ],
+      "counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    "max_drawdown_pct": {
+      "bins": [
+        -3.59,
+        -3.5067,
+        -3.4233,
+        -3.34,
+        -3.2567,
+        -3.1733,
+        -3.09,
+        -3.0067,
+        -2.9233,
+        -2.84,
+        -2.7567,
+        -2.6733,
+        -2.59
+      ],
+      "counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "total_return_pct": NaN,
+      "sharpe": -1.85,
+      "max_drawdown_pct": -3.09,
+      "vol_mult": 1.0548,
+      "regime_drift": -0.0021
+    }
+  ]
+}

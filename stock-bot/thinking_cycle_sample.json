@@ -1,0 +1,156 @@
+{
+  "regime": "RHYME_D: Range_Bound_Neutral",
+  "vol": "High",
+  "context_block": "REGIME: RHYME_D: Range_Bound_Neutral | vol=High\nSPY: above MA200 (+6.6%) | VIX: 16.2 falling (-14.2% 5d)\nBUBBLE: 31.8/100 | Buffett: Strongly Overvalued (218% GDP)\nINSIDER: strong cluster buys: ALKT (5 insiders, s94), DCI (4 insiders, s88); CEO/CFO sells -> short watch: WDAY (CFO, s88); risk guard: historical headline mention boosts; guard: historical headline mention bo | clusters: ALKT(5,s94), DCI(4,s88) | exec sells: ADPT(s88), ETON(s88), WDAY(s88)\nNEWS: no headlines cached\nSTAT_ARB: stat arb OFF\nFLOW: INHD RVOL 3069.6x | catalyst: no catalysts \u2265 65 today\nSHORT_SI: SI feed N/A; insider sell watch: WDAY\nTECH: SPY above MA200 (+6.6%); High RVOL: INHD 3069.6x, D 2.5x\nCONVICTION: 0.388",
+  "enriched_context": {
+    "insider_cluster_buys": [
+      {
+        "ticker": "ALKT",
+        "insiders_count": 5,
+        "score": 94,
+        "value": null
+      },
+      {
+        "ticker": "DCI",
+        "insiders_count": 4,
+        "score": 88,
+        "value": 112966.12000000001
+      }
+    ],
+    "insider_executive_sells": [
+      {
+        "ticker": "ADPT",
+        "score": 88,
+        "role": "executive",
+        "value": 8501148.79
+      },
+      {
+        "ticker": "ETON",
+        "score": 88,
+        "role": "executive",
+        "value": 4768637.168
+      },
+      {
+        "ticker": "WDAY",
+        "score": 88,
+        "role": "cfo",
+        "value": 1939038.9351
+      },
+      {
+        "ticker": "WDAY",
+        "score": 88,
+        "role": "executive",
+        "value": 1607135.8744
+      },
+      {
+        "ticker": "QS",
+        "score": 83,
+        "role": "executive",
+        "value": 999565.6111999999
+      }
+    ],
+    "insider_summary": "strong cluster buys: ALKT (5 insiders, s94), DCI (4 insiders, s88); CEO/CFO sells -> short watch: WDAY (CFO, s88); risk guard: historical headline mention boosts; guard: historical headline mention boosts",
+    "bubble_score_100": 31.8,
+    "buffett_signal": "Strongly Overvalued",
+    "buffett_ratio_pct": 218.14,
+    "news_summary": "no headlines cached",
+    "news_headline_lines": [],
+    "stat_arb_candidates": [],
+    "stat_arb_candidate_summary": "stat arb OFF",
+    "options_flow_summary": "INHD RVOL 3069.6x | catalyst: no catalysts \u2265 65 today",
+    "unusual_activity": [
+      "INHD RVOL 3069.6x",
+      "catalyst: no catalysts \u2265 65 today"
+    ],
+    "short_interest_summary": "SI feed N/A; insider sell watch: WDAY",
+    "short_interest_watch": [
+      "WDAY"
+    ]
+  },
+  "regime_analysis": {
+    "signal_strength": 0.5,
+    "confidence": 0.388,
+    "suggested_action": "hold cash, consider shorting WDAY",
+    "reasoning": "The market is in a range-bound neutral regime with high volatility and SPY above its 200-day moving average by +6.6%. Insider activity shows strong cluster buys in ALKT (5 insiders) and DCI (4 insiders), but CEO/CFO sells in WDAY, which aligns with the short watch indicated.",
+    "regime_label": "RHYME_D: Range_Bound_Neutral",
+    "conviction_score": 0.388,
+    "risk_posture": "neutral",
+    "key_drivers": [
+      "High volatility (SPY vol +6.6%, VIX falling -14.2%)",
+      "Strong insider buying clusters in ALKT and DCI"
+    ],
+    "sleeve_bias": {
+      "vti": "neutral",
+      "spy": "neutral",
+      "cash": "neutral",
+      "crypto": "neutral",
+      "nyse": "neutral"
+    },
+    "model": "deepseek-r1:8b",
+    "source": "llm",
+    "capability": "regime_analysis"
+  },
+  "stat_arb": {
+    "signal_strength": 0.388,
+    "confidence": 0.75,
+    "suggested_action": "stand down",
+    "reasoning": "The CONVICTION score is low, and there are no candidate pairs available for scoring despite market conditions suggesting potential opportunities (e.g., high volatility from SPY above MA200). Additionally, the regime indicates range bound neutrality with high volatility, but without specific tradeable pairs, no action can be taken.",
+    "market_spread_regime": "hostile",
+    "pairs": [],
+    "model": "deepseek-r1:8b",
+    "source": "llm",
+    "capability": "stat_arb_pairs"
+  },
+  "short_validation": {
+    "signal_strength": 0.5,
+    "confidence": 0.388,
+    "suggested_action": "reduce short size",
+    "reasoning": "The regime is range-bound neutral with high volatility, and the VIX is falling but still relatively low. The Buffett bubble score indicates strong overvaluation relative to GDP.",
+    "valid": true,
+    "verdict": "reject",
+    "trigger_alignment": 0.388,
+    "risks": [
+      "high market volatility may lead to rapid price changes",
+      "potential for continued overvaluation despite falling VIX"
+    ],
+    "model": "deepseek-r1:8b",
+    "source": "llm",
+    "capability": "short_validation",
+    "triggers": {
+      "allowed": false,
+      "regime": "RHYME_D: Range_Bound_Neutral",
+      "reject": "shorts_disabled",
+      "trigger_reason": "",
+      "bubble_score": 0.0,
+      "bubble_score_100": 0.0,
+      "buffett_ratio_pct": null,
+      "buffett_signal": "",
+      "vix_reason": "",
+      "exhaustion_reason": "",
+      "regime_path": "",
+      "bear_streak": 0
+    }
+  },
+  "weekly_review": {
+    "signal_strength": 0.5,
+    "confidence": 0.7,
+    "suggested_action": "Hold cash until regime shift.",
+    "reasoning": "The market is in a high volatility range-bound neutral phase, and SPY shows strength above the MA200 with VIX falling, indicating potential continuation of trends but increased risk due to insider sell activity on WDAY. Buffett indicator suggests overvaluation relative to GDP growth.",
+    "headline": "High vol range bound neutral regime; SPY strong above MA200",
+    "what_worked": [
+      "SPY performance above MA200"
+    ],
+    "what_failed": [
+      "Stat arb opportunities absent"
+    ],
+    "next_week_actions": [
+      "Monitor WDAY for CEO CFO selling impact",
+      "Assess regime shift in RHYME_D if SPY breaks below MA200",
+      "Evaluate bubble score against VTI performance weekly"
+    ],
+    "regime_outlook": "Expect high volatility to persist, watch for regime change signals.",
+    "model": "deepseek-r1:8b",
+    "source": "llm",
+    "capability": "weekly_review"
+  }
+}

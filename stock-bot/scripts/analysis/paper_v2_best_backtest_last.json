@@ -1,0 +1,222 @@
+{
+  "research_only": true,
+  "pick": "15 names, 30d hold, 2x ATR, no 1R, no micro-trims, 33/67 VTI overlay",
+  "windows": {
+    "365": {
+      "start": "2025-08-19",
+      "end": "2026-09-13",
+      "bars": 390,
+      "symbols": 247,
+      "vti_bh_pct": 20.99,
+      "spy_bh_pct": 20.78,
+      "policies": {
+        "pick_15_30_2x": {
+          "trades": 336,
+          "win_rate": 39.6,
+          "book_ret_pct": 49.18,
+          "max_dd_pct": 4.91,
+          "avg_ret_pct": 2.906,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 189,
+            "time": 132,
+            "eod": 15
+          },
+          "book_33_67_pct": 56.11
+        },
+        "names_8_30": {
+          "trades": 179,
+          "win_rate": 41.9,
+          "book_ret_pct": 59.94,
+          "max_dd_pct": 6.37,
+          "avg_ret_pct": 3.622,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 97,
+            "time": 74,
+            "eod": 8
+          },
+          "book_33_67_pct": 66.87
+        },
+        "names_25_30": {
+          "trades": 567,
+          "win_rate": 38.8,
+          "book_ret_pct": 41.23,
+          "max_dd_pct": 3.16,
+          "avg_ret_pct": 2.469,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 324,
+            "time": 218,
+            "eod": 25
+          },
+          "book_33_67_pct": 48.16
+        },
+        "hold_35": {
+          "trades": 322,
+          "win_rate": 37.3,
+          "book_ret_pct": 50.77,
+          "max_dd_pct": 6.27,
+          "avg_ret_pct": 3.218,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 194,
+            "time": 113,
+            "eod": 15
+          },
+          "book_33_67_pct": 57.7
+        },
+        "hold_45": {
+          "trades": 276,
+          "win_rate": 30.8,
+          "book_ret_pct": 37.91,
+          "max_dd_pct": 5.28,
+          "avg_ret_pct": 3.055,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 180,
+            "time": 81,
+            "eod": 15
+          },
+          "book_33_67_pct": 44.84
+        },
+        "atr_3x": {
+          "trades": 278,
+          "win_rate": 49.3,
+          "book_ret_pct": 55.69,
+          "max_dd_pct": 5.97,
+          "avg_ret_pct": 3.949,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 122,
+            "time": 141,
+            "eod": 15
+          },
+          "book_33_67_pct": 62.62
+        },
+        "take_1r": {
+          "trades": 1177,
+          "win_rate": 57.6,
+          "book_ret_pct": 62.44,
+          "max_dd_pct": 9.45,
+          "avg_ret_pct": 0.972,
+          "exit_reasons": {
+            "1r": 671,
+            "stop": 491,
+            "time": 0,
+            "eod": 15
+          },
+          "book_33_67_pct": 69.37
+        }
+      }
+    },
+    "1000": {
+      "start": "2023-07-21",
+      "end": "2026-09-13",
+      "bars": 1025,
+      "symbols": 247,
+      "vti_bh_pct": 44.7,
+      "spy_bh_pct": 45.31,
+      "policies": {
+        "pick_15_30_2x": {
+          "trades": 551,
+          "win_rate": 39.0,
+          "book_ret_pct": 91.83,
+          "max_dd_pct": 9.97,
+          "avg_ret_pct": 2.906,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 321,
+            "time": 215,
+            "eod": 15
+          },
+          "book_33_67_pct": 106.58
+        },
+        "names_8_30": {
+          "trades": 298,
+          "win_rate": 37.2,
+          "book_ret_pct": 123.62,
+          "max_dd_pct": 15.48,
+          "avg_ret_pct": 3.759,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 179,
+            "time": 111,
+            "eod": 8
+          },
+          "book_33_67_pct": 138.37
+        },
+        "names_25_30": {
+          "trades": 917,
+          "win_rate": 38.1,
+          "book_ret_pct": 74.7,
+          "max_dd_pct": 6.86,
+          "avg_ret_pct": 2.459,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 542,
+            "time": 350,
+            "eod": 25
+          },
+          "book_33_67_pct": 89.45
+        },
+        "hold_35": {
+          "trades": 509,
+          "win_rate": 36.0,
+          "book_ret_pct": 84.99,
+          "max_dd_pct": 10.54,
+          "avg_ret_pct": 3.028,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 311,
+            "time": 183,
+            "eod": 15
+          },
+          "book_33_67_pct": 99.74
+        },
+        "hold_45": {
+          "trades": 429,
+          "win_rate": 31.5,
+          "book_ret_pct": 52.34,
+          "max_dd_pct": 10.99,
+          "avg_ret_pct": 2.52,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 282,
+            "time": 132,
+            "eod": 15
+          },
+          "book_33_67_pct": 67.09
+        },
+        "atr_3x": {
+          "trades": 477,
+          "win_rate": 47.2,
+          "book_ret_pct": 101.42,
+          "max_dd_pct": 12.62,
+          "avg_ret_pct": 3.643,
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 230,
+            "time": 232,
+            "eod": 15
+          },
+          "book_33_67_pct": 116.17
+        },
+        "take_1r": {
+          "trades": 1839,
+          "win_rate": 56.9,
+          "book_ret_pct": 102.97,
+          "max_dd_pct": 14.6,
+          "avg_ret_pct": 0.907,
+          "exit_reasons": {
+            "1r": 1037,
+            "stop": 784,
+            "time": 3,
+            "eod": 15
+          },
+          "book_33_67_pct": 117.72
+        }
+      }
+    }
+  }
+}

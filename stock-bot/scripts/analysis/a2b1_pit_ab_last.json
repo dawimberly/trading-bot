@@ -1,0 +1,232 @@
+{
+  "research_only": true,
+  "cost_rt_bps": 10.0,
+  "sleeve": 0.95,
+  "gain_exit_pct": 8.0,
+  "gain_exit_mode": "skip_monday",
+  "windows": [
+    {
+      "label": "365d",
+      "start": "2025-09-16",
+      "end": "2026-10-10",
+      "coverage": {
+        "members_in_window": 299,
+        "members_with_data": 299,
+        "members_missing_data": 0,
+        "coverage_pct": 100.0,
+        "avg_members_per_day": 290.1,
+        "avg_covered_per_day": 290.1,
+        "missing_sample": []
+      },
+      "policies": {
+        "pick_15": {
+          "book_ret_pct": 95.53,
+          "max_dd_pct": 13.79,
+          "max_dd_booked_pct": 7.8,
+          "sharpe": 1.91,
+          "sharpe_daily": 0.12049,
+          "n_days": 388,
+          "daily_skew": 0.2262,
+          "daily_kurt": 6.6342,
+          "trades": 325,
+          "win_rate": 39.7,
+          "symbols": 299,
+          "start": "2025-09-16",
+          "end": "2026-10-10",
+          "gain_fades": 0,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 0,
+            "Wed": 0,
+            "Thu": 0,
+            "Fri": 0
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 181,
+            "time": 129,
+            "friday": 0,
+            "gain_fade": 0,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 15
+          }
+        },
+        "a2b1_skip_mon": {
+          "book_ret_pct": 86.68,
+          "max_dd_pct": 14.51,
+          "max_dd_booked_pct": 9.95,
+          "sharpe": 1.88,
+          "sharpe_daily": 0.11834,
+          "n_days": 388,
+          "daily_skew": -0.0267,
+          "daily_kurt": 6.7238,
+          "trades": 412,
+          "win_rate": 42.0,
+          "symbols": 299,
+          "start": "2025-09-16",
+          "end": "2026-10-10",
+          "gain_fades": 84,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 0,
+            "Wed": 0,
+            "Thu": 24,
+            "Fri": 32
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 214,
+            "time": 99,
+            "friday": 0,
+            "gain_fade": 84,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 15
+          },
+          "gate_vs_pick_15": "FAIL",
+          "d_book_pp": -8.85,
+          "d_dd_pp": 0.72
+        }
+      }
+    },
+    {
+      "label": "full_db_1568bars",
+      "start": "2022-06-11",
+      "end": "2026-10-10",
+      "coverage": {
+        "members_in_window": 307,
+        "members_with_data": 307,
+        "members_missing_data": 0,
+        "coverage_pct": 100.0,
+        "avg_members_per_day": 285.1,
+        "avg_covered_per_day": 285.1,
+        "missing_sample": []
+      },
+      "policies": {
+        "pick_15": {
+          "book_ret_pct": 134.38,
+          "max_dd_pct": 19.61,
+          "max_dd_booked_pct": 15.42,
+          "sharpe": 1.06,
+          "sharpe_daily": 0.06657,
+          "n_days": 1481,
+          "daily_skew": 0.3088,
+          "daily_kurt": 15.3339,
+          "trades": 655,
+          "win_rate": 36.8,
+          "symbols": 307,
+          "start": "2022-06-11",
+          "end": "2026-10-10",
+          "gain_fades": 0,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 0,
+            "Wed": 0,
+            "Thu": 0,
+            "Fri": 0
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 397,
+            "time": 243,
+            "friday": 0,
+            "gain_fade": 0,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 15
+          }
+        },
+        "a2b1_skip_mon": {
+          "book_ret_pct": 112.14,
+          "max_dd_pct": 18.18,
+          "max_dd_booked_pct": 17.0,
+          "sharpe": 0.99,
+          "sharpe_daily": 0.06216,
+          "n_days": 1481,
+          "daily_skew": 0.2376,
+          "daily_kurt": 15.8955,
+          "trades": 785,
+          "win_rate": 39.4,
+          "symbols": 307,
+          "start": "2022-06-11",
+          "end": "2026-10-10",
+          "gain_fades": 142,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 23,
+            "Wed": 31,
+            "Thu": 50,
+            "Fri": 38
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 426,
+            "time": 202,
+            "friday": 0,
+            "gain_fade": 142,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 15
+          },
+          "gate_vs_pick_15": "FAIL",
+          "d_book_pp": -22.24,
+          "d_dd_pp": -1.43
+        }
+      }
+    }
+  ],
+  "deflated_sharpe": [
+    {
+      "sharpe_daily": 0.12049,
+      "sharpe_annual": 1.913,
+      "n_trials": 10,
+      "sr0_daily": 0.05107,
+      "sr0_annual": 0.811,
+      "n_obs": 388,
+      "dsr": 0.9147,
+      "psr_vs_zero": 0.9913,
+      "window": "365d",
+      "policy": "pick_15"
+    },
+    {
+      "sharpe_daily": 0.11834,
+      "sharpe_annual": 1.879,
+      "n_trials": 10,
+      "sr0_daily": 0.05107,
+      "sr0_annual": 0.811,
+      "n_obs": 388,
+      "dsr": 0.9046,
+      "psr_vs_zero": 0.9893,
+      "window": "365d",
+      "policy": "a2b1_skip_mon"
+    },
+    {
+      "sharpe_daily": 0.06657,
+      "sharpe_annual": 1.057,
+      "n_trials": 10,
+      "sr0_daily": 0.05107,
+      "sr0_annual": 0.811,
+      "n_obs": 1481,
+      "dsr": 0.725,
+      "psr_vs_zero": 0.9949,
+      "window": "full_db_1568bars",
+      "policy": "pick_15"
+    },
+    {
+      "sharpe_daily": 0.06216,
+      "sharpe_annual": 0.987,
+      "n_trials": 10,
+      "sr0_daily": 0.05107,
+      "sr0_annual": 0.811,
+      "n_obs": 1481,
+      "dsr": 0.6652,
+      "psr_vs_zero": 0.9916,
+      "window": "full_db_1568bars",
+      "policy": "a2b1_skip_mon"
+    }
+  ],
+  "ledger_trials_in_family": 10,
+  "verdict": "HOLD",
+  "note": "No .env / restart. Promote only if both windows PASS. Not Medium/live."
+}

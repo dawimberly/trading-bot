@@ -1,0 +1,72 @@
+Pre-Market Report — 2026-07-05 19:33:41 ET
+User: dawimberly | Book: alpaca_paper | RR v1.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 11176). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3805.936775s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 80/100 (Good) — Green
+  • Strong insider cluster buys (3)
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• CYPH | cluster_buy | s94 — Cluster buy: 8 insiders purchased CYPHERPUNK TECHNOLOGI
+• MOVE | cluster_buy | s94 — Cluster buy: 5 insiders purchased Corvex, Inc.
+• SYRE | executive_sell | s94 $1.3M — CEO sale — Spyre Therapeutics, Inc. ($1.3M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 26 returned
+
+Top signals (up to 5)
+  CYPH   cluster_buy      score= 94  Cluster buy: 8 insiders purchased CYPHERPUNK TECHNOLOGIES IN
+  MOVE   cluster_buy      score= 94  Cluster buy: 5 insiders purchased Corvex, Inc.
+  SYRE   executive_sell   score= 94  CEO sale � Spyre Therapeutics, Inc. ($1.3M)
+  KEY    cluster_buy      score= 88  Cluster buy: 4 insiders purchased KEYCORP /NEW/
+  SYRE   cluster_buy      score= 84  Cluster buy: 2 insiders purchased Spyre Therapeutics, Inc. (
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � strong cluster buys: CYPH (8 insiders, s94), MOVE (5 insiders, s94), KEY (4 insi
+
+Applied boosts
+  momentum  CYPH: +0.150
+  momentum  MOVE: +0.120
+  momentum  KEY: +0.120
+  stat_arb  CYPH: x1.120
+  stat_arb  MOVE: x1.100
+  stat_arb  KEY: x1.100
+  short     SYRE: base=0.260 role=ceo
+  short     ASPI: base=0.240 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.8
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>85); stat arb insider mult damped 80%
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 4 | Quality signals: 28 | Boost: 3 clusters, 2 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

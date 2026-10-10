@@ -1,0 +1,116 @@
+{
+  "generated_at": "2026-07-29 21:27 UTC",
+  "research_db": "data\\research\\geopolitical\\research_macro.db",
+  "prod_db_untouched": true,
+  "disclaimer": "Research store only \u2014 freeze stays on; no strategy/live changes.",
+  "series": [
+    {
+      "name": "VIX",
+      "source": "FRED",
+      "source_id": "VIXCLS",
+      "first_date": "1990-01-02",
+      "last_date": "2026-07-28",
+      "rows": 9239,
+      "checksum": "48e3e1d55d12eec4",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "CBOE VIX daily close via FRED",
+      "ok": true
+    },
+    {
+      "name": "WTI",
+      "source": "FRED",
+      "source_id": "DCOILWTICO",
+      "first_date": "1986-01-02",
+      "last_date": "2026-07-27",
+      "rows": 10210,
+      "checksum": "a6e9e3c8145804df",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "WTI Cushing spot USD/bbl via FRED/EIA",
+      "ok": true
+    },
+    {
+      "name": "SPY",
+      "source": "yfinance",
+      "source_id": "SPY",
+      "first_date": "1993-01-29",
+      "last_date": "2026-07-29",
+      "rows": 8431,
+      "checksum": "c88b1837c78489a2",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "SPDR S&P 500 ETF",
+      "ok": true
+    },
+    {
+      "name": "VTI",
+      "source": "yfinance",
+      "source_id": "VTI",
+      "first_date": "2001-06-15",
+      "last_date": "2026-07-29",
+      "rows": 6316,
+      "checksum": "4de3c8ae96583a71",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "Vanguard Total Stock Market ETF",
+      "ok": true
+    },
+    {
+      "name": "XLE",
+      "source": "yfinance",
+      "source_id": "XLE",
+      "first_date": "1998-12-22",
+      "last_date": "2026-07-29",
+      "rows": 6941,
+      "checksum": "5bde84e5ef5de99f",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "Energy Select Sector SPDR",
+      "ok": true
+    },
+    {
+      "name": "GLD",
+      "source": "yfinance",
+      "source_id": "GLD",
+      "first_date": "2004-11-18",
+      "last_date": "2026-07-29",
+      "rows": 5456,
+      "checksum": "8dd616f190e7a32c",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "SPDR Gold Shares",
+      "ok": true
+    },
+    {
+      "name": "VIX_YF",
+      "source": "yfinance",
+      "source_id": "^VIX",
+      "first_date": "1990-01-02",
+      "last_date": "2026-07-29",
+      "rows": 9211,
+      "checksum": "cae517c3b710b9d7",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "yfinance VIX cross-check",
+      "ok": true
+    },
+    {
+      "name": "CL_F",
+      "source": "yfinance",
+      "source_id": "CL=F",
+      "first_date": "2000-08-23",
+      "last_date": "2026-07-29",
+      "rows": 6510,
+      "checksum": "b0571391c2842e7e",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "WTI futures proxy",
+      "ok": true
+    },
+    {
+      "name": "GC_F",
+      "source": "yfinance",
+      "source_id": "GC=F",
+      "first_date": "2000-08-30",
+      "last_date": "2026-07-29",
+      "rows": 6501,
+      "checksum": "e1c6498ea45f99ed",
+      "retrieved_at": "2026-07-29 21:27 UTC",
+      "notes": "Gold futures proxy",
+      "ok": true
+    }
+  ]
+}

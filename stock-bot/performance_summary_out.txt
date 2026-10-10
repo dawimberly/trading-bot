@@ -1,0 +1,33 @@
+﻿========================================================================
+PYTHONTRADING ù PERFORMANCE SUMMARY
+Generated: 2026-07-08 14:08:14
+========================================================================
+
+## Dynamic Core Allocator
+  Choice: VTI @ 41.5%
+  Updated: 2026-07-08T19:06:43+00:00
+  VTI 63d: Sharpe 1.94 | ann ret 16.67% | max DD -2.96%
+  SPY 63d: Sharpe 1.65 | ann ret 13.61% | max DD -2.89%
+
+## Paper Book
+  Heartbeat: 2026-07-08T12:23:39 | status=starting
+  WARN Last error: name 'get_volatility' is not defined @ 2026-07-08T14:08:02.756891
+  Equity: $0.00 | Regime: None
+  Target caps %: VTI_CORE 0.0%, SPY 0.0%, CRYPTO 0.0%, NYSE 0.0%, METAL 0.0%
+python : Traceback (most recent call last):
+At C:\Users\Owner\AppData\Local\Temp\ps-script-77ec9de2-4e73-4485-877b-dc35cd27809d.ps1:77 char:44
++ ... \stock-bot; python scripts\analysis\performance_summary.py 2>&1 | Out ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\performance_summary.py", line 380, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\performance_summary.py", line 279, in main
+    print(f"  Journal rows: {len(journal):,} | range {journal['timestamp'].min()} \u2192 {journal['timestamp'].max()}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 51: character maps to <undefined>

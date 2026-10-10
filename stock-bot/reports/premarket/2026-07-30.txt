@@ -1,0 +1,82 @@
+Pre-Market Report — 2026-07-30 00:03:54 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 26548). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3716.534822s
+Equity: $94,690.12
+
+=== Bot Health ===
+Score: 98/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Thinking engine ON (LLM)
+  • Strong insider clusters (3)
+  • All-time Sharpe negative (-0.28)
+  • Tail-risk sizing cut (0.70x)
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 36/100
+
+=== Insider Signals (top 3) ===
+• NTRA | executive_sell | s94 $1.5M — CEO sale - Natera, Inc. ($1.5M)
+• CRWV | executive_sell | s93 $157.2M — executive sale - CoreWeave, Inc. ($157.2M)
+• CRWV | executive_sell | s93 $70.2B — executive sale - CoreWeave, Inc. ($70.2B)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 35 returned
+
+Top signals (up to 5)
+  NTRA   executive_sell   score= 94  CEO sale - Natera, Inc. ($1.5M)
+  CRWV   executive_sell   score= 93  executive sale - CoreWeave, Inc. ($157.2M)
+  CRWV   executive_sell   score= 93  executive sale - CoreWeave, Inc. ($70.2B)
+  NTRA   executive_sell   score= 88  CFO sale - Natera, Inc. ($1.3M)
+  GENCO SHIPPING & TRADING LTD activist_13d     score= 86  Schedule 13D activist stake - GENCO SHIPPING & TRADING LTD
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: YARW (2 insiders), HNGE (2 insiders), CATY (2 insiders); exec sell
+
+Applied boosts
+  momentum  YARW: +0.080
+  momentum  HNGE: +0.080
+  momentum  CATY: +0.080
+  stat_arb  YARW: x1.060
+  stat_arb  HNGE: x1.060
+  stat_arb  CATY: x1.060
+  short     NTRA: base=0.420 role=executive
+  short     CRWV: base=0.420 role=executive
+  short     MHK: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 35.9
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 35 | Boost: 3 clusters, 8 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

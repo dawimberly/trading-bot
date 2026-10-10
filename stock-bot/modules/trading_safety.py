@@ -39,6 +39,16 @@ def daily_loss_limit_pct(*, paper: bool | None = None) -> float:
 
 
 def _book_key(*, paper: bool) -> str:
+    """Per-book state key.
+
+    Lab and Medium are both paper books with very different equity. Sharing one
+    "paper" key let whichever started first set the session anchor, so the other
+    measured its equity against the wrong open and tripped the daily-loss
+    breaker all day (entry_block_active -> every entry reported regime_paused).
+    """
+    book_id = (os.getenv("TRADING_BOOK_ID") or "").strip().lower()
+    if book_id:
+        return book_id
     return "paper" if paper else "live"
 
 

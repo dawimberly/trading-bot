@@ -9,7 +9,7 @@ import sys
 import warnings
 from pathlib import Path
 
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv, find_dotenv, dotenv_values
 
 _CONFIG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = _CONFIG_DIR
@@ -41,13 +41,70 @@ def _load_project_dotenv() -> None:
     """Load .env: stock-bot/.env is authoritative; dist/.env fills missing keys only."""
     loaded: list[str] = []
     env_override = os.getenv("PYTHONTRADING_ENV_FILE", "").strip()
+    overlay_keys = (
+        "TRADING_BOOK_ID",
+        "PAPER_MEDIUM_STRATEGY",
+        "PAPER_LAB_CONCENTRATED",
+        "PAPER_LAB_MAX_NAMES",
+        "PAPER_LAB_MAX_HOLD_DAYS",
+        "PAPER_LAB_HALF_GAIN_PCT",
+        "PAPER_LAB_TRAIL_ARM_PCT",
+        "PAPER_LAB_TRAIL_PCT",
+        "PAPER_LAB_DISASTER_PCT",
+        "PAPER_LAB_ADD_POLICY",
+        "PAPER_LAB_ADD_MAX_MULT",
+        "MAX_ACTIVE_TICKERS",
+        "ATR_STOP_MULTIPLIER",
+        "PAPER_POSITION_MAX_HOLD_BARS",
+        "EXIT_OPTIMIZATION_ENABLED",
+        "EXIT_OPTIMIZATION_MAX_HOLD_BARS",
+        "PAPER_SMART_STOPS",
+        "STOP_LOSS_REEVAL_PCTS",
+        "CONCENTRATION_TRIM_MIN_PCT",
+        "PAPER_NYSE_FAT_LOSER_ENABLED",
+        "PAPER_NYSE_A2B1_ENABLED",
+        "PAPER_NYSE_GAIN_EXIT_PCT",
+        "PAPER_NYSE_GAIN_EXIT_MODE",
+        "PAPER_MAX_POSITION_PCT",
+        "PER_NAME_MAX_PCT",
+        "STOP_LOSS_PCT",
+        # Medium fixed 33/67 — survive book .env after Realistic Research defaults.
+        "PAPER_DYNAMIC_VTI",
+        "PAPER_DYNAMIC_VTI_ENABLED",
+        "PAPER_VTI_CORE_PCT",
+        "VTI_CORE_PCT",
+        "DYNAMIC_VTI_PAPER_FLOOR",
+        "DYNAMIC_VTI_PAPER_CEILING",
+        "DYNAMIC_VTI_FLOOR_MIN",
+        "DYNAMIC_VTI_DEFAULT_PCT",
+        "DYNAMIC_VTI_STRESS_PCT",
+        "DYNAMIC_VTI_CALM_PCT",
+        "DYNAMIC_VTI_OPTIONAL_ENABLED",
+        "PAPER_ACTIVE_SLEEVE_BOOST",
+        "NYSE_SLEEVE_CAP_PCT",
+        "PAPER_NYSE_SLEEVE_CAP_PCT",
+        "PAPER_NYSE_HIGH_CASH_CAP_PCT",
+        "PAPER_NYSE_MAX_EXPOSURE_PCT",
+        "PAPER_REGIME_WEAK_SLEEVE_MAX_PCT",
+        "METAL_SLEEVE_ENABLED",
+        # Live / Medium weekly 33/67
+        "LIVE_VTI_CORE_PCT",
+        "LIVE_SMALL_ACTIVE_SLEEVE_PCT",
+        "LIVE_ACTIVE_SLEEVE_CHOICE",
+        "SMALL_ACCOUNT_VTI_CORE_PCT",
+        "VTI_REBALANCE_CADENCE",
+        "NYSE_SLEEVE_CAP_PCT",
+    )
+    launch_overlay = {k: os.environ[k] for k in overlay_keys if k in os.environ}
     if env_override and os.path.isfile(env_override):
         load_dotenv(env_override, override=True)
+        os.environ.update(launch_overlay)
         _append_loaded_env(loaded, Path(env_override))
         stock_env = _CONFIG_DIR / ".env"
         if stock_env.is_file():
             load_dotenv(stock_env, override=False)
             _append_loaded_env(loaded, stock_env)
+        isolate_book_alpaca_os_environ(Path(env_override))
         _normalize_alpaca_env_keys()
         if loaded:
             os.environ["PYTHONTRADING_LOADED_ENV"] = ";".join(loaded)
@@ -136,6 +193,27 @@ _ALPACA_ENV_KEYS = (
     "ALLOW_LIVE_TRADING",
 )
 
+# Keys that must come from the active book .env, never from a sibling book
+# or stock-bot/.env PAPER_APCA_* (that pair is the Lab $94k blotter).
+_BOOK_ALPACA_CREDENTIAL_KEYS = (
+    "APCA_API_KEY_ID",
+    "APCA_API_SECRET_KEY",
+    "ALPACA_API_KEY",
+    "ALPACA_SECRET_KEY",
+    "PAPER_APCA_API_KEY_ID",
+    "PAPER_APCA_API_SECRET_KEY",
+    "SOCIAL_APCA_API_KEY_ID",
+    "SOCIAL_APCA_API_SECRET_KEY",
+    "APCA_API_BASE_URL",
+)
+
+_ROOT_ONLY_PAPER_KEYS = (
+    "PAPER_APCA_API_KEY_ID",
+    "PAPER_APCA_API_SECRET_KEY",
+    "SOCIAL_APCA_API_KEY_ID",
+    "SOCIAL_APCA_API_SECRET_KEY",
+)
+
 
 def _strip_env(val: str | None) -> str:
     """Strip whitespace, optional quotes, and UTF-8 BOM artifacts from env values."""
@@ -156,6 +234,70 @@ def _normalize_alpaca_env_keys() -> None:
         cleaned = _strip_env(raw)
         if cleaned != raw:
             os.environ[key] = cleaned
+
+
+def _book_file_credential_map(book_env_path: Path | str | None) -> dict[str, str]:
+    path = Path(book_env_path) if book_env_path else Path()
+    if not path.is_file():
+        return {}
+    vals = dotenv_values(path)
+    out: dict[str, str] = {}
+    for key in _BOOK_ALPACA_CREDENTIAL_KEYS:
+        raw = vals.get(key)
+        if raw is None:
+            continue
+        cleaned = _strip_env(str(raw))
+        if cleaned:
+            out[key] = cleaned
+    return out
+
+
+def isolate_book_alpaca_env(
+    env: dict[str, str],
+    *,
+    book_env_path: str | Path | None = None,
+) -> dict[str, str]:
+    """Portal/paper books trade APCA_* from their own .env, never root PAPER_APCA_*.
+
+    stock-bot/.env PAPER_APCA_* is the Lab blotter. run_paper_bot used to
+    set PAPER_CHASE_USE_RESEARCH_KEYS when those were inherited, so a v2
+    process with Medium flags traded the $94k Lab account.
+    """
+    out = dict(env)
+    book_id = (out.get("TRADING_BOOK_ID") or "").strip()
+    portal = (out.get("PORTAL_MANAGED_BOT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    path = book_env_path or out.get("PYTHONTRADING_ENV_FILE") or ""
+    if not (portal or book_id or path):
+        return out
+    book_creds = _book_file_credential_map(path)
+    if portal or book_id:
+        for key in _BOOK_ALPACA_CREDENTIAL_KEYS:
+            out.pop(key, None)
+        out.update(book_creds)
+        out["PAPER_CHASE_USE_RESEARCH_KEYS"] = "false"
+        return out
+    for key in _ROOT_ONLY_PAPER_KEYS:
+        if key not in book_creds:
+            out.pop(key, None)
+    return out
+
+
+def isolate_book_alpaca_os_environ(book_env_path: Path | str) -> None:
+    """Drop root PAPER_APCA_* from os.environ when the book file does not set them."""
+    isolated = isolate_book_alpaca_env(dict(os.environ), book_env_path=book_env_path)
+    for key in _ROOT_ONLY_PAPER_KEYS:
+        if key not in isolated:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = isolated[key]
+    os.environ["PAPER_CHASE_USE_RESEARCH_KEYS"] = isolated.get(
+        "PAPER_CHASE_USE_RESEARCH_KEYS", "false"
+    )
 
 
 def _sync_trading_mode_flags(*, skip_root_override: bool = False) -> None:
@@ -505,6 +647,8 @@ VTI_CORE_PCT = float(os.getenv("VTI_CORE_PCT", "0.80"))
 VTI_CORE_SYMBOL = os.getenv("VTI_CORE_SYMBOL", "VTI").strip().upper()
 # Rebalance VTI when |current - target| / equity exceeds this (avoids daily churn)
 VTI_CORE_REBALANCE_DRIFT_PCT = float(os.getenv("VTI_CORE_REBALANCE_DRIFT_PCT", "0.02"))
+# drift = every cycle (band); weekly = one resize per ISO week (Live + Medium SoT).
+VTI_REBALANCE_CADENCE = os.getenv("VTI_REBALANCE_CADENCE", "drift").strip().lower()
 
 # Paper research book (PAPER_APCA_*) — uses REALISTIC_RESEARCH_PROFILE defaults below.
 PAPER_AGGRESSIVE_ENABLED = os.getenv("PAPER_AGGRESSIVE", "true").lower() in (
@@ -774,6 +918,8 @@ PAPER_MAX_POSITION_PCT = float(os.getenv("PAPER_MAX_POSITION_PCT", str(PER_NAME_
 CONCENTRATION_GUARD_ENABLED = _env_bool_first(
     "CONCENTRATION_GUARD_ENABLED", default="true"
 )
+# Only sell-down when excess is at least this fraction of equity (0 = min-notional clips).
+CONCENTRATION_TRIM_MIN_PCT = float(os.getenv("CONCENTRATION_TRIM_MIN_PCT", "0"))
 MAX_ACTIVE_TICKERS = int(os.getenv("MAX_ACTIVE_TICKERS", "25"))
 # Auto-dust cleaner: sell positions with market value below this (USD).
 AUTO_DUST_MAX_NOTIONAL = float(os.getenv("AUTO_DUST_MAX_NOTIONAL", "10"))
@@ -1409,7 +1555,8 @@ _paper_aggressive_ctx = False
 
 # --- Fund sleeves (run_all.py) — 85% deployed, 15% cash buffer (see effective_* when game plan on) ---
 FUND_CASH_BUFFER_PCT = 0.15
-SPY_SLEEVE_CAP_PCT = 0.45
+# Retired SPY momentum sleeve (cap 0). SPY remains a regular NYSE-eligible name.
+SPY_SLEEVE_CAP_PCT = float(os.getenv("SPY_SLEEVE_CAP_PCT", "0"))
 # Base NYSE momentum sleeve; paper/research uses effective_nyse_sleeve_cap_pct() (0.18–0.22).
 NYSE_SLEEVE_CAP_PCT = float(os.getenv("NYSE_SLEEVE_CAP_PCT", "0.20"))
 # Dedicated stat-arb sleeve (paper/research) — independent of NYSE momentum cap.
@@ -1570,6 +1717,8 @@ PAPER_REGIME_A_SIZING_MULT = float(os.getenv("PAPER_REGIME_A_SIZING_MULT", "1.2"
 PAPER_REGIME_B_SIZING_MULT = float(os.getenv("PAPER_REGIME_B_SIZING_MULT", "0.30"))
 PAPER_REGIME_C_SIZING_MULT = float(os.getenv("PAPER_REGIME_C_SIZING_MULT", "1.0"))
 PAPER_REGIME_D_SIZING_MULT = float(os.getenv("PAPER_REGIME_D_SIZING_MULT", "0.7"))
+# RHYME_E (Steady_Bearish_Decline): intentional 1.60× for paper Best Paper lock
+# (protective shorts + dip path); not a typo vs B/D shrink. README documents 1.60×.
 PAPER_REGIME_E_SIZING_MULT = float(os.getenv("PAPER_REGIME_E_SIZING_MULT", "1.60"))
 # Weak RHYME (B/D/E): per-sleeve exposure ceiling as fraction of equity.
 PAPER_REGIME_WEAK_SLEEVE_MAX_PCT = float(os.getenv("PAPER_REGIME_WEAK_SLEEVE_MAX_PCT", "0.25"))
@@ -2128,15 +2277,18 @@ SMALL_ACCOUNT_EQUITY_THRESHOLD = float(
     os.getenv("SMALL_ACCOUNT_EQUITY_THRESHOLD", "500")
 )
 SMALL_ACCOUNT_RISK_PER_TRADE = float(os.getenv("SMALL_ACCOUNT_RISK_PER_TRADE", "0.01"))
-SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "10"))
-# Live Conservative profile (alpaca_live) — separate from Paper Research v1.5.4 FINAL LOCK.
-# High VTI + SPY-trend sleeve + safety stack (GARCH/ATR/exits/corr/tail); research sleeves OFF.
-LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.85"))
-LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.05"))
-# v1.1c 365d evidence: SPY MA200 best risk-adjusted live sleeve (PF 114, 98% win vs NYSE unrealized).
-LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "spy").strip().lower()
+# Flat per-order cap for small books. $10 could not fill one name in a single
+# order (per-name concentration cap is 8% of equity, ~$24 on a $300 book), so
+# idle cash drained in $10 slices. effective_max_notional_per_order still holds
+# the 25%-of-equity guard above this.
+SMALL_ACCOUNT_MAX_NOTIONAL = float(os.getenv("SMALL_ACCOUNT_MAX_NOTIONAL", "25"))
+# Live book (alpaca_live) — fixed 33/67 VTI/NYSE (same SoT as Paper Medium).
+# Weekly VTI resize via VTI_REBALANCE_CADENCE=weekly (not every cycle).
+LIVE_VTI_CORE_PCT = float(os.getenv("LIVE_VTI_CORE_PCT", "0.33"))
+LIVE_SMALL_ACTIVE_SLEEVE_PCT = float(os.getenv("LIVE_SMALL_ACTIVE_SLEEVE_PCT", "0.67"))
+LIVE_ACTIVE_SLEEVE_CHOICE = os.getenv("LIVE_ACTIVE_SLEEVE_CHOICE", "nyse").strip().lower()
 LIVE_CONSERVATIVE_ENABLED = _env_bool_first("LIVE_CONSERVATIVE_ENABLED", default="true")
-LIVE_CONSERVATIVE_LABEL = "Live Conservative"
+LIVE_CONSERVATIVE_LABEL = "Live NYSE (VTI off)"
 LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
     "vti_core_pct": LIVE_VTI_CORE_PCT,
     "active_sleeve_pct": LIVE_SMALL_ACTIVE_SLEEVE_PCT,
@@ -2146,8 +2298,8 @@ LIVE_CONSERVATIVE_PROFILE: dict[str, float | str] = {
 }
 # Locked when enforce_live_conservative_profile() runs (live book / Profile A).
 LIVE_CONSERVATIVE_LOCKED_ON: tuple[str, ...] = (
-    "SPY trend (LIVE_ACTIVE_SLEEVE_CHOICE=spy)",
-    "High VTI core (LIVE_VTI_CORE_PCT; no optional 0% floor)",
+    "NYSE active sleeve (LIVE_ACTIVE_SLEEVE_CHOICE=nyse)",
+    "Fixed VTI core 33% (LIVE_VTI_CORE_PCT; weekly resize)",
     "GARCH vol sizing (GARCH_VOL_LIVE_ENABLED via live enforce)",
     "Tail-risk controls",
     "Correlation guard",
@@ -2468,6 +2620,11 @@ def get_telegram_config():
     return None
 
 
+# Phone slash commands (Telegram). Read-only on live; never start/stop trading.
+TELEGRAM_COMMANDS_ENABLED = _parse_env_bool("TELEGRAM_COMMANDS_ENABLED", default="true")
+TELEGRAM_COMMANDS_LIVE = _parse_env_bool("TELEGRAM_COMMANDS_LIVE", default="true")
+
+
 # --- Alert policy (high-signal Telegram/email; noisy topics off by default) ---
 TELEGRAM_ALERT_HALT = _parse_env_bool("TELEGRAM_ALERT_HALT", default="true")
 TELEGRAM_ALERT_DRAWDOWN_MAJOR = _parse_env_bool("TELEGRAM_ALERT_DRAWDOWN_MAJOR", default="true")
@@ -2513,6 +2670,14 @@ TELEGRAM_LIVE_FILL_MIN_USD = TELEGRAM_FILL_MIN_USD  # alias
 # Error / action watcher (structured JSONL + optional Telegram + Cursor queue).
 ERROR_WATCHER_ENABLED = _parse_env_bool("ERROR_WATCHER_ENABLED", default="true")
 TELEGRAM_ALERT_ERRORS = _parse_env_bool("TELEGRAM_ALERT_ERRORS", default="true")
+# Runtime auto-recovery for cycle errors. Never patches source.
+# Known Alpaca 5xx/DNS: retry/backoff without waiting on Ollama.
+# Unknown errors: optional Ollama JSON pick from an allowlist (skip/backoff/retry/human).
+ERROR_AUTOFIX_ENABLED = _parse_env_bool("ERROR_AUTOFIX_ENABLED", default="true")
+ERROR_AUTOFIX_OLLAMA = _parse_env_bool("ERROR_AUTOFIX_OLLAMA", default="true")
+ERROR_AUTOFIX_OLLAMA_TIMEOUT_SEC = int(os.getenv("ERROR_AUTOFIX_OLLAMA_TIMEOUT_SEC", "12"))
+ERROR_AUTOFIX_MAX_BACKOFF_SEC = int(os.getenv("ERROR_AUTOFIX_MAX_BACKOFF_SEC", "120"))
+ERROR_AUTOFIX_TELEGRAM = _parse_env_bool("ERROR_AUTOFIX_TELEGRAM", default="true")
 # Optional once-per-day Telegram digest of bot_errors.jsonl (default OFF).
 TELEGRAM_DAILY_ERROR_DIGEST = _parse_env_bool(
     "TELEGRAM_DAILY_ERROR_DIGEST", default="false"
@@ -2568,11 +2733,13 @@ def telegram_alert_policy_summary() -> str:
     else:
         bits.append("yield alerts=off")
     if TELEGRAM_ALERT_FILLS:
-        bits.append(f"fills≥${telegram_fill_min_usd():.0f}")
+        bits.append(f"fills>=${telegram_fill_min_usd():.0f}")
     if TELEGRAM_ALERT_ERRORS:
         bits.append("errors")
     if ERROR_WATCHER_ENABLED:
         bits.append("error-watcher+daily-log")
+    if ERROR_AUTOFIX_ENABLED:
+        bits.append("error-autofix")
     if TELEGRAM_DAILY_ERROR_DIGEST:
         bits.append(f"error-digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET")
     if TELEGRAM_ALERT_DAILY_SUMMARY:
@@ -2583,6 +2750,8 @@ def telegram_alert_policy_summary() -> str:
         bits.append(f"live daily@{TELEGRAM_LIVE_DAILY_SUMMARY_TIME} ET")
     if telegram_weekly_summary_enabled():
         bits.append(f"weekly Fri@{TELEGRAM_WEEKLY_SUMMARY_TIME} ET")
+    if TELEGRAM_COMMANDS_ENABLED and (PAPER_TRADING or TELEGRAM_COMMANDS_LIVE):
+        bits.append("phone /status")
     return ", ".join(bits) if bits else "all high-signal alerts off"
 
 
@@ -2601,9 +2770,16 @@ def format_telegram_automation_banner() -> str:
         err_s = "Error watcher ON | daily log + TG per error"
         if TELEGRAM_DAILY_ERROR_DIGEST:
             err_s += f" | digest@{TELEGRAM_DAILY_ERROR_DIGEST_TIME} ET"
+        if ERROR_AUTOFIX_ENABLED:
+            ollama_s = "Ollama unknown-errors" if ERROR_AUTOFIX_OLLAMA else "rules-only"
+            err_s += f" | auto-fix {ollama_s}"
     else:
         err_s = "Error watcher OFF"
-    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} <<<"
+    if TELEGRAM_COMMANDS_ENABLED and (PAPER_TRADING or TELEGRAM_COMMANDS_LIVE):
+        phone_s = "phone cmds ON (/status)"
+    else:
+        phone_s = "phone cmds OFF"
+    return f">>> Telegram automation - {yield_s} | {fills_s} | {err_s} | {phone_s} <<<"
 
 
 def get_smtp_config():
@@ -2747,14 +2923,26 @@ def effective_halt_resume_drawdown_pct() -> float:
 
 
 def paper_sleeve_hard_cap_pct(sleeve_key: str) -> float | None:
+    # SPY sleeve is retired on every paper book, not only paper-aggressive.
+    if sleeve_key == "spy" and PAPER_TRADING:
+        return PAPER_SPY_MAX_EXPOSURE_PCT
     if not paper_aggressive_context():
         return None
     caps = {
-        "spy": PAPER_SPY_MAX_EXPOSURE_PCT,
         "nyse": PAPER_NYSE_MAX_EXPOSURE_PCT,
         "crypto": PAPER_CRYPTO_MAX_EXPOSURE_PCT,
     }
     return caps.get(sleeve_key)
+
+
+def spy_sleeve_enabled() -> bool:
+    """Dedicated SPY sleeve (cap + MA trend fill). Off does not ban SPY as a NYSE name."""
+    if float(SPY_SLEEVE_CAP_PCT) <= 0:
+        return False
+    hard = paper_sleeve_hard_cap_pct("spy")
+    if hard is not None and float(hard) <= 0:
+        return False
+    return True
 
 
 def set_backtest_live_conservative_context(enabled: bool) -> None:
@@ -2769,6 +2957,11 @@ def backtest_live_conservative_context() -> bool:
 def live_conservative_lock_active() -> bool:
     """True when Live Conservative feature lock applies (live book, not paper research)."""
     if not LIVE_CONSERVATIVE_ENABLED:
+        return False
+    # VTI core off (Lab/Medium/Live SoT) — do not keep the frozen 10% active
+    # baseline that assumed an 85/15 or 33/67 VTI ballast. Check the flag, not
+    # vti_core_enabled(), to avoid recursion through vti_core_allocation_pct().
+    if not VTI_CORE_ENABLED:
         return False
     if (
         PAPER_TRADING
@@ -2823,11 +3016,11 @@ def enforce_live_conservative_profile() -> None:
     if is_realistic_research_active():
         return
 
-    # --- High VTI + SPY trend sleeve ---
+    # --- Fixed 33/67 VTI/NYSE (env from portal user_bot_env wins) ---
     if not _env_explicit("SMALL_ACCOUNT_VTI_CORE_PCT"):
         SMALL_ACCOUNT_VTI_CORE_PCT = LIVE_VTI_CORE_PCT
     if not _env_explicit("LIVE_ACTIVE_SLEEVE_CHOICE"):
-        LIVE_ACTIVE_SLEEVE_CHOICE = "spy"
+        LIVE_ACTIVE_SLEEVE_CHOICE = "nyse"
 
     # --- Live ON (safety / sizing stack) ---
     if not _env_explicit("GARCH_VOL_ENABLED"):
@@ -2875,31 +3068,28 @@ def format_live_conservative_banner() -> str:
         "cash": "cash buffer",
     }
     sleeve = sleeve_labels.get(LIVE_ACTIVE_SLEEVE_CHOICE, LIVE_ACTIVE_SLEEVE_CHOICE)
-    legacy_active = max(
-        0.0, 1.0 - LIVE_VTI_CORE_PCT - LIVE_SMALL_ACTIVE_SLEEVE_PCT
-    )
     garch = "ON" if GARCH_VOL_LIVE_ENABLED and GARCH_VOL_ENABLED else "OFF"
+    cadence = effective_vti_rebalance_cadence()
     return (
-        f"{LIVE_CONSERVATIVE_LABEL} {LIVE_VTI_CORE_PCT:.0%}/{legacy_active:.0%}: "
+        f"{LIVE_CONSERVATIVE_LABEL}: "
         f"{LIVE_VTI_CORE_PCT:.0%} VTI | {LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {sleeve} | "
-        f"{legacy_active:.0%} NYSE/active | "
         f"GARCH {garch} | ATR/exits/corr/tail ON | "
-        f"scanners/shorts/stat-arb OFF | "
+        f"VTI resize {cadence} | "
         f"{SMALL_ACCOUNT_RISK_PER_TRADE:.0%} risk | ${SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max/order"
     )
 
 
 def format_live_conservative_headline() -> str:
-    """Prominent Live Conservative FINAL LOCK line (mirrors paper FINAL LOCK headline)."""
+    """Prominent Live FINAL LOCK line (mirrors paper FINAL LOCK headline)."""
     on = " | ".join(
         (
-            "SPY trend",
-            f"High VTI {LIVE_VTI_CORE_PCT:.0%}",
+            f"{LIVE_VTI_CORE_PCT:.0%}/{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} VTI/NYSE",
             "GARCH",
             "Tail risk",
             "Corr guard",
             "ATR",
             "Exits",
+            f"VTI {effective_vti_rebalance_cadence()}",
         )
     )
     off = "Stat Arb / shorts / RVOL-ORB-Catalyst / optional VTI floor / SPY-like / ARIMA / Daily Bank"
@@ -2912,7 +3102,8 @@ def format_live_conservative_headline() -> str:
 def get_live_profile_summary() -> str:
     return (
         f"{LIVE_CONSERVATIVE_LABEL}: {LIVE_VTI_CORE_PCT:.0%} VTI | "
-        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY trend | GARCH ON | "
+        f"{LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} {LIVE_ACTIVE_SLEEVE_CHOICE.upper()} | "
+        f"GARCH ON | weekly VTI resize | "
         f"ATR/exits/corr/tail ON | scanners/shorts/stat-arb OFF | "
         f"crypto OFF | thinking OFF | static universe"
     )
@@ -3045,7 +3236,22 @@ def effective_risk_per_trade(
 
 
 def effective_per_name_max_pct() -> float:
-    """Strict per-name ceiling (default 8%)."""
+    """Strict per-name ceiling (default 8%).
+
+    PAPER_MAX_POSITION_PCT is a paper-research knob (root .env pins it to 8%).
+    Applying it to the live book silently clamped the live PER_NAME_MAX_PCT, so
+    it only narrows the ceiling on paper/backtest paths.
+    """
+    if paper_lab_concentrated_enabled():
+        return float(os.getenv("PAPER_MAX_POSITION_PCT", "0.15"))
+    paperish = (
+        PAPER_TRADING
+        or paper_aggressive_context()
+        or is_realistic_research_active()
+        or backtest_paper_sleeves_context()
+    )
+    if not paperish:
+        return float(PER_NAME_MAX_PCT)
     return min(float(PER_NAME_MAX_PCT), float(PAPER_MAX_POSITION_PCT))
 
 
@@ -3054,8 +3260,18 @@ def effective_concentration_guard_enabled() -> bool:
     return bool(CONCENTRATION_GUARD_ENABLED)
 
 
+def effective_concentration_trim_min_notional(equity: float) -> float:
+    """Skip drip trims until excess is this large (USD)."""
+    pct = float(os.getenv("CONCENTRATION_TRIM_MIN_PCT", str(CONCENTRATION_TRIM_MIN_PCT)))
+    return max(0.0, float(equity or 0.0) * max(0.0, pct))
+
+
 def effective_max_active_tickers() -> int:
     """Max distinct non-core open tickers (default 25)."""
+    if paper_lab_concentrated_enabled():
+        return paper_lab_max_names()
+    if paper_medium_strategy_enabled():
+        return max(1, int(os.getenv("MAX_ACTIVE_TICKERS", "15")))
     return max(1, int(MAX_ACTIVE_TICKERS))
 
 
@@ -3375,7 +3591,7 @@ def effective_max_equity_trades() -> int:
         n = int(PAPER_MAX_EQUITY_TRADES)
     except (TypeError, ValueError):
         n = 3
-    return max(1, min(5, n))
+    return max(1, min(12, n))
 
 
 def account_cash_pct() -> float | None:
@@ -3492,12 +3708,11 @@ def load_screener_universe_tickers() -> list[str] | None:
 
 
 def _nyse_eligible_symbol(symbol: str) -> bool:
-    return (
-        not is_crypto(symbol)
-        and symbol != SPY_BOT_SYMBOL
-        and symbol != VTI_CORE_SYMBOL
-        and not is_metal_symbol(symbol)
-    )
+    if is_crypto(symbol) or is_metal_symbol(symbol) or symbol == VTI_CORE_SYMBOL:
+        return False
+    if symbol == SPY_BOT_SYMBOL:
+        return not spy_sleeve_enabled()
+    return True
 
 
 def nyse_momentum_universe(data_columns) -> list[str]:
@@ -4208,6 +4423,7 @@ def enforce_realistic_research_profile() -> None:
     global VTI_CORE_PCT
     global PAPER_RISK_PER_TRADE
     global PAPER_RISK_CALM_BULL_PCT
+    global PAPER_MAX_EQUITY_TRADES
     global RISK_PER_TRADE
     global PAPER_POSITION_MAX_HOLD_BARS
     global PAPER_REGIME_B_SIZING_MULT
@@ -4406,7 +4622,8 @@ def enforce_realistic_research_profile() -> None:
     global PAPER_SOCIAL_SLEEVE_ENABLED
 
     if not _env_explicit("DYNAMIC_CORE_ENABLED"):
-        DYNAMIC_CORE_ENABLED = True
+        # Allocator picks a passive VTI/SPY core; retired with the VTI sleeve.
+        DYNAMIC_CORE_ENABLED = False
     if not _env_explicit("DEEP_HISTORY_ENABLED"):
         DEEP_HISTORY_ENABLED = True
     if not _env_explicit("DEEP_HISTORY_INDICATORS_ONLY"):
@@ -4416,22 +4633,24 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("POSITIONING_OVERLAY_ENABLED", "COT_OVERLAY_ENABLED"):
         POSITIONING_OVERLAY_ENABLED = False
     if not _env_explicit("PAPER_DYNAMIC_VTI", "PAPER_DYNAMIC_VTI_ENABLED"):
-        PAPER_DYNAMIC_VTI_ENABLED = True
+        PAPER_DYNAMIC_VTI_ENABLED = False
+    # VTI core is retired on every book — one NYSE sleeve buys VTI/SPY/VOO like
+    # any other candidate. These must stay 0 or the in-process lock re-creates a
+    # 40/80% passive core whenever the portal env keys are absent.
     if not _env_explicit("DYNAMIC_VTI_PAPER_FLOOR"):
-        DYNAMIC_VTI_PAPER_FLOOR = 0.40
+        DYNAMIC_VTI_PAPER_FLOOR = 0.0
     if not _env_explicit("DYNAMIC_VTI_DEFAULT_PCT"):
-        DYNAMIC_VTI_DEFAULT_PCT = 0.65
+        DYNAMIC_VTI_DEFAULT_PCT = 0.0
     if not _env_explicit("DYNAMIC_VTI_CALM_PCT"):
-        DYNAMIC_VTI_CALM_PCT = 0.50
+        DYNAMIC_VTI_CALM_PCT = 0.0
     if not _env_explicit("DYNAMIC_VTI_STRESS_PCT"):
-        DYNAMIC_VTI_STRESS_PCT = 0.75
+        DYNAMIC_VTI_STRESS_PCT = 0.0
     if not _env_explicit("DYNAMIC_VTI_OPTIONAL_ENABLED", "VTI_OPTIONAL_FLOOR"):
-        DYNAMIC_VTI_OPTIONAL_ENABLED = True
+        DYNAMIC_VTI_OPTIONAL_ENABLED = False
     if not _env_explicit("DYNAMIC_VTI_ALLOW_ZERO", "VTI_OPTIONAL"):
-        # Safety rail: paper Dynamic VTI never below 40% (no zero-core path).
-        DYNAMIC_VTI_ALLOW_ZERO = False
+        DYNAMIC_VTI_ALLOW_ZERO = True
     if not _env_explicit("DYNAMIC_VTI_FLOOR_MIN"):
-        DYNAMIC_VTI_FLOOR_MIN = 0.40
+        DYNAMIC_VTI_FLOOR_MIN = 0.0
     if not _env_explicit("SPY_LIKE_BOOST_ENABLED", "PAPER_SPY_LIKE_BOOST_ENABLED"):
         SPY_LIKE_BOOST_ENABLED = True
     if not _env_explicit("PORTFOLIO_CONSTRUCTOR_ENABLED"):
@@ -4443,9 +4662,13 @@ def enforce_realistic_research_profile() -> None:
     if not _env_explicit("CORE_ALLOCATOR_LOCKED_CHOICE"):
         CORE_ALLOCATOR_LOCKED_CHOICE = "spy"
     if not _env_explicit("PAPER_VTI_CORE_PCT", "VTI_CORE_PCT"):
-        PAPER_VTI_CORE_PCT = 0.40
+        PAPER_VTI_CORE_PCT = 0.0
     if not _env_explicit("VTI_CORE_PCT"):
-        VTI_CORE_PCT = 0.80
+        VTI_CORE_PCT = 0.0
+    if not _env_explicit("PAPER_MAX_EQUITY_TRADES"):
+        # One NYSE sleeve carries the whole book; 3 entries/cycle cannot absorb
+        # freed cash across 15 name slots.
+        PAPER_MAX_EQUITY_TRADES = 12
     if not _env_explicit("PAPER_RISK_PER_TRADE", "RISK_PER_TRADE"):
         PAPER_RISK_PER_TRADE = 0.018
     if not _env_explicit("PAPER_RISK_CALM_BULL_PCT"):
@@ -4922,18 +5145,22 @@ def enforce_realistic_research_profile() -> None:
 # Subprocess env defaults for portal paper book / run_paper_bot (live book must not inherit).
 REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_AGGRESSIVE": "true",
-    "VTI_CORE_PCT": "0.80",
-    "PAPER_VTI_CORE_PCT": "0.40",
-    "PAPER_DYNAMIC_VTI": "true",
-    "PAPER_DYNAMIC_VTI_ENABLED": "true",
-    "DYNAMIC_VTI_PAPER_FLOOR": "0.40",
-    "DYNAMIC_VTI_PAPER_CEILING": "0.75",
-    "DYNAMIC_VTI_DEFAULT_PCT": "0.65",
-    "DYNAMIC_VTI_CALM_PCT": "0.50",
-    "DYNAMIC_VTI_STRESS_PCT": "0.75",
-    "DYNAMIC_VTI_OPTIONAL_ENABLED": "true",
-    "DYNAMIC_VTI_ALLOW_ZERO": "false",
-    "DYNAMIC_VTI_FLOOR_MIN": "0.40",
+    # Research / Lab / Medium: no VTI ballast — full active (Live also VTI off).
+    "VTI_CORE_ENABLED": "false",
+    "VTI_CORE_PCT": "0",
+    "PAPER_VTI_CORE_PCT": "0",
+    "PAPER_DYNAMIC_VTI": "false",
+    "PAPER_DYNAMIC_VTI_ENABLED": "false",
+    "DYNAMIC_VTI_PAPER_FLOOR": "0",
+    "DYNAMIC_VTI_PAPER_CEILING": "0",
+    "DYNAMIC_VTI_DEFAULT_PCT": "0",
+    "DYNAMIC_VTI_CALM_PCT": "0",
+    "DYNAMIC_VTI_STRESS_PCT": "0",
+    "DYNAMIC_VTI_OPTIONAL_ENABLED": "false",
+    "DYNAMIC_VTI_ALLOW_ZERO": "true",
+    "DYNAMIC_VTI_FLOOR_MIN": "0",
+    "DYNAMIC_CORE_ENABLED": "false",
+    "CORE_ALLOCATOR_LOCKED": "false",
     "SPY_LIKE_UNIVERSE": (
         "SPY,QQQ,VTI,VOO,IWM,AAPL,MSFT,NVDA,GOOGL,AMZN,META,AVGO"
     ),
@@ -4941,10 +5168,13 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "SPY_LIKE_BOOST_MULT": "1.10",
     "SPY_LIKE_BOOST_LIVE_ENABLED": "false",
     "DYNAMIC_VTI_OPTIONAL_LIVE": "false",
-    "CORE_ALLOCATOR_LOCKED": "false",
     "CORE_ALLOCATOR_LOCKED_CHOICE": "spy",
-    "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "300",
-    "PAPER_MAX_EQUITY_TRADES": "3",
+    "SPY_SLEEVE_CAP_PCT": "0",
+    "PAPER_SPY_MAX_EXPOSURE_PCT": "0",
+    # 300s killed full research cycles mid-flight (exit-42 restart loop, no
+    # completed cycle). Match heartbeat_watchdog's own paper default.
+    "HEARTBEAT_WATCHDOG_TIMEOUT_SEC": "900",
+    "PAPER_MAX_EQUITY_TRADES": "12",
     "DEEP_HISTORY_ENABLED": "true",
     "DEEP_HISTORY_INDICATORS_ONLY": "true",
     "RISK_PER_TRADE": "0.018",
@@ -5146,10 +5376,11 @@ REALISTIC_RESEARCH_ENV: dict[str, str] = {
     "PAPER_DUST_SKIP_CHUNK_FRAC": "0.02",
     "PAPER_EXCESS_CASH_SLEEVE_BOOST": "1.12",
     "PAPER_YIELD_GATE_OVERRIDE": "true",
-    "PAPER_NYSE_SLEEVE_CAP_PCT": "0.20",
-    "PAPER_NYSE_HIGH_CASH_CAP_PCT": "0.22",
-    "PAPER_NYSE_MAX_EXPOSURE_PCT": "0.22",
-    "NYSE_SLEEVE_CAP_PCT": "0.20",
+    # With VTI off, Research needs NYSE room for concentrated / active names.
+    "PAPER_NYSE_SLEEVE_CAP_PCT": "0.95",
+    "PAPER_NYSE_HIGH_CASH_CAP_PCT": "0.95",
+    "PAPER_NYSE_MAX_EXPOSURE_PCT": "0.95",
+    "NYSE_SLEEVE_CAP_PCT": "0.95",
     "SECTOR_EXPANSION_SIZE": "45",
     "SECTOR_MAX_TOTAL_TICKERS": "180",
     "MAX_ACTIVE_SECTORS_STRONG": "4",
@@ -5230,7 +5461,7 @@ def format_paper_live_profile_line() -> str:
     return (
         f">>> PAPER BOT: Realistic Research v{REALISTIC_RESEARCH_VERSION} (Aggressive FINAL LOCK) | "
         f"{REALISTIC_RESEARCH_TAGLINE} | Live Bot: {LIVE_CONSERVATIVE_LABEL} "
-        f"{LIVE_VTI_CORE_PCT:.0%} VTI + SPY trend + GARCH/ATR/exits/corr/tail"
+        f"{LIVE_CONSERVATIVE_LABEL} {LIVE_VTI_CORE_PCT:.0%} VTI + NYSE active + GARCH/ATR/exits/corr/tail"
     )
 
 
@@ -5248,9 +5479,14 @@ def format_universe_pool_label() -> str:
 
 def format_realistic_research_headline() -> str:
     """Prominent version line for paper bot startup (v1.5.4 FINAL LOCK)."""
+    vti_bit = (
+        f"fixed VTI {float(PAPER_VTI_CORE_PCT):.0%}"
+        if not PAPER_DYNAMIC_VTI_ENABLED
+        else "Dynamic VTI LOCKED 40-75% (>=40% floor)"
+    )
     features = (
         "FINAL LOCK | RHYME primary | HMM soft | GARCH vol | Daily Banking | "
-        "Stat Arb quality | Dynamic VTI LOCKED 40-75% (>=40% floor) | SPY-like ON | "
+        f"Stat Arb quality | {vti_bit} | SPY-like ON | "
         "ARIMA OFF | RVOL/ORB/Catalyst/ATR | Shorts 8-18%"
     )
     return (
@@ -5298,10 +5534,17 @@ def format_realistic_research_banner() -> str:
 
 def format_realistic_research_startup_lines() -> list[str]:
     """Multi-line startup block: headline, stat arb, profile details."""
+    detail = REALISTIC_RESEARCH_FEATURE_DETAIL
+    if not PAPER_DYNAMIC_VTI_ENABLED:
+        detail = detail.replace(
+            "Smart Dynamic VTI LOCKED (40-75%, hard floor >=40%; "
+            "tiers stress 75% / default 65% / calm 50%)",
+            f"fixed VTI {float(PAPER_VTI_CORE_PCT):.0%} (Dynamic VTI off)",
+        )
     lines = [
         f">>> {REALISTIC_RESEARCH_TAGLINE} <<<",
         format_realistic_research_headline(),
-        f">>> {REALISTIC_RESEARCH_FEATURE_DETAIL} <<<",
+        f">>> {detail} <<<",
     ]
     stat_line = format_stat_arb_research_line()
     if stat_line:
@@ -5605,11 +5848,215 @@ def paper_aggressive_context() -> bool:
     return PAPER_AGGRESSIVE_ENABLED and _paper_aggressive_ctx
 
 
+def trading_book_id() -> str:
+    return (os.getenv("TRADING_BOOK_ID") or os.getenv("BOOK_ID") or "").strip()
+
+
+def paper_lab_concentrated_enabled() -> bool:
+    """alpaca_paper lab only: 8 names, 30d, trail-from-peak, optional half."""
+    if trading_book_id() != "alpaca_paper":
+        return False
+    return os.getenv("PAPER_LAB_CONCENTRATED", "false").lower() in ("1", "true", "yes")
+
+
+def paper_nyse_a2b1_enabled() -> bool:
+    """Hold A2B1: flatten ≥8% next open, skip Monday. Lab 8 paper only."""
+    if not paper_lab_concentrated_enabled():
+        return False
+    return os.getenv("PAPER_NYSE_A2B1_ENABLED", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def paper_nyse_gain_exit_pct() -> float:
+    """A2B1 prior close-to-close threshold as a fraction (default 8%)."""
+    raw = os.getenv("PAPER_NYSE_GAIN_EXIT_PCT", "8")
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        val = 8.0
+    return val / 100.0 if val > 1.0 else max(0.0, val)
+
+
+def paper_nyse_gain_exit_mode() -> str:
+    raw = (os.getenv("PAPER_NYSE_GAIN_EXIT_MODE") or "skip_monday").strip().lower()
+    if raw in {"skip_monday", "skip-monday", "b1"}:
+        return "skip_monday"
+    if raw in {"all_days", "all", "b3"}:
+        return "all_days"
+    if raw in {"thu_only", "thursday", "b2"}:
+        return "thu_only"
+    return "skip_monday"
+
+
+def paper_medium_strategy_enabled() -> bool:
+    """alpaca_paper_v2: 15 names, 30d hold, 2x ATR, no 1R, no micro-trims."""
+    if trading_book_id() != "alpaca_paper_v2":
+        return False
+    return os.getenv("PAPER_MEDIUM_STRATEGY", "false").lower() in ("1", "true", "yes")
+
+
+def paper_idle_cash_scale_in_active(
+    cash_pct: float | None = None,
+    *,
+    equity: float | None = None,
+    cash: float | None = None,
+) -> bool:
+    """Lab/Medium only: put parked cash into names already held.
+
+    Live never qualifies. Requires the paper high-cash deploy threshold so this
+    is a leftover-VTI drain, not a permanent extra entry style.
+    """
+    if trading_book_id() == "alpaca_live":
+        return False
+    if not (paper_lab_concentrated_enabled() or paper_medium_strategy_enabled()):
+        return False
+    return paper_deploy_aggressive(cash_pct, equity=equity, cash=cash)
+
+
+def paper_lab_max_names() -> int:
+    return max(1, int(os.getenv("PAPER_LAB_MAX_NAMES", "8")))
+
+
+def paper_lab_half_gain_pct() -> float:
+    return float(os.getenv("PAPER_LAB_HALF_GAIN_PCT", "0.20"))
+
+
+def paper_lab_trail_arm_pct() -> float:
+    """Arm an 8% peak trail once the name is up this much from entry."""
+    return float(os.getenv("PAPER_LAB_TRAIL_ARM_PCT", "0.10"))
+
+
+def paper_lab_trail_pct() -> float:
+    return float(os.getenv("PAPER_LAB_TRAIL_PCT", "0.08"))
+
+
+def paper_lab_disaster_pct() -> float:
+    return float(os.getenv("PAPER_LAB_DISASTER_PCT", "0.10"))
+
+
+def paper_lab_max_hold_days() -> int:
+    return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "30")))
+
+
+def paper_lab_add_policy() -> str:
+    """Lab-only add-on policy. Medium/live always leftover-room.
+
+    ``idle`` (Lab lock): top up leftover under the name cap; a second full
+    ticket (up to 2×) only when the book is full so cash would otherwise sit.
+    ``room``: leftover under the per-name cap only.
+    ``fresh``: size a re-signal as if the name were flat, up to 2×.
+    """
+    if not paper_lab_concentrated_enabled():
+        return "room"
+    raw = (os.getenv("PAPER_LAB_ADD_POLICY") or "idle").strip().lower()
+    if raw in {"idle", "idle_cash", "cash"}:
+        return "idle"
+    if raw in {"fresh", "fresh_ticket", "as_if_unheld", "pyramid"}:
+        return "fresh"
+    if raw in {"room", "leftover"}:
+        return "room"
+    return "idle"
+
+
+def paper_lab_add_max_mult() -> float:
+    """Hard ceiling on a Lab name when an extra ticket is allowed (default 2×)."""
+    try:
+        return max(1.0, float(os.getenv("PAPER_LAB_ADD_MAX_MULT", "2.0")))
+    except (TypeError, ValueError):
+        return 2.0
+
+
+def paper_lab_extra_add_ok(
+    *,
+    gain_pct: float | None = None,
+    age_days: int | None = None,
+) -> bool:
+    """Block a 2× add into a name already trailing or late in the 30d clock."""
+    if gain_pct is not None and float(gain_pct) >= paper_lab_trail_arm_pct():
+        return False
+    late_from = max(1, paper_lab_max_hold_days() - 7)
+    if age_days is not None and int(age_days) >= late_from:
+        return False
+    return True
+
+
+def effective_per_name_trim_pct() -> float:
+    """Trim ceiling. Idle/fresh Lab may hold up to add-max-mult × the name cap."""
+    cap = effective_per_name_max_pct()
+    if paper_lab_add_policy() in {"fresh", "idle"}:
+        return cap * paper_lab_add_max_mult()
+    return cap
+
+
+def concentration_buy_room(
+    *,
+    current_val: float,
+    equity: float,
+    has_position: bool,
+    slots_full: bool = False,
+    extra_ok: bool = True,
+) -> float:
+    """USD room for a buy after the per-name cap (and Lab idle-cash extras)."""
+    if equity <= 0:
+        return 0.0
+    cap_val = float(equity) * effective_per_name_max_pct()
+    current = max(0.0, float(current_val or 0.0))
+    leftover = max(0.0, cap_val - current)
+    policy = paper_lab_add_policy()
+    if not has_position:
+        return leftover if leftover else cap_val
+    if policy == "fresh":
+        hard = cap_val * paper_lab_add_max_mult()
+        return max(0.0, min(cap_val, hard - current))
+    if policy == "idle":
+        if leftover > 0:
+            return leftover
+        if slots_full and extra_ok:
+            hard = cap_val * paper_lab_add_max_mult()
+            return max(0.0, min(cap_val, hard - current))
+        return 0.0
+    return leftover
+
+
 def research_mode_ready() -> bool:
     """Paper aggressive with stat arb sleeve (research / attribution stack)."""
     if not paper_aggressive_context():
         return False
     return effective_stat_arb_enabled()
+
+
+def format_paper_lab_banner() -> str | None:
+    if not paper_lab_concentrated_enabled():
+        return None
+    add = paper_lab_add_policy()
+    if add == "idle":
+        add_bit = "idle-cash add (2× only if book full)"
+    elif add == "fresh":
+        add_bit = f"add=fresh (full ticket up to {paper_lab_add_max_mult():.0f}×)"
+    else:
+        add_bit = "add leftover-room only"
+    a2b1 = ""
+    if paper_nyse_a2b1_enabled():
+        pct = paper_nyse_gain_exit_pct() * 100.0
+        a2b1 = f" | A2B1 ≥{pct:.0f}% next-open skip Mon"
+    return (
+        "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
+        "disaster -10% | 30d time | trail 8% off high after +10% | "
+        f"half @ +20% | {add_bit} | no same-day rebuy{a2b1}"
+    )
+
+
+def format_paper_v2_calm_banner() -> str | None:
+    if not paper_medium_strategy_enabled():
+        return None
+    return (
+        "PAPER MEDIUM (alpaca_paper_v2): 15 names | 30d hold | 2x ATR | "
+        "no 1R | no micro-trims | 33/67 VTI"
+    )
 
 
 def format_research_mode_banner() -> str | None:
@@ -6230,6 +6677,8 @@ def effective_multi_timeframe_enabled() -> bool:
 
 def effective_exit_optimization_enabled() -> bool:
     """Dynamic exits (partial, trail, time) — paper/research + Live Conservative lock."""
+    if paper_lab_concentrated_enabled() or paper_medium_strategy_enabled():
+        return False
     if not EXIT_OPTIMIZATION_ENABLED:
         return False
     if live_conservative_lock_active():
@@ -7002,6 +7451,8 @@ def effective_strategy_rating_enabled() -> bool:
 
 def effective_smart_stops_enabled() -> bool:
     """Smart ATR stops with reeval — paper / Realistic Research; live opt-in."""
+    if paper_lab_concentrated_enabled():
+        return False
     if not PAPER_SMART_STOPS:
         return False
     if (
@@ -7167,6 +7618,11 @@ def effective_vti_rebalance_drift_pct() -> float:
     return VTI_CORE_REBALANCE_DRIFT_PCT
 
 
+def effective_vti_rebalance_cadence() -> str:
+    raw = (os.getenv("VTI_REBALANCE_CADENCE") or VTI_REBALANCE_CADENCE or "drift").strip().lower()
+    return "weekly" if raw in ("weekly", "week", "1w") else "drift"
+
+
 def get_vti_core_pct(
     equity: float,
     vol_score: float | None = None,
@@ -7328,7 +7784,9 @@ def vti_core_allocation_pct(
         return dynamic
     if paper_only_sleeves_active():
         eq = equity if equity is not None and equity > 0 else (_account_equity or 0.0)
-        if eq > 0:
+        if eq > 0 and PAPER_DYNAMIC_VTI_ENABLED:
+            # Vol-scaled core only when Dynamic VTI is on; otherwise the fixed
+            # PAPER_VTI_CORE_PCT (0 on every book today) must win.
             pct = get_vti_core_pct(
                 eq,
                 vol_score=vol_score,
@@ -7429,6 +7887,27 @@ def _long_sleeve_base_cap_sum() -> float:
     return total
 
 
+def _long_sleeve_room_pct() -> float:
+    """Equity fraction left for long sleeves after VTI core + metal."""
+    metal = METAL_SLEEVE_CAP_PCT if metal_sleeve_enabled() else 0.0
+    try:
+        vti = float(vti_core_allocation_pct() or 0.0)
+    except Exception:
+        vti = 0.0
+    return max(0.0, round(1.0 - metal - vti, 6))
+
+
+def _fit_long_sleeve_scale(scale: float, long_sum: float) -> float:
+    """Never let scaled long sleeves plus VTI/metal exceed 100% of equity."""
+    if long_sum <= 0:
+        return 0.0
+    room = _long_sleeve_room_pct()
+    deploy = round(float(scale) * long_sum, 6)
+    if deploy > room + 1e-9:
+        scale = round(room / long_sum, 6)
+    return max(0.0, scale)
+
+
 def active_sleeve_scale() -> float:
     """Scale active SPY/crypto/NYSE caps (VTI core + metal/social reserves)."""
     af = active_fund_fraction()
@@ -7438,14 +7917,14 @@ def active_sleeve_scale() -> float:
         return 0.0
     base_scale = round(lf * af, 6)
     if not paper_aggressive_context():
-        return base_scale
-    # Boost deploys more of the active slice; never exceed active fund headroom.
+        return _fit_long_sleeve_scale(base_scale, long_sum)
+    # Boost deploys more of the active slice; never exceed remaining fund room.
     base_deploy = round(base_scale * long_sum, 6)
     max_active = base_scale
     target_deploy = round(
         min(max_active, base_deploy * PAPER_ACTIVE_SLEEVE_BOOST), 6
     )
-    return round(target_deploy / long_sum, 6)
+    return _fit_long_sleeve_scale(round(target_deploy / long_sum, 6), long_sum)
 
 
 def apply_paper_wisdom_floor(wisdom: dict | None) -> dict | None:
@@ -7460,7 +7939,11 @@ def apply_paper_wisdom_floor(wisdom: dict | None) -> dict | None:
 
 
 def _live_small_active_baseline_scale() -> float:
-    """Frozen 10% active fraction (pre-85% VTI) so NYSE cap stays unchanged."""
+    """Frozen 10% active fraction for legacy Live Conservative when VTI core is ON.
+
+    Unreachable when VTI_CORE_ENABLED=false (live_conservative_lock_active gates
+    that mode off so NYSE can use the full active sleeve).
+    """
     af = 0.10
     lf = long_fund_scale()
     long_sum = _long_sleeve_base_cap_sum()
@@ -7481,13 +7964,20 @@ def _live_conservative_sleeve_boost(sleeve: str | None) -> float:
 
 
 def effective_sleeve_cap(base_pct: float, *, sleeve: str | None = None) -> float:
+    if float(base_pct) <= 0:
+        return 0.0
     if sleeve == "stat_arb" and effective_stat_arb_sleeve_cap_enabled():
         return round(STAT_ARB_SLEEVE_CAP_PCT * active_sleeve_scale(), 6)
     if live_conservative_profile_active():
         cap = round(base_pct * _live_small_active_baseline_scale(), 6)
         cap = round(cap + _live_conservative_sleeve_boost(sleeve), 6)
-        return cap
-    return round(base_pct * active_sleeve_scale(), 6)
+    else:
+        cap = round(base_pct * active_sleeve_scale(), 6)
+    if sleeve:
+        hard = paper_sleeve_hard_cap_pct(sleeve)
+        if hard is not None:
+            cap = min(float(cap), float(hard))
+    return cap
 
 
 def effective_stat_arb_sleeve_cap_enabled() -> bool:
@@ -7563,10 +8053,14 @@ def effective_cash_buffer_pct() -> float:
         long_caps = _long_sleeve_base_cap_sum() * active_sleeve_scale()
     cash = round(1.0 - metal - vti - long_caps, 6)
     if cash < 0:
-        raise ValueError(
-            f"Fund over-allocated: vti {vti:.2%} + metal {metal:.2%} + "
-            f"long sleeves {long_caps:.2%} > 100%; reduce VTI_CORE_PCT or sleeve caps"
+        logging.getLogger(__name__).warning(
+            "Fund over-allocated: vti %.2f%% + metal %.2f%% + long sleeves %.2f%% > 100%%; "
+            "clamping cash buffer to 0 (dashboard/import still starts)",
+            vti * 100.0,
+            metal * 100.0,
+            long_caps * 100.0,
         )
+        return 0.0
     return cash
 
 
@@ -7584,7 +8078,7 @@ def fund_allocation_pct() -> dict[str, float]:
     )
     return {
         "vti_core": vti_core_allocation_pct(),
-        "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT),
+        "spy": effective_sleeve_cap(SPY_SLEEVE_CAP_PCT, sleeve="spy"),
         "crypto": crypto_cap,
         "nyse": effective_sleeve_cap(NYSE_SLEEVE_CAP_PCT),
         "stat_arb": stat_arb_cap,
@@ -7593,6 +8087,13 @@ def fund_allocation_pct() -> dict[str, float]:
     }
 
 
-_alloc = fund_allocation_pct()
-if abs(sum(_alloc.values()) - 1.0) > 1e-4:
-    raise ValueError(f"Fund allocation must sum to 100%, got {_alloc}")
+try:
+    _alloc = fund_allocation_pct()
+except ValueError as exc:
+    logging.getLogger(__name__).warning("Fund allocation check skipped: %s", exc)
+    _alloc = {}
+else:
+    if _alloc and abs(sum(_alloc.values()) - 1.0) > 1e-4:
+        logging.getLogger(__name__).warning(
+            "Fund allocation must sum to 100%%, got %s", _alloc
+        )

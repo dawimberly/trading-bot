@@ -1,0 +1,82 @@
+Pre-Market Report — 2026-09-16 00:04:22 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 15252). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3761.503299s
+Equity: $100,203.34
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Bear regime managed (E)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (2)
+  • All-time Sharpe OK (0.98)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • RHYME_E bear — elevated caution
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_E: Steady_Bearish_Decline
+Bubble Risk: 41/100
+
+=== Insider Signals (top 3) ===
+• WHWK | cluster_buy | s94 — Cluster buy: 5 insiders purchased Whitehawk Therapeutic
+• LITE | executive_sell | s88 $1.3M — executive sale - Lumentum Holdings Inc. ($1.3M)
+• AVT | cluster_buy | s86 $635K — Cluster buy: 3 insiders purchased AVNET INC ($635K tota
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 30 returned
+
+Top signals (up to 5)
+  WHWK   cluster_buy      score= 94  Cluster buy: 5 insiders purchased Whitehawk Therapeutics, In
+  LITE   executive_sell   score= 88  executive sale - Lumentum Holdings Inc. ($1.3M)
+  AVT    cluster_buy      score= 86  Cluster buy: 3 insiders purchased AVNET INC ($635K total)
+  ORKA   cluster_buy      score= 84  Cluster buy: 2 insiders purchased Oruka Therapeutics, Inc. (
+  ORKA   executive_sell   score= 84  CEO sale - Oruka Therapeutics, Inc. ($235K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: WHWK T1, NET T1; cluster buys: AVT (3 insiders), ORKA (2 insider
+
+Applied boosts
+  momentum  WHWK: +0.280
+  momentum  AVT: +0.180
+  momentum  ORKA: +0.080
+  stat_arb  WHWK: x1.220
+  stat_arb  AVT: x1.150
+  stat_arb  ORKA: x1.060
+  short     LITE: base=0.420 role=executive
+  short     ORKA: base=0.420 role=ceo
+  short     NET: base=0.420 role=cfo
+  short     GLOO: base=0.420 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 41.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 31 | Boost: 2 clusters, 4 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

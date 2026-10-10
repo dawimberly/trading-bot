@@ -1,0 +1,13 @@
+variant,n_trades,win_rate,avg_r_multiple,avg_pnl_bps,total_pnl_bps,note
+train_baseline,399,0.546,0.094,25.07,10001.3,
+holdout_baseline,456,0.548,0.155,24.59,11214.7,
+train_rhyme_C,161,0.516,0.011,22.75,3662.7,
+train_rhyme_D,195,0.538,0.163,16.25,3169.5,
+train_rhyme_E,43,0.698,0.083,73.7,3169.1,
+holdout_rhyme_C,148,0.514,-0.115,8.8,1302.3,
+holdout_rhyme_D,220,0.582,0.418,28.09,6179.2,
+holdout_rhyme_E,88,0.523,-0.083,42.42,3733.2,
+train_d_allow_c_block,238,0.567,0.151,26.63,6338.6,
+holdout_d_allow_c_block,308,0.565,0.281,32.18,9912.4,
+holdout_d_only,220,0.582,0.418,28.09,6179.2,
+oos_verdict,308,0.565,0.281,32.18,9912.4,gated_avgR=0.281 vs baseline_avgR=0.155; gated_total=9912.4 vs baseline_total=11214.7; train_decision=d_allow_c_block

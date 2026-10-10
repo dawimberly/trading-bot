@@ -29,13 +29,36 @@ _SQL_TABLE_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _matrix_cache: dict[tuple, tuple[float, float, pd.DataFrame]] = {}
 
 
+def sql_ticker_key(symbol: str) -> str:
+    """SQLite ident for a ticker — BRK.B -> BRK_B (dots are illegal in unquoted names)."""
+    return (config.normalize_symbol(symbol) or "").replace(".", "_")
+
+
+def daily_table_name(symbol: str) -> str:
+    return f"{sql_ticker_key(symbol)}_daily"
+
+
+def restore_sql_ticker(key: str) -> str:
+    """Map BRK_B back to BRK.B when the universe still uses the dotted ticker."""
+    raw = str(key or "")
+    try:
+        tickers = list(config.backtest_fetch_tickers())
+    except Exception:
+        tickers = []
+    for tick in tickers:
+        if sql_ticker_key(tick) == raw:
+            return config.normalize_symbol(tick)
+    return raw
+
+
 def safe_sql_table(name: str, *, allowed: set[str] | None = None) -> str:
-    """Validate table name before SQL interpolation."""
-    if not _SQL_TABLE_RE.match(name or ""):
+    """Validate table name before SQL interpolation. Dots become underscores (BRK.B)."""
+    check = str(name or "").replace(".", "_")
+    if not _SQL_TABLE_RE.match(check):
         raise ValueError(f"Invalid SQL table name: {name!r}")
-    if allowed is not None and name not in allowed:
+    if allowed is not None and check not in allowed and str(name or "") not in allowed:
         raise ValueError(f"Table not in allowlist: {name!r}")
-    return name
+    return check
 
 
 def _cache_ttl_sec() -> int:
@@ -95,7 +118,9 @@ def _load_table_close(conn: sqlite3.Connection, table: str) -> pd.Series | None:
     return series
 
 
-def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=False):
+def load_close_matrix(
+    db_path=None, interval="5m", days=None, *, force_refresh=False, tickers=None
+):
     """
     Read ticker tables into a wide DataFrame of close prices.
 
@@ -104,9 +129,12 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
       - "1d": backtest tables (*_daily suffix, column names without suffix)
     days: if set, keep only the last N rows after load
     force_refresh: bypass TTL cache
+    tickers: for "1d", load these instead of ``config.backtest_fetch_tickers()``
+      (research universes that are wider than the runtime fetch list)
     """
     path = str(db_path or config.resolve_db_path())
-    cache_key = (str(path), interval, days)
+    ticker_key = tuple(sorted(str(t) for t in tickers)) if tickers is not None else None
+    cache_key = (str(path), interval, days, ticker_key)
     mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
     ttl = _cache_ttl_sec()
     now = time.time()
@@ -123,7 +151,8 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
     tables = [t[0] for t in cursor.fetchall()]
 
     if interval == "1d":
-        allowed = {f"{ticker}_daily" for ticker in config.backtest_fetch_tickers()}
+        fetch_list = tickers if tickers is not None else config.backtest_fetch_tickers()
+        allowed = {daily_table_name(ticker) for ticker in fetch_list}
         tables = [t for t in tables if t.endswith("_daily") and t in allowed]
     else:
         tables = [t for t in tables if "_5m" not in t and "_daily" not in t]
@@ -133,7 +162,9 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
         series = _load_table_close(conn, table)
         if series is None:
             continue
-        col = table.removesuffix("_daily") if interval == "1d" else table
+        col = restore_sql_ticker(
+            table.removesuffix("_daily") if interval == "1d" else table
+        )
         columns[col] = series
 
     conn.close()

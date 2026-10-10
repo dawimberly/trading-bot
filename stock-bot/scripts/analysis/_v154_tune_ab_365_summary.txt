@@ -1,0 +1,21 @@
+v1.5.4 tune A/B days=365
+started=2026-07-18 11:38:45
+HMM=false
+
+| Test | Return | Sharpe | MaxDD | vs VTI | notes |
+|---|---:|---:|---:|---:|---|
+### Stat Arb quality (fill-rate baseline vs v1.5.4)
+Knobs unchanged (Z 2.1-2.7, RR 1.7, trail 45/30, partial@1.2, pairs 8-12).
+| SA fill-rate baseline | +24.36% | 1.31 | -7.05% | n/a | compare-stat-arb-quality |
+| SA v1.5.4 quality | +25.81% | 1.38 | -6.26% | n/a | compare-stat-arb-quality |
+Delta: return +1.45pp | Sharpe +0.07 | MaxDD +0.79pp | SA PnL $+0.56 | win +3.7pp | fill +0.0pp | pairs -1
+### STAGE 2: ARIMA OFF vs ON
+| ARIMA OFF | +17.23% | 1.12 | -6.05% | +4.40pp | avgVTI=47.1% |
+| ARIMA ON | +16.98% | 1.11 | -5.99% | +4.15pp | avgVTI=47.1% |
+### STAGE 3: optional VTI floor OFF vs ON
+| VTI floor fixed~35% | +17.23% | 1.12 | -6.06% | +4.40pp | avgVTI=47.1% |
+| VTI optional 20%/0% | +17.23% | 1.12 | -6.05% | +4.40pp | avgVTI=47.1% |
+### STAGE 4: SPY-like boost OFF vs ON (optional VTI ON)
+| SPY-like boost OFF | +17.23% | 1.12 | -6.05% | +4.40pp | avgVTI=47.1% |
+| SPY-like boost ON | +17.23% | 1.12 | -6.05% | +4.40pp | avgVTI=47.1% |
+finished=2026-07-18 18:39:54

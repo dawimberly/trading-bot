@@ -309,28 +309,41 @@ def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
 _last_equity = 0.0
 
 
-def _record_cycle_error(error: str) -> None:
+def _record_cycle_error(error: str) -> str:
     """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
     from modules.safe_io import read_json_file, write_json_atomic
 
+    try:
+        from modules import error_watcher
+
+        klass = error_watcher.classify_error_class(error)
+    except Exception:
+        klass = "other"
+
     path = config.ensure_heartbeat_path_writable()
     payload = read_json_file(path) or {}
+    payload["timestamp"] = datetime.datetime.now().isoformat()
     payload["last_cycle_error"] = str(error)[:500]
     payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
+    payload["last_cycle_error_class"] = klass
     write_json_atomic(path, payload)
     try:
         from modules import error_watcher
 
-        error_watcher.log_action("cycle_error", error=str(error)[:500])
-        # Promote to error queue without fabricating a traceback.
-        error_watcher.log_failed_order(
-            symbol="CYCLE",
-            side="n/a",
-            reason="cycle_error",
-            error=str(error)[:1000],
+        error_watcher.log_action(
+            "cycle_error", error=str(error)[:500], error_class=klass
         )
+        # Cycle-level Alpaca 5xx/DNS is not a failed order — never fabricate
+        # symbol=CYCLE / side=n/a (that produced "[LIVE] Order failed: n/a CYCLE").
+        if klass == "transient_network":
+            error_watcher.log_transient_network(str(error)[:1000], context="cycle")
+        elif klass == "transient_api":
+            error_watcher.log_transient_api(str(error)[:1000], context="cycle")
+        else:
+            error_watcher.log_cycle_fault(str(error)[:1000], error_class=klass)
     except Exception:
         pass
+    return klass
 
 
 def _write_heartbeat(
@@ -386,7 +399,7 @@ def _write_heartbeat(
                 data=heartbeat_data,
                 insider_state=insider_state,
             ),
-            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
+            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy"),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
             "metal": config.METAL_SLEEVE_CAP_PCT if config.metal_sleeve_enabled() else 0.0,
@@ -522,7 +535,7 @@ def _write_heartbeat(
 def main():
     global _last_equity, _last_cycle_schedule, _main_cycle_count
     _main_cycle_count += 1
-    now_ts = datetime.datetime.now()
+    now_ts = datetime.datetime.now(datetime.timezone.utc).astimezone()
     executor = _make_executor()
     schedule = equity_scan_state(executor.client, now_ts)
     _last_cycle_schedule = schedule
@@ -542,7 +555,13 @@ def main():
         pass
 
     try:
-        guard_summary = executor.enforce_portfolio_guards(dry_run=bool(executor.dry_run))
+        # Live: first cycles after a mid-session start used to nibble
+        # concentration_guard_trim (XOM ~$1) before regime pause applied.
+        skip_conc = (not config.PAPER_TRADING) and _main_cycle_count <= 2
+        guard_summary = executor.enforce_portfolio_guards(
+            dry_run=bool(executor.dry_run),
+            skip_concentration=skip_conc,
+        )
         if _main_cycle_count <= 2 or guard_summary.get("concentration_trims") or any(
             a.get("status") in ("dry_run", "closed", "submitted")
             for a in (guard_summary.get("dust_actions") or [])
@@ -1315,7 +1334,9 @@ def main():
                     f"--- Operating Layer: wisdom {wisdom_rec.get('action')} "
                     f"conv {wisdom_rec.get('conviction', 0):.2f} (no rebalance trigger) ---"
                 )
-    elif config.vti_core_enabled() and market_open:
+    elif market_open:
+        # Always run while open so VTI_CORE_ENABLED=false still unwinds leftover
+        # VTI (Paper Aggressive must not keep a stranded core).
         vti_result = rebalance_vti_core(
             executor,
             market_open=market_open,
@@ -1325,7 +1346,7 @@ def main():
         )
         if config.paper_aggressive_context() and vti_result.get("enabled"):
             print(
-                f"--- Dynamic VTI: {vti_result.get('target_pct', 0):.0%} target "
+                f"--- VTI core: {vti_result.get('target_pct', 0):.0%} target "
                 f"(vol={vol_label}/{vol_score:.4f}, stress={macro_stress_flag}) ---"
             )
         if vti_result.get("action"):
@@ -1339,6 +1360,12 @@ def main():
             print(
                 f"--- VTI core: {vti_result.get('current_value', 0):,.2f} / "
                 f"{vti_result.get('target_value', 0):,.2f} ---"
+            )
+        elif vti_result.get("reason") == "core off; unwind leftover VTI":
+            print(
+                f"--- VTI core OFF: unwind leftover "
+                f"${vti_result.get('notional', 0):,.2f} "
+                f"({'ok' if vti_result.get('ok') else 'pending'}) ---"
             )
 
     options_result = None
@@ -1557,7 +1584,7 @@ def main():
     if exits:
         print(f"--- Stop-loss exits: {exits} ---")
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone()
     resolve_cycle_deploy(
         data,
         executor,
@@ -2131,6 +2158,12 @@ def _print_startup_banner(startup_equity: float | None = None):
         research_line = config.format_research_mode_banner()
         if research_line:
             print(f"--- {research_line} ---")
+        lab_line = config.format_paper_lab_banner()
+        if lab_line:
+            print(f"--- {lab_line} ---")
+        v2_line = config.format_paper_v2_calm_banner()
+        if v2_line:
+            print(f"--- {v2_line} ---")
         try:
             from modules.pipeline_strategies import load_pipeline_data
             from modules.market_context import current_regime_from_data
@@ -2361,6 +2394,15 @@ def _print_startup_banner(startup_equity: float | None = None):
             )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     print(f"--- {config.format_telegram_automation_banner()} ---")
+    try:
+        from modules.telegram_commands import ensure_telegram_command_poller
+
+        if ensure_telegram_command_poller():
+            print("--- Telegram phone commands: ON (open the bot chat, tap /status) ---")
+        elif config.get_telegram_config():
+            print("--- Telegram phone commands: off (TELEGRAM_COMMANDS_* in .env) ---")
+    except Exception as exc:
+        print(f"[WARN] Telegram phone commands: {exc}")
     if alerts.alerts_configured():
         print(f"--- Alerts: on - {config.telegram_alert_policy_summary()} ---")
         if config.telegram_weekly_summary_enabled():
@@ -2512,6 +2554,7 @@ if __name__ == "__main__":
     while True:
         if watchdog is not None:
             watchdog.begin_cycle("main")
+        autofix_plan = None
         try:
             main()
         except AlpacaAuthError as e:
@@ -2525,12 +2568,18 @@ if __name__ == "__main__":
             sys.exit(1)
         except AlpacaCriticalError as e:
             log_event("alpaca_critical", error=str(e))
-            _record_cycle_error(str(e))
+            klass = _record_cycle_error(str(e))
             logger.warning(
                 "Alpaca API failure after retries (skipping cycle, bot continues): %s",
                 e,
             )
             trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
+            try:
+                from modules.error_autofix import handle_cycle_error
+
+                autofix_plan = handle_cycle_error(str(e), error_class=klass)
+            except Exception:
+                autofix_plan = None
         except AlpacaValidationError as e:
             log_event("alpaca_validation", error=str(e))
             logger.info("Alpaca order validation skipped (cycle continues): %s", e)
@@ -2541,13 +2590,19 @@ if __name__ == "__main__":
             break
         except Exception as e:
             tb = traceback.format_exc()
-            _record_cycle_error(str(e))
+            klass = _record_cycle_error(str(e))
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
             logger.exception("Cycle error: %s", e)
             notes = str(e)
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
+            try:
+                from modules.error_autofix import handle_cycle_error
+
+                autofix_plan = handle_cycle_error(str(e), error_class=klass)
+            except Exception:
+                autofix_plan = None
         finally:
             if watchdog is not None:
                 watchdog.end_cycle()
@@ -2555,4 +2610,7 @@ if __name__ == "__main__":
         if cli_args.cycles and cycle_count >= cli_args.cycles:
             logger.info("Completed %s cycle(s); exiting (--cycles)", cli_args.cycles)
             break
-        time.sleep(cycle_sleep_seconds(_last_cycle_schedule))
+        sleep_for = float(cycle_sleep_seconds(_last_cycle_schedule))
+        if autofix_plan is not None:
+            sleep_for = autofix_plan.loop_sleep_sec(sleep_for)
+        time.sleep(sleep_for)

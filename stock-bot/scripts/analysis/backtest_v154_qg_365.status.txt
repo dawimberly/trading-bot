@@ -1,0 +1,6 @@
+2026-07-19T22:30:46.7613783-05:00 starting sequential QG 365 A/B
+2026-07-19T22:30:46.7873632-05:00 CONTROL starting
+2026-07-19T23:21:09.1526250-05:00 CONTROL exit=0 elapsed_min=50.4 out=c:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\backtest_v154_qg_ctrl_365.txt
+2026-07-19T23:21:09.1596216-05:00 TREATMENT starting
+2026-07-20T00:15:58.5297423-05:00 TREATMENT exit=0 elapsed_min=54.8 out=c:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\backtest_v154_qg_treat_365.txt
+2026-07-20T00:15:58.6156930-05:00 DONE ctrl_exit=0 treat_exit=0

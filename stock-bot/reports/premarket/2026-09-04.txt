@@ -1,0 +1,87 @@
+Pre-Market Report — 2026-09-04 00:04:03 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 23432). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3787.454409s
+Equity: $100,070.51
+
+=== Bot Health ===
+Score: 97/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (5)
+  • Tail-risk sizing cut (0.70x)
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• REAX | cluster_buy | s100 $14.6B — Cluster buy: 4 insiders purchased Real REMAX Group Inc.
+• FLD | cluster_buy | s96 $74.5B — Cluster buy: 3 insiders purchased Fold Holdings, Inc. (
+• SYRE | executive_sell | s94 $1.3M — CEO sale - Spyre Therapeutics, Inc. ($1.3M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+[deploy] paper_deploy_aggressive ctx=False -> False
+[deploy] paper_deploy_aggressive ctx=False -> False
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 12 returned
+
+Top signals (up to 5)
+  REAX   cluster_buy      score=100  Cluster buy: 4 insiders purchased Real REMAX Group Inc. ($14
+  FLD    cluster_buy      score= 96  Cluster buy: 3 insiders purchased Fold Holdings, Inc. ($74.5
+  SYRE   executive_sell   score= 94  CEO sale - Spyre Therapeutics, Inc. ($1.3M)
+  REAX   executive_sell   score= 93  executive sale - Real REMAX Group Inc. ($555.0B)
+  TAK    executive_sell   score= 88  executive sale - TAKEDA PHARMACEUTICAL CO LTD ($2.1M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: REAX (4 insiders), FLD (3 insiders), SYRE (2 insiders), CORT (2 in
+
+Applied boosts
+  momentum  REAX: +0.180
+  momentum  FLD: +0.180
+  momentum  CEPL: +0.180
+  momentum  SYRE: +0.080
+  momentum  CORT: +0.080
+  stat_arb  REAX: x1.150
+  stat_arb  FLD: x1.150
+  stat_arb  CEPL: x1.150
+  stat_arb  SYRE: x1.060
+  stat_arb  CORT: x1.060
+  short     SYRE: base=0.420 role=ceo
+  short     REAX: base=0.420 role=executive
+  short     NTRA: base=0.420 role=executive
+  short     TAK: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 5 | Quality signals: 12 | Boost: 5 clusters, 4 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

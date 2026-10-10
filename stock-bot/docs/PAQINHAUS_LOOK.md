@@ -2,7 +2,7 @@
 
 Look only. Do not change strategy, journal, Alpaca, orders, sleeves, or bot process logic.
 
-Reference: the Grok web preview the owner signed off — giant blackletter **Stock-bot** wordmark, cyan **NYSE 100** stamp, cream-on-near-black, cyan tape.
+Reference: the Grok web preview the owner signed off — giant blackletter **Stock-bot** wordmark, cyan **LIVE** / **PAPER** stamp, cream-on-near-black, cyan tape. Do **not** restore the leftover NYSE-only `NYSE 100` slogan.
 
 ## Palette (mandatory)
 
@@ -30,18 +30,21 @@ Red is **live money + losses + errors**. Never decorative.
 - Body / tables / metrics: **Segoe UI**, tabular numbers.
 - Wordmark text: `Stock-bot`
 - Kicker above wordmark (cyan, tracked uppercase): `PYTHONTRADING · {BOOK}`
-- Stamp next to wordmark: `NYSE 100` — cyan fill, near-black text, slight rotation if the toolkit allows, otherwise a tight cyan pill.
+- Stamp next to wordmark: `LIVE` or `PAPER` (active book) — cyan fill, near-black text, slight rotation if the toolkit allows, otherwise a tight cyan pill. Never `NYSE 100` / `VTI 85`.
 
 ## Layout (top → bottom)
 
 1. 6px cyan hairline across the full window.
-2. Header: kicker + giant **Stock-bot** + NYSE stamp on the left. Running/halted chip + Paper/Live book switcher on the right.
-3. Cyan tape row with strategy facts: `NYSE 100% · VTI CORE OFF · SPY SLEEVE 0% · CRYPTO 0% · STAT-ARB 0% · JOURNAL = FILL · ATR COOLDOWN ON · SURVIVAL NOT P95`
+2. Header: kicker + giant **Stock-bot** + PAPER/LIVE stamp on the left. Running/halted chip + book controls on the right.
+3. Cyan **scrolling** tape: today's date + book strategy (Medium SoT / Lab / Live Profile A). Not a live holdings ticker. Never `NYSE 100% · VTI CORE OFF · …`.
 4. **LIVE TRADING — REAL MONEY ACCOUNT** banner only on the live book. Loud red. Do not size options on ~$300.
-5. Status pills: book, NYSE 100%, regime, gates, health, bot, heartbeat, conviction.
-6. Metric row: Equity, Cash %, Invested %, Unrealized P&L, Next market. Equity is the largest cream number.
+5. Status pills: book, regime, gates, health, bot, heartbeat, conviction.
+6. Metric row: Equity, Cash, Invested, Positions, Unrealized P&L, Market.
 7. Tabs: Positions / Overview / Trades / Wisdom / Charts.
-8. Active tab is cyan fill + near-black label. Inactive is cream on surface.
+8. **Positions tab (locked):** open-positions table expands first and shows **at least 10 tickers** without page-scroll; compact sleeve mix under the table. Scanner / insider / RVOL / ORB / shorts panels stay **off** this tab (they log; they must not steal table height). Do not put a tall sleeve/hero block above the table on the desktop path.
+9. Active tab is cyan fill + near-black label. Inactive is cream on surface.
+
+**Desktop entry** opens `dashboard_app.py --book alpaca_paper_v2` (full chrome). Never `--paper-book` for the daily launcher — that strips the tape.
 
 Paper book ≈ $97k. Live book ≈ $300. Switching books must change the stack, banner, and title kicker.
 

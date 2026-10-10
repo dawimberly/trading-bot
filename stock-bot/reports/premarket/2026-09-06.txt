@@ -1,0 +1,87 @@
+Pre-Market Report — 2026-09-06 00:03:57 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 19396). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3771.456817s
+Equity: $100,421.52
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (2)
+  • All-time Sharpe OK (0.97)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• RXT | executive_sell | s94 $1.6M — CEO sale - Rackspace Technology, Inc. ($1.6M)
+• CRWD | executive_sell | s94 $4.2M — CEO sale - CrowdStrike Holdings, Inc. ($4.2M)
+• NMIH | executive_sell | s94 $7.7M — CEO sale - NMI Holdings, Inc. ($7.7M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+[deploy] paper_deploy_aggressive ctx=False -> False
+[deploy] paper_deploy_aggressive ctx=False -> False
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 28 returned
+
+Top signals (up to 5)
+  RXT    executive_sell   score= 94  CEO sale - Rackspace Technology, Inc. ($1.6M)
+  CRWD   executive_sell   score= 94  CEO sale - CrowdStrike Holdings, Inc. ($4.2M)
+  NMIH   executive_sell   score= 94  CEO sale - NMI Holdings, Inc. ($7.7M)
+  ASPI   executive_sell   score= 89  CEO sale - ASP Isotopes Inc. ($999K)
+  DFTX   executive_sell   score= 89  CEO sale - Definium Therapeutics, Inc. ($722K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: ENOV (2 insiders), WRAP (2 insiders); exec sells -> short watch: N
+
+Applied boosts
+  momentum  ENOV: +0.080
+  momentum  WRAP: +0.080
+  stat_arb  ENOV: x1.060
+  stat_arb  WRAP: x1.060
+  short     NMIH: base=0.420 role=ceo
+  short     CRWD: base=0.420 role=ceo
+  short     RXT: base=0.420 role=ceo
+  short     ASPI: base=0.420 role=ceo
+  short     DFTX: base=0.420 role=ceo
+  short     VCYT: base=0.420 role=executive
+  short     ONTO: base=0.420 role=executive
+  short     GRAB: base=0.420 role=executive
+  short     OUT: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 31 | Boost: 2 clusters, 14 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

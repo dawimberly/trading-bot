@@ -1,0 +1,13 @@
+# v1.5.4 Stat Arb tune decision (2026-07-18)
+
+## Evidence reviewed
+- `scripts/analysis/_optional_vti_365.log`: SA 3 pairs, 100% fill, PnL +$5.65, win 20%, avg Z 2.49, avg hold 1.7b, cap util 1%. Portfolio +16.68% / Sharpe 1.09 / MaxDD -6.56%.
+- `backtest_v154_thorough_1000.txt`: SA 4 pairs, 67% fill, PnL +$21, win 22%, exits mostly stop/trail; atomic_fail rejects.
+- `scripts/analysis/_stat_arb_quality_100.log`: fill-rate baseline vs v1.5.4 quality → quality wins (SA PnL $-3.15→+$3.40, win +5.4pp, return +0.10pp, Sharpe +0.02). Prior 365 quality compare incomplete (baseline only).
+
+## Decision
+**No product-default knob changes.** Sample is tiny (3–4 pairs / window); further Z/RR/trail/cap edits would be noise-fitting. Keep locked v1.5.4 quality:
+Z 2.1–2.7 | RR 1.7 | trail 45%/30% | partial@1.2R | pairs 8–12 | ADV $50M | vol<5.5% | sleeve 7% vol-scaled.
+
+## Action
+Re-run `--compare-stat-arb-quality --days 365` (HMM off) for confirmation only.

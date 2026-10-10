@@ -12,6 +12,7 @@ import pandas as pd
 import yfinance as yf
 
 import config
+from modules.data_loader import daily_table_name, sql_ticker_key
 from modules.safe_io import safe_print
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def fetch_and_store(tickers=None):
             if df.empty:
                 safe_print("No data for " + ticker)
                 continue
-            df.to_sql(ticker, conn, if_exists="replace", index=False)
+            df.to_sql(sql_ticker_key(ticker) or ticker, conn, if_exists="replace", index=False)
             safe_print("Stored: " + ticker)
         except Exception as e:
             logger.warning("fetch 5m failed for %s: %s", ticker, e)
@@ -62,7 +63,7 @@ def fetch_daily_history(days=None, use_max=False):
         days = days or config.BACKTEST_DAYS
         print(f"Fetching {days}-day daily data for {len(tickers)} tickers...")
     for ticker in tickers:
-        table = f"{ticker}_daily"
+        table = daily_table_name(ticker)
         try:
             kwargs = dict(interval="1d", progress=False, auto_adjust=True)
             if use_max:
@@ -100,7 +101,7 @@ def fetch_daily_history_for_tickers(
         days = days or config.BACKTEST_DAYS
         print(f"Fetching {days}-day daily data for {len(tickers)} screener tickers...")
     for ticker in tickers:
-        table = f"{ticker}_daily"
+        table = daily_table_name(ticker)
         try:
             kwargs = dict(interval="1d", progress=False, auto_adjust=True)
             if use_max:

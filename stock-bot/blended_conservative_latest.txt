@@ -1,0 +1,124 @@
+﻿2026-06-18 00:22:06 INFO [root] logging initialized (daily rotation, 7 days)
+python : --- Logging error ---
+At C:\Users\Owner\AppData\Local\Temp\ps-script-82374d0a-5d1e-4de1-aa8a-9b5d6f57fed7.ps1:79 char:44
++ ... \stock-bot; python backtester.py --days 365 --paper-aggressive --stri ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (--- Logging error ---:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\handlers.py", line 80, in emit
+    self.doRollover()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Python314\Lib\logging\handlers.py", line 456, in doRollover
+    self.rotate(self.baseFilename, dfn)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\logging\handlers.py", line 121, in rotate
+    os.rename(source, dest)
+    ~~~~~~~~~^^^^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 
+'C:\\Users\\Owner\\PythonTrading\\stock-bot\\logs\\run_all.log' -> 
+'C:\\Users\\Owner\\PythonTrading\\stock-bot\\logs\\run_all.log.2026-06-17'
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 6414, in <module>
+    setup_project_logging()
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\logging_utils.py", line 116, in setup_project_logging
+    return setup_logging(log_dir=Path("logs"), level=level, backup_days=backup_days)
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\logging_utils.py", line 106, in setup_logging
+    root.info("logging initialized (daily rotation, %s days)", backup_days)
+Message: 'logging initialized (daily rotation, %s days)'
+Arguments: (7,)
+C:\Users\Owner\PythonTrading\stock-bot\modules\pipeline_strategies.py:560: UserWarning: Dynamic universe enabled but 
+no screener tickers in price data ù fetch daily history for data/screener_universe.json tickers
+  return config.nyse_momentum_universe(data.columns)
+--- TOP1 CONSERVATIVE BLEND COMPARE (strict PIT, thinking + news) ---
+Window (365d): 2025-08-13 -> 2026-06-18 (310 sim bars)
+VTI buy & hold benchmark: +16.15%
+Conservative blend: speculative 0.5% cap + mild ATR scale (0.75-1.25x) | speculative -5% stop (ATR widen) | mild trail +8% conf>=0.65 (12% trail) | NO heat cap | NO partials | patterns OFF
+Full vol sizing: 1% base x ATR x conviction | spec 0.5% | heat cap 7%
+Full loss cutting: -7%/-4% stops | tighten on headwind | partials +6/+12/+20 | trailing after +6%
+Config                       Return  Sharpe    MaxDD  Trades  Sized  Stops
+------------------------------------------------------------------------------
+2026-06-18 00:22:07 INFO [modules.international_sleeve] ADR/currency risk: home-market gaps and FX moves are unhedged on Alpaca (no forex sleeve) ù international sleeve uses USD ADRs only.
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Python314\Lib\logging\handlers.py", line 80, in emit
+    self.doRollover()
+    ~~~~~~~~~~~~~~~^^
+  File "C:\Python314\Lib\logging\handlers.py", line 456, in doRollover
+    self.rotate(self.baseFilename, dfn)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Python314\Lib\logging\handlers.py", line 121, in rotate
+    os.rename(source, dest)
+    ~~~~~~~~~^^^^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 
+'C:\\Users\\Owner\\PythonTrading\\stock-bot\\logs\\run_all.log' -> 
+'C:\\Users\\Owner\\PythonTrading\\stock-bot\\logs\\run_all.log.2026-06-17'
+Call stack:
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 6874, in <module>
+    run_blended_conservative_compare(
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 5858, in run_blended_conservative_compare
+    result = run_backtest(data, track_metrics=True, **kwargs)
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1675, in run_backtest
+    total_international += run_international_strategy(
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\pipeline_strategies.py", line 1419, in 
+run_international_strategy
+    log_adr_risk_once()
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\international_sleeve.py", line 183, in log_adr_risk_once
+    logger.info(ADR_RISK_NOTE)
+Message: 'ADR/currency risk: home-market gaps and FX moves are unhedged on Alpaca (no forex sleeve) ù international 
+sleeve uses USD ADRs only.'
+Arguments: ()
+v2.1 baseline (no Top1)     +53.71%    1.96   -7.63%      15      0      0
+2026-06-18 00:23:38 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:23:39 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:23:40 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:23:40 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:23:40 INFO [modules.loss_cutting] Conservative hard stop -7.2% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 00:23:40 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+Conservative blend          +59.60%    2.05   -7.24%      17      4      2
+  sizing: sized 4 | spec caps 4 | conviction boosts 0 | heat blocks 0 | peak heat 1.5%
+  exits: hard stops 2 | partial takes 0 | trail exits 0 | thinking tightened 0 | sector tightened 0
+2026-06-18 00:25:07 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:25:08 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:25:08 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:25:08 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+Full vol sizing only        +54.89%    1.98   -7.39%      16      4      0
+  sizing: sized 4 | spec caps 4 | conviction boosts 0 | heat blocks 0 | peak heat 1.5%
+2026-06-18 00:26:28 INFO [modules.loss_cutting] Conservative hard stop -7.4% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 00:26:28 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+Full loss cutting only      +59.29%    2.05   -7.20%      16      0      2
+  exits: hard stops 2 | partial takes 0 | trail exits 0 | thinking tightened 0 | sector tightened 0
+2026-06-18 00:27:41 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:27:42 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:27:42 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:27:42 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+2026-06-18 00:27:42 INFO [modules.loss_cutting] Conservative hard stop -7.2% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 00:27:42 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+Full Top1 combined          +59.60%    2.05   -7.24%      17      4      2
+  sizing: sized 4 | spec caps 4 | conviction boosts 0 | heat blocks 0 | peak heat 1.5%
+  exits: hard stops 2 | partial takes 0 | trail exits 0 | thinking tightened 0 | sector tightened 0
+------------------------------------------------------------------------------
+
+Delta vs v2.1 baseline:
+  Conservative blend: return +5.89pp | Sharpe +0.09 | MaxDD +0.39pp | Trades +2
+  Full vol sizing only: return +1.18pp | Sharpe +0.02 | MaxDD +0.24pp | Trades +1
+  Full loss cutting only: return +5.58pp | Sharpe +0.09 | MaxDD +0.43pp | Trades +1
+  Full Top1 combined: return +5.89pp | Sharpe +0.09 | MaxDD +0.39pp | Trades +2
+
+Delta conservative blend vs full individual features:
+  vs full vol sizing: return +4.71pp | Sharpe +0.07 | MaxDD +0.15pp
+  vs full loss cutting: return +0.31pp | Sharpe +0.00 | MaxDD -0.04pp
+  vs full combined Top1: return +0.00pp | Sharpe +0.00 | MaxDD +0.00pp
+
+Delta refined conservative blend vs prior blend (spec -4% stop, no trailing):
+  return +0.98pp | Sharpe +0.01 | MaxDD +0.15pp | Trades +2
+
+Overall: REFINED conservative blend is BETTER than prior blend and baseline on this window.
+
+Conservative blend speculative-name impact:
+  PLTR: sized 2 spec=2 stops 1
+  KTOS: sized 2 spec=2 stops 1
+
+Recommendation: ENABLE conservative blend on paper (TOP1_VOL_SIZING_CONSERVATIVE=true + TOP1_LOSS_CUT_CONSERVATIVE=true with PAPER_VOL_POSITION_SIZING_ENABLED and PAPER_LOSS_CUTTING_ENABLED). Partial Top1 rules improve or match baseline with less drag than full features.
+------------------------------------------------------------------------------

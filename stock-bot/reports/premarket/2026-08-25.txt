@@ -1,0 +1,75 @@
+Pre-Market Report — 2026-08-25 00:03:55 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 10664). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3739.906649s
+Equity: $96,666.65
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 31/100
+
+=== Insider Signals (top 3) ===
+• SIG | cluster_buy | s94 — Cluster buy: 17 insiders purchased SIGNET JEWELERS LTD
+• PCOR | executive_sell | s94 $2.8M — CEO sale - PROCORE TECHNOLOGIES, INC. ($2.8M)
+• FLD | executive_sell | s84 $9K — CEO sale - Fold Holdings, Inc. ($9K)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 26 returned
+
+Top signals (up to 5)
+  SIG    cluster_buy      score= 94  Cluster buy: 17 insiders purchased SIGNET JEWELERS LTD
+  PCOR   executive_sell   score= 94  CEO sale - PROCORE TECHNOLOGIES, INC. ($2.8M)
+  FLD    executive_sell   score= 84  CEO sale - Fold Holdings, Inc. ($9K)
+  PCOR   executive_sell   score= 83  executive sale - PROCORE TECHNOLOGIES, INC. ($835K)
+  PRE    cluster_buy      score= 79  Cluster buy: 2 insiders purchased Prenetics Global Ltd ($502
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: SIG T1; cluster buys: PRE (2 insiders); exec sells -> short watc
+
+Applied boosts
+  momentum  SIG: +0.280
+  momentum  PRE: +0.080
+  stat_arb  SIG: x1.220
+  stat_arb  PRE: x1.060
+  short     PCOR: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.8
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 26 | Boost: 1 clusters, 3 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

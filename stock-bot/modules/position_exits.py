@@ -3,13 +3,130 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import math
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 import config
 
 logger = logging.getLogger(__name__)
 _ET = ZoneInfo("America/New_York")
+
+
+def a2b1_should_flatten(
+    weekday: int,
+    prior_ret: float | None,
+    *,
+    threshold: float = 0.08,
+    mode: str = "skip_monday",
+    entered_today: bool = False,
+) -> bool:
+    """Hold A2B1: flatten after a ≥threshold up-day, next open, skip Monday."""
+    if entered_today:
+        return False
+    if prior_ret is None:
+        return False
+    try:
+        ret = float(prior_ret)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(ret) or ret < float(threshold):
+        return False
+    mode_n = (mode or "skip_monday").strip().lower()
+    wd = int(weekday)
+    if mode_n == "skip_monday":
+        return wd != 0
+    if mode_n == "all_days":
+        return True
+    if mode_n == "thu_only":
+        return wd == 3
+    return False
+
+
+def prior_session_close_return(closes, *, as_of_date: date | None = None) -> float | None:
+    """Yesterday close / prior close − 1, dropping today's in-progress bar."""
+    if closes is None:
+        return None
+    pairs: list[tuple[date, float]] = []
+    try:
+        items = closes.items() if hasattr(closes, "items") else enumerate(closes)
+        for raw_idx, raw_px in items:
+            try:
+                px = float(raw_px)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(px) or px <= 0:
+                continue
+            idx_date: date | None = None
+            if isinstance(raw_idx, date) and not isinstance(raw_idx, datetime):
+                idx_date = raw_idx
+            elif isinstance(raw_idx, datetime):
+                idx_date = raw_idx.date()
+            else:
+                ts = getattr(raw_idx, "date", None)
+                if callable(ts):
+                    try:
+                        idx_date = ts()
+                    except Exception:
+                        idx_date = None
+                if idx_date is None and hasattr(raw_idx, "to_pydatetime"):
+                    try:
+                        idx_date = raw_idx.to_pydatetime().date()
+                    except Exception:
+                        idx_date = None
+            if idx_date is None:
+                pairs.append((date.min, px))
+            else:
+                pairs.append((idx_date, px))
+    except Exception:
+        return None
+    if len(pairs) < 2:
+        return None
+    as_of = as_of_date or datetime.now(_ET).date()
+    completed = [(d, px) for d, px in pairs if d != as_of]
+    if len(completed) < 2:
+        return None
+    _yest_d, yest = completed[-1]
+    _prev_d, prev = completed[-2]
+    if prev <= 0:
+        return None
+    return yest / prev - 1.0
+
+
+def _a2b1_prior_return(symbol: str, executor=None, now=None) -> float | None:
+    injected = getattr(executor, "_a2b1_prior_returns", None) if executor else None
+    if isinstance(injected, dict) and symbol in injected:
+        return injected[symbol]
+    as_of = now.date() if isinstance(now, datetime) else datetime.now(_ET).date()
+    cache = getattr(executor, "_a2b1_ret_cache", None) if executor else None
+    if cache is None:
+        cache = {}
+        if executor is not None:
+            executor._a2b1_ret_cache = cache
+    key = (as_of.isoformat(), symbol)
+    if key in cache:
+        return cache[key]
+    ret = None
+    try:
+        import yfinance as yf
+
+        hist = yf.Ticker(symbol).history(period="15d", auto_adjust=True)
+        if hist is not None and len(hist) >= 2 and "Close" in hist.columns:
+            ret = prior_session_close_return(hist["Close"], as_of_date=as_of)
+    except Exception as exc:
+        logger.debug("a2b1 prior close %s: %s", symbol, exc)
+        ret = None
+    cache[key] = ret
+    return ret
+
+
+def _et_weekday(now=None) -> int:
+    if isinstance(now, datetime):
+        dt = now
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_ET).weekday()
+    return datetime.now(_ET).weekday()
 
 
 def _position_symbol(raw_symbol):
@@ -33,6 +150,55 @@ def _position_entry_hour_et(pos) -> str:
     except Exception:
         return ""
     return f"{et.hour:02d}:00"
+
+
+def _exit_hold_fields(pos) -> dict:
+    """Entry price, entry hour, and minutes held. Measurement only."""
+    try:
+        entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+    except (TypeError, ValueError):
+        entry = 0.0
+    hold = ""
+    created = getattr(pos, "created_at", None) or getattr(pos, "createdAt", None)
+    if isinstance(created, str):
+        try:
+            created = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except ValueError:
+            created = None
+    if created is not None:
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        try:
+            hold = int((datetime.now(timezone.utc) - created).total_seconds() // 60)
+        except Exception:
+            hold = ""
+    return {
+        "entry_price": round(entry, 4) if entry > 0 else "",
+        "entry_hour": _position_entry_hour_et(pos),
+        "hold_minutes": hold,
+    }
+
+
+def _log_position_exit(
+    journal,
+    journal_path,
+    pos,
+    symbol,
+    side,
+    reason,
+    equity,
+    *,
+    exit_reason="",
+) -> None:
+    journal.log_exit(
+        symbol,
+        side,
+        reason,
+        equity,
+        journal_path=journal_path,
+        exit_reason=exit_reason,
+        **_exit_hold_fields(pos),
+    )
 
 
 def _trailing_stop_hit(
@@ -89,6 +255,8 @@ def _position_age_bars(pos) -> int | None:
 
 
 def _max_hold_bars() -> int:
+    if config.paper_medium_strategy_enabled():
+        return max(1, int(config.PAPER_POSITION_MAX_HOLD_BARS))
     if config.effective_exit_optimization_enabled():
         return int(getattr(config, "EXIT_OPTIMIZATION_MAX_HOLD_BARS", 35))
     return int(config.PAPER_POSITION_MAX_HOLD_BARS)
@@ -143,10 +311,143 @@ def run_position_exits(
         meta = dict(meta_cache.get(symbol) or {})
 
         atr_stop_hit = False
-        stop_hit = pnl_pct <= -config.STOP_LOSS_PCT
+        lab = config.paper_lab_concentrated_enabled() and qty > 0 and not config.is_crypto(
+            symbol
+        )
+        disaster = config.paper_lab_disaster_pct() if lab else config.STOP_LOSS_PCT
+        stop_hit = pnl_pct <= -disaster
         plpc = getattr(pos, "unrealized_plpc", None)
-        if plpc is not None and float(plpc) <= -config.STOP_LOSS_PCT:
+        if plpc is not None and float(plpc) <= -disaster:
             stop_hit = True
+
+        if lab:
+            if config.paper_nyse_a2b1_enabled():
+                entered_today = age_bars == 0
+                prior_ret = _a2b1_prior_return(symbol, executor)
+                if a2b1_should_flatten(
+                    _et_weekday(),
+                    prior_ret,
+                    threshold=config.paper_nyse_gain_exit_pct(),
+                    mode=config.paper_nyse_gain_exit_mode(),
+                    entered_today=entered_today,
+                ):
+                    try:
+                        order = executor.execute_full_exit(
+                            symbol, reason="a2b1_gain_fade", sleeve="NYSE"
+                        )
+                        if executor.order_filled(order):
+                            exits += 1
+                            peak_cache.pop(symbol, None)
+                            meta_cache.pop(symbol, None)
+                            risk_manager._log_event(
+                                f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} "
+                                f"(a2b1_gain_fade {prior_ret:.2%})"
+                            )
+                            if journal:
+                                _log_position_exit(
+                                    journal,
+                                    journal_path,
+                                    pos,
+                                    symbol,
+                                    "sell",
+                                    f"a2b1_gain_fade {prior_ret:.2%}",
+                                    equity,
+                                    exit_reason="a2b1_gain_fade",
+                                )
+                    except Exception as e:
+                        if journal:
+                            journal.log_event(
+                                "exit_error",
+                                symbol=symbol,
+                                notes=str(e),
+                                journal_path=journal_path,
+                            )
+                    continue
+            peak_gain = (peak - entry) / entry if entry > 0 else 0.0
+            if peak_gain >= config.paper_lab_trail_arm_pct():
+                meta["lab_trail_armed"] = True
+                meta_cache[symbol] = meta
+            half_pct = config.paper_lab_half_gain_pct()
+            if not meta.get("lab_half_taken") and pnl_pct >= half_pct:
+                try:
+                    reduce_n = round(abs(qty) * current * 0.5, 2)
+                    order = executor.execute_reduce_notional(
+                        symbol,
+                        reduce_n,
+                        reason="lab_half_scale",
+                        sleeve="NYSE",
+                    )
+                    if order and executor.order_filled(order):
+                        meta["lab_half_taken"] = True
+                        meta_cache[symbol] = meta
+                        exits += 1
+                        risk_manager._log_event(
+                            f"LAB HALF: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
+                        )
+                        if journal:
+                            _log_position_exit(
+                                journal,
+                                journal_path,
+                                pos,
+                                symbol,
+                                "sell",
+                                f"lab_half_scale {pnl_pct:.2%}",
+                                equity,
+                                exit_reason="lab_half_scale",
+                            )
+                except Exception as e:
+                    if journal:
+                        journal.log_event(
+                            "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                        )
+                continue
+            trail_hit = False
+            if meta.get("lab_trail_armed") or meta.get("lab_half_taken"):
+                trail_hit = current <= peak * (1.0 - config.paper_lab_trail_pct())
+            hold_hit = (
+                age_bars is not None and age_bars >= config.paper_lab_max_hold_days()
+            )
+            if not (stop_hit or trail_hit or hold_hit):
+                continue
+            side = "sell"
+            try:
+                if stop_hit:
+                    exit_code = "lab_disaster"
+                    reason = f"lab_disaster {pnl_pct:.2%}"
+                elif trail_hit:
+                    exit_code = "lab_trail"
+                    reason = f"lab_trail {pnl_pct:.2%}"
+                else:
+                    exit_code = "lab_time"
+                    reason = f"lab_time {pnl_pct:.2%}"
+                order = executor.execute_full_exit(
+                    symbol, reason=exit_code, sleeve="NYSE"
+                )
+                if not executor.order_filled(order):
+                    continue
+                exits += 1
+                peak_cache.pop(symbol, None)
+                meta_cache.pop(symbol, None)
+                risk_manager._log_event(
+                    f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
+                )
+                if journal:
+                    _log_position_exit(
+                        journal,
+                        journal_path,
+                        pos,
+                        symbol,
+                        side,
+                        reason,
+                        equity,
+                        exit_reason=exit_code,
+                    )
+            except Exception as e:
+                if journal:
+                    journal.log_event(
+                        "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                    )
+            continue
 
         smart_on = config.effective_smart_stops_enabled()
         if smart_on and qty > 0 and not config.is_crypto(symbol):
@@ -185,12 +486,15 @@ def run_position_exits(
                             f"SMART STOP REDUCE: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
                         )
                         if journal:
-                            journal.log_exit(
+                            _log_position_exit(
+                                journal,
+                                journal_path,
+                                pos,
                                 symbol,
                                 "sell",
                                 decision.get("reason") or "smart_size_reduce",
                                 equity,
-                                journal_path=journal_path,
+                                exit_reason=decision.get("exit_code") or "smart_size_reduce",
                             )
                 except Exception as e:
                     if journal:
@@ -264,12 +568,15 @@ def run_position_exits(
                             f"PARTIAL EXIT: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
                         )
                         if journal:
-                            journal.log_exit(
+                            _log_position_exit(
+                                journal,
+                                journal_path,
+                                pos,
                                 symbol,
                                 "sell",
                                 f"partial_1r {pnl_pct:.2%}",
                                 equity,
-                                journal_path=journal_path,
+                                exit_reason="partial_1r",
                             )
                 except Exception as e:
                     if journal:
@@ -346,21 +653,16 @@ def run_position_exits(
 
             risk_manager._log_event(f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})")
             if journal:
-                entry_hour = _position_entry_hour_et(pos) if quality else ""
-                if quality:
-                    journal.log_exit(
-                        symbol,
-                        side,
-                        reason,
-                        equity,
-                        journal_path=journal_path,
-                        exit_reason=exit_code,
-                        entry_hour=entry_hour,
-                    )
-                else:
-                    journal.log_exit(
-                        symbol, side, reason, equity, journal_path=journal_path
-                    )
+                _log_position_exit(
+                    journal,
+                    journal_path,
+                    pos,
+                    symbol,
+                    side,
+                    reason,
+                    equity,
+                    exit_reason=exit_code,
+                )
         except Exception as e:
             if journal:
                 journal.log_event(

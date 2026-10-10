@@ -1,0 +1,38 @@
+﻿2026-06-18 07:12:12 INFO [root] logging initialized (daily rotation, 7 days)
+python : C:\Users\Owner\PythonTrading\stock-bot\modules\pipeline_strategies.py:560: UserWarning: Dynamic universe 
+enabled but no screener tickers in price data ù fetch daily history for data/screener_universe.json tickers
+At C:\Users\Owner\AppData\Local\Temp\ps-script-7793cde1-9748-4df3-890b-f87adaa2128b.ps1:79 char:44
++ ... \stock-bot; python backtester.py --days 365 --paper-aggressive --stri ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\Owner\...se.json tickers:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  return config.nyse_momentum_universe(data.columns)
+--- THINKING ENGINE IMPACT A/B (conservative blend + strict PIT) ---
+Window (365d): 2025-08-13 -> 2026-06-18 (310 sim bars)
+VTI buy & hold benchmark: +16.15%
+Held constant: Top1 conservative vol sizing (spec 0.5% + mild ATR) | spec -4% stop only | sector rotation OFF | patterns OFF
+Variable: Thinking Engine sleeve tilts + synthetic news digest (PAPER_THINKING_ENGINE_ENABLED / with_news)
+Config                             Return  Sharpe    MaxDD  Trades  Tilts  TiltMag
+------------------------------------------------------------------------------------
+2026-06-18 07:12:25 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:12:25 INFO [modules.international_sleeve] ADR/currency risk: home-market gaps and FX moves are unhedged on Alpaca (no forex sleeve) ù international sleeve uses USD ADRs only.
+2026-06-18 07:12:27 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:12:28 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:12:29 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:12:29 INFO [modules.loss_cutting] Conservative hard stop -7.2% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 07:12:29 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+Blend + thinking + news ON        +59.60%    2.05   -7.24%      17    134    0.138
+2026-06-18 07:16:35 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:16:36 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:16:37 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:16:37 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:16:37 INFO [modules.loss_cutting] Conservative hard stop -7.2% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 07:16:37 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+Blend + thinking + news OFF       +53.53%    2.01   -6.78%      16      0    0.000
+------------------------------------------------------------------------------------
+
+Delta (thinking ON - OFF): return +6.07pp | Sharpe +0.04 | MaxDD -0.46pp | Trades +1 | tilts +134
+
+Recommendation: KEEP Thinking + News ON for paper conservative blend (PAPER_THINKING_ENGINE_ENABLED=true). Tilts add edge or match heuristic-only.
+------------------------------------------------------------------------------------

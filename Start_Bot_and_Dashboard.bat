@@ -37,8 +37,12 @@ set "PYTHONTRADING_ROOT=%STOCK_BOT%"
 title PythonTrading - Starting...
 
 set "PY="
-REM Prefer repo-root .venv (full deps). stock-bot\.venv may be incomplete.
-if exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
+REM Prefer repo venv311 (this PC), then .venv.
+if exist "%REPO_ROOT%\venv311\Scripts\python.exe" (
+    set "PY=%REPO_ROOT%\venv311\Scripts\python.exe"
+) else if exist "%STOCK_BOT%\venv311\Scripts\python.exe" (
+    set "PY=%STOCK_BOT%\venv311\Scripts\python.exe"
+) else if exist "%REPO_ROOT%\.venv\Scripts\python.exe" (
     set "PY=%REPO_ROOT%\.venv\Scripts\python.exe"
 ) else if exist "%STOCK_BOT%\.venv\Scripts\python.exe" (
     set "PY=%STOCK_BOT%\.venv\Scripts\python.exe"
@@ -53,6 +57,7 @@ echo ========================================
 echo.
 echo   This window shows startup progress only.
 echo   The dashboard opens in a separate window.
+echo   Healthy Paper v2 is left running unless you pass --force-reset.
 echo.
 echo   Project: %STOCK_BOT%
 echo   Python:  %PY%
@@ -84,9 +89,9 @@ if not "%RC%"=="0" (
 echo.
 echo ========================================
 echo   Started successfully.
-echo   - Live bot  ^(conservative^)
-echo   - Paper bot ^(aggressive^)
 echo   - Desktop dashboard ^(pythonw^)
+echo   - Paper v2 left running when heartbeat is fresh
+echo   - Live / paper restart only with --force-reset
 echo.
 echo   Sign in when the dashboard opens.
 echo   Wait ~60 seconds, then check Overview for fresh heartbeats.

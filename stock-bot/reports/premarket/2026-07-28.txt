@@ -1,0 +1,84 @@
+Pre-Market Report — 2026-07-28 00:04:02 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 1372). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3704.66177s
+Equity: $95,512.41
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Thinking engine ON (LLM)
+  • Strong insider cluster
+  • All-time Sharpe negative (-0.87)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• SOFI | cluster_buy | s94 — Cluster buy: 9 insiders purchased SoFi Technologies, In
+• NU | executive_sell | s89 $612K — CEO sale - Nu Holdings Ltd. ($612K)
+• SNEX | executive_sell | s88 $1.5M — executive sale - StoneX Group Inc. ($1.5M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 34 returned
+
+Top signals (up to 5)
+  SOFI   cluster_buy      score= 94  Cluster buy: 9 insiders purchased SoFi Technologies, Inc.
+  NU     executive_sell   score= 89  CEO sale - Nu Holdings Ltd. ($612K)
+  SNEX   executive_sell   score= 88  executive sale - StoneX Group Inc. ($1.5M)
+  GENCO SHIPPING & TRADING LTD activist_13d     score= 86  Schedule 13D activist stake - GENCO SHIPPING & TRADING LTD
+  NU     executive_sell   score= 84  CEO sale - Nu Holdings Ltd. ($108K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: SOFI T1; cluster buys: INTU (2 insiders); exec sells -> short wa
+
+Applied boosts
+  momentum  SOFI: +0.280
+  momentum  INTU: +0.080
+  stat_arb  SOFI: x1.220
+  stat_arb  INTU: x1.060
+  short     NU: base=0.420 role=executive
+  short     SNEX: base=0.420 role=executive
+  short     MU: base=0.420 role=executive
+  short     EW: base=0.420 role=executive
+  short     FUNC: base=0.420 role=executive
+  short     LAB: base=0.420 role=cfo
+  short     RENT: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.9
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 34 | Boost: 1 clusters, 9 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

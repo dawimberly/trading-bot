@@ -95,9 +95,18 @@ def read_csv_file(path: Path, *, tail_rows: int | None = None) -> pd.DataFrame:
     if not path.is_file():
         return pd.DataFrame()
     try:
-        if tail_rows is not None and tail_rows > 0 and path.stat().st_size > 256_000:
+        size = path.stat().st_size
+        if tail_rows is not None and tail_rows > 0 and size > 256_000:
             return read_csv_tail(path, tail_rows)
-        return pd.read_csv(path, encoding="utf-8", engine="python", on_bad_lines="warn")
+        # Ragged journals must not use pd.read_csv(on_bad_lines="warn") — that
+        # floods ParserWarning on the UI thread and makes login feel stuck.
+        header, rows = read_csv_rows_safe(path)
+        if not header:
+            return pd.DataFrame()
+        try:
+            return pd.DataFrame(rows, columns=header)
+        except ValueError:
+            return read_csv_tail(path, tail_rows or 5000)
     except (OSError, pd.errors.EmptyDataError, pd.errors.ParserError, ValueError) as exc:
         logger.warning("CSV read failed for %s: %s", path.name, exc)
         if tail_rows is not None and tail_rows > 0:

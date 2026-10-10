@@ -1,0 +1,51 @@
+{
+  "saved_at": "2026-08-19T03:26:15.370441+00:00",
+  "complete": true,
+  "completed_runs": 200,
+  "mc_runs": 200,
+  "elapsed_sec": 370511.0,
+  "sec_per_run": 1852.56,
+  "summary": {
+    "return_pct": {
+      "metric": "return_pct",
+      "n": 200,
+      "mean": 21.1564,
+      "median": 4.715,
+      "std": 60.235,
+      "p5": -43.827,
+      "p25": -19.8775,
+      "p75": 50.535,
+      "p95": 145.9375,
+      "min": -69.01,
+      "max": 230.38
+    },
+    "sharpe": {
+      "metric": "sharpe",
+      "n": 200,
+      "mean": 0.335,
+      "median": 0.33,
+      "std": 2.8681,
+      "p5": -4.376,
+      "p25": -1.3625,
+      "p75": 2.315,
+      "p95": 5.0525,
+      "min": -9.65,
+      "max": 6.52
+    },
+    "max_drawdown_pct": {
+      "metric": "max_drawdown_pct",
+      "n": 200,
+      "mean": -18.3177,
+      "median": -13.47,
+      "std": 14.1061,
+      "p5": -44.8365,
+      "p25": -25.195,
+      "p75": -6.9575,
+      "p95": -4.4485,
+      "min": -69.01,
+      "max": -3.31
+    },
+    "p_return_positive": 52.5,
+    "p_sharpe_gt_1": 37.5
+  }
+}

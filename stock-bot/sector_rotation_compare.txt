@@ -1,0 +1,318 @@
+﻿2026-06-18 07:00:21 INFO [root] logging initialized (daily rotation, 7 days)
+python : C:\Users\Owner\PythonTrading\stock-bot\modules\pipeline_strategies.py:560: UserWarning: Dynamic universe 
+enabled but no screener tickers in price data ù fetch daily history for data/screener_universe.json tickers
+At C:\Users\Owner\AppData\Local\Temp\ps-script-c9e4a695-3b67-4290-b25d-b83aa6078cad.ps1:79 char:44
++ ... \stock-bot; python backtester.py --days 365 --paper-aggressive --stri ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (C:\Users\Owner\...se.json tickers:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  return config.nyse_momentum_universe(data.columns)
+--- SECTOR ROTATION A/B (conservative blend + strict PIT + thinking + news) ---
+Window (365d): 2025-08-13 -> 2026-06-18 (310 sim bars)
+VTI buy & hold benchmark: +16.15%
+Conservative rotation: validated macro regimes (defense/space, oil, AI, rate cuts) | boost 6% / trim 5% | max 1 sector | sleeve delta cap 4% | no tech trim on defense unless lagging
+Full hybrid: rules + thinking bias | boost 12% / trim 10% | max 2 sectors
+Config                             Return  Sharpe    MaxDD  Trades  Tilts
+----------------------------------------------------------------------------
+2026-06-18 07:00:22 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:00:22 INFO [modules.international_sleeve] ADR/currency risk: home-market gaps and FX moves are unhedged on Alpaca (no forex sleeve) ù international sleeve uses USD ADRs only.
+2026-06-18 07:00:23 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:00:24 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:00:24 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:00:24 INFO [modules.loss_cutting] Conservative hard stop -7.2% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 07:00:24 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+Conservative blend (no rotation)  +59.60%    2.05   -7.24%      17    134
+2026-06-18 07:01:48 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:01:49 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:01:50 INFO [modules.vol_position_sizing] Top1 sizing PLTR: risk 0.50% (base 1% x vol 1.21 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:01:50 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $49 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:01:50 INFO [modules.loss_cutting] Conservative hard stop -7.2% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 07:01:50 INFO [modules.loss_cutting] Conservative hard stop -11.0% on speculative PLTR (watchlist hype name) (limit -4%)
+2026-06-18 07:01:52 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:01:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:01:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:01:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:01:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:00 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:07 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:12 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:12 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:17 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:17 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:17 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:18 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:18 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:18 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:29 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:30 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:30 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:31 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:35 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:35 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:36 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:37 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:39 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:40 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:41 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:41 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:42 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:42 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:43 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:43 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:43 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:46 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:47 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:47 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:47 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:48 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:49 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:49 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:50 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:50 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:50 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:51 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:51 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:51 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:51 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:52 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:52 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:52 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:52 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:52 INFO [modules.thinking_engine] Thinking engine: tilt rejected (total sleeve delta 12.0% exceeds 12% cap)
+2026-06-18 07:02:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:54 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:54 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:56 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:56 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:56 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:57 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:57 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:57 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:02:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:00 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:00 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:00 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:01 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:01 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:02 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:02 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:03 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:07 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:07 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:07 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:11 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:12 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:12 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:14 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:14 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:15 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:15 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+Blend + conservative rotation     +41.78%    1.91   -6.31%      20    133
+2026-06-18 07:03:22 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $50 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:03:23 INFO [modules.vol_position_sizing] Top1 sizing KTOS: risk 0.50% (base 1% x vol 1.25 x conv 1.00) -> $2 notional | SPECULATIVE watchlist hype name
+2026-06-18 07:03:23 INFO [modules.loss_cutting] Conservative hard stop -7.4% on speculative KTOS (watchlist hype name) (limit -4%)
+2026-06-18 07:03:25 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:35 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:36 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:37 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:41 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:52 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:54 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:55 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:57 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:03:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:00 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:01 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:02 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:13 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:14 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:15 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:15 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:39 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:40 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:49 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:50 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:51 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:54 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:54 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:55 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:55 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:56 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:04:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:01 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:03 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:07 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:11 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:17 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:18 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:18 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:19 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:19 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:22 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:23 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:24 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:24 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:25 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:25 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:26 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:26 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:27 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:28 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:28 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:29 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:29 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:29 INFO [modules.thinking_engine] Thinking engine: tilt rejected (total sleeve delta 12.0% exceeds 12% cap)
+2026-06-18 07:05:30 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:30 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:31 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:32 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:33 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:34 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:34 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:37 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:37 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:38 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:39 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:39 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:39 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:40 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:41 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:41 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:42 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:43 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:43 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:46 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:47 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:48 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:48 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:49 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:50 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:50 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:51 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:53 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:55 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:56 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:56 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:57 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:57 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:58 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:05:59 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:00 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:01 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:02 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:03 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:03 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:04 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:05 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:06 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:08 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:09 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:10 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:11 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:12 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:15 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:16 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:18 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:19 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:20 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:21 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:22 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:22 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:23 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:24 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+2026-06-18 07:06:25 WARNING [thinking_engine] Thinking validation failed: meta/process narrative
+Blend + full hybrid rotation      +24.61%    1.42   -6.34%      17    133
+----------------------------------------------------------------------------
+
+Delta vs conservative blend (no rotation):
+  Blend + conservative rotation: return -17.82pp | Sharpe -0.14 | MaxDD +0.93pp | Trades +3
+  Blend + full hybrid rotation: return -34.99pp | Sharpe -0.63 | MaxDD +0.90pp | Trades +0
+
+Paper recommendation: KEEP sector rotation OFF on paper ù no clear edge vs conservative blend on this window.
+
+--- Macro narrative example (defense/space theme) ---
+  Defense/space theme ù boost defense/aerospace/space when GLD/defense confirm | Oil/energy shock validated ù favor energy, trim airlines/consumer | Tech leadership validated ù modest tech overweight | Favor (max 2): Aerospace, Defense, Space, Tech | Trim (max 2): none
+  Favored: Aerospace, Defense, Space, Tech
+  Trimmed: none
+----------------------------------------------------------------------------

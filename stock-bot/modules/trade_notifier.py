@@ -1,4 +1,4 @@
-"""Telegram notifications for confirmed Alpaca order fills (live account, policy-gated)."""
+"""Telegram notifications for confirmed Alpaca order fills (paper + live)."""
 
 from __future__ import annotations
 
@@ -48,10 +48,8 @@ def format_trade_message(trade_details: dict) -> str:
 
 
 def should_notify_fill(trade_details: dict) -> bool:
-    """Live fills only, above minimum notional (paper fills never alert)."""
-    if config.PAPER_TRADING:
-        return False
-    if not config.TELEGRAM_ALERT_LIVE_FILLS:
+    """Paper + live fills above the configured notional floor."""
+    if not getattr(config, "TELEGRAM_ALERT_FILLS", True):
         return False
     if not config.get_telegram_config():
         return False
@@ -61,7 +59,8 @@ def should_notify_fill(trade_details: dict) -> bool:
         price = float(trade_details.get("price") or 0)
         if qty > 0 and price > 0:
             notional = qty * price
-    return notional >= float(config.TELEGRAM_LIVE_FILL_MIN_USD)
+    min_usd = float(config.telegram_fill_min_usd())
+    return notional >= min_usd
 
 
 def send_trade_notification(trade_details: dict) -> bool:
@@ -72,7 +71,7 @@ def send_trade_notification(trade_details: dict) -> bool:
         msg = format_trade_message(trade_details)
         subject = msg.split("\n", 1)[0]
         body = msg.split("\n", 1)[1] if "\n" in msg else ""
-        return broadcast(subject, body, category="live_fill")
+        return broadcast(subject, body, category="fill")
     except Exception as exc:
         print(f"Trade notification failed: {exc}")
         return False

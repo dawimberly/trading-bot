@@ -69,9 +69,45 @@ def run_tests() -> None:
             assert status2["loss_pct"] is not None
             assert float(status2["loss_pct"]) > 0
 
+            _check_paper_books_do_not_share_anchor(tmp, today)
+
             print("test_trading_safety_status: all passed")
         finally:
             config.TRADING_SAFETY_STATE_FILE = orig_file
+
+
+def _check_paper_books_do_not_share_anchor(tmp: str, today: str) -> None:
+    """Lab must not measure its equity against Medium's session open.
+
+    Both are paper books; a shared "paper" key made Lab (~93.6k) look 6.4% down
+    against Medium's ~100k open and tripped the 4% breaker all day.
+    """
+    import os
+
+    shared = Path(tmp) / "two_paper_books.json"
+    shared.write_text(
+        json.dumps(
+            {
+                # Written by Medium under the old shared key.
+                "paper": {
+                    "daily_equity_date": today,
+                    "daily_equity_open": 100032.54,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    config.TRADING_SAFETY_STATE_FILE = str(shared)
+    prev_book = os.environ.get("TRADING_BOOK_ID")
+    os.environ["TRADING_BOOK_ID"] = "alpaca_paper"
+    try:
+        tripped, reason, ratio = ts.daily_loss_circuit_tripped(93662.31, paper=True)
+        assert not tripped, f"Lab tripped on Medium's anchor: {reason} {ratio}"
+    finally:
+        if prev_book is None:
+            os.environ.pop("TRADING_BOOK_ID", None)
+        else:
+            os.environ["TRADING_BOOK_ID"] = prev_book
 
 
 if __name__ == "__main__":

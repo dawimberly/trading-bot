@@ -21,7 +21,37 @@ from modules.logging_utils import setup_project_logging
 ROOT = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
 LIVE_HEARTBEAT = Path(os.getenv("HEARTBEAT_FILE", config.HEARTBEAT_FILE))
-PAPER_HEARTBEAT = Path(os.getenv("PAPER_CHASE_HEARTBEAT", "paper_chase_heartbeat.json"))
+
+
+def _default_portal_username() -> str:
+    env = (os.getenv("PORTAL_USERNAME") or "").strip().lower()
+    if env:
+        return env
+    try:
+        from modules.portal_paths import get_last_username
+
+        name = (get_last_username() or "").strip().lower()
+        if name:
+            return name
+    except Exception:
+        pass
+    return "dawimberly"
+
+
+def _resolve_paper_heartbeat_path() -> Path:
+    """Paper SoT portal heartbeat; PAPER_CHASE_HEARTBEAT env still overrides."""
+    env = (os.getenv("PAPER_CHASE_HEARTBEAT") or "").strip()
+    if env:
+        path = Path(env)
+        return path if path.is_absolute() else ROOT / path
+    try:
+        from modules.portal_paths import bind_project_root, book_heartbeat_path
+        from modules.trading_books import PAPER_SOT_BOOK_ID
+
+        bind_project_root(ROOT)
+        return book_heartbeat_path(_default_portal_username(), PAPER_SOT_BOOK_ID)
+    except Exception:
+        return ROOT / "paper_chase_heartbeat.json"
 
 
 def _load_json(path: Path) -> dict | None:
@@ -500,7 +530,7 @@ def _profile_table_lines() -> list[str]:
         "=== Profiles ===",
         f"| | Live Profile A (~$300) | Paper {paper_label} |",
         "|--|------------------------|---------------------------|",
-        f"| VTI core | {config.LIVE_VTI_CORE_PCT:.0%} + {config.LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY (<$500) / 80% | dynamic 40-75% |",
+        f"| VTI core | {config.LIVE_VTI_CORE_PCT:.0%} + {config.LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} NYSE (weekly resize) | fixed 33/67 weekly |",
         f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
         "| Crypto sleeve | OFF (disabled) | OFF (locked) |",
         "| Stat arb / vol / options | off | on (locked stack) |",
@@ -606,7 +636,7 @@ def main() -> None:
 
     _sync_paper_stack_for_status()
     live_hb_path = LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT
-    paper_hb_path = ROOT / PAPER_HEARTBEAT
+    paper_hb_path = _resolve_paper_heartbeat_path()
     live_hb = _load_json(live_hb_path)
     paper_hb = _load_json(paper_hb_path)
 

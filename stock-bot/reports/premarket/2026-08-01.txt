@@ -1,0 +1,80 @@
+Pre-Market Report — 2026-08-01 00:03:59 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 25032). First heartbeat may take up to 60s. | Stopped 1 orphan bot process(es).
+Heartbeat age: 3659.219336s
+Equity: $95,012.56
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Thinking engine ON (LLM)
+  • Strong insider cluster
+  • All-time Sharpe negative (-0.30)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 30/100
+
+=== Insider Signals (top 3) ===
+• REF | cluster_buy | s100 $2.4M — Cluster buy: 8 insiders purchased Reformation Inc. ($2.
+• UEC | cluster_buy | s100 $9418.5B — Cluster buy: 10 insiders purchased URANIUM ENERGY CORP 
+• CCLD | cluster_buy | s88 — Cluster buy: 4 insiders purchased CareCloud, Inc.
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 24 returned
+
+Top signals (up to 5)
+  REF    cluster_buy      score=100  Cluster buy: 8 insiders purchased Reformation Inc. ($2.4M to
+  UEC    cluster_buy      score=100  Cluster buy: 10 insiders purchased URANIUM ENERGY CORP ($941
+  CCLD   cluster_buy      score= 88  Cluster buy: 4 insiders purchased CareCloud, Inc.
+  VTIX   executive_sell   score= 78  executive sale - Virtuix Holdings Inc. ($241K)
+  INOVIO PHARMACEUTICALS, INC. dilution         score= 64  Prospectus / offering - INOVIO PHARMACEUTICALS, INC.
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: UEC T1, REF T1; cluster buys: CCLD (4 insiders); exec sells -> s
+
+Applied boosts
+  momentum  UEC: +0.280
+  momentum  REF: +0.280
+  momentum  CCLD: +0.180
+  stat_arb  UEC: x1.220
+  stat_arb  REF: x1.220
+  stat_arb  CCLD: x1.150
+  short     VTIX: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 30.3
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 29 | Boost: 1 clusters, 1 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

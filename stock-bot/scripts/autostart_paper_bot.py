@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Autonomous overnight paper-bot startup + 9:00 AM ET pre-market Telegram summary.
+"""Autonomous overnight Paper SoT startup + 9:00 AM ET pre-market Telegram summary.
 
-Paper book (alpaca_paper) only — does not start or stop the live bot.
+Paper SoT (alpaca_paper_v2) only — does not start or stop live or Lab.
 
 Run from stock-bot/:
   python scripts/autostart_paper_bot.py
@@ -85,8 +85,9 @@ def _today_et() -> str:
 
 def _load_heartbeat(username: str) -> dict | None:
     from modules.portal_paths import book_heartbeat_path
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
 
-    path = book_heartbeat_path(username, "alpaca_paper")
+    path = book_heartbeat_path(username, SOT)
     if not path.is_file():
         return None
     try:
@@ -317,9 +318,11 @@ def format_premarket_report_text(
     color = health.get("color", "")
     now = datetime.now(_ET).strftime("%Y-%m-%d %H:%M:%S ET")
 
+    from modules.trading_books import PAPER_SOT_BOOK_ID as SOT
+
     lines = [
         f"Pre-Market Report — {now}",
-        f"User: {username} | Book: alpaca_paper | RR v{config.REALISTIC_RESEARCH_VERSION}",
+        f"User: {username} | Book: {SOT} | RR v{config.REALISTIC_RESEARCH_VERSION}",
         "",
         "=== Startup ===",
         start_msg,
@@ -471,6 +474,50 @@ def telegram_already_sent_today() -> bool:
     return _load_state().get("premarket_telegram_date") == _today_et()
 
 
+def _page_autostart_crash(exc: BaseException) -> None:
+    _log(f"[ERROR] Autostart crashed: {type(exc).__name__}: {exc}")
+    try:
+        from modules.alerts import broadcast
+
+        broadcast(
+            "[PythonTrading PAPER] Autostart crashed",
+            f"{type(exc).__name__}: {exc}\nSee logs/autostart_paper.log",
+            category="error",
+        )
+        return
+    except Exception as send_exc:
+        _log(f"Crash Telegram via alerts failed: {send_exc}")
+    try:
+        env_path = ROOT / ".env"
+        tok = os.getenv("TELEGRAM_BOT_TOKEN") or ""
+        chat = os.getenv("TELEGRAM_CHAT_ID") or ""
+        if env_path.is_file() and (not tok or not chat):
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if s.startswith("#") or "=" not in s:
+                    continue
+                k, _, v = s.partition("=")
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k == "TELEGRAM_BOT_TOKEN" and not tok:
+                    tok = v
+                elif k == "TELEGRAM_CHAT_ID" and not chat:
+                    chat = v
+        if not tok or not chat:
+            return
+        import urllib.parse
+        import urllib.request
+
+        text = f"[PythonTrading PAPER] Autostart crashed\n{type(exc).__name__}: {exc}"
+        url = (
+            f"https://api.telegram.org/bot{tok}/sendMessage?"
+            + urllib.parse.urlencode({"chat_id": chat, "text": text[:3500]})
+        )
+        urllib.request.urlopen(url, timeout=15)
+        _log("Crash Telegram sent via fallback.")
+    except Exception as send_exc:
+        _log(f"Crash Telegram fallback failed: {send_exc}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Autonomous paper bot overnight startup + 9 AM ET Telegram"
@@ -496,10 +543,14 @@ def main() -> int:
     os.environ.setdefault("PAPER_TRADING", "true")
     os.environ.setdefault("PAPER_CHASE_MODE", "1")
 
-    import config
+    try:
+        import config
 
-    config.init_paper_chase_if_enabled()
-    config.enforce_realistic_research_profile()
+        config.init_paper_chase_if_enabled()
+        config.enforce_realistic_research_profile()
+    except Exception as exc:
+        _page_autostart_crash(exc)
+        return 1
 
     start_msg = "Skipped startup (--skip-start)"
     restart_after: datetime | None = None
@@ -571,4 +622,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _page_autostart_crash(exc)
+        raise

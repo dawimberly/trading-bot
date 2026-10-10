@@ -1,0 +1,73 @@
+Pre-Market Report — 2026-07-09 00:03:50 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.3
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 86568). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3810.688039s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• XNCR | cluster_buy | s94 — Cluster buy: 5 insiders purchased Xencor Inc
+• SNOW | executive_sell | s93 $12.2M — executive sale - Snowflake Inc. ($12.2M)
+• WAB | executive_sell | s89 $604K — CEO sale - WESTINGHOUSE AIR BRAKE TECHNOLOGIES CORP ($6
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 32 returned
+
+Top signals (up to 5)
+  XNCR   cluster_buy      score= 94  Cluster buy: 5 insiders purchased Xencor Inc
+  SNOW   executive_sell   score= 93  executive sale - Snowflake Inc. ($12.2M)
+  WAB    executive_sell   score= 89  CEO sale - WESTINGHOUSE AIR BRAKE TECHNOLOGIES CORP ($604K)
+  MPT    executive_sell   score= 89  CEO sale - MEDICAL PROPERTIES TRUST INC ($504K)
+  META   executive_sell   score= 88  executive sale - Meta Platforms, Inc. ($3.1M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � strong cluster buys: XNCR (5 insiders, s94); CEO/CFO sells -> short watch: WAB (
+
+Applied boosts
+  momentum  XNCR: +0.120
+  stat_arb  XNCR: x1.100
+  short     WAB: base=0.260 role=ceo
+  short     MPT: base=0.240 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 32.5
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>85); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 1 | Quality signals: 32 | Boost: 1 clusters, 3 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

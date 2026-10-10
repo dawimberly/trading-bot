@@ -1,0 +1,111 @@
+{
+  "research_only": true,
+  "book": "alpaca_paper_v2",
+  "week_start": "2026-09-08",
+  "week_end": "2026-09-12",
+  "started_at": "2026-09-06 19:30 UTC",
+  "goal": "Measure exit quality + churn on paper_v2 for one week; evaluate on Saturday weekly/freeze report. No .env changes.",
+  "evaluate_rules": {
+    "wide_stop_3x": "HOLD\u2192consider next week only if stop_bounce_flags this week \u22652 AND cancel_ex_core does not worsen vs baseline by >0.10",
+    "same_day_churn": "HOLD\u2192consider hygiene tighten only if cancel_ex_core \u22650.70 for the week window",
+    "take_1r_wire": "Stay REJECT unless 365d A/B DD gap vs hold \u22642pp (re-run)",
+    "one_r_reality": "Note only \u2014 paper 1R hit rate; do not retune from <10 closes"
+  },
+  "baseline": {
+    "ts": "2026-09-06 19:30 UTC",
+    "journal": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\paper_journal.csv",
+    "equity": 100421.52,
+    "one_r_closed_n": 21,
+    "one_r_hits": 0,
+    "one_r_hit_rate_pct": 0.0,
+    "cancel_ratio": 0.5671,
+    "cancel_ex_core": 0.7323,
+    "rhyme_fills": 131,
+    "stop_bounce_flags_in_report": 1,
+    "nyse_realized_pnl": -705.8100000000002,
+    "nyse_unrealized_pnl": 840.3147,
+    "attr_period_return_pct": 5.65,
+    "attr_fills": 53,
+    "research_exit_ab": {
+      "hold": {
+        "book_ret_pct": 66.14,
+        "max_dd_pct": 6.63,
+        "win_rate": 38.7,
+        "trades": 357
+      },
+      "take_1r": {
+        "book_ret_pct": 81.28,
+        "max_dd_pct": 10.95,
+        "win_rate": 58.4,
+        "trades": 1203
+      },
+      "wide_stop_3x": {
+        "book_ret_pct": 72.39,
+        "max_dd_pct": 8.34,
+        "win_rate": 47.6,
+        "trades": 292
+      },
+      "long_hold_45": {
+        "book_ret_pct": 66.9,
+        "max_dd_pct": 5.86,
+        "win_rate": 33.7,
+        "trades": 267
+      }
+    },
+    "candidates": {
+      "wide_stop_3x": "HOLD \u2014 research candidate; measure stop-bounce this week",
+      "same_day_churn": "HOLD \u2014 cancel_ex_core / same-day exits; no overlay add",
+      "take_1r_wire": "REJECT research default \u2014 DD >2pp vs hold on 365d A/B"
+    }
+  },
+  "snapshots": [
+    {
+      "ts": "2026-09-06 19:30 UTC",
+      "journal": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper_v2\\paper_journal.csv",
+      "equity": 100421.52,
+      "one_r_closed_n": 21,
+      "one_r_hits": 0,
+      "one_r_hit_rate_pct": 0.0,
+      "cancel_ratio": 0.5671,
+      "cancel_ex_core": 0.7323,
+      "rhyme_fills": 131,
+      "stop_bounce_flags_in_report": 1,
+      "nyse_realized_pnl": -705.8100000000002,
+      "nyse_unrealized_pnl": 840.3147,
+      "attr_period_return_pct": 5.65,
+      "attr_fills": 53,
+      "research_exit_ab": {
+        "hold": {
+          "book_ret_pct": 66.14,
+          "max_dd_pct": 6.63,
+          "win_rate": 38.7,
+          "trades": 357
+        },
+        "take_1r": {
+          "book_ret_pct": 81.28,
+          "max_dd_pct": 10.95,
+          "win_rate": 58.4,
+          "trades": 1203
+        },
+        "wide_stop_3x": {
+          "book_ret_pct": 72.39,
+          "max_dd_pct": 8.34,
+          "win_rate": 47.6,
+          "trades": 292
+        },
+        "long_hold_45": {
+          "book_ret_pct": 66.9,
+          "max_dd_pct": 5.86,
+          "win_rate": 33.7,
+          "trades": 267
+        }
+      },
+      "candidates": {
+        "wide_stop_3x": "HOLD \u2014 research candidate; measure stop-bounce this week",
+        "same_day_churn": "HOLD \u2014 cancel_ex_core / same-day exits; no overlay add",
+        "take_1r_wire": "REJECT research default \u2014 DD >2pp vs hold on 365d A/B"
+      }
+    }
+  ],
+  "evaluation": null
+}

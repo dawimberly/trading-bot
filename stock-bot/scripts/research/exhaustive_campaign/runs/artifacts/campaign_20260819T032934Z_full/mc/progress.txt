@@ -1,0 +1,7 @@
+runs=16/200
+current_run=17
+status=backtesting
+complete=false
+elapsed_sec=34904.1
+sec_per_run=2181.5
+updated_at=2026-08-19T20:21:39.597636+00:00

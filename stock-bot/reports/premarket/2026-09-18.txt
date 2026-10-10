@@ -1,0 +1,79 @@
+Pre-Market Report — 2026-09-18 00:03:58 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 7524). First heartbeat may take up to 60s. | Stopped 2 orphan bot process(es).
+Heartbeat age: 3761.839193s
+Equity: $100,010.24
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Bear regime managed (E)
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (27)
+  • All-time Sharpe OK (0.98)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • RHYME_E bear — elevated caution
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_E: Steady_Bearish_Decline
+Bubble Risk: 40/100
+
+=== Insider Signals (top 3) ===
+• TVTX | cluster_buy | s100 $83.8M — Cluster buy: 7 insiders purchased Travere Therapeutics,
+• FLXS | cluster_buy | s94 — Cluster buy: 6 insiders purchased FLEXSTEEL INDUSTRIES 
+• RBRK | executive_sell | s88 $1.0M — executive sale - Rubrik, Inc. ($1.0M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 27 returned
+
+Top signals (up to 5)
+  TVTX   cluster_buy      score=100  Cluster buy: 7 insiders purchased Travere Therapeutics, Inc.
+  FLXS   cluster_buy      score= 94  Cluster buy: 6 insiders purchased FLEXSTEEL INDUSTRIES INC
+  RBRK   executive_sell   score= 88  executive sale - Rubrik, Inc. ($1.0M)
+  INVE   executive_sell   score= 84  CEO sale - INVE Technologies, Inc. ($116K)
+  PAYS   executive_sell   score= 83  executive sale - Paysign, Inc. ($717K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: TVTX T1, FLXS T1, INVE T1; exec sells -> short watch: RBRK (EXEC
+
+Applied boosts
+  momentum  TVTX: +0.280
+  momentum  FLXS: +0.280
+  stat_arb  TVTX: x1.220
+  stat_arb  FLXS: x1.220
+  short     RBRK: base=0.420 role=executive
+  short     INVE: base=0.420 role=ceo
+  short     PAYS: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 40.0
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 27 | Boost: 0 clusters, 3 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

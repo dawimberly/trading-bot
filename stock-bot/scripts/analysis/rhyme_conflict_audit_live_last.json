@@ -1,0 +1,138 @@
+{
+  "summary": {
+    "generated": "2026-08-19 05:57",
+    "book": "live",
+    "start": "2026-07-29",
+    "end": "2026-08-19",
+    "sources": [
+      "jsonl:fill",
+      "jsonl:order_submitted"
+    ],
+    "n_fills": 350,
+    "n_buy": 223,
+    "n_sell": 127,
+    "gross": 40506.37,
+    "net": 39020.85,
+    "cancel_ratio": 0.0367,
+    "cancel_ex_core": 0.0157,
+    "median_daily_cancel": 0.9305,
+    "n_pairs": 14,
+    "n_regime_mismatch_pairs": 0,
+    "mismatch_frac": 0.0,
+    "n_flip_both": 0,
+    "n_days_with_fills": 5,
+    "verdict": "cancellation not persistently in the 0.6-0.7 danger zone; RHYME not clearly subtractive on this window",
+    "load_notes": [
+      "journal paper_journal.csv: rows=13159 preferred_trade_rows=1",
+      "journal paper_chase_journal.csv: rows=818 preferred_trade_rows=0",
+      "journal paper_journal.csv: rows=309 preferred_trade_rows=0",
+      "journal has no event=fill in preferred set; using jsonl",
+      "jsonl action rows after fill-over-submit: 1350",
+      "verdict tape: 350 event=fill rows (submit $ is biased; many sells have null notional)",
+      "submit+fill days with both sides: 10/11"
+    ]
+  },
+  "daily": [
+    {
+      "date": "2026-08-12",
+      "regime": "D",
+      "n_buy": 30,
+      "n_sell": 7,
+      "gross": 39253.32,
+      "net": 39011.32,
+      "cancel_ratio": 0.0062,
+      "count_cancel": 0.3784,
+      "cancel_ex_core": 0.0006,
+      "same_sym_rt": 4,
+      "paired_rt_syms": 1,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day; cross_sleeve_syms=1"
+    },
+    {
+      "date": "2026-08-13",
+      "regime": "D",
+      "n_buy": 74,
+      "n_sell": 45,
+      "gross": 198.12,
+      "net": 13.76,
+      "cancel_ratio": 0.9305,
+      "count_cancel": 0.7563,
+      "cancel_ex_core": 0.898,
+      "same_sym_rt": 23,
+      "paired_rt_syms": 1,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    },
+    {
+      "date": "2026-08-14",
+      "regime": "D",
+      "n_buy": 71,
+      "n_sell": 41,
+      "gross": 503.26,
+      "net": -3.6,
+      "cancel_ratio": 0.9928,
+      "count_cancel": 0.7321,
+      "cancel_ex_core": 0.9692,
+      "same_sym_rt": 22,
+      "paired_rt_syms": 1,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    },
+    {
+      "date": "2026-08-17",
+      "regime": "D",
+      "n_buy": 44,
+      "n_sell": 29,
+      "gross": 480.74,
+      "net": 30.38,
+      "cancel_ratio": 0.9368,
+      "count_cancel": 0.7945,
+      "cancel_ex_core": 0.8948,
+      "same_sym_rt": 21,
+      "paired_rt_syms": 1,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    },
+    {
+      "date": "2026-08-18",
+      "regime": "D",
+      "n_buy": 4,
+      "n_sell": 5,
+      "gross": 70.93,
+      "net": -31.01,
+      "cancel_ratio": 0.5628,
+      "count_cancel": 0.8889,
+      "cancel_ex_core": 0.9743,
+      "same_sym_rt": 0,
+      "paired_rt_syms": 1,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    }
+  ],
+  "by_regime": [
+    {
+      "regime": "D",
+      "n_buy": 223,
+      "n_sell": 127,
+      "gross": 40506.37,
+      "net": 39020.85,
+      "cancel_ratio": 0.0367,
+      "n_days": 5
+    }
+  ],
+  "top_symbols": [
+    {
+      "symbol": "VTI",
+      "pairs": 14,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 139.86,
+      "sell_notional": 402.03000000000003
+    }
+  ]
+}
