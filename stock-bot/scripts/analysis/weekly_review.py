@@ -104,7 +104,7 @@ SLEEVE_PARAM: dict[str, tuple[str, str, str]] = {
     "overall": ("PAPER_RISK_PER_TRADE", "0.015", "tighten"),
 }
 
-TRADE_EVENTS = {"exit", "sell", "close"}
+TRADE_EVENTS = {"exit", "sell", "close", "trade_closed"}
 BUY_EVENTS = {"buy", "entry", "open"}
 DataGrade = Literal["A", "B", "C"]
 
@@ -541,6 +541,62 @@ def _extract_pnl(note: str) -> float | None:
     return pnl
 
 
+def _close_pair_keys(row: Any) -> set[tuple]:
+    """Keys that identify one close. ``exit`` often has a blank ``trade_id``."""
+    keys: set[tuple] = set()
+    tid = ""
+    ts = None
+    sym = ""
+    if hasattr(row, "get"):
+        raw = row.get("trade_id")
+        if raw is not None and not (isinstance(raw, float) and math.isnan(raw)):
+            tid = str(raw).strip()
+        ts = row.get("timestamp")
+        for key in ("symbol", "ticker"):
+            val = row.get(key)
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                continue
+            text = str(val).strip().upper()
+            if text and text.lower() not in ("nan", "none"):
+                sym = text
+                break
+    if tid and tid.lower() not in ("nan", "none"):
+        keys.add(("id", tid))
+    if ts is not None and not (isinstance(ts, float) and math.isnan(ts)):
+        stamp = pd.Timestamp(ts)
+        if not pd.isna(stamp):
+            keys.add(("ts", stamp.isoformat(timespec="seconds"), sym))
+    return keys
+
+
+def select_closed_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Closed trades, preferring ``trade_closed`` dollars over a paired ``exit`` note.
+
+    After 2026-09-28 the journal writes both rows at the same timestamp. Counting
+    both would double the trade count and still miss dollars if only ``exit``
+    were kept.
+    """
+    if df.empty or "event" not in df.columns:
+        return df.iloc[0:0].copy() if hasattr(df, "iloc") else df
+    ev = df["event"].astype(str).str.lower()
+    closes = df[ev.isin(TRADE_EVENTS)]
+    if closes.empty:
+        return closes
+    ev = closes["event"].astype(str).str.lower()
+    dollar = closes[ev.eq("trade_closed")]
+    if dollar.empty:
+        return closes
+    keys: set[tuple] = set()
+    for _, row in dollar.iterrows():
+        keys.update(_close_pair_keys(row))
+    keep: list[Any] = []
+    for idx, row in closes.iterrows():
+        event = str(row.get("event") or "").lower()
+        if event == "trade_closed" or keys.isdisjoint(_close_pair_keys(row)):
+            keep.append(idx)
+    return closes.loc[keep]
+
+
 def _apply_trade_outcome(st: SleeveStats, row: Any, pnls: list[float]) -> tuple[bool, bool]:
     """Update sleeve stats. Returns (percent-only close, unresolved outcome)."""
     st.realized_trades += 1
@@ -566,8 +622,7 @@ def _closed_trade_stats(
     df = journal[journal["timestamp"] >= cutoff].copy()
     if df.empty:
         return pnls, sleeves, inferred, directional_only
-    ev = df["event"].astype(str).str.lower()
-    exits = df[ev.isin(TRADE_EVENTS)]
+    exits = select_closed_rows(df)
     for _, row in exits.iterrows():
         sleeve, was_inferred = _row_sleeve(row)
         if was_inferred:
@@ -815,8 +870,7 @@ def _collect_nyse_entry_quality(journal: pd.DataFrame, cutoff: datetime) -> Nyse
         return nq
 
     df = journal[journal["timestamp"] >= cutoff].copy()
-    ev = df["event"].astype(str).str.lower()
-    exits = df[ev.isin(TRADE_EVENTS)]
+    exits = select_closed_rows(df)
     if exits.empty:
         nyse = exits
     else:

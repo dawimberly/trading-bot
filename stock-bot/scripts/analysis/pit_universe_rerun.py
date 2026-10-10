@@ -50,8 +50,79 @@ SLEEVE = 0.95
 DD_GATE_PP = 2.0
 
 
+def _gaps_from_open_close(opens: dict, closes: dict, index: pd.DatetimeIndex) -> pd.DataFrame | None:
+    if not opens:
+        return None
+    o = pd.DataFrame(opens).sort_index()
+    c = pd.DataFrame(closes).sort_index()
+    gaps = o / c.shift(1)
+    gaps = gaps[~gaps.index.duplicated(keep="last")]
+    return gaps.reindex(pd.DatetimeIndex(index).normalize())
+
+
+def _yf_symbol(symbol: str) -> str:
+    return str(symbol).strip().upper().replace(".", "-")
+
+
+def load_yfinance_open_gaps(symbols: list[str], index: pd.DatetimeIndex) -> pd.DataFrame | None:
+    """Same gap construction as Alpaca: open[t] / close[t-1] from one OHLC source."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        print("yfinance not installed")
+        return None
+    start = (pd.Timestamp(index[0]) - timedelta(days=10)).strftime("%Y-%m-%d")
+    end = (pd.Timestamp(index[-1]) + timedelta(days=2)).strftime("%Y-%m-%d")
+    yf_to_local = {_yf_symbol(s): s for s in symbols}
+    opens: dict[str, pd.Series] = {}
+    closes: dict[str, pd.Series] = {}
+    chunk = 80
+    yf_names = list(yf_to_local)
+    for k in range(0, len(yf_names), chunk):
+        batch = yf_names[k : k + chunk]
+        try:
+            raw = yf.download(
+                batch,
+                start=start,
+                end=end,
+                interval="1d",
+                auto_adjust=True,
+                progress=False,
+                group_by="ticker",
+                threads=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"yfinance bars failed for batch {k // chunk}: {exc}")
+            continue
+        if raw is None or raw.empty:
+            continue
+        for yf_sym in batch:
+            local = yf_to_local[yf_sym]
+            try:
+                if isinstance(raw.columns, pd.MultiIndex):
+                    if yf_sym not in raw.columns.get_level_values(0):
+                        continue
+                    sub = raw[yf_sym]
+                else:
+                    sub = raw if len(batch) == 1 else None
+                if sub is None or sub.empty:
+                    continue
+                cols = {str(c).lower(): c for c in sub.columns}
+                if "open" not in cols or "close" not in cols:
+                    continue
+                idx = pd.to_datetime(sub.index, utc=True).tz_convert(None).normalize()
+                opens[local] = pd.Series(pd.to_numeric(sub[cols["open"]], errors="coerce").to_numpy(), index=idx)
+                closes[local] = pd.Series(pd.to_numeric(sub[cols["close"]], errors="coerce").to_numpy(), index=idx)
+            except Exception:
+                continue
+    gaps = _gaps_from_open_close(opens, closes, index)
+    if gaps is not None:
+        print(f"yfinance open gaps: {gaps.shape[1]} names")
+    return gaps
+
+
 def load_alpaca_open_gaps(symbols: list[str], index: pd.DatetimeIndex) -> pd.DataFrame | None:
-    """open[t] / close[t-1] from Alpaca daily bars, aligned to ``index``."""
+    """open[t] / close[t-1] from Alpaca daily bars, or yfinance if SIP is blocked."""
     try:
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockBarsRequest
@@ -60,8 +131,8 @@ def load_alpaca_open_gaps(symbols: list[str], index: pd.DatetimeIndex) -> pd.Dat
         api_key, secret_key = config.get_alpaca_credentials(paper=True)
         client = StockHistoricalDataClient(api_key, secret_key)
     except Exception as exc:  # noqa: BLE001
-        print(f"Alpaca open gaps unavailable: {exc}")
-        return None
+        print(f"Alpaca client unavailable: {exc}")
+        return load_yfinance_open_gaps(symbols, index)
     start = pd.Timestamp(index[0]).to_pydatetime() - timedelta(days=7)
     end = pd.Timestamp(index[-1]).to_pydatetime() + timedelta(days=1)
     opens: dict[str, pd.Series] = {}
@@ -85,12 +156,9 @@ def load_alpaca_open_gaps(symbols: list[str], index: pd.DatetimeIndex) -> pd.Dat
             opens[sym] = pd.Series(pd.to_numeric(sub["open"], errors="coerce").to_numpy(), index=idx)
             closes[sym] = pd.Series(pd.to_numeric(sub["close"], errors="coerce").to_numpy(), index=idx)
     if not opens:
-        return None
-    o = pd.DataFrame(opens).sort_index()
-    c = pd.DataFrame(closes).sort_index()
-    gaps = o / c.shift(1)
-    gaps = gaps[~gaps.index.duplicated(keep="last")]
-    return gaps.reindex(pd.DatetimeIndex(index).normalize())
+        print("Alpaca SIP empty; falling back to yfinance open gaps")
+        return load_yfinance_open_gaps(symbols, index)
+    return _gaps_from_open_close(opens, closes, index)
 
 
 def _symbols_for(mode: str, data: pd.DataFrame, runtime_cols: set[str], membership: pd.DataFrame):

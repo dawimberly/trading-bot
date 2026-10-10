@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-AS_OF = "2026-09-20"
+AS_OF = "2026-10-10"
 
 # Deploy ladder. Lower rung_order = earlier capital.
 BOOKS: dict[str, dict[str, Any]] = {
@@ -56,8 +56,8 @@ STRATEGIES: list[dict[str, Any]] = [
         "status": "deployed",
         "book": "medium",
         "priority": 20,
-        "evidence": "paper_v2_best 365d +49.2%/DD 4.9%; 1000d +91.8%/10.0%",
-        "next": "Audit Medium drift (running 10 names + 2.5x ATR vs this pick)",
+        "evidence": "S&P PIT 10bps MTM 2026-10-10: 365d +95.5%/DD 13.8/Sh 1.91; full DB +134%/19.6/1.06. Old screener walks are look-ahead.",
+        "next": "Keep as isolated-walk SoT. Medium portal already 15/2.0x.",
         "knob": None,
     },
     {
@@ -76,7 +76,7 @@ STRATEGIES: list[dict[str, Any]] = [
         "status": "hold",
         "book": "aggressive",
         "priority": 10,
-        "evidence": "STRICT 365d+1000d 2026-09-20: 15 loses. 8 beats 25. 6 vs 8 2026-09-21: FAIL both (365d -0.12pp; 1000d -15.4pp / -0.34 Sh). Stay Lab 8. No .env write.",
+        "evidence": "STRICT executor 2026-09-20: 8 beats 25. Isolated S&P PIT walk 2026-10-10: pick_8 FAIL DD, pick_25 FAIL ret vs pick_15. Stay Lab 8 from STRICT, not from the walk.",
         "next": "Leave aggressive on portal 8-name Lab. Do not cut to 6 or set 15.",
         "knob": "MAX_ACTIVE_TICKERS / NYSE slots",
         "pass": "15 or 8 beats 25 on return+Sharpe, MaxDD not worse >1pp, both windows",
@@ -94,13 +94,13 @@ STRATEGIES: list[dict[str, Any]] = [
     {
         "id": "overlay_a2b1",
         "name": "Flatten >=8% at next open, skip Monday (hold A2B1)",
-        "status": "deployed",
+        "status": "reject",
         "book": "aggressive",
-        "priority": 40,
-        "evidence": "NYSE walk hold +9.0pp / DD better, 242 RTH bars. Chat 2026-09-26: wired Lab 8 portal PAPER_NYSE_A2B1_ENABLED. take_1r/wide/long all fail.",
-        "next": "Collect full-stack second window. Kill if book misses hold baseline or DD +2pp. Not Medium/live.",
+        "priority": 100,
+        "evidence": "S&P PIT 10bps MTM 2026-10-10: 365d -8.9pp / DD +0.7pp (84 fades); full -22.2pp / DD -1.4pp (142 fades). FAIL ret both windows. Gaps yfinance (Alpaca SIP blocked). Pre-PIT +9pp was look-ahead.",
+        "next": "Leave PAPER_NYSE_A2B1_ENABLED on Lab until a named kill. Do not promote. Not Medium/live.",
         "knob": "PAPER_NYSE_A2B1_ENABLED / gain_exit_pct=8, gain_exit_mode=skip_monday",
-        "pass": "PROTOCOL full-stack gates vs current aggressive",
+        "pass": "book% > pick_15 and maxDD not worse >2pp, both S&P PIT windows",
     },
     {
         "id": "tod_entry",
@@ -135,11 +135,11 @@ STRATEGIES: list[dict[str, Any]] = [
     {
         "id": "lab_concentrated",
         "name": "Lab 8 names · 15% · trail from peak",
-        "status": "watch",
+        "status": "hold",
         "book": "aggressive",
         "priority": 70,
-        "evidence": "Walk +123%/DD 12% 365d. PAPER_LAB_CONCENTRATED is not set on alpaca_paper .env.",
-        "next": "Do not enable. Compare only as a sleeve alternative after name-count A/B.",
+        "evidence": "S&P PIT 10bps MTM 2026-10-10: 365d +121%/DD 20.8 vs pick_15 +95.5%/13.8; full +189%/22.7 vs +134%/19.6. FAIL 2pp DD both windows. Runtime already Lab 8 via portal.",
+        "next": "Leave portal Lab 8. Do not promote from the walk. Not Medium.",
         "knob": "PAPER_LAB_CONCENTRATED",
     },
     {
@@ -168,8 +168,8 @@ STRATEGIES: list[dict[str, Any]] = [
         "status": "reject",
         "book": "research",
         "priority": 100,
-        "evidence": "one_r_hit: book +81% vs hold +66% but DD 11.0 vs 6.6 (>+2pp)",
-        "next": "Dead unless a new 1000d window passes the DD gate",
+        "evidence": "S&P PIT 2026-10-10: 365d +82%/14.3 vs pick_15 +96%/13.8; full +111%/19.9 vs +134%/19.6. FAIL ret.",
+        "next": "Dead unless a new window passes the DD and return gates",
         "knob": "take_1r / EXIT_OPTIMIZATION full-exit",
     },
     {
@@ -178,9 +178,29 @@ STRATEGIES: list[dict[str, Any]] = [
         "status": "reject",
         "book": "research",
         "priority": 100,
-        "evidence": "365d −19pp vs hold; 1000d −33pp. Weekend continuation.",
+        "evidence": "S&P PIT 2026-10-10: 365d +38%/24.9 vs pick_15 +96%/13.8; full +53%/24.9 vs +134%/19.6.",
         "next": "Do not run again as a default",
         "knob": "friday_flatten",
+    },
+    {
+        "id": "risk_adj_rank",
+        "name": "Rank by distance-to-MA / 20d vol",
+        "status": "reject",
+        "book": "research",
+        "priority": 100,
+        "evidence": "S&P PIT 10bps MTM 2026-10-10: 365d −61pp / full −103pp vs pick_15. 365d DD better. Kills the book.",
+        "next": "Do not combine with vol targeting. Dead as a default rank.",
+        "knob": "rank_mode=risk_adj",
+    },
+    {
+        "id": "vol_target_12",
+        "name": "Scale sleeve to 12% annual book vol (126-bar)",
+        "status": "reject",
+        "book": "research",
+        "priority": 100,
+        "evidence": "S&P PIT 10bps MTM 2026-10-10: 365d −23pp / full −29pp vs pick_15. DD −4.7 / −5.3 pp. FAIL return gate.",
+        "next": "Shallower DD is not a promote. Do not mix with risk_adj.",
+        "knob": "vol_target=0.12",
     },
     {
         "id": "thursday_only_fade",
