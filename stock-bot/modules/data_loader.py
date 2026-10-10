@@ -118,7 +118,9 @@ def _load_table_close(conn: sqlite3.Connection, table: str) -> pd.Series | None:
     return series
 
 
-def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=False):
+def load_close_matrix(
+    db_path=None, interval="5m", days=None, *, force_refresh=False, tickers=None
+):
     """
     Read ticker tables into a wide DataFrame of close prices.
 
@@ -127,9 +129,12 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
       - "1d": backtest tables (*_daily suffix, column names without suffix)
     days: if set, keep only the last N rows after load
     force_refresh: bypass TTL cache
+    tickers: for "1d", load these instead of ``config.backtest_fetch_tickers()``
+      (research universes that are wider than the runtime fetch list)
     """
     path = str(db_path or config.resolve_db_path())
-    cache_key = (str(path), interval, days)
+    ticker_key = tuple(sorted(str(t) for t in tickers)) if tickers is not None else None
+    cache_key = (str(path), interval, days, ticker_key)
     mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
     ttl = _cache_ttl_sec()
     now = time.time()
@@ -146,7 +151,8 @@ def load_close_matrix(db_path=None, interval="5m", days=None, *, force_refresh=F
     tables = [t[0] for t in cursor.fetchall()]
 
     if interval == "1d":
-        allowed = {daily_table_name(ticker) for ticker in config.backtest_fetch_tickers()}
+        fetch_list = tickers if tickers is not None else config.backtest_fetch_tickers()
+        allowed = {daily_table_name(ticker) for ticker in fetch_list}
         tables = [t for t in tables if t.endswith("_daily") and t in allowed]
     else:
         tables = [t for t in tables if "_5m" not in t and "_daily" not in t]

@@ -98,12 +98,30 @@ def run_lab(
     max_hold: int = 30,
     add_policy: str = "room",
     add_max_mult: float = 2.0,
+    universe: list[str] | None = None,
+    eligible: pd.DataFrame | None = None,
+    cost_rt_bps: float = 0.0,
 ) -> tuple[dict, list[dict]]:
-    symbols = [c for c in _universe(data.columns) if c in data.columns]
+    """Lab 8 walk. ``universe`` / ``eligible`` as in ``one_r_hit_backtest.run_backtest``.
+
+    Drawdown is marked to market each bar; ``max_dd_booked_pct`` keeps the old
+    closed-trades-only figure.
+    """
+    base = universe if universe is not None else _universe(data.columns)
+    symbols = [c for c in dict.fromkeys(base) if c in data.columns]
     frame = data[symbols].apply(pd.to_numeric, errors="coerce")
     ma = frame.rolling(ma_win, min_periods=ma_win).mean()
     mom = frame / ma - 1.0
     above = frame > ma
+    elig = None
+    if eligible is not None:
+        elig = (
+            eligible.reindex(index=frame.index, columns=symbols)
+            .ffill()
+            .fillna(False)
+            .astype(bool)
+        )
+    side_cost = max(0.0, float(cost_rt_bps)) / 2.0 / 10_000.0
 
     open_pos: dict[str, dict] = {}
     trades: list[dict] = []
@@ -111,6 +129,8 @@ def run_lab(
     equity = 100_000.0
     peak_eq = equity
     max_dd = 0.0
+    peak_booked = equity
+    max_dd_booked = 0.0
     add_count = 0
     start_i = max(warmup, ma_win + 15)
 
@@ -120,6 +140,7 @@ def run_lab(
         ret = exit_px / pos["entry"] - 1.0
         pnl = qty * (exit_px - pos["entry"])
         equity += pnl
+        equity -= qty * exit_px * side_cost
         trades.append(
             {
                 "symbol": sym,
@@ -168,13 +189,23 @@ def run_lab(
         for sym in closed_today:
             open_pos.pop(sym, None)
 
-        peak_eq = max(peak_eq, equity)
-        dd = (peak_eq - equity) / peak_eq if peak_eq > 0 else 0.0
+        peak_booked = max(peak_booked, equity)
+        max_dd_booked = max(
+            max_dd_booked, (peak_booked - equity) / peak_booked if peak_booked > 0 else 0.0
+        )
+        mtm = equity
+        for sym, pos in open_pos.items():
+            px = float(px_row.get(sym, np.nan))
+            if np.isfinite(px) and px > 0:
+                mtm += pos["qty"] * (px - pos["entry"])
+        peak_eq = max(peak_eq, mtm)
+        dd = (peak_eq - mtm) / peak_eq if peak_eq > 0 else 0.0
         max_dd = max(max_dd, dd)
         curve.append(
             {
                 "date": str(frame.index[i].date()),
-                "equity": round(equity, 2),
+                "equity": round(mtm, 2),
+                "booked": round(equity, 2),
                 "open": len(open_pos),
             }
         )
@@ -184,8 +215,11 @@ def run_lab(
         scores = []
         row_above = above.iloc[i]
         row_mom = mom.iloc[i]
+        row_elig = elig.iloc[i] if elig is not None else None
         for sym in symbols:
             if sym in closed_today:
+                continue
+            if row_elig is not None and not bool(row_elig.get(sym, False)):
                 continue
             if not bool(row_above.get(sym, False)):
                 continue
@@ -225,6 +259,7 @@ def run_lab(
                     "adds": 0,
                 }
                 cash_room -= ticket
+                equity -= ticket * side_cost
                 continue
             mv = pos["qty"] * px
             if add_policy == "fresh":
@@ -241,6 +276,7 @@ def run_lab(
             pos["adds"] = int(pos.get("adds") or 0) + 1
             add_count += 1
             cash_room -= room
+            equity -= room * side_cost
 
     last_i = len(frame) - 1
     for sym, pos in list(open_pos.items()):
@@ -260,9 +296,30 @@ def run_lab(
     )
     summary["add_policy"] = add_policy
     summary["adds"] = add_count
+    summary["max_dd_booked_pct"] = round(max_dd_booked * 100.0, 2)
+    summary["cost_rt_bps"] = float(cost_rt_bps)
+    summary["pit_gated"] = eligible is not None
+    mtm_curve = [float(c["equity"]) for c in curve]
+    summary["sharpe"] = _sharpe(mtm_curve)
     summary["curve"] = curve[:: max(1, len(curve) // 80)]
     summary["curve_len"] = len(curve)
     return summary, trades
+
+
+def _sharpe(curve: list[float]) -> float | None:
+    if len(curve) < 5:
+        return None
+    arr = np.asarray(curve, dtype=float)
+    prev = arr[:-1]
+    ok = prev > 0
+    rets = (arr[1:][ok] - prev[ok]) / prev[ok]
+    rets = rets[np.isfinite(rets)]
+    if rets.size < 5:
+        return None
+    std = float(rets.std(ddof=1))
+    if std <= 1e-12:
+        return None
+    return round(float(rets.mean() / std) * np.sqrt(252.0), 2)
 
 
 def run_atr_hold(

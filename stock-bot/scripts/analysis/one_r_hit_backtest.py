@@ -57,6 +57,78 @@ def _atr_at(data: pd.DataFrame, symbol: str, i: int) -> float | None:
     return calculate_atr(window, symbol)
 
 
+def _sharpe(equity_path: list[float]) -> float | None:
+    if len(equity_path) < 5:
+        return None
+    curve = np.asarray(equity_path, dtype=float)
+    prev = curve[:-1]
+    ok = prev > 0
+    rets = (curve[1:][ok] - prev[ok]) / prev[ok]
+    rets = rets[np.isfinite(rets)]
+    if rets.size < 5:
+        return None
+    std = float(rets.std(ddof=1))
+    if std <= 1e-12:
+        return None
+    return round(float(rets.mean() / std) * np.sqrt(252.0), 2)
+
+
+def _daily_return_stats(equity_path: list[float]) -> dict:
+    """Per-bar Sharpe, skew and kurtosis of the marked book — inputs to the deflated Sharpe."""
+    out = {"n_days": 0, "sharpe_daily": None, "daily_skew": None, "daily_kurt": None}
+    if len(equity_path) < 5:
+        return out
+    curve = np.asarray(equity_path, dtype=float)
+    prev = curve[:-1]
+    ok = prev > 0
+    rets = (curve[1:][ok] - prev[ok]) / prev[ok]
+    rets = rets[np.isfinite(rets)]
+    out["n_days"] = int(rets.size)
+    if rets.size < 5:
+        return out
+    std = float(rets.std(ddof=1))
+    if std <= 1e-12:
+        return out
+    z = (rets - rets.mean()) / std
+    out["sharpe_daily"] = round(float(rets.mean() / std), 5)
+    out["daily_skew"] = round(float(np.mean(z**3)), 4)
+    out["daily_kurt"] = round(float(np.mean(z**4)), 4)  # raw (normal = 3)
+    return out
+
+
+def fractional_kelly_sleeve(
+    returns: list[float],
+    *,
+    fraction: float,
+    floor: float,
+    cap: float,
+    min_n: int,
+) -> float:
+    """Fraction of equity for the whole sleeve.
+
+    Uses only closed-trade returns already in hand. Until ``min_n`` closes,
+    stays at ``cap`` (the baseline sleeve). Never levers above ``cap``.
+    """
+    cap_f = float(cap)
+    floor_f = float(floor)
+    if floor_f > cap_f:
+        floor_f = cap_f
+    if len(returns) < int(min_n):
+        return cap_f
+    arr = np.asarray(returns, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size < int(min_n):
+        return cap_f
+    mu = float(arr.mean())
+    var = float(arr.var(ddof=1))
+    if not np.isfinite(mu) or not np.isfinite(var) or var <= 1e-12:
+        return cap_f
+    raw = float(fraction) * mu / var
+    if not np.isfinite(raw):
+        return cap_f
+    return float(min(cap_f, max(floor_f, raw)))
+
+
 def run_backtest(
     data: pd.DataFrame,
     *,
@@ -81,23 +153,89 @@ def run_backtest(
     stall_mom_edge: float = 0.0,
     stall_mode: str = "flat",
     stall_band: float = 0.02,
+    kelly_fraction: float | None = None,
+    kelly_min_trades: int = 40,
+    kelly_floor: float = 0.0,
+    record_equity: bool = False,
+    sleeve: float = 0.67,
+    universe: list[str] | None = None,
+    eligible: pd.DataFrame | None = None,
+    rank_mode: str = "raw",
+    rank_vol_lookback: int = 20,
+    vol_target: float | None = None,
+    vol_target_lookback: int = 126,
 ) -> dict:
-    symbols = [c for c in _universe(data.columns) if c in data.columns]
+    """Daily walk of the NYSE MA rank sleeve.
+
+    ``universe`` replaces the runtime candidate list; ``eligible`` (bool frame,
+    dates x symbols) gates entries per date (point-in-time membership).
+    ``rank_mode="risk_adj"`` ranks by distance-to-MA over trailing daily vol.
+    ``vol_target`` (annualised, e.g. 0.12) scales the sleeve by
+    ``min(1, target / realised book vol over vol_target_lookback bars)``.
+    Drawdown and Sharpe are marked to market every bar; booked-only drawdown
+    is kept as ``max_dd_booked_pct`` for comparison with older runs.
+    """
+    base = universe if universe is not None else _universe(data.columns)
+    symbols = [c for c in dict.fromkeys(base) if c in data.columns]
     frame = data[symbols].apply(pd.to_numeric, errors="coerce")
     ma = frame.rolling(ma_win, min_periods=ma_win).mean()
     mom = frame / ma - 1.0
     above = frame > ma
+    if rank_mode == "risk_adj":
+        vol = frame.pct_change().rolling(int(rank_vol_lookback)).std()
+        rank_score = mom / vol.where(vol > 1e-12)
+    elif rank_mode == "raw":
+        rank_score = mom
+    else:
+        raise ValueError(f"unknown rank_mode {rank_mode!r}")
+    elig = None
+    if eligible is not None:
+        elig = (
+            eligible.reindex(index=frame.index, columns=symbols)
+            .ffill()
+            .fillna(False)
+            .astype(bool)
+        )
 
     open_pos: dict[str, dict] = {}
     trades: list[dict] = []
     equity = 100_000.0
-    sleeve = 0.67
+    sleeve = min(1.0, max(0.0, float(sleeve)))
     peak = equity
     max_dd = 0.0
+    peak_booked = equity
+    max_dd_booked = 0.0
     start_i = max(warmup, ma_win + 15)
     side_cost = max(0.0, float(cost_rt_bps)) / 2.0 / 10_000.0
     rotate_pairs: list[dict] = []
     flat_n = max(1, int(stall_flat_bars))
+    kelly_sleeves: list[float] = []
+    vol_scales: list[float] = []
+    equity_path: list[float] = []
+
+    def _mark_to_market(i: int) -> float:
+        mtm = equity
+        for sym, pos in open_pos.items():
+            px = float(frame[sym].iloc[i])
+            if np.isfinite(px) and px > 0:
+                mtm += pos["notional"] * (px / pos["entry"] - 1.0)
+        return mtm
+
+    def _vol_scale() -> float:
+        if vol_target is None:
+            return 1.0
+        n = int(vol_target_lookback)
+        if len(equity_path) < n + 1:
+            return 1.0
+        curve = np.asarray(equity_path[-(n + 1) :], dtype=float)
+        rets = curve[1:] / curve[:-1] - 1.0
+        rets = rets[np.isfinite(rets)]
+        if rets.size < n:
+            return 1.0
+        realised = float(rets.std(ddof=1)) * np.sqrt(252.0)
+        if realised <= 1e-12:
+            return 1.0
+        return float(min(1.0, float(vol_target) / realised))
 
     def _fwd(sym: str, i: int, horizon: int) -> float | None:
         j = i + horizon
@@ -353,9 +491,15 @@ def run_backtest(
                 )
             open_pos.clear()
 
-        peak = max(peak, equity)
-        dd = (peak - equity) / peak if peak > 0 else 0.0
+        peak_booked = max(peak_booked, equity)
+        max_dd_booked = max(
+            max_dd_booked, (peak_booked - equity) / peak_booked if peak_booked > 0 else 0.0
+        )
+        mtm = _mark_to_market(i)
+        peak = max(peak, mtm)
+        dd = (peak - mtm) / peak if peak > 0 else 0.0
         max_dd = max(max_dd, dd)
+        equity_path.append(mtm)
 
         if friday_flatten and int(frame.index[i].weekday()) >= 4:
             continue
@@ -364,18 +508,41 @@ def run_backtest(
         scores = []
         row_above = above.iloc[i]
         row_mom = mom.iloc[i]
+        row_score = rank_score.iloc[i]
+        row_elig = elig.iloc[i] if elig is not None else None
         for sym in symbols:
             if sym in open_pos or sym in fade_skip:
+                continue
+            if row_elig is not None and not bool(row_elig.get(sym, False)):
                 continue
             if not bool(row_above.get(sym, False)):
                 continue
             m = row_mom.get(sym)
             if m is None or not np.isfinite(m) or m <= 0:
                 continue
-            scores.append((float(m), sym))
+            s = row_score.get(sym)
+            if s is None or not np.isfinite(s):
+                continue
+            scores.append((float(s), sym))
         scores.sort(reverse=True)
         slots = max_active - len(open_pos)
-        clip = (equity * sleeve) / max_active if max_active else 0.0
+        sleeve_now = sleeve
+        if vol_target is not None:
+            scale = _vol_scale()
+            vol_scales.append(scale)
+            sleeve_now = sleeve * scale
+        if kelly_fraction is not None:
+            sleeve_now = fractional_kelly_sleeve(
+                [t["ret_pct"] / 100.0 for t in trades],
+                fraction=float(kelly_fraction),
+                floor=float(kelly_floor),
+                cap=sleeve_now,
+                min_n=int(kelly_min_trades),
+            )
+            kelly_sleeves.append(sleeve_now)
+        clip = (equity * sleeve_now) / max_active if max_active else 0.0
+        if clip <= 0:
+            continue
         for _mom, sym in scores[:slots]:
             px = float(frame[sym].iloc[i])
             if not np.isfinite(px) or px <= 0:
@@ -437,7 +604,7 @@ def run_backtest(
     hits = sum(1 for t in trades if t["touched_1r"])
     rets = [t["ret_pct"] for t in trades]
     win = sum(1 for r in rets if r > 0)
-    return {
+    out = {
         "take_1r": take_1r,
         "stop_multiplier": stop_multiplier,
         "max_hold": max_hold,
@@ -459,6 +626,12 @@ def run_backtest(
         "equity_end": round(equity, 2),
         "book_ret_pct": round((equity / 100_000.0 - 1.0) * 100.0, 2),
         "max_dd_pct": round(max_dd * 100.0, 2),
+        "max_dd_booked_pct": round(max_dd_booked * 100.0, 2),
+        "rank_mode": rank_mode,
+        "vol_target": vol_target,
+        "universe_mode": "custom" if universe is not None else "runtime",
+        "pit_gated": eligible is not None,
+        "cost_rt_bps": float(cost_rt_bps),
         "exit_reasons": {
             k: sum(1 for t in trades if t["reason"] == k)
             for k in ("1r", "stop", "time", "friday", "gain_fade", "fat_loser", "stall_rotate", "eod")
@@ -481,6 +654,43 @@ def run_backtest(
         },
         "trades_sample": trades[:8],
     }
+    out["sharpe"] = _sharpe(equity_path)
+    out.update(_daily_return_stats(equity_path))
+    if record_equity:
+        out["equity_path"] = [round(v, 2) for v in equity_path]
+    if vol_target is not None:
+        out["vol_scale_avg"] = round(float(np.mean(vol_scales)), 4) if vol_scales else None
+        out["vol_days_scaled_pct"] = (
+            round(100.0 * sum(1 for s in vol_scales if s < 1.0 - 1e-9) / len(vol_scales), 1)
+            if vol_scales
+            else None
+        )
+    if kelly_fraction is not None:
+        out["kelly_fraction"] = float(kelly_fraction)
+        out["kelly_sleeve_avg"] = (
+            round(float(np.mean(kelly_sleeves)), 4) if kelly_sleeves else None
+        )
+        out["kelly_days_at_cap_pct"] = (
+            round(
+                100.0
+                * sum(1 for s in kelly_sleeves if s >= sleeve - 1e-9)
+                / len(kelly_sleeves),
+                1,
+            )
+            if kelly_sleeves
+            else None
+        )
+        out["kelly_days_at_floor_pct"] = (
+            round(
+                100.0
+                * sum(1 for s in kelly_sleeves if s <= float(kelly_floor) + 1e-9)
+                / len(kelly_sleeves),
+                1,
+            )
+            if kelly_sleeves
+            else None
+        )
+    return out
 
 
 def main() -> int:

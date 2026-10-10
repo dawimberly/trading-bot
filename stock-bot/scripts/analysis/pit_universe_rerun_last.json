@@ -1,0 +1,536 @@
+{
+  "research_only": true,
+  "cost_rt_bps": 10.0,
+  "sleeve": 0.95,
+  "membership_file": "data\\sp500_ticker_start_end.csv",
+  "windows": [
+    {
+      "label": "365d",
+      "start": "2025-09-16",
+      "end": "2026-10-10",
+      "modes": {
+        "current": {
+          "symbols": 312,
+          "policies": {
+            "pick_8": {
+              "label": "pick_8",
+              "book_ret_pct": 310.05,
+              "max_dd_pct": 16.8,
+              "max_dd_booked_pct": 11.41,
+              "sharpe": 2.49,
+              "trades": 180,
+              "symbols": 312,
+              "win_rate": 42.8,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "pick_15": {
+              "label": "pick_15",
+              "book_ret_pct": 246.33,
+              "max_dd_pct": 13.75,
+              "max_dd_booked_pct": 7.51,
+              "sharpe": 2.72,
+              "trades": 341,
+              "symbols": 312,
+              "win_rate": 42.5
+            },
+            "pick_25": {
+              "label": "pick_25",
+              "book_ret_pct": 170.29,
+              "max_dd_pct": 13.34,
+              "max_dd_booked_pct": 5.34,
+              "sharpe": 2.57,
+              "trades": 572,
+              "symbols": 312,
+              "win_rate": 39.2,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "friday_flatten": {
+              "label": "friday_flatten",
+              "book_ret_pct": 89.09,
+              "max_dd_pct": 22.15,
+              "max_dd_booked_pct": 21.84,
+              "sharpe": 1.57,
+              "trades": 1125,
+              "symbols": 312,
+              "win_rate": 50.4,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "take_1r": {
+              "label": "take_1r",
+              "book_ret_pct": 229.16,
+              "max_dd_pct": 15.02,
+              "max_dd_booked_pct": 12.88,
+              "sharpe": 2.71,
+              "trades": 1206,
+              "symbols": 312,
+              "win_rate": 57.9,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "lab_8_room": {
+              "label": "lab_8_room",
+              "book_ret_pct": 368.36,
+              "max_dd_pct": 13.51,
+              "max_dd_booked_pct": 6.46,
+              "sharpe": 2.76,
+              "trades": 235,
+              "symbols": 312,
+              "win_rate": 66.4,
+              "gate_vs_pick_15": "PASS"
+            }
+          }
+        },
+        "frozen": {
+          "symbols": 231,
+          "policies": {
+            "pick_8": {
+              "label": "pick_8",
+              "book_ret_pct": 80.19,
+              "max_dd_pct": 17.0,
+              "max_dd_booked_pct": 10.88,
+              "sharpe": 1.53,
+              "trades": 176,
+              "symbols": 231,
+              "win_rate": 39.8,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "pick_15": {
+              "label": "pick_15",
+              "book_ret_pct": 70.84,
+              "max_dd_pct": 14.46,
+              "max_dd_booked_pct": 6.73,
+              "sharpe": 1.63,
+              "trades": 337,
+              "symbols": 231,
+              "win_rate": 40.1
+            },
+            "pick_25": {
+              "label": "pick_25",
+              "book_ret_pct": 54.83,
+              "max_dd_pct": 13.84,
+              "max_dd_booked_pct": 6.41,
+              "sharpe": 1.57,
+              "trades": 574,
+              "symbols": 231,
+              "win_rate": 38.3,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "friday_flatten": {
+              "label": "friday_flatten",
+              "book_ret_pct": 38.92,
+              "max_dd_pct": 22.58,
+              "max_dd_booked_pct": 20.94,
+              "sharpe": 1.08,
+              "trades": 1113,
+              "symbols": 231,
+              "win_rate": 51.9,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "take_1r": {
+              "label": "take_1r",
+              "book_ret_pct": 74.44,
+              "max_dd_pct": 15.34,
+              "max_dd_booked_pct": 15.08,
+              "sharpe": 1.65,
+              "trades": 1150,
+              "symbols": 231,
+              "win_rate": 57.0,
+              "gate_vs_pick_15": "PASS"
+            },
+            "lab_8_room": {
+              "label": "lab_8_room",
+              "book_ret_pct": 102.87,
+              "max_dd_pct": 15.42,
+              "max_dd_booked_pct": 12.52,
+              "sharpe": 1.81,
+              "trades": 161,
+              "symbols": 231,
+              "win_rate": 65.2,
+              "gate_vs_pick_15": "PASS"
+            }
+          }
+        },
+        "sp500": {
+          "symbols": 299,
+          "policies": {
+            "pick_8": {
+              "label": "pick_8",
+              "book_ret_pct": 103.5,
+              "max_dd_pct": 20.36,
+              "max_dd_booked_pct": 15.27,
+              "sharpe": 1.67,
+              "trades": 187,
+              "symbols": 299,
+              "win_rate": 35.8,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "pick_15": {
+              "label": "pick_15",
+              "book_ret_pct": 95.53,
+              "max_dd_pct": 13.79,
+              "max_dd_booked_pct": 7.8,
+              "sharpe": 1.91,
+              "trades": 325,
+              "symbols": 299,
+              "win_rate": 39.7
+            },
+            "pick_25": {
+              "label": "pick_25",
+              "book_ret_pct": 71.85,
+              "max_dd_pct": 12.55,
+              "max_dd_booked_pct": 5.57,
+              "sharpe": 1.85,
+              "trades": 549,
+              "symbols": 299,
+              "win_rate": 38.8,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "friday_flatten": {
+              "label": "friday_flatten",
+              "book_ret_pct": 37.78,
+              "max_dd_pct": 24.94,
+              "max_dd_booked_pct": 24.5,
+              "sharpe": 0.99,
+              "trades": 1112,
+              "symbols": 299,
+              "win_rate": 51.2,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "take_1r": {
+              "label": "take_1r",
+              "book_ret_pct": 82.27,
+              "max_dd_pct": 14.31,
+              "max_dd_booked_pct": 14.11,
+              "sharpe": 1.72,
+              "trades": 1114,
+              "symbols": 299,
+              "win_rate": 56.6,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "lab_8_room": {
+              "label": "lab_8_room",
+              "book_ret_pct": 121.47,
+              "max_dd_pct": 20.82,
+              "max_dd_booked_pct": 13.3,
+              "sharpe": 1.9,
+              "trades": 160,
+              "symbols": 299,
+              "win_rate": 65.6,
+              "gate_vs_pick_15": "FAIL"
+            }
+          },
+          "coverage": {
+            "members_in_window": 299,
+            "members_with_data": 299,
+            "members_missing_data": 0,
+            "coverage_pct": 100.0,
+            "avg_members_per_day": 290.1,
+            "avg_covered_per_day": 290.1,
+            "missing_sample": []
+          }
+        }
+      }
+    },
+    {
+      "label": "full_db_1568bars",
+      "start": "2022-06-11",
+      "end": "2026-10-10",
+      "modes": {
+        "current": {
+          "symbols": 312,
+          "policies": {
+            "pick_8": {
+              "label": "pick_8",
+              "book_ret_pct": 366.28,
+              "max_dd_pct": 40.93,
+              "max_dd_booked_pct": 27.9,
+              "sharpe": 1.19,
+              "trades": 306,
+              "symbols": 312,
+              "win_rate": 35.9,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "pick_15": {
+              "label": "pick_15",
+              "book_ret_pct": 297.89,
+              "max_dd_pct": 30.64,
+              "max_dd_booked_pct": 19.24,
+              "sharpe": 1.28,
+              "trades": 565,
+              "symbols": 312,
+              "win_rate": 38.4
+            },
+            "pick_25": {
+              "label": "pick_25",
+              "book_ret_pct": 244.94,
+              "max_dd_pct": 24.18,
+              "max_dd_booked_pct": 14.15,
+              "sharpe": 1.34,
+              "trades": 945,
+              "symbols": 312,
+              "win_rate": 38.0,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "friday_flatten": {
+              "label": "friday_flatten",
+              "book_ret_pct": 135.51,
+              "max_dd_pct": 24.41,
+              "max_dd_booked_pct": 24.76,
+              "sharpe": 0.9,
+              "trades": 1889,
+              "symbols": 312,
+              "win_rate": 50.6,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "take_1r": {
+              "label": "take_1r",
+              "book_ret_pct": 298.45,
+              "max_dd_pct": 27.92,
+              "max_dd_booked_pct": 28.06,
+              "sharpe": 1.32,
+              "trades": 1914,
+              "symbols": 312,
+              "win_rate": 56.5,
+              "gate_vs_pick_15": "PASS"
+            },
+            "lab_8_room": {
+              "label": "lab_8_room",
+              "book_ret_pct": 340.98,
+              "max_dd_pct": 43.93,
+              "max_dd_booked_pct": 42.31,
+              "sharpe": 1.17,
+              "trades": 353,
+              "symbols": 312,
+              "win_rate": 62.0,
+              "gate_vs_pick_15": "FAIL"
+            }
+          }
+        },
+        "frozen": {
+          "symbols": 231,
+          "policies": {
+            "pick_8": {
+              "label": "pick_8",
+              "book_ret_pct": 133.87,
+              "max_dd_pct": 28.84,
+              "max_dd_booked_pct": 22.12,
+              "sharpe": 0.88,
+              "trades": 299,
+              "symbols": 231,
+              "win_rate": 38.1,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "pick_15": {
+              "label": "pick_15",
+              "book_ret_pct": 103.25,
+              "max_dd_pct": 22.15,
+              "max_dd_booked_pct": 15.39,
+              "sharpe": 0.9,
+              "trades": 572,
+              "symbols": 231,
+              "win_rate": 36.9
+            },
+            "pick_25": {
+              "label": "pick_25",
+              "book_ret_pct": 85.89,
+              "max_dd_pct": 15.96,
+              "max_dd_booked_pct": 10.55,
+              "sharpe": 0.92,
+              "trades": 971,
+              "symbols": 231,
+              "win_rate": 36.5,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "friday_flatten": {
+              "label": "friday_flatten",
+              "book_ret_pct": 57.03,
+              "max_dd_pct": 22.58,
+              "max_dd_booked_pct": 20.94,
+              "sharpe": 0.63,
+              "trades": 1893,
+              "symbols": 231,
+              "win_rate": 50.4,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "take_1r": {
+              "label": "take_1r",
+              "book_ret_pct": 100.01,
+              "max_dd_pct": 21.7,
+              "max_dd_booked_pct": 21.54,
+              "sharpe": 0.87,
+              "trades": 1829,
+              "symbols": 231,
+              "win_rate": 55.8,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "lab_8_room": {
+              "label": "lab_8_room",
+              "book_ret_pct": 144.87,
+              "max_dd_pct": 23.21,
+              "max_dd_booked_pct": 17.49,
+              "sharpe": 0.92,
+              "trades": 258,
+              "symbols": 231,
+              "win_rate": 60.5,
+              "gate_vs_pick_15": "PASS"
+            }
+          }
+        },
+        "sp500": {
+          "symbols": 307,
+          "policies": {
+            "pick_8": {
+              "label": "pick_8",
+              "book_ret_pct": 165.8,
+              "max_dd_pct": 23.18,
+              "max_dd_booked_pct": 18.36,
+              "sharpe": 0.99,
+              "trades": 371,
+              "symbols": 307,
+              "win_rate": 35.6,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "pick_15": {
+              "label": "pick_15",
+              "book_ret_pct": 134.38,
+              "max_dd_pct": 19.61,
+              "max_dd_booked_pct": 15.42,
+              "sharpe": 1.06,
+              "trades": 655,
+              "symbols": 307,
+              "win_rate": 36.8
+            },
+            "pick_25": {
+              "label": "pick_25",
+              "book_ret_pct": 108.99,
+              "max_dd_pct": 14.21,
+              "max_dd_booked_pct": 10.53,
+              "sharpe": 1.09,
+              "trades": 1030,
+              "symbols": 307,
+              "win_rate": 37.0,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "friday_flatten": {
+              "label": "friday_flatten",
+              "book_ret_pct": 53.02,
+              "max_dd_pct": 24.94,
+              "max_dd_booked_pct": 24.5,
+              "sharpe": 0.58,
+              "trades": 2225,
+              "symbols": 307,
+              "win_rate": 50.6,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "take_1r": {
+              "label": "take_1r",
+              "book_ret_pct": 110.92,
+              "max_dd_pct": 19.94,
+              "max_dd_booked_pct": 19.21,
+              "sharpe": 0.94,
+              "trades": 2093,
+              "symbols": 307,
+              "win_rate": 56.1,
+              "gate_vs_pick_15": "FAIL"
+            },
+            "lab_8_room": {
+              "label": "lab_8_room",
+              "book_ret_pct": 188.69,
+              "max_dd_pct": 22.66,
+              "max_dd_booked_pct": 19.31,
+              "sharpe": 1.1,
+              "trades": 296,
+              "symbols": 307,
+              "win_rate": 60.8,
+              "gate_vs_pick_15": "FAIL"
+            }
+          },
+          "coverage": {
+            "members_in_window": 307,
+            "members_with_data": 307,
+            "members_missing_data": 0,
+            "coverage_pct": 100.0,
+            "avg_members_per_day": 285.1,
+            "avg_covered_per_day": 285.1,
+            "missing_sample": []
+          }
+        }
+      }
+    }
+  ],
+  "deflated_sharpe_pick_15": [
+    {
+      "sharpe_daily": 0.17119,
+      "sharpe_annual": 2.718,
+      "n_trials": 90,
+      "sr0_daily": 0.09267,
+      "sr0_annual": 1.471,
+      "n_obs": 388,
+      "dsr": 0.9421,
+      "psr_vs_zero": 0.9997,
+      "window": "365d",
+      "universe": "current"
+    },
+    {
+      "sharpe_daily": 0.10262,
+      "sharpe_annual": 1.629,
+      "n_trials": 90,
+      "sr0_daily": 0.09267,
+      "sr0_annual": 1.471,
+      "n_obs": 388,
+      "dsr": 0.5769,
+      "psr_vs_zero": 0.9773,
+      "window": "365d",
+      "universe": "frozen"
+    },
+    {
+      "sharpe_daily": 0.12049,
+      "sharpe_annual": 1.913,
+      "n_trials": 90,
+      "sr0_daily": 0.09267,
+      "sr0_annual": 1.471,
+      "n_obs": 388,
+      "dsr": 0.7086,
+      "psr_vs_zero": 0.9913,
+      "window": "365d",
+      "universe": "sp500"
+    },
+    {
+      "sharpe_daily": 0.08089,
+      "sharpe_annual": 1.284,
+      "n_trials": 90,
+      "sr0_daily": 0.09267,
+      "sr0_annual": 1.471,
+      "n_obs": 1481,
+      "dsr": 0.3251,
+      "psr_vs_zero": 0.9991,
+      "window": "full_db_1568bars",
+      "universe": "current"
+    },
+    {
+      "sharpe_daily": 0.05643,
+      "sharpe_annual": 0.896,
+      "n_trials": 90,
+      "sr0_daily": 0.09267,
+      "sr0_annual": 1.471,
+      "n_obs": 1481,
+      "dsr": 0.0835,
+      "psr_vs_zero": 0.9843,
+      "window": "full_db_1568bars",
+      "universe": "frozen"
+    },
+    {
+      "sharpe_daily": 0.06657,
+      "sharpe_annual": 1.057,
+      "n_trials": 90,
+      "sr0_daily": 0.09267,
+      "sr0_annual": 1.471,
+      "n_obs": 1481,
+      "dsr": 0.1571,
+      "psr_vs_zero": 0.9949,
+      "window": "full_db_1568bars",
+      "universe": "sp500"
+    }
+  ],
+  "ledger_trials_in_family": 108,
+  "note": "No .env / restart. Universe = current is the look-ahead list older findings used."
+}
