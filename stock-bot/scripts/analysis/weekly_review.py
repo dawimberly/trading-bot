@@ -106,6 +106,7 @@ SLEEVE_PARAM: dict[str, tuple[str, str, str]] = {
 
 TRADE_EVENTS = {"exit", "sell", "close", "trade_closed"}
 BUY_EVENTS = {"buy", "entry", "open"}
+CLOSE_PAIR_TOLERANCE = pd.Timedelta(seconds=10)  # supporting evidence only; not an identity
 DataGrade = Literal["A", "B", "C"]
 
 
@@ -541,60 +542,314 @@ def _extract_pnl(note: str) -> float | None:
     return pnl
 
 
-def _close_pair_keys(row: Any) -> set[tuple]:
-    """Keys that identify one close. ``exit`` often has a blank ``trade_id``."""
-    keys: set[tuple] = set()
-    tid = ""
-    ts = None
-    sym = ""
-    if hasattr(row, "get"):
-        raw = row.get("trade_id")
-        if raw is not None and not (isinstance(raw, float) and math.isnan(raw)):
-            tid = str(raw).strip()
-        ts = row.get("timestamp")
-        for key in ("symbol", "ticker"):
-            val = row.get(key)
-            if val is None or (isinstance(val, float) and math.isnan(val)):
+def _row_text(row: Any, key: str) -> str:
+    if not hasattr(row, "get"):
+        return ""
+    raw = row.get(key)
+    if raw is None or (isinstance(raw, float) and math.isnan(raw)):
+        return ""
+    text = str(raw).strip()
+    if text.lower() in ("", "nan", "none"):
+        return ""
+    return text
+
+
+def _row_event(row: Any) -> str:
+    return _row_text(row, "event").lower()
+
+
+def _row_ts(row: Any) -> pd.Timestamp | None:
+    if not hasattr(row, "get"):
+        return None
+    raw = row.get("timestamp")
+    if raw is None or (isinstance(raw, float) and math.isnan(raw)):
+        return None
+    stamp = pd.Timestamp(raw)
+    return None if pd.isna(stamp) else stamp
+
+
+def _row_symbol(row: Any) -> str:
+    if not hasattr(row, "get"):
+        return ""
+    for key in ("symbol", "ticker"):
+        text = _row_text(row, key).upper()
+        if text:
+            return text
+    return ""
+
+
+def _has_dollar_pnl(row: Any) -> bool:
+    return hasattr(row, "get") and _coerce_float(row.get("realized_pnl")) is not None
+
+
+def _execution_id(row: Any) -> str:
+    for key in ("execution_id", "fill_id", "broker_fill_id"):
+        text = _row_text(row, key)
+        if text:
+            return text
+    return ""
+
+
+def _pnl_value(row: Any) -> float | None:
+    if not _has_dollar_pnl(row):
+        return None
+    return _coerce_float(row.get("realized_pnl"))
+
+
+def _pnl_equal(left: Any, right: Any) -> bool:
+    left_pnl = _pnl_value(left)
+    right_pnl = _pnl_value(right)
+    if left_pnl is None or right_pnl is None:
+        return False
+    return abs(left_pnl - right_pnl) <= 0.01
+
+
+def _fill_link(left: Any, right: Any) -> str:
+    """Shared identity. A symbol and a clock are not an identity."""
+    left_exec = _execution_id(left)
+    right_exec = _execution_id(right)
+    if left_exec and right_exec and left_exec == right_exec:
+        return "execution_id"
+    left_order = _row_text(left, "order_id")
+    right_order = _row_text(right, "order_id")
+    if (
+        left_order
+        and right_order
+        and left_order == right_order
+        and _row_symbol(left) == _row_symbol(right)
+        and _row_text(left, "qty") == _row_text(right, "qty")
+        and _row_text(left, "price") == _row_text(right, "price")
+    ):
+        return "order_id_fill_identity"
+    left_trade = _row_text(left, "trade_id")
+    right_trade = _row_text(right, "trade_id")
+    if left_trade and right_trade and left_trade == right_trade and _row_symbol(left) == _row_symbol(right):
+        return "trade_id"
+    return ""
+
+
+def _time_supports(left: Any, right: Any) -> bool:
+    """Clock proximity is evidence only. It never decides that two fills are one."""
+    symbol = _row_symbol(left)
+    if not symbol or symbol != _row_symbol(right):
+        return False
+    left_ts = _row_ts(left)
+    right_ts = _row_ts(right)
+    if left_ts is None or right_ts is None:
+        return False
+    return abs(left_ts - right_ts) <= CLOSE_PAIR_TOLERANCE
+
+
+def _ambiguous_record(row: Any, reason: str) -> dict[str, Any]:
+    pnl = _pnl_value(row)
+    stamp = _row_ts(row)
+    return {
+        "reason": reason,
+        "event": _row_event(row),
+        "symbol": _row_symbol(row),
+        "order_id": _row_text(row, "order_id"),
+        "trade_id": _row_text(row, "trade_id"),
+        "execution_id": _execution_id(row),
+        "timestamp": "" if stamp is None else stamp.isoformat(sep=" ", timespec="seconds"),
+        "dollars": None if pnl is None else round(pnl, 2),
+    }
+
+
+def _empty_reconcile(df: pd.DataFrame) -> dict[str, Any]:
+    empty = df.iloc[0:0].copy() if hasattr(df, "iloc") else df
+    return {
+        "raw_fill_count": 0,
+        "raw_fill_total": 0.0,
+        "duplicate_fill_count": 0,
+        "deduplicated_fill_count": 0,
+        "deduplicated_fill_total": 0.0,
+        "historical_close_marker_count": 0,
+        "historical_close_marker_total": 0.0,
+        "suppressed_marker_count": 0,
+        "suppressed_marker_total": 0.0,
+        "confident_count": 0,
+        "confident_total": 0.0,
+        "ambiguous_records": [],
+        "unattributed_count": 0,
+        "unattributed_total": 0.0,
+        "confident_frame": empty,
+    }
+
+
+def reconcile_realized(df: pd.DataFrame) -> dict[str, Any]:
+    """Separate confident dollars from rows that cannot be tied to one fill.
+
+    The same execution id is one fill. An order id plus the same quantity and
+    price is not an execution id: those rows stay in the report as uncertain
+    and their dollars are not dropped. Distinct fills stay separate. A
+    historical ``trade_closed`` dollar row is omitted from the confident total
+    only when it matches one identified fill. Rows with no identity are listed
+    instead of being dropped.
+    """
+    report = _empty_reconcile(df)
+    if df is None or df.empty or "event" not in df.columns:
+        return report
+    ev = df["event"].astype(str).str.lower()
+    side = df["side"].astype(str).str.lower() if "side" in df.columns else pd.Series("", index=df.index)
+    fill_rows = [
+        (idx, row)
+        for idx, row in df[(ev == "fill") & (side == "sell")].iterrows()
+        if _has_dollar_pnl(row)
+    ]
+    markers = [
+        (idx, row)
+        for idx, row in df[ev.eq("trade_closed")].iterrows()
+        if _has_dollar_pnl(row)
+    ]
+    exits = [
+        (idx, row)
+        for idx, row in df[ev.isin(["exit", "sell", "close"])].iterrows()
+        if _row_event(row) != "trade_closed"
+    ]
+    report["raw_fill_count"] = len(fill_rows)
+    report["raw_fill_total"] = round(sum(_pnl_value(row) or 0.0 for _, row in fill_rows), 2)
+    report["historical_close_marker_count"] = len(markers)
+    report["historical_close_marker_total"] = round(sum(_pnl_value(row) or 0.0 for _, row in markers), 2)
+
+    seen_exec: dict[str, Any] = {}
+    unique: list[tuple[Any, Any]] = []
+    for idx, row in fill_rows:
+        execution = _execution_id(row)
+        if execution:
+            if execution in seen_exec:
+                report["duplicate_fill_count"] += 1
                 continue
-            text = str(val).strip().upper()
-            if text and text.lower() not in ("nan", "none"):
-                sym = text
-                break
-    if tid and tid.lower() not in ("nan", "none"):
-        keys.add(("id", tid))
-    if ts is not None and not (isinstance(ts, float) and math.isnan(ts)):
-        stamp = pd.Timestamp(ts)
-        if not pd.isna(stamp):
-            keys.add(("ts", stamp.isoformat(timespec="seconds"), sym))
-    return keys
+            seen_exec[execution] = idx
+        unique.append((idx, row))
+
+    ambiguous: list[dict[str, Any]] = []
+    confident_fills: list[tuple[Any, Any]] = []
+    uncertain_fills: list[Any] = []
+    order_groups: dict[tuple, list[tuple[Any, Any]]] = {}
+    blank_groups: dict[tuple, list[tuple[Any, Any]]] = {}
+    for item in unique:
+        row = item[1]
+        if _execution_id(row):
+            confident_fills.append(item)
+            continue
+        order_id = _row_text(row, "order_id")
+        if order_id:
+            fingerprint = (
+                order_id,
+                _row_symbol(row),
+                _row_text(row, "qty"),
+                _row_text(row, "price"),
+            )
+            order_groups.setdefault(fingerprint, []).append(item)
+            continue
+        key = (
+            _row_symbol(row),
+            _row_text(row, "qty"),
+            _row_text(row, "price"),
+            round(_pnl_value(row) or 0.0, 2),
+        )
+        blank_groups.setdefault(key, []).append(item)
+    for group in order_groups.values():
+        if len(group) == 1:
+            confident_fills.append(group[0])
+            continue
+        for _, row in group:
+            ambiguous.append(_ambiguous_record(row, "indistinguishable_executions"))
+            uncertain_fills.append(row)
+    for group in blank_groups.values():
+        if len(group) == 1:
+            confident_fills.append(group[0])
+            continue
+        for _, row in group:
+            ambiguous.append(_ambiguous_record(row, "identical_blank_fill"))
+
+    preserved_ambiguous = [
+        row
+        for row in ambiguous
+        if row["reason"] in {"identical_blank_fill", "indistinguishable_executions"}
+        and row["event"] == "fill"
+    ]
+    report["deduplicated_fill_count"] = len(confident_fills) + len(preserved_ambiguous)
+    report["deduplicated_fill_total"] = round(
+        sum(_pnl_value(row) or 0.0 for _, row in confident_fills)
+        + sum(row["dollars"] or 0.0 for row in preserved_ambiguous),
+        2,
+    )
+
+    suppressed: list[tuple[Any, Any]] = []
+    unmatched_markers: list[tuple[Any, Any]] = []
+    for m_idx, marker in markers:
+        if any(_fill_link(fill, marker) for fill in uncertain_fills):
+            ambiguous.append(_ambiguous_record(marker, "indistinguishable_executions"))
+            continue
+        linked = [
+            (f_idx, fill)
+            for f_idx, fill in confident_fills
+            if _fill_link(fill, marker)
+        ]
+        equal = [item for item in linked if _pnl_equal(item[1], marker)]
+        if equal:
+            suppressed.append((m_idx, marker))
+            continue
+        if linked:
+            ambiguous.append(_ambiguous_record(marker, "identity_pnl_mismatch"))
+            continue
+        unmatched_markers.append((m_idx, marker))
+    report["suppressed_marker_count"] = len(suppressed)
+    report["suppressed_marker_total"] = round(sum(_pnl_value(row) or 0.0 for _, row in suppressed), 2)
+
+    confident_markers: list[tuple[Any, Any]] = []
+    for m_idx, marker in unmatched_markers:
+        if not _row_text(marker, "order_id") and not _row_text(marker, "trade_id") and not _execution_id(marker):
+            ambiguous.append(_ambiguous_record(marker, "blank_identifier"))
+            continue
+        nearby = [
+            item
+            for item in confident_fills
+            if not _fill_link(item[1], marker) and _time_supports(item[1], marker)
+        ]
+        if nearby:
+            ambiguous.append(_ambiguous_record(marker, "timestamp_without_identity"))
+            continue
+        confident_markers.append((m_idx, marker))
+
+    confident_exits: list[tuple[Any, Any]] = []
+    dollar_rows = confident_fills + confident_markers
+    for e_idx, exit_row in exits:
+        if _has_dollar_pnl(exit_row):
+            continue
+        if any(_fill_link(exit_row, row) for row in uncertain_fills):
+            ambiguous.append(_ambiguous_record(exit_row, "indistinguishable_executions"))
+            continue
+        linked = any(_fill_link(exit_row, row) for _, row in dollar_rows)
+        if linked:
+            continue
+        if any(_time_supports(exit_row, row) for _, row in dollar_rows):
+            ambiguous.append(_ambiguous_record(exit_row, "timestamp_without_identity"))
+            continue
+        confident_exits.append((e_idx, exit_row))
+
+    confident_idx = [idx for idx, _ in confident_fills + confident_markers + confident_exits]
+    frame = df.loc[confident_idx] if confident_idx else report["confident_frame"]
+    dollars = [
+        _pnl_value(row) or 0.0
+        for _, row in confident_fills + confident_markers
+    ]
+    unattributed = [row["dollars"] for row in ambiguous if row["dollars"] is not None]
+    report["confident_frame"] = frame
+    report["confident_count"] = len(confident_idx)
+    report["confident_total"] = round(sum(dollars), 2)
+    report["ambiguous_records"] = ambiguous
+    report["unattributed_count"] = len(unattributed)
+    report["unattributed_total"] = round(sum(unattributed), 2)
+    return report
 
 
 def select_closed_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """Closed trades, preferring ``trade_closed`` dollars over a paired ``exit`` note.
-
-    After 2026-09-28 the journal writes both rows at the same timestamp. Counting
-    both would double the trade count and still miss dollars if only ``exit``
-    were kept.
-    """
-    if df.empty or "event" not in df.columns:
+    """Confident closes. Identity decides a duplicate; the clock does not."""
+    if df is None or df.empty or "event" not in getattr(df, "columns", []):
         return df.iloc[0:0].copy() if hasattr(df, "iloc") else df
-    ev = df["event"].astype(str).str.lower()
-    closes = df[ev.isin(TRADE_EVENTS)]
-    if closes.empty:
-        return closes
-    ev = closes["event"].astype(str).str.lower()
-    dollar = closes[ev.eq("trade_closed")]
-    if dollar.empty:
-        return closes
-    keys: set[tuple] = set()
-    for _, row in dollar.iterrows():
-        keys.update(_close_pair_keys(row))
-    keep: list[Any] = []
-    for idx, row in closes.iterrows():
-        event = str(row.get("event") or "").lower()
-        if event == "trade_closed" or keys.isdisjoint(_close_pair_keys(row)):
-            keep.append(idx)
-    return closes.loc[keep]
+    return reconcile_realized(df)["confident_frame"]
 
 
 def _apply_trade_outcome(st: SleeveStats, row: Any, pnls: list[float]) -> tuple[bool, bool]:

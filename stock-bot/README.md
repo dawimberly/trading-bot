@@ -2,6 +2,12 @@
 
 **Personal systematic fund** on Alpaca. **What actually runs** is the portal overlay in `modules/portal_bot.py`, not the old Profile A / v1.5.4 VTI locks further down this file.
 
+### Phase 4 Medium paper trial (2026-10-11)
+
+Phase 4 remains a Medium paper trial on `cursor/phase4-integration`. October 12 order, fill, and realized-P&L reconciliation is **NOT YET TESTED**. Realized dollars belong on fill rows; confirmed close markers carry no duplicate dollars. Estimated remaining quantity cannot confirm a completed exit. Offline research does not validate broker execution or paper accounting.
+
+Research runs must use historical snapshots, keep outputs outside active books, and use only information available before the simulated execution. Record data coverage, universe selection, costs, and execution limitations with each result. Promotion requires review of actual paper orders and fills; this branch is not approval to merge or deploy to live.
+
 | Book | ID | Employed (2026-10-10) |
 |------|-----|------------------------|
 | **Live** | `alpaca_live` | ~$300 · **VTI core OFF** · NYSE-only (~95% cap) · 1% / $10 small-account caps · crypto **off** |
@@ -1731,7 +1737,7 @@ python scripts/analysis/weekly_review.py --test
 python scripts/analysis/weekly_review.py --skip-backtest   # smoke only
 ```
 
-Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`. Closed-trade dollars come from `trade_closed` (`realized_pnl`); a paired percent-only `exit` note is dropped so the same close is not counted twice. Unpaired old `exit` rows still count as win/loss direction only. The Saturday pack also appends a Lab 8 A2B1 / fat-loser tally (`data/lab_a2b1_week_latest.md`; standalone: `python scripts/analysis/lab_a2b1_week.py`). Advisory only — does not write `.env`.
+Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`. New realized-dollar accounting uses sell `fill` rows. The same fill is counted once when it shares an execution id. The same order id with the same quantity and price, and no execution id, is reported as uncertain and both records stay in the unattributed list. A historical `trade_closed` marker is left out of the confident total only when it matches one identified fill with the same dollars. Unpaired old `exit` rows still count as win/loss direction only. The Saturday pack also appends a Lab 8 A2B1 / fat-loser tally (`data/lab_a2b1_week_latest.md`; standalone: `python scripts/analysis/lab_a2b1_week.py`). Advisory only — does not write `.env`.
 
 The NYSE hour table is **sale hour**: the exit timestamp converted from the machine clock to ET. It does not use blank `entry_hour`, and it is not an entry-quality score. `python scripts/analysis/eval_open_stop_gap.py` classifies those ATR exits as an overnight gap-through versus a session fade. The 2026-09-26 week was 8 fades and 1 open print (TGT). That script does not write `.env`.
 

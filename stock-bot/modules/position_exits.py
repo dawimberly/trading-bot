@@ -304,6 +304,7 @@ def run_position_exits(
         pnl_pct = (current - entry) / entry
         if qty < 0:
             pnl_pct = -pnl_pct
+        exit_meta = None
 
         peak = max(float(peak_cache.get(symbol, entry)), current)
         peak_cache[symbol] = peak
@@ -469,6 +470,11 @@ def run_position_exits(
             )
             meta = decision.get("meta") or meta
             meta_cache[symbol] = meta
+            exit_meta = {
+                "atr": atr,
+                "atr_asof": "at_exit",
+                "stop_price": decision.get("stop_price"),
+            }
             action = decision.get("action")
             if action == "reduce":
                 try:
@@ -479,6 +485,7 @@ def run_position_exits(
                         reduce_n,
                         reason=decision.get("exit_code") or "smart_size_reduce",
                         sleeve="NYSE",
+                        exit_meta=exit_meta,
                     )
                     if order and executor.order_filled(order):
                         exits += 1
@@ -527,6 +534,11 @@ def run_position_exits(
             plan = compute_trailing_stop_plan(
                 symbol, entry, atr, getattr(executor, "_last_regime", None), conviction
             )
+            exit_meta = {
+                "atr": atr,
+                "atr_asof": "at_exit",
+                "stop_price": plan.get("stop_price"),
+            }
             if current <= plan["stop_price"]:
                 atr_stop_hit = True
                 stop_hit = True
@@ -552,6 +564,7 @@ def run_position_exits(
                         reduce_n,
                         reason="partial_1r",
                         sleeve="NYSE",
+                        exit_meta=exit_meta,
                     )
                     if order and executor.order_filled(order):
                         meta["partial_taken"] = True
@@ -629,12 +642,14 @@ def run_position_exits(
             if quality:
                 try:
                     order = executor.execute_full_exit(
-                        symbol, reason=exit_code, sleeve="NYSE"
+                        symbol, reason=exit_code, sleeve="NYSE", exit_meta=exit_meta
                     )
                 except TypeError:
                     order = executor.execute_full_exit(symbol)
             else:
-                order = executor.execute_full_exit(symbol)
+                order = executor.execute_full_exit(
+                    symbol, reason=exit_code, exit_meta=exit_meta
+                )
             if not executor.order_filled(order):
                 continue
             exits += 1
