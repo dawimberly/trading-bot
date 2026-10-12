@@ -95,7 +95,7 @@ The comparison is: same order path, two scores. The baseline score is the live o
 
 The candidate score is the split-adjusted return from the last NYSE session on or before 12 calendar months before the **signal date** through the last NYSE session on or before 7 calendar months before that same signal date:
 
-`adj_close(S7) / adj_close(S12) - 1`
+`split_adj_close(S7) / split_adj_close(S12) - 1`
 
 Both endpoints come from the same split-adjusted series. An unadjusted close is not substituted for either endpoint. If either session is missing, or the adjustment method for that name cannot be shown, the name is removed from **both** books for that decision. No other lookback pair is tested. The signal-date anchor is pre-registered in `scripts/research/nyse_12_7_shadow_plan.md`. The baseline score stays the 50-row (20-row IPO) ratio on the live frame. The candidate changes only the sort key inside that shared eligible set.
 
@@ -110,7 +110,7 @@ Required fields, one row per symbol per **NYSE session** (weekends and exchange 
 | `delist_date` | Names that leave the list must remain through the last tradable session, then exit. Absent today means survivorship is untested. |
 | Unadjusted and split/dividend-adjusted session `open`, `high`, `low`, `close` | The 12-to-7 ratio uses only the split-adjusted session closes, both endpoints from the same method. Unadjusted open and the prior session’s unadjusted close are for the gap test if that flag is on. |
 | Timestamped live closes used by the score | One row per close the live matrix would have rolled, with `bar_time <= decision_time`. At least 50 rows (20 if the IPO rule fires) before each decision. Spacing is recorded from the timestamps. It is not assumed. |
-| Executable fill tape | Either a quote (`quote_time`, `bid`, `ask`, `bid_size`, `ask_size`) or an OHLC bar (`bar_start`, `bar_end`, `open`, `high`, `low`, `close`). A close with no interval start, and a 5-minute close series alone, does not define a fill. |
+| Executable fill tape | Either a quote (`event_time`, `vendor_receipt_time`, `local_receipt_time`, `bid`, `ask`, `bid_size`, `ask_size`) or an OHLC bar (`bar_start`, `bar_end`, `open`, `high`, `low`, `close`). A close with no interval start, and a 5-minute close series alone, does not define a fill. A quote with only one timestamp is not a fill. |
 | `split_factor`, `dividend` | Both candidate endpoints must be reconstructable as split-adjusted. Daily `fetch_data.py` uses `auto_adjust=True` and then drops every column except Close (`fetch_data.py` lines 20–31 and 67–77), so that file cannot show the factor. |
 
 History before the first decision: 12 calendar months of NYSE sessions so both candidate endpoints exist, plus 50 timestamped live-matrix rows at or before the decision (20 when the IPO rule fires) and `ATR_PERIOD` rows of that same matrix (checked-in default 14). After the last entry, prices must continue through the coded time exit. With exit optimization on, that cap is `EXIT_OPTIMIZATION_MAX_HOLD_BARS` (checked-in default 35, `config.py` line 1194); otherwise `PAPER_POSITION_MAX_HOLD_BARS` (checked-in default 30, line 770). Whether optimization is on in a running process is unverified (`effective_exit_optimization_enabled`, lines 6231–6247). This checkout does not contain that span. The observation window, separate from the hold cap, is at least six prospective months. See the shadow plan.
@@ -134,7 +134,7 @@ No configured source can supply the prospective feed. yfinance is a code path wi
 A later read-only drop would need, for `get_nyse_universe_fixed()` plus SPY, without this session fetching it:
 
 - Live-score closes: `symbol`, `bar_time` in `America/New_York`, `close`, enough rows before each decision for a 50-row mean (20 for an IPO). Timestamps must be the bar times the live matrix would have used. Spacing is measured from those timestamps.
-- Fills: quotes with `quote_time > decision_time`, `bid`, `ask`, and sizes, or OHLC bars with `bar_start > decision_time` and `bar_end` at or before the session close. The fill price is defined in the shadow plan. The signal bar is not a fill.
+- Fills: quotes with `event_time` and a receipt time, both after the decision, and a receipt lag of at most 2 seconds, plus `bid`, `ask`, and sizes; or, only when no such quote exists, OHLC bars with `bar_start > decision_time` and `bar_end` at or before the session close. The fill price and the cost split are defined in `scripts/research/nyse_shadow_feed_sources.md`. The signal bar is not a fill.
 - Sessions: `session_date`, split-adjusted `close`, `split_factor`, and `dividend` for at least 12 calendar months before the first signal date, on an explicit NYSE calendar. Both 12-to-7 endpoints must use that adjusted series.
 - Access: a local read-only file. No trading connection, no change to the running bot, and no secret written into the research notes.
 
@@ -148,14 +148,14 @@ Do not report return, Sharpe, drawdown, turnover, or cost totals until every che
 | 12-to-7 coverage | At least 90% of those name-sessions have both the 7-month and 12-month prior session closes. |
 | Fill coverage | At least 90% of entry and exit decisions have an executable fill, as defined in the shadow plan, strictly after the decision and at or before the session close. A later close with no quote and no bar-start is not a fill. |
 | Calendar | Dates match an explicit NYSE session list. Any Saturday, Sunday, or exchange holiday fails the file. |
-| Duplicates | Zero duplicate `(symbol, session_date)` keys and zero duplicate `(symbol, bar_time)` or `(symbol, quote_time)` keys. |
+| Duplicates | Zero duplicate `(symbol, session_date)` keys and zero duplicate `(symbol, bar_time)` or `(symbol, event_time)` keys. |
 | Stale prices | A close equal to the prior session close for 5 or more consecutive sessions is flagged. If flagged name-sessions exceed 2% of the panel, stop. |
 | Look-ahead | The 50-row mean and the ATR use only rows whose timestamp is at or before the decision. The 12-to-7 endpoints are sessions on or before 7 and 12 calendar months before the signal date. Membership `asof` is on or before the decision. The fill timestamp is after the decision. The signal row is not the fill row. |
 | Survivorship | If the claim is the static 30-name list, the report must say the result is conditional on those survivors unless an add/delete log is attached. If the claim is a broad index, a window with zero delist records fails the check. |
 | Corporate actions | An adjusted close move larger than 25% versus the prior session without a split or dividend factor fails that name-session and counts against coverage. |
-| Costs | When a performance report is eventually allowed, apply 5 bps per side and 0 commission on the executable fill price (`modules/backtester_core.py` lines 29–31 and 290–307). Gross results do not satisfy this check. Interim diagnostics do not report return. |
+| Costs | When a performance report is eventually allowed, use the split in `scripts/research/nyse_shadow_feed_sources.md`. A quote fill buys the ask or sells the bid and does not also apply the 5 bps term. An OHLC open applies that 5 bps once and no extra half-spread. Equity commission stays 0 (`modules/backtester_core.py` lines 29–31 and 300–305). Receipt lag is an exclusion, not more basis points. Gross results do not satisfy this check. Interim diagnostics do not report return. |
 | Same names and dates | Baseline and candidate use the same decision times, the same eligible names, and the same position limits, sizing, exits, fills, and costs. A missing 12-to-7 endpoint removes the name from both books for that decision. Only the ranking score changes. |
-| Observation length | At least six calendar months of prospective sessions after the feed is valid, pre-registered before the tracker starts. A shorter sample is not a performance result. Six months is a minimum window, not proof of profitability. |
+| Observation length | At least six calendar months of prospective sessions after the feed is valid, plus at least 30 completed round trips in each book and at least 120 paired session returns, pre-registered before the tracker starts. Failing coverage or either sample floor is inconclusive. Meeting the floors is not proof of profitability. |
 
 The current pickle fails session definition (weekend rows, and weekday repeats that look like holiday copies), OHLC, quotes, adjustment, membership, and delist checks. Executable-fill coverage of the required decisions is 0%.
 
@@ -165,4 +165,4 @@ The current pickle fails session definition (weekend rows, and weekday repeats t
 
 Blocker: this checkout has no read-only feed of timestamped live-score closes, post-decision quotes or OHLC, and 12 months of consistently split-adjusted session closes. No configured credential can supply that feed. `fetch_data.py` and `_fetch_alpaca_daily_closes` were not run.
 
-Next step, before any tracker code: add that feed locally, not wired to either bot, for `get_nyse_universe_fixed()` plus SPY. Re-run `python scripts/research/nyse_comparison_data_inventory.py`. Do not start the tracker and do not compute performance until section 5 passes and six prospective months have elapsed. State that the universe is the current static list. A point-in-time index test also needs membership and delisted names, which are not in this checkout.
+Next step, before any tracker code: a user-held entitlement for one of the quote tapes compared in `scripts/research/nyse_shadow_feed_sources.md`, plus that source’s explicit split events, with the credential placed in an uncommitted env file. This checkout cannot build the feed until that exists. Do not start the tracker and do not compute performance until section 5 passes, six prospective months have elapsed, and the pre-registered trade-count and paired-return floors pass. State that the universe is the current static list. A point-in-time index test also needs membership and delisted names, which are not in this checkout.

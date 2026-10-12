@@ -6,7 +6,9 @@ Checked-in defaults below are `os.getenv` fallbacks in `config.py` and values in
 
 ## 1. Baseline score
 
-`_equity_momentum_candidates` (`modules/pipeline_strategies.py` lines 986–994) sets `ma_window = 20 if ipo else 50`, then `prices.rolling(window=window).mean()` on the column it was given. The sorted score is `current / ma - 1`. A name stays in the list when `current > ma * (1 - NYSE_MA_ENTRY_TOLERANCE_PCT)` (lines 968–994). The checked-in tolerance is `0.01` (`config.py` line 1485). The function does not resample and does not call `effective_nyse_ma_window()`.
+`_equity_momentum_candidates` (`modules/pipeline_strategies.py` lines 986–994) sets `ma_window = 20 if ipo else 50`, then `window = min(ma_window, len(prices))` and `prices.rolling(window=window).mean()` on the column it was given. The sorted score is `current / ma - 1`. A name stays in the list when `current > ma * (1 - NYSE_MA_ENTRY_TOLERANCE_PCT)` (lines 968–994). The checked-in tolerance is `0.01` (`config.py` line 1485). The function does not resample and does not call `effective_nyse_ma_window()`.
+
+The 50-row and 20-row figures are the target windows. A non-IPO is skipped only below 20 rows (line 986). An IPO is skipped only below `IPO_MIN_TRADING_DAYS`, checked-in default 5 (`modules/dynamic_universe.py` lines 27 and 309–310). A shorter series that still passes that minimum is scored on `min(target, len)`. The shadow follows that function. It does not invent rows to force a 50-row mean.
 
 The live and paper cycles load `data = load_live_close_matrix()` (`run_all.py` line 709) and pass that frame, unresampled, into `run_nyse_momentum_and_stat_arb` (lines 1630–1640). `modules/real_time_data.py` is not in this checkout. No live matrix snapshot is on disk. **The bar spacing of the live score is unproven.** This plan does not assign it a size.
 
@@ -45,11 +47,11 @@ The daily backtester sets `prices = data.iloc[i]` (`backtester.py` line 1566) an
 
 Signal date is the NYSE session date of the decision timestamp.
 
-`score = adj_close(S7) / adj_close(S12) - 1`
+`score = split_adj_close(S7) / split_adj_close(S12) - 1`
 
 - `S12` is the last NYSE session on or before 12 calendar months before the signal date.
 - `S7` is the last NYSE session on or before 7 calendar months before the signal date.
-- `adj_close` is the split-adjusted close. Both endpoints use the same adjustment method, named in the feed sidecar. An unadjusted close is not used for one endpoint and an adjusted close for the other.
+- `split_adj_close` is the split-adjusted close. Cash dividends are not in this ratio. Both endpoints use the same split-only method, named in the feed sidecar. An unadjusted close is not used for one endpoint and an adjusted close for the other. Alpaca `adjustment=all` includes cash dividends and is not this method.
 - A weekend or holiday row is not a session.
 - If either session is missing, or the factor for that name is missing, the name is ineligible for **both** books on that decision.
 
@@ -57,15 +59,17 @@ This is the return from the 12-month session through the 7-month session. No oth
 
 ## 4. Fill rule
 
-A close series, including a 5-minute close series, does not prove an executable fill. The signal row is the last live-matrix close with `bar_time <= decision_time`. That row forms the baseline score. It is never the fill.
+A close series, including a 5-minute close series, does not prove an executable fill. The signal row is the last score-file close with `bar_time <= decision_time`. That row forms the baseline score. It is never the fill. The full source comparison and the cost split are in `scripts/research/nyse_shadow_feed_sources.md`.
 
-For a decision at time `T`, before the session close:
+For a decision at time `T`, before the official NYSE close:
 
-- Quote tape: the buy fill is the `ask` of the first quote with `quote_time > T`, `ask > 0`, and `ask_size > 0`. The sell fill is the `bid` of the first quote with `quote_time > T`, `bid > 0`, and `bid_size > 0`.
-- OHLC tape, used only when no quote is present: the fill is the `open` of the first bar with `bar_start > T` and `bar_end` at or before the session close. A bar that contains `T` is not a fill. Its open, high, low, and close can include prices from before `T`.
+- Quote tape, used when an eligible quote exists. The record must carry `event_time` and a receipt time. `available_time` is the local receipt when the research process stored the record, otherwise the vendor receipt. A historical file must not invent the missing one. A quote is eligible only when `event_time > T`, `available_time > T`, and `available_time - event_time` is at most 2.000 seconds, with price > 0 and size > 0 on the side used. The buy fill is that quote’s ask. The sell fill is that quote’s bid. The recorded fill time is `available_time`. The 2-second ceiling is an eligibility filter, not an extra cost.
+- OHLC tape, used only when no eligible quote exists: the fill is the `open` of the first bar with `bar_start > T` and `bar_end` at or before the session’s official close. A bar that contains `T` is not a fill.
 - If neither print exists, the decision is unfilled and counts against fill coverage.
 
-Both books use that same fill for the same decision. Checked-in research costs, applied only when a performance report is allowed, are 5 bps per side and 0 commission (`modules/backtester_core.py` lines 29–31). Buys multiply the fill by `1 + 5/10000`. Sells multiply by `1 - 5/10000` (`effective_execution`, lines 300–305). `execute_order` itself does not add that slippage.
+Both books use that same fill for the same decision. Either price is a simulated fill proxy, not an Alpaca print and not a call to `execute_order`.
+
+Costs, applied only when a performance report is allowed, do not count the spread twice. A quote fill pays the spread through the ask or the bid, uses equity commission of 0 (`modules/backtester_core.py` line 31), and does **not** also multiply by the 5 bps slippage term. An OHLC open does not contain the spread, so that path applies the checked-in 5 bps once (lines 29 and 300–305) and does not also subtract a modeled half-spread. Latency is the 2-second exclusion, not more basis points. Applying those 5 bps on top of a bid or ask would double-count the spread. That earlier sentence in this section is withdrawn.
 
 ## 5. Feed schema
 
@@ -78,22 +82,25 @@ Directory, read-only, not created here: `scripts/research/feeds/`.
 - `symbol`
 - `bar_time` (ISO-8601, `America/New_York`)
 - `close`
+- `source` (`live_matrix_snapshot` or `research_proxy`)
 
-Rows with `bar_time <= T` are the only rows in the 50-row mean. The file must cover `get_nyse_universe_fixed()` and SPY. Record the observed median spacing. Do not relabel it.
+Rows with `bar_time <= T` are the only rows in the mean. The mean length is the order function’s `min(target, len)`, with targets 50 and 20. The file must cover `get_nyse_universe_fixed()` and SPY. Record the observed median spacing. Do not relabel it. A `research_proxy` file is not a snapshot of `load_live_close_matrix()`.
 
 `nyse_shadow_fills.jsonl`, one object per symbol per quote or bar. Quote records:
 
-- `symbol`, `quote_time`, `bid`, `ask`, `bid_size`, `ask_size`
+- `symbol`, `event_time`, `vendor_receipt_time`, `local_receipt_time`, `bid`, `ask`, `bid_size`, `ask_size`, `source`
 
-OHLC records:
+OHLC records, used only when no eligible quote exists:
 
-- `symbol`, `bar_start`, `bar_end`, `open`, `high`, `low`, `close`
+- `symbol`, `bar_start`, `bar_end`, `open`, `high`, `low`, `close`, `source`
 
 `nyse_shadow_sessions.jsonl`, one object per symbol per NYSE session:
 
-- `session_date`, `symbol`, `adj_close`, `unadj_close`, `split_factor`, `dividend`
+- `session_date`, `symbol`, `split_adj_close`, `unadj_close`, `split_factor`, `cash_dividend`
 
-No Saturday, Sunday, or holiday rows. History starts at least 12 calendar months before the first signal date. `adjustment.json` names the method. Both `S7` and `S12` read `adj_close` from this file only. `fetch_data.py` lines 20–31 and 67–77 keep Close after `auto_adjust=True` on the daily path, so a file built that way does not satisfy the factor fields.
+`split_adj_close` is split-adjusted only. `cash_dividend` is stored and is not multiplied into the 12-to-7 ratio. Alpaca `adjustment=all` and `adjustment=dividend` include cash dividends and do not satisfy this field.
+
+No Saturday, Sunday, or holiday rows. History starts at least 12 calendar months before the first signal date. `adjustment.json` names the method as split ratios only. Both `S7` and `S12` read `split_adj_close` from this file only. Score-close records also carry `source` of `live_matrix_snapshot` or `research_proxy`. A proxy does not prove `load_live_close_matrix()`. `fetch_data.py` lines 20–31 and 67–77 keep Close after `auto_adjust=True` on the daily path, so a file built that way does not satisfy the factor fields.
 
 `nyse_sessions.txt` lists the session dates used to choose `S7` and `S12`.
 
@@ -111,19 +118,21 @@ Presence only. No secret value is recorded. No provider was called.
 | `days_266.pkl` | Local close panel, 2025-04-14 through 2026-06-14. | No. Close only, not prospective, no fill tape, adjustment unverifiable. |
 | Polygon, Sharadar, CRSP, Tiingo, Databento, Nasdaq Data Link, FMP | No key name with a value in `.env.example`. Those env names are unset in this process. | No source is configured. |
 
-Exact fields a future read-only drop must have are in section 5. Access is a local file. This plan does not subscribe, fetch, or guess a vendor default.
+Exact fields a future read-only drop must have are in section 5. Which official sources can produce them, and which prices were actually printed on their pages, are in `scripts/research/nyse_shadow_feed_sources.md`. Access is a local file. This plan does not subscribe, fetch, or guess a vendor default. No key named in that note is configured here.
 
 ## 7. Observation protocol
 
-Registered before any tracker start. Not revised after the first decision.
+Registered on 2026-10-12, before any feed file is collected and before any tracker start. Not revised after the first decision timestamp is written into a feed file. The worked rules are in `scripts/research/nyse_shadow_feed_sources.md` section 6.
 
 - The performance window is **at least six calendar months** of prospective NYSE sessions, beginning on the first session after the feed passes the readiness checks.
 - Six months is a minimum observation window. It is not proof of profitability. A completed window does not authorize a live or paper change.
-- During those six months, interim notes may list data-quality and operational diagnostics only: row counts, missing endpoints, duplicate timestamps, stale sessions, unfilled decisions, feed gaps, and exceptions. They do not include return, Sharpe, drawdown, turnover, or a promotion recommendation. They are not used to change lags, bands, caps, or exits.
-- At the end, report **inconclusive** if executable-fill coverage, 12-to-7 endpoint coverage, or live-score row coverage is under 90% of in-universe name-decisions, or if either book has no completed round trip. Weekend rows are not in those ratios.
-- The same stale-price rule (more than 2% of name-sessions unchanged for five sessions) and the same corporate-action rule (an adjusted move over 25% without a factor fails that name-session) still block a performance number.
-- If those checks pass, the first paired note may show net return after the 5 bps cost, max drawdown, turnover, trade count, costs, and coverage, on the same names and decision times. That note still does not claim expected profit and does not change the bot.
-- The earlier 35-day burn-in, 60-session window, and 20-round-trip gate are retired. The 35-day figure remains only as the checked-in exit-optimization hold cap, which is a position rule, not the observation window.
+- Each book must finish at least **30 completed round trips**. A completed round trip goes from flat to a position on an entry fill and later returns to flat on an exit fill, both inside the window. An open position at the end is not completed.
+- At least **120 paired NYSE sessions** are required. A paired session is one where both books have a finite daily return. Equity at the session close is cash plus open positions marked at the same `split_adj_close`. That mark is not the fill. The comparison series is the candidate session return minus the baseline session return.
+- During the window, interim notes may list data-quality and operational diagnostics only: row counts, missing endpoints, duplicate timestamps, stale sessions, unfilled decisions, receipt-lag failures, feed gaps, and exceptions. They do not include return, Sharpe, drawdown, turnover, or a promotion recommendation. They are not used to change the lag ceiling, the trade floor, bands, caps, or exits.
+- At the end, report **inconclusive** if executable-fill coverage, 12-to-7 endpoint coverage, or score-row coverage is under 90% of in-universe name-decisions, **or** if either book has fewer than 30 completed round trips, **or** if fewer than 120 paired sessions exist. Weekend rows are not in those ratios. Failing either the coverage requirements or the sample requirements is inconclusive.
+- The same stale-price rule (more than 2% of name-sessions unchanged for five sessions) and the same corporate-action rule (a split-adjusted move over 25% without a split factor fails that name-session) still block a performance number.
+- If those checks pass, the first paired note may show the paired difference series and its mean, max drawdown, turnover, trade count, the section 4 costs, and coverage, on the same names and decision times. Meeting the six-month, 30-round-trip, and 120-session floors does not prove future profitability and does not change the bot.
+- The earlier 35-day burn-in, 60-session window, and 20-round-trip gate are retired. The 35-day figure remains only as the checked-in exit-optimization hold cap, which is a position rule, not the observation window. The earlier “zero completed round trips” gate is also retired in favor of the 30-round-trip floor.
 
 ## 8. Tracker
 
@@ -133,4 +142,4 @@ Smallest next implementation step, after the feed exists and the inventory scrip
 
 ## 9. Result
 
-**Inconclusive.** No observation exists, so no strategy return is reported. The candidate stays pre-registered and untested. The next concrete step is the local read-only feed in section 5. No strategy or production setting changes.
+**Inconclusive.** No observation exists, so no strategy return is reported. The candidate stays pre-registered and untested. The next concrete step is not a download from this checkout. It is the prerequisite in `scripts/research/nyse_shadow_feed_sources.md`: a user-held entitlement for a quote tape that already has an event time and a receipt time, plus explicit split events, with the credential placed in an uncommitted env file. No strategy or production setting changes.
