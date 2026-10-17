@@ -229,6 +229,16 @@ class AlpacaExecutor:
             except Exception:
                 pass
 
+        # Observational plan only. Failure cannot block order or fill bookkeeping.
+        _purchase_plan_token = None
+        try:
+            from modules.purchase_plans import before_submit
+            _purchase_plan_token = before_submit(
+                self, config, symbol=symbol, side=side, reason=reason, sleeve=sleeve, order=order
+            )
+        except Exception:
+            logger.warning("TRADE PLAN INCOMPLETE: pre-submit capture unavailable")
+
         if getattr(self, "dry_run", False):
             logger.info(
                 "Dry-run preflight passed",
@@ -261,6 +271,11 @@ class AlpacaExecutor:
                 except Exception:
                     pass
                 raise
+        try:
+            from modules.purchase_plans import submitted as _plan_submitted
+            _plan_submitted(_purchase_plan_token, submitted)
+        except Exception:
+            logger.warning("TRADE PLAN INCOMPLETE: order link unavailable")
         self._invalidate_cache()
         self._track_order(
             submitted,

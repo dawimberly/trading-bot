@@ -1,0 +1,25 @@
+name: Purchase plans and post-sale review
+on:
+  pull_request:
+    paths:
+      - 'stock-bot/modules/purchase_plans.py'
+      - 'stock-bot/modules/post_sale_review.py'
+      - 'stock-bot/modules/alpaca_executor.py'
+      - 'stock-bot/scripts/analysis/post_sale_review.py'
+      - 'stock-bot/tests/test_purchase_plans_and_post_sale.py'
+      - '.github/workflows/trade-review-tests.yml'
+permissions:
+  contents: read
+jobs:
+  focused-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -B stock-bot/tests/test_purchase_plans_and_post_sale.py
+      - run: python -m py_compile stock-bot/modules/purchase_plans.py stock-bot/modules/post_sale_review.py stock-bot/scripts/analysis/post_sale_review.py stock-bot/modules/alpaca_executor.py
