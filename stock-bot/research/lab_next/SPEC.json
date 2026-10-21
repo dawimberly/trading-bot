@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "mode": "separate_virtual_paper",
+  "replaces_existing_lab": false,
+  "promotion": false,
+  "prior_selector": "research/learn_100_30_20261019 REJECTED; not revived",
+  "learning": "ranks eligible entries from matured baseline virtual trades; 100 complete sessions, chronological prediction check, 30-session freeze",
+  "learning_cannot_change": ["code", "exits", "hard_stop", "trail", "hold", "cooldown", "risk_limits", "production_settings"],
+  "prediction_mae_is_not_a_profitability_gate": true,
+  "market_adapter": "read-only local five-minute cache inspector; tradable emission blocked until raw prices and an independent action ledger exist",
+  "broker": "none",
+  "historical_profitability": "not established"
+}
