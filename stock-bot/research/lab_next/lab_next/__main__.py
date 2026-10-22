@@ -7,7 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from .engine import SPEC, advance, code_hash, fresh, spec_hash
+from .engine import SPEC, advance, code_hash, fresh, reject_unverified_market_feed, spec_hash
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,6 +29,7 @@ def connect(name: str) -> tuple[sqlite3.Connection, Path]:
 
 
 def ingest(connection: sqlite3.Connection, frame: dict) -> bool:
+    reject_unverified_market_feed(frame)
     blob = json.dumps(frame, sort_keys=True, allow_nan=False)
     digest = hashlib.sha256(blob.encode()).hexdigest()
     with connection:

@@ -1,0 +1,25 @@
+name: lab-next
+
+on:
+  push:
+    branches:
+      - cursor/lab-next-virtual-paper
+    paths:
+      - stock-bot/research/lab_next/**
+      - .github/workflows/lab-next.yml
+  pull_request:
+    paths:
+      - stock-bot/research/lab_next/**
+      - .github/workflows/lab-next.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Lab Next unit tests
+        working-directory: stock-bot/research/lab_next
+        run: python -B -m unittest discover -s tests -q

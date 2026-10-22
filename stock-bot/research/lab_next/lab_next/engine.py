@@ -121,7 +121,20 @@ def _money(value) -> Decimal:
     return Decimal(str(value))
 
 
+MARKET_FEED_BLOCK = (
+    "historical_replay and forward_observation are blocked until a "
+    "source-verifying market-data adapter exists"
+)
+
+
+def reject_unverified_market_feed(frame: dict) -> None:
+    """Self-declared provenance cannot admit a market feed."""
+    if frame.get("feed_mode") in {"historical_replay", "forward_observation"}:
+        raise ValueError(MARKET_FEED_BLOCK)
+
+
 def _audit_events(frame: dict, day: str) -> list[dict]:
+    reject_unverified_market_feed(frame)
     if frame.get("actions_checked") is True and "action_audit" not in frame:
         raise ValueError("actions_checked boolean is not an independent corporate-action audit")
     audit = frame.get("action_audit")
@@ -133,11 +146,8 @@ def _audit_events(frame: dict, day: str) -> list[dict]:
     if mode == "synthetic":
         if source != "synthetic_declared" or independent is not False:
             raise ValueError("synthetic frames must declare an unaudited synthetic action list")
-    elif mode in {"historical_replay", "forward_observation"}:
-        if independent is not True or source in {None, "synthetic_declared", "caller_boolean"}:
-            raise ValueError("market frames require an independent action audit")
     else:
-        raise ValueError("feed_mode must be synthetic, historical_replay, or forward_observation")
+        raise ValueError("feed_mode must be synthetic until a source-verifying adapter exists")
     if str(audit.get("coverage_from")) > day or str(audit.get("coverage_through")) < day:
         raise ValueError("action audit does not cover this session")
     covered = set(audit.get("symbols") or [])

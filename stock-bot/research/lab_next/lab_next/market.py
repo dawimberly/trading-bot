@@ -44,7 +44,31 @@ def _meta(path: Path) -> dict:
     sidecar = path.with_suffix(".meta.json")
     if not sidecar.is_file():
         return {"symbol": path.stem, "meta": False}
-    return json.loads(sidecar.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {"symbol": path.stem, "meta": False, "malformed": True}
+    if not isinstance(payload, dict):
+        return {"symbol": path.stem, "meta": False, "malformed": True}
+    payload["meta"] = True
+    return payload
+
+
+def benchmark_total_return(cache: Path, symbol: str) -> bool:
+    """Total return is available only from verified series metadata.
+
+    A ``SYMBOL.pkl`` file, including a price-only file, does not qualify.
+    """
+    meta = _meta(cache / f"{symbol}.pkl")
+    if not meta.get("meta"):
+        return False
+    if meta.get("series") == "price" or meta.get("price_only") is True:
+        return False
+    return (
+        meta.get("verified") is True
+        and meta.get("series") == "total_return"
+        and meta.get("distributions_included") is True
+    )
 
 
 def inspect(cache: Path = CACHE, *, as_of: datetime | None = None) -> dict:
@@ -57,8 +81,8 @@ def inspect(cache: Path = CACHE, *, as_of: datetime | None = None) -> dict:
     provenance = {
         "adjustment": adjustments[0] if len(adjustments) == 1 else None,
         "adjustments": adjustments,
-        "spy_total_return": (cache / "SPY.pkl").is_file(),
-        "vti_total_return": (cache / "VTI.pkl").is_file(),
+        "spy_total_return": benchmark_total_return(cache, "SPY"),
+        "vti_total_return": benchmark_total_return(cache, "VTI"),
         "feed": sorted({item.get("feed") for item in metas if item.get("feed")}),
         "bar_interval": sorted({item.get("bar_interval") for item in metas if item.get("bar_interval")}),
     }

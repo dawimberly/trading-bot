@@ -5,7 +5,7 @@ from pathlib import Path
 
 from lab_next.calendar import ET, _ORDERED, bar_starts, is_session, prior_bar
 from lab_next.engine import advance, fresh, timestamp
-from lab_next.market import blockers
+from lab_next.market import benchmark_total_return, blockers, inspect
 from lab_next.model import features, learn
 from lab_next.__main__ import connect, ingest, report
 
@@ -353,6 +353,74 @@ class BotTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_spoofed_market_provenance_cannot_create_a_fill(self):
+        for mode in ("historical_replay", "forward_observation"):
+            payload = frame()
+            payload["feed_mode"] = mode
+            payload["actions_checked"] = True
+            payload["received_at"] = payload["as_of"]
+            payload["action_audit"] = {
+                "source": "alpaca_data_v1_corporate_actions",
+                "independent": True,
+                "coverage_from": "2026-10-21",
+                "coverage_through": "2026-10-21",
+                "symbols": ["X"],
+                "events": [],
+                "pages_complete": True,
+                "verified": True,
+            }
+            before = fresh()
+            with self.assertRaisesRegex(ValueError, "source-verifying"):
+                advance(before, payload)
+            self.assertEqual(before["books"]["baseline"]["cash"], 100000)
+            self.assertEqual(before["books"]["baseline"]["positions"], {})
+            connection, _path = connect(f"test_spoof_{mode}")
+            try:
+                with self.assertRaisesRegex(ValueError, "source-verifying"):
+                    ingest(connection, payload)
+                self.assertIsNone(connection.execute("SELECT payload FROM state WHERE id=1").fetchone())
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM frames").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM records").fetchone()[0], 0)
+            finally:
+                connection.close()
+
+    def test_benchmark_total_return_follows_verified_metadata_only(self):
+        import json
+        import tempfile
+
+        verified = {
+            "series": "total_return",
+            "verified": True,
+            "distributions_included": True,
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            cache = Path(folder)
+            (cache / "SPY.pkl").write_bytes(b"price-cache")
+            (cache / "VTI.pkl").write_bytes(b"price-cache")
+            self.assertFalse(benchmark_total_return(cache, "SPY"))
+            self.assertFalse(benchmark_total_return(cache, "VTI"))
+            (cache / "SPY.meta.json").write_text("{", encoding="utf-8")
+            (cache / "VTI.meta.json").write_text("[]", encoding="utf-8")
+            self.assertFalse(benchmark_total_return(cache, "SPY"))
+            self.assertFalse(benchmark_total_return(cache, "VTI"))
+            (cache / "SPY.meta.json").write_text(
+                json.dumps({"series": "price", "verified": True, "distributions_included": False, "adjustment": "split"}),
+                encoding="utf-8",
+            )
+            self.assertFalse(benchmark_total_return(cache, "SPY"))
+            (cache / "VTI.meta.json").write_text(json.dumps(verified), encoding="utf-8")
+            (cache / "VTI.pkl").unlink()
+            self.assertTrue(benchmark_total_return(cache, "VTI"))
+            seen = inspect(cache, as_of=datetime(2026, 10, 21, 18, 0, tzinfo=ET))
+            self.assertTrue(any("SPY/VTI" in reason for reason in seen["blockers"]))
+            self.assertTrue((cache / "SPY.pkl").is_file())
+            provenance_blocked = blockers(
+                {"adjustment": "raw", "spy_total_return": False, "vti_total_return": True},
+                has_action_ledger=True,
+                universe="explicit_frozen_asof_universe",
+            )
+            self.assertTrue(any("SPY/VTI" in reason for reason in provenance_blocked))
 
     def test_feature_and_spec_are_stable(self):
         self.assertEqual(features([100] * 51), [0, 0, 0.5])
