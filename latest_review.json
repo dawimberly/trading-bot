@@ -77,8 +77,8 @@
   ],
   "overnight_research": {
     "batch_status": "RUNNING",
-    "updated_at": "2026-10-24T05:28:27.076864+00:00",
-    "completed_jobs": 3,
+    "updated_at": "2026-10-24T05:30:51.224418+00:00",
+    "completed_jobs": 4,
     "total_jobs": 6,
     "candidates": [
       {
@@ -129,7 +129,48 @@
       },
       {
         "variant": "median_linear",
-        "status": "pending_or_blocked",
+        "status": "reject",
+        "gates": {
+          "return": true,
+          "drawdown": true,
+          "first_half": true,
+          "second_half": true,
+          "higher_cost": false,
+          "ledger": true,
+          "no_action_blocks": true
+        },
+        "normal_cost": {
+          "baseline": {
+            "return": 0.032615441725100114,
+            "max_drawdown": 0.11193493723374992,
+            "first_half": -0.032429116085397225,
+            "second_half": 0.06722459190518393,
+            "all147_return": 0.06937846050277274
+          },
+          "learner": {
+            "return": 0.09469928506298131,
+            "max_drawdown": 0.07298876002845789,
+            "first_half": 0.007009032072461396,
+            "second_half": 0.08707990712858882,
+            "all147_return": 0.10953065196539535
+          }
+        },
+        "higher_cost": {
+          "baseline": {
+            "return": 0.04265441761797217,
+            "max_drawdown": 0.11067222284728329,
+            "first_half": 0.04873172251020108,
+            "second_half": -0.005794908995107484,
+            "all147_return": 0.056517645994189625
+          },
+          "learner": {
+            "return": -0.04761307460978059,
+            "max_drawdown": 0.11723497707942332,
+            "first_half": -0.06209960639945389,
+            "second_half": 0.015445703923910648,
+            "all147_return": -0.07107849313431347
+          }
+        },
         "promotion": false
       },
       {
