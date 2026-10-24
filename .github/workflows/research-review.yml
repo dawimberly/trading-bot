@@ -1,0 +1,21 @@
+name: Research evidence review
+on:
+  pull_request:
+    paths:
+      - 'stock-bot/research/review_loop/**'
+      - '.github/workflows/research-review.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline-review-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test offline evidence review
+        working-directory: stock-bot/research/review_loop
+        run: python -B -m unittest discover -s tests -v
