@@ -1,0 +1,7 @@
+{
+  "file": "vendor_post_sale_review.py",
+  "origin": "stock-bot/modules/post_sale_review.py in the local source checkout",
+  "source_sha256": "bef7c2b9247f748145e348507e8f027458df15394b8644e2e5310879a65f757e",
+  "note": "UTF-8 BOM removed only; copied offline math, no production imports or code changes",
+  "copied_at": "2026-10-24T00:33:06.441Z"
+}

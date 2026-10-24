@@ -1,0 +1,12 @@
+{
+  "as_of": "2026-10-24T00:38:26.256Z",
+  "status": "EVIDENCE_GAPS",
+  "protected_source_and_env_files_unchanged": true,
+  "test_count": 33,
+  "first_scheduler_run_exit": 0,
+  "published_branch": "codex/research-review-evidence-20261024",
+  "next_run_central": "2026-10-26T18:00:00-05:00",
+  "source_commit": "124849bdb7b055819ac54f98c91409adc2496d21",
+  "no_trading_restart": true,
+  "no_broker_write_routes": true
+}
