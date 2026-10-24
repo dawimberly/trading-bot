@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "generated_at": "2026-10-24T00:32:00.034776+00:00",
+  "scope": "observational research evidence only; no deployment",
+  "target_net_annual_return": 0.5,
+  "annual_target_status": "unverified",
+  "status": "EVIDENCE_GAPS",
+  "fresh_export_all_books": true,
+  "books": [
+    {
+      "book": "alpaca_live",
+      "source_as_of": "2026-10-24T00:27:53.011438+00:00",
+      "purchases": 425,
+      "sales": 377,
+      "plans_available": 12,
+      "post_sale_30_price_observations": 168,
+      "gaps": [
+        "unresolved_initial_inventory_or_corporate_actions",
+        "original_purchase_plans_missing"
+      ],
+      "latest_refresh_ok": true,
+      "fill_pagination_complete": true
+    },
+    {
+      "book": "alpaca_paper_v2",
+      "source_as_of": "2026-10-24T00:27:53.011438+00:00",
+      "purchases": 491,
+      "sales": 312,
+      "plans_available": 44,
+      "post_sale_30_price_observations": 75,
+      "gaps": [
+        "unresolved_initial_inventory_or_corporate_actions",
+        "original_purchase_plans_missing",
+        "post_sale_symbols_deferred"
+      ],
+      "latest_refresh_ok": true,
+      "fill_pagination_complete": true
+    },
+    {
+      "book": "alpaca_paper",
+      "source_as_of": "2026-10-24T00:27:53.011438+00:00",
+      "purchases": 4600,
+      "sales": 3805,
+      "plans_available": 6,
+      "post_sale_30_price_observations": 1365,
+      "gaps": [
+        "unresolved_initial_inventory_or_corporate_actions",
+        "original_purchase_plans_missing",
+        "post_sale_symbols_deferred"
+      ],
+      "latest_refresh_ok": true,
+      "fill_pagination_complete": true
+    }
+  ],
+  "best_strategy": null,
+  "automatic_deployment": false,
+  "notes": [
+    "No balances, positions, account IDs, order IDs, credentials, raw fills or account-return figures are published.",
+    "Price-only post-sale observations are not trade profitability or hindsight timing verdicts.",
+    "Fixed/adaptive strategy search, full portfolio accounting, missing original plans and corporate-action reconciliation remain separate unfinished work."
+  ]
+}
