@@ -38,6 +38,7 @@ def review_book(report, expected_book, now):
         if available and finite(m.get('price_return')) and not m.get('unavailable_reasons'): price_moves.append(m['price_return'])
     gaps=[]
     if report.get('error'): gaps.append('report_error')
+    if report.get('decision_record_attribution_error'): gaps.append('legacy_journal_attribution_unavailable')
     if c.get('action_scoping_unverified_symbols'): gaps.append('action_scoping_unverified')
     if c.get('snapshot_errors'): gaps.append('snapshot_errors')
     if age>72: gaps.append('stale_report_over_72h')
@@ -64,6 +65,7 @@ def review_book(report, expected_book, now):
             'costs_and_cashflows':'fees, dividends, deposits, withdrawals and corporate actions require reconciled ledgers',
             'regime_and_opportunity_cost':'not measurable from fill-only report',
             'plan_adherence':'requires original plan, decision state and linked broker fills'},
+        'legacy_decision_record_coverage':{k:v for k,v in (report.get('decision_record_coverage') or {}).items() if k in ('journal_fill_records','journal_signals','journal_exits','matched_journal_fill_records','matched_broker_executions','unmatched_journal_fill_records','unmatched_broker_executions','unmatched_equity_executions','unmatched_equity_before_journal_start','unmatched_equity_before_first_journal_timestamp')},
         'strategy_promotion':False}
 
 def review_experiment(result):

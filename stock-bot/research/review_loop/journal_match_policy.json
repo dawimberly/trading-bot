@@ -1,0 +1,25 @@
+{
+  "created_at": "2026-10-24T05:01:54.035Z",
+  "scope": "Lab observational attribution only; no strategy or trading change",
+  "source_files": [
+    "paper_journal.csv",
+    "paper_journal.csv.bak_pre_quarantine_20260729T221617Z"
+  ],
+  "reader": "Use local modules/csv_utils.py read_csv_file via isolated importlib loading; pad ragged rows, no pandas on_bad_lines skipping",
+  "naive_time_zone": "America/Chicago, documented journal/host convention; naive rows lack stored offsets",
+  "time_window_seconds": 120,
+  "quantity_absolute_tolerance": "0.00000001",
+  "price_guard": "broker price must round to journal recorded decimal precision (half-even); exact quantity is primary, not guessed round-trip basis",
+  "broker_units": "individual fill execution or full-completion order aggregation, deduplicated by activity IDs; no arbitrary subset sum",
+  "ambiguity": "Only unique row-to-execution-set matches with no shared candidate execution across other journal rows; no nearest greedy match",
+  "duplicate_policy": "Collapse identical rows across source snapshots; identical repeated rows within one source remain ambiguous",
+  "signal_exit_context": "retained as contemporaneous context; no order linkage asserted without a matched fill",
+  "historical_plans": "never fabricated from post-hoc journal notes",
+  "fee_rules": {
+    "FEE_REG_CAT_TAF": "equity regulatory costs by posted currency; positive adjustments retained",
+    "CFEE": "crypto pair fees, excluded from stock costs",
+    "DIV": "only actual posted broker dividend cash",
+    "unclassified": "separate unresolved bucket"
+  },
+  "whole_book_pnl": "blocked until opening inventory/corporate actions reconciled"
+}

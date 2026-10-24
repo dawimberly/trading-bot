@@ -42,4 +42,7 @@ class DailyTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    p=Path(tmp);(p/'.git').mkdir()
    with self.assertRaises(ValueError):publish(public_summary(review(),receipts()),p,run)
+ def test_legacy_decision_coverage_does_not_export_journal_notes(self):
+  r=review();r['books'][2]['legacy_decision_record_coverage']={'journal_fill_records':501,'matched_journal_fill_records':165,'notes':'PRIVATE_SECRET','broker_order_id':'PRIVATE_ID'}
+  out=public_summary(r,receipts());self.assertEqual(out['books'][2]['legacy_decision_record_coverage']['journal_fill_records'],501);self.assertNotIn('PRIVATE_SECRET',json.dumps(out));self.assertNotIn('PRIVATE_ID',json.dumps(out))
 if __name__=='__main__':unittest.main()

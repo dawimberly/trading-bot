@@ -49,3 +49,7 @@ Reports must match their expected book IDs and include timezone-aware as-of time
 
 ## Target measurement
 Compare cash-flow-adjusted, net-of-cost portfolio returns on the same dates. Show actual cumulative return for periods shorter than 252 sessions; do not extrapolate them into a claimed 50%-annual accomplishment. At least 252 reconciled sessions permit a historical annualized calculation, but do not establish future attainability. Long-window robustness, risk and protocol gates remain separate from the numerical target.
+
+
+## Legacy Lab decision history
+The aggressive alpaca_paper journal is preserved and now used for conservative fill attribution. Its 501 fills, 350 signals and 201 exits are distinct from the new original purchase-plan files. See ATTRIBUTION.md. Regulatory FEE pass-throughs, crypto CFEE and actual posted DIV cash are separate accounting categories. Unknown opening basis and unapplied corporate actions still block whole-book profit.

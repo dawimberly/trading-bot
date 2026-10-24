@@ -31,3 +31,7 @@ Alpaca API references:
 
 ## Verified installation receipt
 The separate research task was registered for weekdays at 18:00 Central, limited interactive Owner logon, missed-start handling enabled, no wake timer, battery execution allowed and overlapping runs ignored. Its first scheduled time is Monday 2026-10-26. A manual launch through the actual hidden Task Scheduler path completed with exit code 0 on 2026-10-23 at 19:37 Central. It refreshed all three accounts, generated the private review and published the allowlisted summary. The next scheduled run is 2026-10-26 at 18:00 Central.
+
+
+## Legacy journal correction
+The original aggressive Lab journal and its July 29 backup are now integrated as decision-attribution sources. New purchase-plan counts are not used as a count of all historical decision evidence. See ATTRIBUTION.md for the conservative matching rule, preserved unmatched executions, regulatory/crypto fee separation and the still-blocked whole-book profit.

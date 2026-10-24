@@ -8,7 +8,7 @@ from review_loop import BOOKS,build,stamp
 REMOTE='https://github.com/dawimberly/trading-bot.git'
 BRANCH='codex/research-review-evidence-20261024'
 PROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0
-GAPS={'stale_report_over_72h','incomplete_fill_history','unresolved_initial_inventory_or_corporate_actions','original_purchase_plans_missing','post_sale_symbols_deferred','pagination_error','conflicts','price_errors','positions_error','calendar_error','report_error','action_scoping_unverified','snapshot_errors'}
+GAPS={'stale_report_over_72h','incomplete_fill_history','unresolved_initial_inventory_or_corporate_actions','original_purchase_plans_missing','post_sale_symbols_deferred','pagination_error','conflicts','price_errors','positions_error','calendar_error','report_error','action_scoping_unverified','snapshot_errors','legacy_journal_attribution_unavailable'}
 
 def public_summary(review,receipt):
     receipt_by={r['book']:r for r in receipt if r.get('book') in BOOKS}
@@ -25,6 +25,9 @@ def public_summary(review,receipt):
             'gaps':[g if g in GAPS else 'unclassified_evidence_gap' for g in r['gaps']],
             'latest_refresh_ok':current.get('account_pin_verified') is True and 'error' not in current and current.get('report_as_of')==r['as_of'],
             'fill_pagination_complete':current.get('complete_activity_pagination') is True})
+    for original,safe in zip(review['books'],rows):
+        counts=original.get('legacy_decision_record_coverage') or {}
+        safe['legacy_decision_record_coverage']={k:v for k,v in counts.items() if k in ('journal_fill_records','journal_signals','journal_exits','matched_journal_fill_records','matched_broker_executions','unmatched_journal_fill_records','unmatched_broker_executions','unmatched_equity_executions','unmatched_equity_before_journal_start','unmatched_equity_before_first_journal_timestamp') and isinstance(v,int) and not isinstance(v,bool) and v>=0}
     allfresh=len(rows)==3 and all(r['latest_refresh_ok'] for r in rows)
     return {'schema':1,'generated_at':stamp(review['generated_at']).isoformat(),'scope':'observational research evidence only; no deployment','target_net_annual_return':.5,'annual_target_status':'unverified','status':'EVIDENCE_GAPS' if review['status']=='EVIDENCE_GAPS' or not allfresh else 'REVIEW_ONLY',
             'fresh_export_all_books':allfresh,'books':rows,'best_strategy':None,'automatic_deployment':False,
@@ -71,6 +74,15 @@ def main():
             if len(new)!=1:raise ValueError('new_run_not_unambiguous')
             runfolder=new[0]
         receipt=json.loads((runfolder/'receipt.json').read_text(encoding='utf8'))
+        # Historical journal attribution is offline, separate from original purchase plans.
+        try:
+            with (private/'lab_attribution.log').open('w',encoding='utf8') as attrlog:
+                attribution=subprocess.run([sys.executable,'-B',str(root/'refresh_lab_attribution.py'),'--source-root',str(args.source_root),'--private-root',str(private),'--run',runfolder.name,'--update-prepared-report'],stdout=attrlog,stderr=attrlog,timeout=180,check=False,creationflags=PROCESS_FLAGS)
+            if attribution.returncode:raise ValueError('legacy_attribution_failed')
+        except Exception:
+            path=private/'reports'/'alpaca_paper.json'
+            if path.exists():
+                r=json.loads(path.read_text(encoding='utf8'));r['decision_record_attribution_error']='offline_legacy_attribution_failed';r.pop('decision_record_coverage',None);atomic(path,r)
         inputs={b:json.loads((private/'reports'/(b+'.json')).read_text(encoding='utf8')) for b in BOOKS if (private/'reports'/(b+'.json')).exists()}
         now=datetime.now(timezone.utc);review=build(inputs,now);review['latest_collection_run']=runfolder.name
         from review_loop import markdown

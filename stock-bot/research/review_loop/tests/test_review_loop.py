@@ -46,4 +46,7 @@ class ReviewTests(unittest.TestCase):
  def test_missing_book_and_stale_history_do_not_choose_winner(self):
   r=report();r['as_of']='2026-10-10T00:00:00Z';out=build({'alpaca_live':r},NOW)
   self.assertEqual(out['status'],'EVIDENCE_GAPS');self.assertEqual(len(out['errors']),2);self.assertIsNone(out['best_strategy']);self.assertFalse(out['automatic_deployment'])
+ def test_historical_journal_evidence_is_distinct_from_original_plans(self):
+  r=report();r['purchases'][0]['original_plan']=None;r['decision_record_coverage']={'journal_fill_records':501,'matched_journal_fill_records':165,'notes':'do not expose'}
+  out=review_book(r,'alpaca_live',NOW);self.assertEqual(out['plans_available'],0);self.assertEqual(out['legacy_decision_record_coverage']['journal_fill_records'],501);self.assertNotIn('notes',out['legacy_decision_record_coverage'])
 if __name__=='__main__':unittest.main()
