@@ -1,0 +1,43 @@
+{
+  "created_at": "2026-10-24T05:14:02.382Z",
+  "purpose": "Overnight Lab learning research, not trading deployment or guaranteed superiority",
+  "owner_goal": "Improve Lab relative to Live and Medium; 50% net annual return is a target, not guaranteed",
+  "data_manifest": "C:/workspace/lab_next_learning_study_20261023/saved_sip/manifest.json",
+  "data_status": "247 sessions, fixed retrospective29 names, previously exposed development cache; 1000-day/required365-session evidence unavailable for this five-minute panel",
+  "candidates": [
+    "pairwise_rank",
+    "median_linear",
+    "local_expectancy"
+  ],
+  "candidate_definitions": {
+    "pairwise_rank": "L2 logistic pairwise ranking of matured baseline trades sharing an entry date;300 steps lr.02,L2.1; accept only validation pair accuracy strictly above base extension;min20train10validpairs",
+    "median_linear": "regularized absolute-error linear return fit;300 steps lr.002 decaying by(1+epoch/100);L2.1; accept validation MAE strictly below training median constant",
+    "local_expectancy": "mean net return of15 nearest matured baseline trades in standardized/clipped original3feature space; accept validation MAE strictly below training mean constant"
+  },
+  "one_knob": "ranking-model objective/class only, each arm separately; fixed existing eligibility, fills, exits, sizing and risk",
+  "training": "100 prior complete sessions;30session model freezes;baseline closed outcomes only, all exit timestamps before decision; inner exit-date60/40split;purge train exits overlapping earliest validation entry;min30rows,20train10valid",
+  "costs_bps_per_side": [
+    5,
+    10
+  ],
+  "evaluation": "four complete30session folds after100training;first60 vssecond60;27-session tail separate; continuous portfolios",
+  "development_gate": "return strictly > fixed Lab baseline, MaxDD<=baseline+2pp, both60sessionhalvesbeatbaseline,10bpsoutperformance, cashledgerreconciles, no price/action blocks; compare all trials with no hidden tuning",
+  "promotion": false,
+  "promotion_blockers": [
+    "required independent full protocol windows unavailable",
+    "unverified raw-provider/action provenance and retrospective universe",
+    "Live/Medium boosts and original decision inputs unavailable for faithful historical replay",
+    "few-session Lab Next broker history and inherited positions do not establish learner performance",
+    "free delayed tape not approved for execution; freshness unchanged"
+  ],
+  "worker_limits": {
+    "hours": 6,
+    "concurrent_jobs": 1,
+    "max_private_memory_GiB": 2,
+    "extra_data_dollars": 0,
+    "network_in_simulator": false,
+    "auto_deploy": false
+  },
+  "stop_rule": "Complete frozen queue once, or stop on budget/data/accounting defects. Do not search indefinitely until a winner appears. Preserve failures. No deployment even on development pass.",
+  "input_manifest_sha256": "e0136430def0d5733edeb21759027a11f980fe4877f2da8d037aa134f7672391"
+}

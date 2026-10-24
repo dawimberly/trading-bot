@@ -1,0 +1,7 @@
+results/
+*.log
+registry*.json
+WORKER_LOCK
+REPORT.json
+REPORT.md
+__pycache__/

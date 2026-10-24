@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'stock-bot/research/review_loop/**'
+      - 'stock-bot/research/lab_learning_overnight/**'
       - '.github/workflows/research-review.yml'
   workflow_dispatch:
 permissions:
@@ -18,4 +19,7 @@ jobs:
           python-version: '3.11'
       - name: Test offline evidence review
         working-directory: stock-bot/research/review_loop
+        run: python -B -m unittest discover -s tests -v
+      - name: Test frozen offline learner batch
+        working-directory: stock-bot/research/lab_learning_overnight
         run: python -B -m unittest discover -s tests -v
