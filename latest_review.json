@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-10-24T00:37:15.140911+00:00",
+  "generated_at": "2026-10-24T05:08:36.140277+00:00",
   "scope": "observational research evidence only; no deployment",
   "target_net_annual_return": 0.5,
   "annual_target_status": "unverified",
@@ -20,7 +20,8 @@
         "original_purchase_plans_missing"
       ],
       "latest_refresh_ok": true,
-      "fill_pagination_complete": true
+      "fill_pagination_complete": true,
+      "legacy_decision_record_coverage": {}
     },
     {
       "book": "alpaca_paper_v2",
@@ -36,7 +37,8 @@
         "post_sale_symbols_deferred"
       ],
       "latest_refresh_ok": true,
-      "fill_pagination_complete": true
+      "fill_pagination_complete": true,
+      "legacy_decision_record_coverage": {}
     },
     {
       "book": "alpaca_paper",
@@ -51,7 +53,19 @@
         "post_sale_symbols_deferred"
       ],
       "latest_refresh_ok": true,
-      "fill_pagination_complete": true
+      "fill_pagination_complete": true,
+      "legacy_decision_record_coverage": {
+        "journal_fill_records": 501,
+        "journal_signals": 350,
+        "journal_exits": 201,
+        "matched_journal_fill_records": 165,
+        "matched_broker_executions": 165,
+        "unmatched_journal_fill_records": 336,
+        "unmatched_broker_executions": 15742,
+        "unmatched_equity_executions": 15657,
+        "unmatched_equity_before_journal_start": 140,
+        "unmatched_equity_before_first_journal_timestamp": 149
+      }
     }
   ],
   "best_strategy": null,
