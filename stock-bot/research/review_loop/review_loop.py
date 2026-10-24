@@ -37,6 +37,9 @@ def review_book(report, expected_book, now):
         except (KeyError,ValueError,TypeError): available=False
         if available and finite(m.get('price_return')) and not m.get('unavailable_reasons'): price_moves.append(m['price_return'])
     gaps=[]
+    if report.get('error'): gaps.append('report_error')
+    if c.get('action_scoping_unverified_symbols'): gaps.append('action_scoping_unverified')
+    if c.get('snapshot_errors'): gaps.append('snapshot_errors')
     if age>72: gaps.append('stale_report_over_72h')
     if c.get('complete_from_start') is not True or c.get('truncated') is not False: gaps.append('incomplete_fill_history')
     if c.get('initial_inventory') not in ('verified','known','empty_verified'): gaps.append('unresolved_initial_inventory_or_corporate_actions')

@@ -5,7 +5,7 @@ The owner objective is a self-improving trading research process targeting **50%
 ## Implemented now
 A Python standard-library evidence reviewer reads prepared trade-review JSON for Live, Medium and Lab, identifies stale/incomplete history, counts original purchase plans and matured 30-session post-sale paths, and imports the completed ranking-learner experiment verdict. It deliberately does not infer completed round trips from unknown inventory, fill in missing returns with zero, call price-only follow-through a sale-quality verdict or declare short development results an annual target achievement.
 
-The output is a sanitized review.json and review.md. Account identifiers, account hashes, order IDs, raw positions and credentials are not exported. Public posting of any new source fields requires an explicit allowlist review. The supplied local reports currently date from October 18/19 UTC and have unresolved corporate-action/inventory history; the first review flags evidence gaps for all three books.
+The output is a sanitized review.json and review.md. Account identifiers, account hashes, order IDs, raw positions and credentials are not exported. Public posting of any new source fields requires an explicit allowlist review. The initial supplied reports dated from October 18/19 UTC. The fresh GET-only bridge now exports new private evidence and a sanitized summary; unresolved corporate-action/inventory history and missing original plans remain explicit. See EXPORT.md.
 
 This runner has no broker client, credential access, production imports, executor, model trainer, deployment hook or self-scheduler. It is the review foundation, not an already operating autonomous strategy search or fresh broker-data collector.
 
@@ -26,9 +26,9 @@ This runner has no broker client, credential access, production imports, executo
 - Model updates: use the frozen experiment schedule; existing ranking-learner research uses 100 prior sessions and a 30-session freeze. This is an experiment setting, not universal proof of the best cadence.
 - Initial research budget: zero additional data spend; one local research job at a time; six-hour maximum per job; no unrestricted strategy generator.
 
-## Current integration work remaining
+## Current integration work remaining (updated after the evidence bridge)
 - Reconcile uncommitted deployed Lab code with the older draft PR #17; a GitHub branch is not proof of running code.
-- Build a GET-only, account-pinned fresh evidence exporter into a separate local research directory. It must preserve raw evidence privately, atomically export sanitized summaries, and never import an order executor.
+- Completed: GET-only, account-pinned fresh evidence exporter into a separate local research directory, with private raw evidence and allowlisted summary publication. No executor import. See EXPORT.md for the separate research schedule and limitations.
 - Resolve corporate actions/initial inventory and collect missing decision/quote/plan history prospectively. Historical missing plans stay missing.
 - Add reconciled cash-flow-adjusted equity/benchmark series and in-trade path labels.
 - Implement the experiment registry and bounded worker, then shadow model evaluation and controlled paper promotion/rollback. The inspected broker paper-owner currently uses fixed selection despite a model-check gate.
