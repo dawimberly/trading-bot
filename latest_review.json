@@ -74,5 +74,35 @@
     "No balances, positions, account IDs, order IDs, credentials, raw fills or account-return figures are published.",
     "Price-only post-sale observations are not trade profitability or hindsight timing verdicts.",
     "Fixed/adaptive strategy search, full portfolio accounting, missing original plans and corporate-action reconciliation remain separate unfinished work."
-  ]
+  ],
+  "overnight_research": {
+    "batch_status": "RUNNING",
+    "updated_at": "2026-10-24T05:19:06.940180+00:00",
+    "completed_jobs": 0,
+    "total_jobs": 6,
+    "candidates": [
+      {
+        "variant": "pairwise_rank",
+        "status": "pending_or_blocked",
+        "promotion": false
+      },
+      {
+        "variant": "median_linear",
+        "status": "pending_or_blocked",
+        "promotion": false
+      },
+      {
+        "variant": "local_expectancy",
+        "status": "pending_or_blocked",
+        "promotion": false
+      }
+    ],
+    "lab_better_than_live_and_medium": "NOT_PROVEN",
+    "promotion": false,
+    "limitations": [
+      "previously exposed247session29namepanel",
+      "required protocol windows and faithful Live/Medium decision inputs unavailable",
+      "no paid data or delayed-feed execution; risk and live books unchanged"
+    ]
+  }
 }
