@@ -7025,6 +7025,20 @@ def h1d_trend_mix_dry_run() -> bool:
     return _parse_env_bool("H1D_TREND_MIX_DRY_RUN", default="false")
 
 
+def h1d_trend_mix_exclusive() -> bool:
+    """This book runs h1d instead of the other entry sleeves. Default off.
+
+    Requires ``H1D_TREND_MIX_ENABLED`` (and the book allowlist, when set).
+    """
+    if not effective_h1d_trend_mix_enabled():
+        return False
+    return _parse_env_bool("H1D_TREND_MIX_EXCLUSIVE", default="false")
+
+
+def h1d_exclusive_blocks_other_entries() -> bool:
+    return h1d_trend_mix_exclusive()
+
+
 def effective_smart_stops_enabled() -> bool:
     """Smart ATR stops with reeval — paper / Realistic Research; live opt-in."""
     if not PAPER_SMART_STOPS:

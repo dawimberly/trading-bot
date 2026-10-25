@@ -12,13 +12,18 @@ Rules (frozen):
 - Rebalance both sleeves at the first caught open of a new month, on a trend
   flip, and once when the book has no saved state.
 - Skip notionals below the dust threshold. Missing inputs produce no orders.
+
+``H1D_TREND_MIX_EXCLUSIVE`` (default off) replaces the book's other entry
+sleeves and winds down positions that are not in the current target.
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
 import math
 import os
+import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -49,8 +54,8 @@ DIVERSIFIED_SYMBOLS: tuple[str, ...] = (
 STRATEGY_SYMBOLS: frozenset[str] = frozenset(
     (*DIVERSIFIED_SYMBOLS, TREND_RISK_ON, TREND_RISK_OFF)
 )
-# Proposed for this strategy only. Inert while the strategy flag is off, so
-# Medium/Live stop defaults stay as they are.
+# Documented proposal only. Unset ``H1D_TREND_MIX_DISABLE_HARD_STOPS`` follows
+# exclusive mode, so stops stay on until a book replaces its other sleeves.
 DISABLE_HARD_STOPS = True
 ENTRY_FRESHNESS_MINUTES = 7
 DEFAULT_DUST_NOTIONAL = 1.0
@@ -78,29 +83,73 @@ def dust_notional() -> float:
     return value
 
 
-def disable_hard_stops() -> bool:
-    """Strategy-config proposal. Unset env follows ``DISABLE_HARD_STOPS``."""
-    raw = os.getenv("H1D_TREND_MIX_DISABLE_HARD_STOPS")
+def _env_true(name: str) -> bool | None:
+    """True/false when the env is set. None when it is missing or blank."""
+    raw = os.getenv(name)
     if raw is None or not str(raw).strip():
-        return bool(DISABLE_HARD_STOPS)
+        return None
     return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
+def disable_hard_stops() -> bool:
+    """Skip fixed and smart −10% stops on this strategy's ETFs.
+
+    Explicit ``H1D_TREND_MIX_DISABLE_HARD_STOPS`` wins. When it is unset,
+    exemption follows exclusive mode. While the strategy is off this is false.
+    """
+    if not config.effective_h1d_trend_mix_enabled():
+        return False
+    explicit = _env_true("H1D_TREND_MIX_DISABLE_HARD_STOPS")
+    if explicit is None:
+        return bool(config.h1d_trend_mix_exclusive())
+    return bool(explicit)
 
 
 def _normalize(symbol: str) -> str:
     return str(symbol or "").replace("/", "-").strip().upper()
 
 
-def hard_stop_exempt(symbol: str) -> bool:
-    """True only when this strategy is on and its config exempts the symbol.
+def is_h1d_symbol(symbol: str) -> bool:
+    return _normalize(symbol) in STRATEGY_SYMBOLS
 
-    While ``H1D_TREND_MIX_ENABLED`` is off this is always false, so existing
-    5% / smart −10% stops on Medium and Live are unchanged.
+
+def guards_bypass_symbol(symbol: str, *, exclusive: bool) -> bool:
+    """Per-name cap and auto-dust skip this ETF only in exclusive mode."""
+    return bool(exclusive) and is_h1d_symbol(symbol)
+
+
+def other_entry_blocked(
+    sleeve: str | None,
+    side: str,
+    has_position: bool,
+    exclusive: bool,
+) -> bool:
+    """Block new entries from sleeves other than H1D.
+
+    Sells of an existing position still pass. H1D orders pass. Buys and
+    sell-to-open from every other sleeve are blocked while exclusive is on.
     """
-    if not config.effective_h1d_trend_mix_enabled():
+    if not exclusive:
         return False
+    if str(sleeve or "").strip().upper() == "H1D":
+        return False
+    side_l = str(side or "").strip().lower()
+    if side_l == "buy":
+        return True
+    if side_l == "sell" and not has_position:
+        return True
+    return False
+
+
+def hard_stop_exempt(symbol: str) -> bool:
+    """True when this book's hard stop should skip an H1D ETF.
+
+    Requires the strategy to be on, the symbol to be one of its ETFs, and
+    either an explicit disable flag or exclusive mode when the flag is unset.
+    """
     if not disable_hard_stops():
         return False
-    return _normalize(symbol) in STRATEGY_SYMBOLS
+    return is_h1d_symbol(symbol)
 
 
 def apply_hard_stop_exemption(
@@ -274,17 +323,123 @@ def plan_rebalance(
         notional = round(abs(delta), 2)
         if notional <= 0 or notional < float(dust):
             continue
+        current = float(positions.get(symbol, 0.0))
+        row: dict[str, Any] = {
+            "symbol": symbol,
+            "side": "buy" if delta > 0 else "sell",
+            "notional": notional,
+            "target_weight": weight,
+            "strategy": STRATEGY_ID,
+        }
+        if delta < 0:
+            row["position_value"] = current
+        orders.append(row)
+    orders.sort(key=lambda row: (row["side"] != "sell", row["symbol"]))
+    return orders
+
+
+def wind_down_orders(
+    positions: dict[str, float],
+    *,
+    dust: float,
+) -> list[dict[str, Any]]:
+    """Sell holdings that are not in this strategy's symbol list.
+
+    Strategy names that dropped out of the target (SSO vs BIL) are sold by
+    ``plan_rebalance``. This list is only the rest of the book.
+    """
+    orders: list[dict[str, Any]] = []
+    for symbol in sorted(positions):
+        market_value = float(positions[symbol])
+        if market_value <= 0:
+            continue
+        notional = round(market_value, 2)
+        if notional <= 0 or notional < float(dust):
+            continue
         orders.append(
             {
                 "symbol": symbol,
-                "side": "buy" if delta > 0 else "sell",
+                "side": "sell",
                 "notional": notional,
-                "target_weight": weight,
+                "target_weight": 0.0,
+                "position_value": market_value,
                 "strategy": STRATEGY_ID,
+                "wind_down": True,
             }
         )
-    orders.sort(key=lambda row: (row["side"] != "sell", row["symbol"]))
     return orders
+
+
+def _defer(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deferred: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["status"] = "deferred_below_min"
+        deferred.append(item)
+    return deferred
+
+
+def _batch_residuals(
+    group: list[dict[str, Any]],
+    side: str,
+    broker_min: float,
+) -> list[dict[str, Any]]:
+    """Fold same-side residuals into the largest when their sum clears the min.
+
+    A batched sell is capped at the host position so the order cannot short.
+    If the capped total is still under the minimum, the whole group waits.
+    """
+    if not group:
+        return []
+    host = max(group, key=lambda row: (float(row["notional"]), row["symbol"]))
+    total = round(sum(float(row["notional"]) for row in group), 2)
+    if side == "sell":
+        cap = _finite(host.get("position_value"))
+        if cap is None:
+            return _defer(group)
+        total = min(total, round(float(cap), 2))
+    if total + 1e-9 < float(broker_min):
+        return _defer(group)
+    batched = dict(host)
+    batched["notional"] = total
+    batched["status"] = "batched"
+    batched["batched_from"] = [
+        row["symbol"] for row in group if row["symbol"] != host["symbol"]
+    ]
+    return [batched]
+
+
+def apply_broker_min(
+    orders: list[dict[str, Any]],
+    broker_min: float,
+) -> list[dict[str, Any]]:
+    """Keep orders the broker will accept. ``broker_min <= 0`` leaves them as-is.
+
+    A sell that closes a name with target weight 0 and is under the minimum
+    is marked ``full_exit`` so the dust path can close it. Partial trims of
+    names that stay in the target are batched or deferred, never full exits.
+    """
+    if broker_min <= 0:
+        return [dict(row) for row in orders]
+    kept: list[dict[str, Any]] = []
+    residuals: dict[str, list[dict[str, Any]]] = {"buy": [], "sell": []}
+    for order in orders:
+        row = dict(order)
+        notional = float(row["notional"])
+        if row.get("full_exit") or notional + 1e-9 >= float(broker_min):
+            kept.append(row)
+            continue
+        closing = row["side"] == "sell" and float(row.get("target_weight") or 0.0) == 0.0
+        if closing:
+            row["full_exit"] = True
+            row["status"] = "full_exit_below_min"
+            kept.append(row)
+            continue
+        residuals[str(row["side"])].append(row)
+    for side, group in residuals.items():
+        kept.extend(_batch_residuals(group, side, broker_min))
+    kept.sort(key=lambda row: (row["side"] != "sell", row["symbol"]))
+    return kept
 
 
 def _aware(moment: datetime) -> datetime | None:
@@ -322,19 +477,32 @@ def entry_window_open(
     return timedelta(0) <= age <= timedelta(minutes=int(freshness_min))
 
 
-def _positions_ok(positions: dict[str, float] | None) -> dict[str, float] | None:
+def _classify_positions(
+    positions: dict[str, float] | None,
+) -> tuple[dict[str, float], dict[str, float]] | None:
+    """Split holdings into strategy ETFs and everything else.
+
+    Any non-finite or negative value fails the cycle, including names this
+    sleeve does not trade. Zeros are dropped.
+    """
     if positions is None or not isinstance(positions, dict):
         return None
-    cleaned: dict[str, float] = {}
+    strategy: dict[str, float] = {}
+    others: dict[str, float] = {}
     for symbol, raw in positions.items():
         name = _normalize(symbol)
-        if name not in STRATEGY_SYMBOLS:
-            continue
+        if not name:
+            return None
         value = _finite(raw)
         if value is None or value < 0:
             return None
-        cleaned[name] = value
-    return cleaned
+        if value == 0:
+            continue
+        if name in STRATEGY_SYMBOLS:
+            strategy[name] = value
+        else:
+            others[name] = value
+    return strategy, others
 
 
 def _empty_plan(reason: str, **extra: Any) -> dict[str, Any]:
@@ -367,8 +535,14 @@ def build_plan(
     dust: float = DEFAULT_DUST_NOTIONAL,
     freshness_min: int = ENTRY_FRESHNESS_MINUTES,
     decision_at: datetime | None = None,
+    exclusive: bool = False,
+    broker_min: float = 0.0,
 ) -> dict[str, Any]:
-    """Pure plan. ``orders`` is empty unless the entry may actually be sent."""
+    """Pure plan. ``orders`` is empty unless the entry may actually be sent.
+
+    ``preview_orders`` still lists the next open when the window is closed.
+    Exclusive mode adds wind-down sells for holdings outside the strategy.
+    """
     if state is None:
         return _empty_plan("state_unreadable")
     if not isinstance(session_date, date):
@@ -377,13 +551,27 @@ def build_plan(
     if risk_on is None:
         return _empty_plan("missing_data")
     weights = target_weights(risk_on)
-    held = _positions_ok(positions)
+    classified = _classify_positions(positions)
     account = _finite(equity)
-    if held is None or account is None or account <= 0:
-        return _empty_plan("missing_data", risk_on=risk_on, weights=weights)
+    if classified is None or account is None or account <= 0:
+        return _empty_plan(
+            "missing_data",
+            risk_on=risk_on,
+            weights=weights,
+            exclusive=bool(exclusive),
+        )
+    strategy_held, others = classified
+    if not exclusive:
+        others = {}
     due = rebalance_reason(risk_on=risk_on, session_date=session_date, state=state)
-    preview = (
-        plan_rebalance(weights, held, account, dust=dust) if due else []
+    preview: list[dict[str, Any]] = []
+    if due:
+        preview.extend(plan_rebalance(weights, strategy_held, account, dust=dust))
+    if exclusive and others:
+        preview.extend(wind_down_orders(others, dust=dust))
+    preview = apply_broker_min(preview, broker_min)
+    wants_wind = bool(exclusive) and any(
+        row.get("wind_down") or row.get("full_exit") for row in preview
     )
     fresh = bool(market_open) and entry_window_open(
         now_et,
@@ -395,25 +583,50 @@ def build_plan(
         reason = "market_closed"
     elif not fresh:
         reason = "stale_entry"
+    elif due is None and wants_wind:
+        reason = "wind_down"
     elif due is None:
         reason = "hold"
     else:
         reason = due
-    actionable = reason in _REBALANCE_REASONS
+    actionable = reason in _REBALANCE_REASONS or reason == "wind_down"
+    show_preview = bool(due) or wants_wind
     return {
         "strategy": STRATEGY_ID,
         "reason": reason,
         "risk_on": risk_on,
         "weights": weights,
-        "preview_orders": preview if due else [],
+        "equity": account,
+        "exclusive": bool(exclusive),
+        "broker_min": float(broker_min),
+        "preview_orders": preview if show_preview else [],
         "orders": preview if actionable else [],
         "execute": bool(actionable and preview),
-        "persist": bool(actionable),
+        "persist": reason in _REBALANCE_REASONS,
         "send": False,
         "in_window": bool(fresh),
         "signal": "risk_on" if risk_on else "risk_off",
         "rebalance_month": _month_key(session_date),
     }
+
+
+def _order_line(order: dict[str, Any]) -> str:
+    extra: list[str] = []
+    if order.get("wind_down"):
+        extra.append("wind-down")
+    if order.get("full_exit"):
+        extra.append("full-exit")
+    status = str(order.get("status") or "")
+    if status == "deferred_below_min":
+        extra.append("deferred below broker minimum")
+    elif status == "batched":
+        folded = ",".join(order.get("batched_from") or [])
+        extra.append(f"batched {folded}".strip())
+    suffix = f" ({'; '.join(extra)})" if extra else ""
+    return (
+        f"  {str(order['side']).upper()} {order['symbol']} "
+        f"notional ${float(order['notional']):.2f}{suffix}"
+    )
 
 
 def format_plan(plan: dict[str, Any], *, dry_run: bool) -> str:
@@ -424,6 +637,13 @@ def format_plan(plan: dict[str, Any], *, dry_run: bool) -> str:
     book = os.getenv("TRADING_BOOK_ID", "").strip()
     if book:
         lines[0] += f" book={book}"
+    if plan.get("exclusive"):
+        lines.append("  exclusive: other entry sleeves paused")
+    if plan.get("preview_only"):
+        lines.append("  preview-only: strategy flag is off for this book")
+    equity = _finite(plan.get("equity"))
+    if equity is not None and equity > 0:
+        lines.append(f"  equity ${equity:.2f}")
     if weights:
         ordered = sorted(weights, key=lambda symbol: (-float(weights[symbol]), symbol))
         parts = [f"{symbol}={float(weights[symbol]) * 100:.2f}%" for symbol in ordered]
@@ -431,14 +651,26 @@ def format_plan(plan: dict[str, Any], *, dry_run: bool) -> str:
         lines.append("  targets " + " ".join(parts) + f" sum={total:.2f}%")
     else:
         lines.append("  targets none")
-    shown = plan.get("preview_orders") or plan.get("orders") or []
+    shown = list(plan.get("preview_orders") or plan.get("orders") or [])
     if not shown:
         lines.append("  orders: none")
     for order in shown:
+        lines.append(_order_line(order))
+    broker_min = _finite(plan.get("broker_min"))
+    deferred = [
+        order["symbol"]
+        for order in shown
+        if order.get("status") == "deferred_below_min"
+    ]
+    if deferred and broker_min is not None and broker_min > 0:
         lines.append(
-            f"  {str(order['side']).upper()} {order['symbol']} "
-            f"notional ${float(order['notional']):.2f}"
+            "  expected drift: a deferred name can sit just under "
+            f"${broker_min:.2f} off target"
         )
+    if shown and not plan.get("in_window"):
+        lines.append("  next open")
+    elif shown and plan.get("in_window"):
+        lines.append("  this open")
     if dry_run or (shown and not plan.get("send")):
         lines.append("  not sent")
     return "\n".join(lines)
@@ -541,8 +773,8 @@ def _broker_positions(executor: Any) -> dict[str, float] | None:
     positions: dict[str, float] = {}
     for row in rows or []:
         symbol = _normalize(getattr(row, "symbol", ""))
-        if symbol not in STRATEGY_SYMBOLS:
-            continue
+        if not symbol:
+            return None
         market_value = getattr(row, "market_value", None)
         if market_value is None:
             qty = _finite(getattr(row, "qty", None))
@@ -551,11 +783,11 @@ def _broker_positions(executor: Any) -> dict[str, float] | None:
                 return None
             market_value = qty * price
         value = _finite(market_value)
-        if value is None:
+        if value is None or value < 0:
             return None
-        positions[symbol] = abs(value) if value < 0 else value
-        if value < 0:
-            return None
+        if value == 0:
+            continue
+        positions[symbol] = value
     return positions
 
 
@@ -571,21 +803,39 @@ def _broker_equity(executor: Any) -> float | None:
 
 
 def _submit_orders(executor: Any, orders: list[dict[str, Any]], reason: str) -> bool:
-    """Submit sells then buys. False if any sized order is not accepted."""
+    """Submit sells then buys. False if any sized order is not accepted.
+
+    Deferred residuals are skipped. A full exit closes the position even when
+    the notional is under the broker minimum. If every order is deferred,
+    return False so state is not saved and the next open tries again.
+    """
     broker_min = float(config.effective_min_notional())
+    submitted_any = False
+    deferred_any = False
     for order in orders:
-        notional = float(order["notional"])
-        if notional < broker_min:
-            order["status"] = "skipped_broker_min"
+        if order.get("status") == "deferred_below_min":
+            deferred_any = True
             continue
+        label = f"{STRATEGY_ID}:{reason}"
         try:
-            submitted = executor.execute_order(
-                order["symbol"],
-                order["side"],
-                notional=notional,
-                reason=f"{STRATEGY_ID}:{reason}",
-                sleeve="H1D",
-            )
+            if order.get("full_exit"):
+                submitted = executor.execute_full_exit(
+                    order["symbol"],
+                    reason=label,
+                    sleeve="H1D",
+                )
+            else:
+                notional = float(order["notional"])
+                if notional < broker_min:
+                    order["status"] = "skipped_broker_min"
+                    continue
+                submitted = executor.execute_order(
+                    order["symbol"],
+                    order["side"],
+                    notional=notional,
+                    reason=label,
+                    sleeve="H1D",
+                )
         except Exception:
             order["status"] = "error"
             return False
@@ -593,6 +843,9 @@ def _submit_orders(executor: Any, orders: list[dict[str, Any]], reason: str) -> 
             order["status"] = "rejected"
             return False
         order["status"] = "submitted"
+        submitted_any = True
+    if deferred_any and not submitted_any:
+        return False
     return True
 
 
@@ -612,6 +865,9 @@ def run_h1d_trend_mix_cycle(
     confirm_market: bool = True,
     allow_send: bool = True,
     enabled: bool | None = None,
+    exclusive: bool | None = None,
+    broker_min: float | None = None,
+    announce: bool = True,
 ) -> dict[str, Any]:
     """One cycle. Dry-run prints the plan and does not submit or persist."""
     if enabled is None:
@@ -619,6 +875,10 @@ def run_h1d_trend_mix_cycle(
     if not enabled:
         return _empty_plan("disabled")
 
+    if exclusive is None:
+        exclusive = bool(config.h1d_trend_mix_exclusive())
+    if broker_min is None:
+        broker_min = float(config.effective_min_notional())
     if dry_run is None:
         dry_run = bool(config.h1d_trend_mix_dry_run()) or bool(
             getattr(executor, "dry_run", False)
@@ -631,7 +891,8 @@ def run_h1d_trend_mix_cycle(
         plan = _empty_plan("stale_entry")
         plan["dry_run"] = dry_run
         plan["report"] = format_plan(plan, dry_run=dry_run)
-        print(plan["report"])
+        if announce:
+            print(plan["report"])
         return plan
 
     client = getattr(executor, "client", None)
@@ -672,6 +933,8 @@ def run_h1d_trend_mix_cycle(
         dust=dust_notional(),
         freshness_min=entry_freshness_minutes(),
         decision_at=now_aware,
+        exclusive=bool(exclusive),
+        broker_min=float(broker_min),
     )
     window = entry_window_open(
         now_aware,
@@ -707,19 +970,135 @@ def run_h1d_trend_mix_cycle(
         )
         plan["persisted"] = bool(saved)
     plan["report"] = format_plan(plan, dry_run=bool(dry_run))
-    if dry_run or plan.get("in_window") or plan.get("send"):
+    if announce and (dry_run or plan.get("in_window") or plan.get("send")):
         print(plan["report"])
-    else:
+    elif announce:
         logger.info("h1d_trend_mix %s; no orders", plan.get("reason"))
     return plan
 
 
-def main() -> None:
-    """Preview targets and orders. This entry point never submits.
+class _ReadOnlyBroker:
+    """GET positions and equity. ``execute_*`` cannot submit."""
 
-    Notionals use a flat $300 illustration so the preview does not read an
-    account. The book process uses that book's equity when dry-run is on.
+    def __init__(self, executor: Any) -> None:
+        self._executor = executor
+        self.client = getattr(executor, "client", None)
+        self.dry_run = True
+        self.equity_session_open = True
+
+    def _get_positions(self) -> Any:
+        return self._executor._get_positions()
+
+    def _get_account(self) -> Any:
+        return self._executor._get_account()
+
+    def execute_order(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("dry-run broker cannot submit orders")
+
+    def execute_full_exit(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("dry-run broker cannot submit orders")
+
+
+def _parse_cli(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="python -m modules.h1d_trend_mix",
+        description=(
+            "Preview h1d_trend_mix orders for the next open. "
+            "This command has no submit path."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Read positions and print the next-open orders. Required with --book.",
+    )
+    parser.add_argument(
+        "--book",
+        default="",
+        help="Book id: alpaca_live, alpaca_paper_v2, or alpaca_paper.",
+    )
+    parser.add_argument(
+        "--user",
+        default="",
+        help="Portal username whose book env should be read.",
+    )
+    parser.add_argument(
+        "--env-file",
+        default="",
+        help="Book .env to read. Used instead of --user when set.",
+    )
+    parser.add_argument(
+        "--exclusive",
+        action="store_true",
+        help="Also list wind-down sells for holdings outside the target mix.",
+    )
+    return parser.parse_args(argv)
+
+
+def next_open_session_date(now_et: datetime) -> date:
+    """Weekday session this preview is planning.
+
+    Before 16:00 ET on a weekday, today's close is still open, so that close
+    is left out of the signal. After the cash close, the next weekday is the
+    trade session and today's close counts. Exchange holidays are not skipped.
     """
+    now = _aware(now_et) or datetime.now(_ET)
+    close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if now.weekday() < 5 and now < close:
+        return now.date()
+    day = now.date() + timedelta(days=1)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return day
+
+
+def _book_env_path(book: str, user: str, env_file: str) -> Path | None:
+    if env_file:
+        return Path(env_file)
+    if not user:
+        return None
+    from modules.portal_paths import book_env_path
+
+    return book_env_path(user, book)
+
+
+def _load_book_env(path: Path, book: str) -> str | None:
+    """Load a book env for reads. Returns an error string, or None."""
+    if not path.is_file():
+        return f"book env not found for {book}"
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(path, override=True)
+    except Exception as exc:
+        return f"could not read book env ({type(exc).__name__})"
+    os.environ["TRADING_BOOK_ID"] = book
+    os.environ["PYTHONTRADING_ENV_FILE"] = str(path)
+    return None
+
+
+def _read_only_for_book(book: str) -> _ReadOnlyBroker:
+    from modules.alpaca_executor import AlpacaExecutor
+    from modules.trading_books import BOOKS
+
+    spec = BOOKS.get(book) or {}
+    if spec.get("platform") != "alpaca":
+        raise ValueError(f"unknown book {book}")
+    paper = bool(spec.get("default_paper", True))
+    allow_live = bool(spec.get("allow_live_default", False))
+    raw = AlpacaExecutor(paper=paper, allow_live=allow_live)
+    raw.dry_run = True
+    return _ReadOnlyBroker(raw)
+
+
+def _print_read_failure(book: str, detail: str) -> None:
+    print(f"h1d_trend_mix dry-run book={book}: {detail}")
+    print("  orders: none")
+    print("  not sent")
+
+
+def _illustrate() -> None:
+    """Flat $300 preview. Does not read an account and cannot submit."""
     print("h1d_trend_mix CLI is dry-run only and does not submit orders.")
     print("Notionals use a flat $300 illustration, not a live account.")
     run_h1d_trend_mix_cycle(
@@ -731,8 +1110,73 @@ def main() -> None:
         positions={},
         equity=300.0,
         state={},
+        exclusive=False,
+        broker_min=0.0,
     )
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Preview the next open. There is no flag that submits orders."""
+    args = _parse_cli(argv)
+    book = str(args.book or "").strip()
+    if book and not args.dry_run:
+        print("Pass --dry-run. This command has no submit path.")
+        return 2
+    if not book:
+        _illustrate()
+        return 0
+
+    path = _book_env_path(book, str(args.user or "").strip(), str(args.env_file or "").strip())
+    if path is None:
+        _print_read_failure(book, "pass --user or --env-file")
+        return 0
+    loaded = _load_book_env(path, book)
+    if loaded:
+        _print_read_failure(book, loaded)
+        return 0
+
+    env_enabled = bool(config.effective_h1d_trend_mix_enabled())
+    exclusive = bool(args.exclusive) or bool(config.h1d_trend_mix_exclusive())
+    try:
+        broker = _read_only_for_book(book)
+        positions = _broker_positions(broker)
+        equity = _broker_equity(broker)
+        market = _confirm_market_open(broker.client)
+    except Exception as exc:
+        _print_read_failure(book, f"read failed ({type(exc).__name__})")
+        return 0
+    if positions is None or equity is None:
+        _print_read_failure(book, "positions or equity unavailable")
+        return 0
+
+    now = datetime.now(_ET)
+    opened = None
+    if broker.client is not None:
+        opened = _session_open_from_client(broker.client, now)
+    plan = run_h1d_trend_mix_cycle(
+        broker,
+        market_open=bool(market),
+        now_et=now,
+        session_open=opened,
+        session_date=next_open_session_date(now),
+        positions=positions,
+        equity=equity,
+        dry_run=True,
+        allow_send=False,
+        confirm_market=False,
+        enabled=True,
+        exclusive=exclusive,
+        announce=False,
+    )
+    plan["preview_only"] = not env_enabled
+    plan["exclusive"] = exclusive
+    plan["report"] = format_plan(plan, dry_run=True)
+    print(plan["report"])
+    close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    if now.weekday() < 5 and now < close and not plan.get("in_window"):
+        print("  signal uses completed closes only; today's close is not included yet")
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

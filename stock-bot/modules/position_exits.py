@@ -279,8 +279,8 @@ def run_position_exits(
                 continue
 
         # h1d_trend_mix may exempt its own ETFs from fixed / smart −10% hard
-        # stops. The helper is false while that strategy is off, so Medium
-        # and Live stop behavior is unchanged.
+        # stops. The helper is false while that strategy is off, and while
+        # exclusive mode is off unless the book sets the disable flag.
         try:
             from modules.h1d_trend_mix import apply_hard_stop_exemption
 

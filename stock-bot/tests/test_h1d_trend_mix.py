@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import config
 from modules import h1d_trend_mix as h1d
-from modules.trading_books import BOOKS
+from modules.trading_books import BOOKS, book_dropdown_entries
 
 ET = ZoneInfo("America/New_York")
 
@@ -45,6 +45,7 @@ class H1dTrendMixTests(unittest.TestCase):
             for key in (
                 "H1D_TREND_MIX_ENABLED",
                 "H1D_TREND_MIX_DRY_RUN",
+                "H1D_TREND_MIX_EXCLUSIVE",
                 "H1D_TREND_MIX_BOOKS",
                 "H1D_TREND_MIX_DISABLE_HARD_STOPS",
                 "H1D_TREND_MIX_DUST_NOTIONAL",
@@ -62,11 +63,29 @@ class H1dTrendMixTests(unittest.TestCase):
             else:
                 os.environ[key] = value
 
-    def test_default_off_and_not_in_book_profiles(self) -> None:
+    def test_default_off_and_book_ids(self) -> None:
         self.assertFalse(config.effective_h1d_trend_mix_enabled())
+        self.assertFalse(config.h1d_trend_mix_exclusive())
         self.assertNotIn("H1D_TREND_MIX_ENABLED", config.REALISTIC_RESEARCH_ENV)
-        self.assertIn("alpaca_live", BOOKS)
-        self.assertIn("alpaca_paper", BOOKS)
+        self.assertNotIn("H1D_TREND_MIX_EXCLUSIVE", config.REALISTIC_RESEARCH_ENV)
+        live = BOOKS["alpaca_live"]
+        lab = BOOKS["alpaca_paper"]
+        medium = BOOKS["alpaca_paper_v2"]
+        self.assertEqual(live["role"], "live")
+        self.assertTrue(live["enabled"])
+        self.assertFalse(live.get("hidden"))
+        self.assertEqual(lab["role"], "lab")
+        self.assertTrue(lab["enabled"])
+        self.assertTrue(lab["paper_chase"])
+        self.assertEqual(medium["role"], "medium")
+        self.assertFalse(medium["enabled"])
+        self.assertTrue(medium["hidden"])
+        self.assertFalse(medium["paper_chase"])
+        self.assertTrue(medium["default_paper"])
+        menu = [book_id for _label, book_id, _ok in book_dropdown_entries()]
+        self.assertIn("alpaca_live", menu)
+        self.assertIn("alpaca_paper", menu)
+        self.assertNotIn("alpaca_paper_v2", menu)
         self.assertNotIn("h1d_trend_mix", BOOKS)
 
     def test_book_allowlist_fail_safe(self) -> None:
@@ -262,9 +281,8 @@ class H1dTrendMixTests(unittest.TestCase):
         self.assertTrue(plan["orders"])
         self.assertNotIn("AAPL", {row["symbol"] for row in plan["orders"]})
 
-    def test_hard_stop_exemption_is_off_until_the_strategy_is_on(self) -> None:
+    def test_hard_stop_exemption_follows_exclusive_mode(self) -> None:
         self.assertFalse(h1d.hard_stop_exempt("SSO"))
-        self.assertFalse(h1d.hard_stop_exempt("SPY"))
         stop, atr = h1d.apply_hard_stop_exemption(
             "SSO",
             stop_hit=True,
@@ -274,8 +292,12 @@ class H1dTrendMixTests(unittest.TestCase):
         self.assertTrue(stop)
         self.assertTrue(atr)
         os.environ["H1D_TREND_MIX_ENABLED"] = "true"
+        self.assertFalse(h1d.hard_stop_exempt("SSO"))
+        self.assertFalse(h1d.hard_stop_exempt("AAPL"))
+        os.environ["H1D_TREND_MIX_EXCLUSIVE"] = "true"
         self.assertTrue(h1d.hard_stop_exempt("SSO"))
         self.assertTrue(h1d.hard_stop_exempt("SPY"))
+        self.assertTrue(h1d.hard_stop_exempt("BIL"))
         self.assertFalse(h1d.hard_stop_exempt("AAPL"))
         stop, atr = h1d.apply_hard_stop_exemption(
             "BIL",
@@ -303,6 +325,10 @@ class H1dTrendMixTests(unittest.TestCase):
         self.assertTrue(atr)
         os.environ["H1D_TREND_MIX_DISABLE_HARD_STOPS"] = "false"
         self.assertFalse(h1d.hard_stop_exempt("SSO"))
+        os.environ["H1D_TREND_MIX_EXCLUSIVE"] = "false"
+        os.environ["H1D_TREND_MIX_DISABLE_HARD_STOPS"] = "true"
+        self.assertTrue(h1d.hard_stop_exempt("SSO"))
+        self.assertFalse(h1d.hard_stop_exempt("AAPL"))
 
     def test_dry_run_prints_orders_without_sending_or_persisting(self) -> None:
         above, _last = _series(101.0)
@@ -408,15 +434,288 @@ class H1dTrendMixTests(unittest.TestCase):
         self.assertEqual(executor.calls, [])
 
 
+    def test_exclusive_requires_the_strategy_and_the_book(self) -> None:
+        os.environ["H1D_TREND_MIX_EXCLUSIVE"] = "true"
+        self.assertFalse(config.h1d_trend_mix_exclusive())
+        os.environ["H1D_TREND_MIX_ENABLED"] = "true"
+        os.environ["H1D_TREND_MIX_BOOKS"] = "alpaca_paper_v2"
+        os.environ["TRADING_BOOK_ID"] = "alpaca_live"
+        self.assertFalse(config.h1d_trend_mix_exclusive())
+        os.environ["TRADING_BOOK_ID"] = "alpaca_paper"
+        self.assertFalse(config.h1d_trend_mix_exclusive())
+        os.environ["TRADING_BOOK_ID"] = "alpaca_paper_v2"
+        self.assertTrue(config.h1d_trend_mix_exclusive())
+
+    def test_exclusive_wind_down_sells_only_non_target_names(self) -> None:
+        above, _last = _series(101.0)
+        session = date(2026, 10, 15)
+        opened, now = _open_pair(session, 2)
+        held = h1d.allocate_notionals(h1d.target_weights(True), 300.0)
+        held["AAPL"] = 40.0
+        held["VTI"] = 25.0
+        common = dict(
+            spy_bars=above,
+            session_date=session,
+            now_et=now,
+            session_open=opened,
+            market_open=True,
+            positions=held,
+            equity=300.0,
+            state={"signal": "risk_on", "last_rebalance_month": "2026-10"},
+        )
+        stacked = h1d.build_plan(**common)
+        self.assertEqual(stacked["reason"], "hold")
+        self.assertNotIn("AAPL", {row["symbol"] for row in stacked["orders"]})
+        plan = h1d.build_plan(exclusive=True, **common)
+        self.assertEqual(plan["reason"], "wind_down")
+        self.assertFalse(plan["persist"])
+        symbols = {row["symbol"] for row in plan["orders"]}
+        self.assertEqual(symbols, {"AAPL", "VTI"})
+        self.assertTrue(all(row["side"] == "sell" for row in plan["orders"]))
+        self.assertTrue(all(row.get("wind_down") for row in plan["orders"]))
+        late = h1d.build_plan(
+            exclusive=True,
+            **{**common, "now_et": opened + timedelta(minutes=8)},
+        )
+        self.assertEqual(late["orders"], [])
+        self.assertEqual(late["reason"], "stale_entry")
+        preview = {row["symbol"] for row in late["preview_orders"]}
+        self.assertEqual(preview, {"AAPL", "VTI"})
+        self.assertIn("next open", h1d.format_plan(late, dry_run=True))
+        self.assertIn("not sent", h1d.format_plan(late, dry_run=True))
+
+    def test_exclusive_initial_rebalance_sells_before_buys(self) -> None:
+        above, _last = _series(101.0)
+        session = date(2026, 10, 1)
+        opened, now = _open_pair(session, 1)
+        plan = h1d.build_plan(
+            spy_bars=above,
+            session_date=session,
+            now_et=now,
+            session_open=opened,
+            market_open=True,
+            positions={"AAPL": 80.0},
+            equity=300.0,
+            state={},
+            exclusive=True,
+            broker_min=10.0,
+        )
+        self.assertEqual(plan["reason"], "initial")
+        self.assertTrue(plan["persist"])
+        sells = [row for row in plan["orders"] if row["side"] == "sell"]
+        buys = [row for row in plan["orders"] if row["side"] == "buy"]
+        self.assertEqual(plan["orders"][: len(sells)], sells)
+        self.assertEqual(sells[0]["symbol"], "AAPL")
+        self.assertTrue(buys)
+        self.assertIn("SSO", {row["symbol"] for row in buys})
+
+    def test_broker_min_batches_residuals_and_full_exits_wind_down(self) -> None:
+        partials = h1d.apply_broker_min(
+            [
+                {
+                    "symbol": "XLK",
+                    "side": "sell",
+                    "notional": 4.0,
+                    "target_weight": 0.04,
+                    "position_value": 16.0,
+                }
+            ],
+            10.0,
+        )
+        self.assertEqual(partials[0]["status"], "deferred_below_min")
+        self.assertNotIn("full_exit", partials[0])
+        capped = h1d.apply_broker_min(
+            [
+                {
+                    "symbol": "XLK",
+                    "side": "sell",
+                    "notional": 7.0,
+                    "target_weight": 0.04,
+                    "position_value": 8.0,
+                },
+                {
+                    "symbol": "XLB",
+                    "side": "sell",
+                    "notional": 6.0,
+                    "target_weight": 0.04,
+                    "position_value": 20.0,
+                },
+            ],
+            10.0,
+        )
+        self.assertTrue(all(row["status"] == "deferred_below_min" for row in capped))
+        self.assertTrue(all(not row.get("full_exit") for row in capped))
+        batched = h1d.apply_broker_min(
+            [
+                {"symbol": "XLB", "side": "buy", "notional": 4.0, "target_weight": 0.04},
+                {"symbol": "XLE", "side": "buy", "notional": 4.0, "target_weight": 0.04},
+                {"symbol": "XLK", "side": "buy", "notional": 5.0, "target_weight": 0.04},
+            ],
+            10.0,
+        )
+        self.assertEqual(len(batched), 1)
+        self.assertEqual(batched[0]["symbol"], "XLK")
+        self.assertAlmostEqual(batched[0]["notional"], 13.0)
+        self.assertEqual(set(batched[0]["batched_from"]), {"XLB", "XLE"})
+        closing = h1d.apply_broker_min(
+            [
+                {
+                    "symbol": "AAPL",
+                    "side": "sell",
+                    "notional": 6.0,
+                    "target_weight": 0.0,
+                    "position_value": 6.0,
+                    "wind_down": True,
+                }
+            ],
+            10.0,
+        )
+        self.assertTrue(closing[0]["full_exit"])
+        self.assertNotEqual(closing[0].get("status"), "deferred_below_min")
+        unchanged = h1d.apply_broker_min(
+            [{"symbol": "XLB", "side": "buy", "notional": 4.0, "target_weight": 0.04}],
+            0.0,
+        )
+        self.assertNotIn("status", unchanged[0])
+        self.assertAlmostEqual(unchanged[0]["notional"], 4.0)
+
+    def test_wind_down_full_exit_does_not_persist_state(self) -> None:
+        above, _last = _series(101.0)
+        session = date(2026, 10, 15)
+        opened, now = _open_pair(session, 1)
+        held = h1d.allocate_notionals(h1d.target_weights(True), 300.0)
+        held["AAPL"] = 6.0
+        executor = _FakeExecutor()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.json"
+            path.write_text(
+                json.dumps({"signal": "risk_on", "last_rebalance_month": "2026-10"}),
+                encoding="utf-8",
+            )
+            before = path.read_text(encoding="utf-8")
+            os.environ["H1D_TREND_MIX_ENABLED"] = "true"
+            os.environ["H1D_TREND_MIX_EXCLUSIVE"] = "true"
+            plan = h1d.run_h1d_trend_mix_cycle(
+                executor,
+                market_open=True,
+                now_et=now,
+                session_open=opened,
+                session_date=session,
+                spy_bars=above,
+                positions=held,
+                equity=300.0,
+                dry_run=False,
+                state_path=path,
+                confirm_market=False,
+                exclusive=True,
+                broker_min=10.0,
+            )
+            self.assertEqual(plan["reason"], "wind_down")
+            self.assertEqual(executor.full_exits, ["AAPL"])
+            self.assertEqual(executor.calls, [])
+            self.assertFalse(plan.get("persisted"))
+            self.assertEqual(path.read_text(encoding="utf-8"), before)
+            self.assertIn("AAPL", plan["report"])
+            self.assertIn("full-exit", plan["report"])
+
+    def test_exclusive_dry_run_lists_wind_down_without_sending(self) -> None:
+        above, _last = _series(101.0)
+        session = date(2026, 10, 1)
+        opened, now = _open_pair(session, 1)
+        executor = _FakeExecutor()
+        plan = h1d.run_h1d_trend_mix_cycle(
+            executor,
+            market_open=True,
+            now_et=now,
+            session_open=opened,
+            session_date=session,
+            spy_bars=above,
+            positions={"AAPL": 40.0},
+            equity=300.0,
+            state={},
+            dry_run=True,
+            confirm_market=False,
+            enabled=True,
+            exclusive=True,
+            broker_min=10.0,
+        )
+        self.assertEqual(executor.calls, [])
+        self.assertEqual(executor.full_exits, [])
+        self.assertIn("AAPL", plan["report"])
+        self.assertIn("not sent", plan["report"])
+        self.assertIn("BUY SSO", plan["report"])
+
+    def test_other_entries_and_guards(self) -> None:
+        self.assertFalse(h1d.other_entry_blocked("ORB", "buy", False, False))
+        self.assertTrue(h1d.other_entry_blocked("ORB", "buy", False, True))
+        self.assertTrue(h1d.other_entry_blocked("ORB", "buy", True, True))
+        self.assertTrue(h1d.other_entry_blocked(None, "sell", False, True))
+        self.assertFalse(h1d.other_entry_blocked("NYSE", "sell", True, True))
+        self.assertFalse(h1d.other_entry_blocked("H1D", "buy", False, True))
+        self.assertTrue(h1d.guards_bypass_symbol("SSO", exclusive=True))
+        self.assertFalse(h1d.guards_bypass_symbol("AAPL", exclusive=True))
+        self.assertFalse(h1d.guards_bypass_symbol("SSO", exclusive=False))
+
+    def test_next_open_session_uses_completed_closes(self) -> None:
+        wednesday_morning = datetime(2026, 10, 7, 10, 0, tzinfo=ET)
+        self.assertEqual(wednesday_morning.weekday(), 2)
+        self.assertEqual(h1d.next_open_session_date(wednesday_morning), date(2026, 10, 7))
+        wednesday_close = datetime(2026, 10, 7, 16, 0, tzinfo=ET)
+        self.assertEqual(h1d.next_open_session_date(wednesday_close), date(2026, 10, 8))
+        friday_evening = datetime(2026, 10, 9, 16, 5, tzinfo=ET)
+        self.assertEqual(h1d.next_open_session_date(friday_evening), date(2026, 10, 12))
+        saturday = datetime(2026, 10, 10, 11, 0, tzinfo=ET)
+        self.assertEqual(h1d.next_open_session_date(saturday), date(2026, 10, 12))
+
+    def test_cli_has_no_submit_path(self) -> None:
+        with self.assertRaises(SystemExit):
+            h1d.main(["--dry-run", "--book", "alpaca_live", "--send"])
+        broker = h1d._ReadOnlyBroker(object())
+        with self.assertRaises(RuntimeError):
+            broker.execute_order("SSO", "buy", notional=10)
+        with self.assertRaises(RuntimeError):
+            broker.execute_full_exit("AAPL")
+        code = h1d.main(
+            ["--dry-run", "--book", "alpaca_live", "--env-file", "/tmp/h1d-missing.env"]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            h1d.main(["--book", "alpaca_paper_v2", "--user", "someone"]),
+            2,
+        )
+
+    def test_bad_non_strategy_value_fails_closed(self) -> None:
+        above, _last = _series(101.0)
+        session = date(2026, 10, 1)
+        opened, now = _open_pair(session, 1)
+        plan = h1d.build_plan(
+            spy_bars=above,
+            session_date=session,
+            now_et=now,
+            session_open=opened,
+            market_open=True,
+            positions={"AAPL": -5.0},
+            equity=300.0,
+            state={},
+        )
+        self.assertEqual(plan["reason"], "missing_data")
+        self.assertEqual(plan["orders"], [])
+
+
 class _FakeExecutor:
     dry_run = False
     equity_session_open = True
 
     def __init__(self) -> None:
         self.calls: list[tuple] = []
+        self.full_exits: list[str] = []
 
     def execute_order(self, symbol, side, notional=None, reason="", sleeve=None):
         self.calls.append((symbol, side, notional, sleeve, reason))
+        return object()
+
+    def execute_full_exit(self, symbol, reason="", sleeve=None, **kwargs):
+        self.full_exits.append(symbol)
         return object()
 
 
