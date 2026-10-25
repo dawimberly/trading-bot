@@ -51,6 +51,7 @@ def _load_project_dotenv() -> None:
         "PAPER_LAB_TRAIL_ARM_PCT",
         "PAPER_LAB_TRAIL_PCT",
         "PAPER_LAB_DISASTER_PCT",
+        "PAPER_LAB_HOLD_ONLY",
         "PAPER_LAB_ADD_POLICY",
         "PAPER_LAB_ADD_MAX_MULT",
         "MAX_ACTIVE_TICKERS",
@@ -5938,6 +5939,63 @@ def paper_lab_disaster_pct() -> float:
     return float(os.getenv("PAPER_LAB_DISASTER_PCT", "0.10"))
 
 
+def paper_lab_hold_only_enabled() -> bool:
+    """Lab experiment: no loss stop, no trail, no half, no A2B1.
+
+    The only exit is ``paper_lab_max_hold_days`` (30). Portal sets
+    ``PAPER_LAB_HOLD_ONLY=true``. Unset keeps the prior disaster/trail exits
+    so older tests and a manual rollback stay on that path.
+    """
+    if trading_book_id() != "alpaca_paper":
+        return False
+    if not paper_lab_concentrated_enabled():
+        return False
+    return os.getenv("PAPER_LAB_HOLD_ONLY", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def book_hard_stop_pct(book_id: str | None = None) -> float | None:
+    """Long-equity loss stop for one book. None means that stop is off.
+
+    Approved 2026-10-25, one change per book:
+    alpaca_paper with hold-only has no loss stop.
+    alpaca_paper_v2 and alpaca_live are 10%.
+    Any other book stays at 5% unless ``STOP_LOSS_PCT`` is set.
+    ``STOP_LOSS_PCT=off`` disables the percentage stop on a book that has one.
+    """
+    bid = (book_id if book_id is not None else trading_book_id()).strip()
+    if bid == "alpaca_paper" and paper_lab_hold_only_enabled():
+        return None
+    raw = os.getenv("STOP_LOSS_PCT")
+    if raw is not None:
+        text = raw.strip().lower()
+        if text in {"", "off", "none", "disabled", "false"}:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            pass
+    if bid in {"alpaca_paper_v2", "alpaca_live"}:
+        return 0.10
+    return float(STOP_LOSS_PCT)
+
+
+def equity_loss_stop_hit(pnl_pct: float) -> bool:
+    """True when unrealized pnl has reached this book's loss stop.
+
+    A tighter ATR or smart-stop signal inside that band does not count.
+    A loss past the band counts even when that tighter signal is quiet.
+    """
+    pct = book_hard_stop_pct()
+    if pct is None:
+        return False
+    return float(pnl_pct) <= -float(pct)
+
+
 def paper_lab_max_hold_days() -> int:
     return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "30")))
 
@@ -6032,6 +6090,13 @@ def research_mode_ready() -> bool:
 def format_paper_lab_banner() -> str | None:
     if not paper_lab_concentrated_enabled():
         return None
+    if paper_lab_hold_only_enabled():
+        return (
+            "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
+            "STOP EXPERIMENT 2026-10-25: no loss stop | "
+            f"exit only at {paper_lab_max_hold_days()}d hold | "
+            "trail, half, and A2B1 suspended"
+        )
     add = paper_lab_add_policy()
     if add == "idle":
         add_bit = "idle-cash add (2× only if book full)"
@@ -6055,7 +6120,7 @@ def format_paper_v2_calm_banner() -> str | None:
         return None
     return (
         "PAPER MEDIUM (alpaca_paper_v2): 15 names | 30d hold | 2x ATR | "
-        "no 1R | no micro-trims | 33/67 VTI"
+        "hard stop 10% | no 1R | no micro-trims | 33/67 VTI"
     )
 
 
