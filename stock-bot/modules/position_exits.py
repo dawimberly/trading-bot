@@ -732,6 +732,21 @@ def run_position_exits(
                         )
                 continue
 
+        # h1d_trend_mix may exempt its own ETFs from fixed / smart −10% hard
+        # stops. The helper is false while that strategy is off, and while
+        # exclusive mode is off unless the book sets the disable flag.
+        try:
+            from modules.h1d_trend_mix import apply_hard_stop_exemption
+
+            stop_hit, atr_stop_hit = apply_hard_stop_exemption(
+                symbol,
+                stop_hit=stop_hit,
+                atr_stop_hit=atr_stop_hit,
+                smart_exit_code=str(meta.get("smart_exit_code") or ""),
+            )
+        except Exception:
+            logger.debug("h1d hard-stop exemption skipped for %s", symbol, exc_info=True)
+
         trail_hit = controls and qty > 0 and _trailing_stop_hit(
             entry, peak, current, symbol=symbol, executor=executor
         )

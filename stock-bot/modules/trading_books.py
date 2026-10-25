@@ -10,23 +10,32 @@ class BookSpec(TypedDict, total=False):
     platform: str
     enabled: bool
     coming_soon: bool
+    hidden: bool
+    role: str
     default_paper: bool
     paper_chase: bool
     allow_live_default: bool
 
 
 BOOKS: dict[str, BookSpec] = {
+    # Real-money account. Portal sets PAPER_TRADING=false and ALLOW_LIVE_TRADING=yes.
+    # Keys: APCA_API_KEY_ID / APCA_API_SECRET_KEY in this book's .env.
     "alpaca_live": {
         "label": "Alpaca Live",
         "platform": "alpaca",
+        "role": "live",
         "enabled": True,
         "default_paper": False,
         "paper_chase": False,
         "allow_live_default": True,
     },
+    # Legacy Lab paper account. This is the only paper book the portal starts.
+    # Profile B / Realistic Research (the "Best Paper v2.2" strategy name lives here).
+    # It is not a separate Medium book. Keys: this book's .env, paper=true, chase on.
     "alpaca_paper": {
         "label": "Alpaca Paper (aggressive)",
         "platform": "alpaca",
+        "role": "lab",
         "enabled": True,
         "default_paper": True,
         "paper_chase": True,
@@ -35,6 +44,7 @@ BOOKS: dict[str, BookSpec] = {
     "alpaca_paper_v2": {
         "label": "Alpaca Paper v2 (medium SoT, VTI off)",
         "platform": "alpaca",
+        "role": "medium",
         "enabled": True,
         "default_paper": True,
         "paper_chase": True,
@@ -73,6 +83,8 @@ def book_dropdown_entries() -> list[tuple[str, str, bool]]:
     """(menu label, book_id, selectable) — extensible for future platforms."""
     entries: list[tuple[str, str, bool]] = []
     for book_id, spec in list_books():
+        if spec.get("hidden"):
+            continue
         label = spec["label"]
         enabled = bool(spec.get("enabled")) and not spec.get("coming_soon")
         if spec.get("coming_soon"):

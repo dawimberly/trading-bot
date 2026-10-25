@@ -252,6 +252,17 @@ def close_dust_position(
         return DustCloseResult(sym, qty, round(notional, 4), "error", detail)
 
 
+def _h1d_dust_skip(symbol: str) -> bool:
+    """Exclusive h1d keeps its ETFs. Other names still go through this cleaner."""
+    try:
+        import config
+        from modules.h1d_trend_mix import guards_bypass_symbol
+
+        return guards_bypass_symbol(symbol, exclusive=config.h1d_trend_mix_exclusive())
+    except Exception:
+        return False
+
+
 def cleanup_dust_positions(
     executor: AlpacaExecutor,
     *,
@@ -271,6 +282,7 @@ def cleanup_dust_positions(
                 max_qty=max_qty,
             )
             for sym in symbols
+            if not _h1d_dust_skip(sym)
         ]
 
     dust = list_dust_positions(
@@ -279,6 +291,8 @@ def cleanup_dust_positions(
     results: list[DustCloseResult] = []
     for pos, qty, notional in dust:
         sym = executor._normalize_pos_symbol(pos)
+        if _h1d_dust_skip(sym):
+            continue
         if dry_run:
             results.append(
                 DustCloseResult(

@@ -7633,6 +7633,45 @@ def effective_strategy_rating_enabled() -> bool:
     return bool(STRATEGY_RATING_LIVE_ENABLED)
 
 
+def effective_h1d_trend_mix_enabled() -> bool:
+    """Opt-in ``h1d_trend_mix``. Default off for every book.
+
+    Set ``H1D_TREND_MIX_ENABLED=true`` in that book's env only. An optional
+    ``H1D_TREND_MIX_BOOKS`` allowlist (comma-separated book ids) must match
+    ``TRADING_BOOK_ID`` when the allowlist is set. This flag is not part of
+    the Live Conservative or Realistic Research locks.
+    """
+    if not _parse_env_bool("H1D_TREND_MIX_ENABLED", default="false"):
+        return False
+    allow = os.getenv("H1D_TREND_MIX_BOOKS", "").strip()
+    if not allow:
+        return True
+    book = os.getenv("TRADING_BOOK_ID", "").strip()
+    allowed = {part.strip() for part in allow.split(",") if part.strip()}
+    if not book:
+        return False
+    return book in allowed
+
+
+def h1d_trend_mix_dry_run() -> bool:
+    """Print ``h1d_trend_mix`` orders and do not submit them."""
+    return _parse_env_bool("H1D_TREND_MIX_DRY_RUN", default="false")
+
+
+def h1d_trend_mix_exclusive() -> bool:
+    """This book runs h1d instead of the other entry sleeves. Default off.
+
+    Requires ``H1D_TREND_MIX_ENABLED`` (and the book allowlist, when set).
+    """
+    if not effective_h1d_trend_mix_enabled():
+        return False
+    return _parse_env_bool("H1D_TREND_MIX_EXCLUSIVE", default="false")
+
+
+def h1d_exclusive_blocks_other_entries() -> bool:
+    return h1d_trend_mix_exclusive()
+
+
 def effective_smart_stops_enabled() -> bool:
     """Smart ATR stops with reeval — paper / Realistic Research; live opt-in."""
     if paper_lab_concentrated_enabled():

@@ -179,6 +179,8 @@ def _game_plan_signals(regime: str) -> dict:
 
 def _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=False):
     global _startup_rebalanced
+    if config.h1d_exclusive_blocks_other_entries():
+        return
     if _startup_rebalanced or not config.REBALANCE_ON_STARTUP:
         return
     if (
@@ -565,6 +567,8 @@ def main():
     equity_scans = schedule.get("equity_scans", market_open)
     executor.equity_session_open = market_open
     executor.refresh_cache()
+    executor.h1d_exclusive = bool(config.h1d_exclusive_blocks_other_entries())
+    h1d_pause = bool(executor.h1d_exclusive)
 
     try:
         from modules import error_watcher
@@ -1321,7 +1325,9 @@ def main():
                     print(f"--- Kraken SPCX buy skipped/failed: {kraken_buy['error']} ---")
 
     vti_result = None
-    if config.REBALANCE_ENABLED and market_open:
+    if h1d_pause:
+        print("--- h1d exclusive: other entry sleeves paused ---")
+    if config.REBALANCE_ENABLED and market_open and not h1d_pause:
         global _strategic_rebalancer
         from modules.operating_layer import run_operating_cycle_live
         from modules.rebalancer import StrategicRebalancer
@@ -1353,7 +1359,7 @@ def main():
                     f"--- Operating Layer: wisdom {wisdom_rec.get('action')} "
                     f"conv {wisdom_rec.get('conviction', 0):.2f} (no rebalance trigger) ---"
                 )
-    elif market_open:
+    elif market_open and not h1d_pause:
         # Always run while open so VTI_CORE_ENABLED=false still unwinds leftover
         # VTI (Paper Aggressive must not keep a stranded core).
         vti_result = rebalance_vti_core(
@@ -1391,6 +1397,7 @@ def main():
     if (
         config.effective_options_sleeve_enabled()
         and market_open
+        and not h1d_pause
         and _paper_research_scan_allowed(paper_research_deadline, "options")
     ):
         from modules.options_sleeve import current_vix_level, run_options_sleeve_cycle
@@ -1402,7 +1409,7 @@ def main():
             market_open=market_open,
         )
 
-    if config.effective_wheel_sleeve_enabled() and market_open:
+    if config.effective_wheel_sleeve_enabled() and market_open and not h1d_pause:
         try:
             from modules.options_sleeve import current_vix_level
             from modules.wheel_sleeve import run_wheel_sleeve_cycle
@@ -1416,7 +1423,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Wheel sleeve", exc)
 
-    if config.effective_politician_copy_enabled() and market_open and config.PAPER_TRADING:
+    if config.effective_politician_copy_enabled() and market_open and config.PAPER_TRADING and not h1d_pause:
         try:
             from modules.politician_copy_sleeve import run_politician_copy_cycle
 
@@ -1428,7 +1435,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Politician copy sleeve", exc)
 
-    if config.effective_vol_trading_enabled() and market_open:
+    if config.effective_vol_trading_enabled() and market_open and not h1d_pause:
         from modules.options_sleeve import current_vix_level
         from modules.volatility_sleeve import run_volatility_sleeve_cycle
 
@@ -1463,7 +1470,7 @@ def main():
         or config.felix_social_manual_override()
         or config.PAPER_SOCIAL_SLEEVE_ENABLED
     )
-    if social_dynamic_ctx:
+    if social_dynamic_ctx and not h1d_pause:
         from modules.social_sleeve import apply_dynamic_social_gate
 
         apply_dynamic_social_gate(
@@ -1471,7 +1478,7 @@ def main():
         )
     if (
         config.effective_social_sleeve_enabled() or social_dynamic_ctx
-    ) and market_open:
+    ) and market_open and not h1d_pause:
         from modules.social_sleeve import run_social_sleeve_cycle
 
         social_result = run_social_sleeve_cycle(wisdom, executor, market_open=market_open)
@@ -1499,6 +1506,7 @@ def main():
     if (
         config.effective_orb_momentum_enabled()
         and market_open
+        and not h1d_pause
         and _paper_research_scan_allowed(paper_research_deadline, "ORB")
     ):
         try:
@@ -1539,6 +1547,7 @@ def main():
     if (
         config.effective_sector_rotation_enabled()
         and market_open
+        and not h1d_pause
         and _paper_research_scan_allowed(paper_research_deadline, "sector rotation")
     ):
         try:
@@ -1579,6 +1588,7 @@ def main():
     if (
         config.effective_vol_breakout_enabled()
         and market_open
+        and not h1d_pause
         and config.PAPER_TRADING
         and _paper_research_scan_allowed(paper_research_deadline, "volume breakout")
     ):
@@ -1632,7 +1642,7 @@ def main():
         yield_gated=yield_gated,
         market_open=equity_scans,
     )
-    if config.effective_crypto_enabled():
+    if config.effective_crypto_enabled() and not h1d_pause:
         c = run_crypto_strategy(
             data,
             executor,
@@ -1651,7 +1661,14 @@ def main():
 
     market_open = is_equity_market_open(executor.client)
     executor.equity_session_open = market_open
-    if equity_scans and _paper_research_scan_allowed(paper_research_deadline, "NYSE"):
+    if config.effective_h1d_trend_mix_enabled():
+        try:
+            from modules.h1d_trend_mix import run_h1d_trend_mix_cycle
+
+            run_h1d_trend_mix_cycle(executor, market_open=bool(market_open))
+        except Exception as exc:
+            _warn_nonfatal("h1d_trend_mix", exc)
+    if equity_scans and not h1d_pause and _paper_research_scan_allowed(paper_research_deadline, "NYSE"):
         if config.effective_equity_pairs_enabled():
             nyse_trades = run_equity_pairs_strategy(
                 data,
@@ -1766,12 +1783,14 @@ def main():
                         notional=notional,
                         notes=phase,
                     )
+    elif equity_scans and h1d_pause:
+        pass
     elif schedule.get("equity_prep"):
         print(
             f"--- Open prep: refreshing regime; SPY/NYSE scans start "
             f"{config.EQUITY_SCAN_AFTER_OPEN_MIN}m after the bell ---"
         )
-        if config.game_plan_active():
+        if config.game_plan_active() and not h1d_pause:
             gp_result = run_game_plan_cycle(
                 executor,
                 regime,
@@ -1779,11 +1798,13 @@ def main():
                 signals=gp_signals,
             )
     else:
-        if config.effective_crypto_enabled():
+        if h1d_pause:
+            print("--- Overnight: equity scans off (h1d exclusive) ---")
+        elif config.effective_crypto_enabled():
             print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
         else:
             print("--- Overnight: equity scans off (crypto sleeve disabled) ---")
-        if config.game_plan_active():
+        if config.game_plan_active() and not h1d_pause:
             gp_result = run_game_plan_cycle(
                 executor,
                 regime,

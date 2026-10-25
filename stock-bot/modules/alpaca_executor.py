@@ -1781,6 +1781,16 @@ class AlpacaExecutor:
                 )
                 log_event("lab_forward_buy_block", symbol=symbol, block=block)
                 return None
+        if self._h1d_exclusive_on():
+            from modules.h1d_trend_mix import other_entry_blocked
+
+            has_position = self._find_position(symbol) is not None
+            if other_entry_blocked(sleeve, side_lower, has_position, True):
+                logger.info(
+                    "execute_order blocked: h1d exclusive",
+                    extra={"symbol": symbol, "side": side_lower, "sleeve": sleeve},
+                )
+                return None
 
         if not reduce_only and side_lower == "sell":
             if self._find_position(symbol) is None:
@@ -2058,6 +2068,14 @@ class AlpacaExecutor:
     def _is_core_exempt(self, symbol: str) -> bool:
         return config.normalize_symbol(symbol) in self._core_exempt_symbols()
 
+    def _h1d_exclusive_on(self) -> bool:
+        return bool(getattr(self, "h1d_exclusive", False) or config.h1d_trend_mix_exclusive())
+
+    def _h1d_guard_bypass(self, symbol: str) -> bool:
+        from modules.h1d_trend_mix import guards_bypass_symbol
+
+        return guards_bypass_symbol(symbol, exclusive=self._h1d_exclusive_on())
+
     def _position_market_value(self, pos) -> float:
         from modules.dust_cleanup import position_qty_notional
 
@@ -2082,7 +2100,7 @@ class AlpacaExecutor:
 
     def _blocks_new_active_ticker(self, symbol: str) -> bool:
         """True when buying a new name would exceed MAX_ACTIVE_TICKERS."""
-        if self._is_core_exempt(symbol):
+        if self._is_core_exempt(symbol) or self._h1d_guard_bypass(symbol):
             return False
         sym = config.normalize_symbol(symbol)
         if self._find_position(sym) is not None:
@@ -2109,7 +2127,7 @@ class AlpacaExecutor:
         """Cap buy notional so position ≤ effective_per_name_max_pct of equity."""
         if not config.effective_concentration_guard_enabled():
             return notional
-        if self._is_core_exempt(symbol):
+        if self._is_core_exempt(symbol) or self._h1d_guard_bypass(symbol):
             return notional
         equity = float(self._account_equity() or 0)
         if equity <= 0 or notional is None:
@@ -2177,7 +2195,7 @@ class AlpacaExecutor:
             if qty <= 0:
                 continue
             sym = config.normalize_symbol(self._normalize_pos_symbol(pos))
-            if self._is_core_exempt(sym):
+            if self._is_core_exempt(sym) or self._h1d_guard_bypass(sym):
                 continue
             pos_val = self._position_market_value(pos)
             over = pos_val - cap_val
