@@ -8,11 +8,14 @@ import pytest
 
 import config
 from modules.arima_forecast import (
+    arima_directional_is_up_only,
     arima_size_multiplier,
     combine_arima_garch_mult,
     fit_arima_mean_forecast,
     reset_arima_forecast_state,
+    symmetric_research_multiplier,
     update_arima_forecast,
+    _map_forecast_to_mean_mult,
 )
 
 
@@ -143,3 +146,26 @@ def test_arima_disabled_returns_neutral(monkeypatch):
     monkeypatch.setattr(config, "ARIMA_ENABLED", False)
     monkeypatch.setattr(config, "effective_arima_enabled", lambda: False)
     assert arima_size_multiplier() == 1.0
+
+
+def test_default_directional_map_is_up_only(monkeypatch):
+    """Neg forecast stays at 1.0; positive forecast boosts. Research pair is symmetric."""
+    monkeypatch.setattr(config, "ARIMA_BOOST_MULT", 1.08)
+    monkeypatch.setattr(config, "ARIMA_NEG_MULT", 1.0)
+    monkeypatch.setattr(config, "ARIMA_MULT_MAX", 1.15)
+    assert arima_directional_is_up_only() is True
+    assert _map_forecast_to_mean_mult(0.01) == pytest.approx(1.08)
+    assert _map_forecast_to_mean_mult(-0.01) == pytest.approx(1.0)
+    assert _map_forecast_to_mean_mult(0.0) == pytest.approx(1.0)
+    assert symmetric_research_multiplier(0.01) == pytest.approx(1.08)
+    assert symmetric_research_multiplier(-0.01) == pytest.approx(0.92)
+    # Scoring helper must not replace the order multiplier.
+    assert _map_forecast_to_mean_mult(-0.01) == pytest.approx(1.0)
+
+
+def test_explicit_neg_mult_is_not_flagged_up_only(monkeypatch):
+    monkeypatch.setattr(config, "ARIMA_BOOST_MULT", 1.08)
+    monkeypatch.setattr(config, "ARIMA_NEG_MULT", 0.92)
+    monkeypatch.setattr(config, "ARIMA_MULT_MAX", 1.15)
+    assert arima_directional_is_up_only() is False
+    assert _map_forecast_to_mean_mult(-0.01) == pytest.approx(0.92)

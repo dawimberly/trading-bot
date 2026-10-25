@@ -1094,7 +1094,7 @@ def main():
                 display_regime = apply_hmm_primary_regime(display_regime)
                 regime = display_regime
             hmm_banner = format_markov_hmm_banner()
-            if hmm_banner and hmm_pred.get("ok"):
+            if hmm_banner:
                 print(f"--- {hmm_banner} ---")
             if config.effective_markov_hmm_primary_regime():
                 print(

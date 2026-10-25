@@ -58,6 +58,7 @@ class ArimaForecastState:
     order: str = ""
     n_obs: int = 0
     reason: str = ""
+    up_only: bool = False  # directional map cannot size below 1.0
 
 
 _state = ArimaForecastState()
@@ -104,6 +105,30 @@ def _neg_mult() -> float:
     raw = float(getattr(config, "ARIMA_NEG_MULT", 1.0) or 1.0)
     # Cap: no size-up on negative; floor soft dampen only.
     return round(max(0.90, min(1.0, raw)), 4)
+
+
+def arima_directional_is_up_only() -> bool:
+    """True when a non-positive forecast cannot size below 1.0.
+
+    Defaults are boost 1.08 and neg 1.0, so the directional map only levers
+    up. A backtest pass that does not normalize this floor is not evidence
+    of a two-sided forecast. Live sizing is unchanged.
+    """
+    return _neg_mult() >= 0.999 and _boost_mult() > 1.0 + 1e-9
+
+
+def symmetric_research_multiplier(forecast: float) -> float:
+    """Matched up/down multiplier for research scoring. Not used for orders.
+
+    A +1.08 boost pairs with 0.92. ``arima_size_multiplier`` still returns
+    the configured (usually up-only) value.
+    """
+    boost = _boost_mult()
+    if forecast > 0:
+        return boost
+    if forecast < 0:
+        return round(max(0.50, 2.0 - boost), 4)
+    return 1.0
 
 
 def _hybrid_mult_bounds() -> tuple[float, float]:
@@ -370,6 +395,7 @@ def update_arima_forecast(data, *, symbol: str | None = None) -> ArimaForecastSt
                 order=_state.order,
                 n_obs=_state.n_obs,
                 reason=_state.reason,
+                up_only=arima_directional_is_up_only(),
             )
         _bars_since_retrain += 1
         return get_arima_forecast_state()
@@ -382,6 +408,7 @@ def update_arima_forecast(data, *, symbol: str | None = None) -> ArimaForecastSt
     forecast, order_label = result
     mean_mult = _map_forecast_to_mean_mult(forecast)
     size_mult, vol_scale, garch_ratio, hybrid = _finalize_size_mult(mean_mult)
+    up_only = arima_directional_is_up_only()
     sign = 1 if forecast > 0 else (-1 if forecast < 0 else 0)
     sym = str(
         getattr(series, "name", None)
@@ -401,6 +428,7 @@ def update_arima_forecast(data, *, symbol: str | None = None) -> ArimaForecastSt
         order=order_label,
         n_obs=len(rets),
         reason="ok",
+        up_only=up_only,
     )
     _bars_since_retrain = 0
     if sign > 0:
@@ -450,7 +478,8 @@ def format_arima_forecast_banner() -> str | None:
         return (
             f"{mode}: ON optional paper "
             f"(fc {_state.forecast:+.5f} sign{_state.sign:+d} → "
-            f"size x{_state.size_mult:.2f}{extra} | boost {boost:.2f}/neg {neg:.2f}, "
+            f"size x{_state.size_mult:.2f}{extra} | boost {boost:.2f}/neg {neg:.2f}"
+            f"{' up-only' if arima_directional_is_up_only() else ''}, "
             f"order {_state.order})"
         )
     return (
@@ -475,4 +504,5 @@ def heartbeat_arima_forecast_payload() -> dict[str, Any] | None:
         "garch_ratio": st.garch_ratio,
         "order": st.order,
         "positive_days": arima_positive_day_count(),
+        "up_only": bool(st.up_only or arima_directional_is_up_only()),
     }
