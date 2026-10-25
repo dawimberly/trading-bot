@@ -1589,6 +1589,13 @@ def main():
 
     market_open = is_equity_market_open(executor.client)
     executor.equity_session_open = market_open
+    if config.effective_h1d_trend_mix_enabled():
+        try:
+            from modules.h1d_trend_mix import run_h1d_trend_mix_cycle
+
+            run_h1d_trend_mix_cycle(executor, market_open=bool(market_open))
+        except Exception as exc:
+            _warn_nonfatal("h1d_trend_mix", exc)
     if equity_scans:
         s += run_spy_exits(data, executor, regime, log_fn=_spy_log)
         s += run_spy_strategy(
