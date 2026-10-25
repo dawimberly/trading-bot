@@ -94,6 +94,7 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
     env["PYTHONUNBUFFERED"] = "1"
     env["PYTHONTRADING_ROOT"] = str(PROJECT_ROOT)
     env["PYTHONTRADING_ENV_FILE"] = str(ensure_book_env(username, book_id))
+    env["TRADING_BOOK_ID"] = book_id
     env["PORTAL_MANAGED_BOT"] = "1"
     env["HEARTBEAT_FILE"] = str(book_heartbeat_path(username, book_id))
     env["PAPER_JOURNAL_CSV"] = str(book_journal_path(username, book_id))
