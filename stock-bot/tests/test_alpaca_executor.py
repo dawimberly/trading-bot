@@ -64,51 +64,56 @@ def test_execute_exit_with_auto_dust_uses_dust_cleanup_for_tiny_positions(monkey
     assert result is fake_result
 
 
-def test_execute_full_exit_caps_qty_to_available_xle(monkeypatch):
-    """Regression: never over-request sell qty when qty_available << qty (XLE 403)."""
+def _xle_executor(monkeypatch, avail):
     executor = AlpacaExecutor.__new__(AlpacaExecutor)
     executor.dry_run = False
     executor._equity_trading_allowed = lambda symbol: True
     executor._cancel_open_orders_for = lambda symbol: None
     executor.refresh_cache = lambda: None
     executor.get_order_params = lambda symbol: ("XLE", "day", False)
-
-    tiny_avail = 0.011234
     stale_qty = 128.0
     pos = SimpleNamespace(
         symbol="XLE",
         qty=stale_qty,
-        qty_available=tiny_avail,
+        qty_available=avail,
         current_price=90.0,
         avg_entry_price=88.0,
         market_value=stale_qty * 90.0,
     )
     executor._find_position = lambda symbol: pos
     executor._get_positions = lambda: [pos]
-
-    # Position is not dust by full size — must sell capped available, not recurse.
-    monkeypatch.setattr(
-        "config.effective_auto_dust_cleaner_enabled", lambda: True, raising=False
-    )
-    monkeypatch.setattr(
-        "config.effective_auto_dust_max_notional", lambda: 10.0, raising=False
-    )
-
+    executor._open_orders_for_symbol = lambda symbol: []
+    executor._symbol_fractionable = lambda symbol: True
+    executor._fresh_position = lambda symbol: pos
+    monkeypatch.setattr("config.effective_auto_dust_cleaner_enabled", lambda: True, raising=False)
+    monkeypatch.setattr("config.effective_auto_dust_max_notional", lambda: 10.0, raising=False)
     captured = {}
 
     def fake_submit(order, **kwargs):
         captured["order"] = order
-        captured["kwargs"] = kwargs
         return SimpleNamespace(id="ord-xle-test")
 
     executor._submit_order = fake_submit
+    return executor, captured, stale_qty
 
+
+def test_execute_full_exit_skips_sub_dollar_available_remnant(monkeypatch):
+    """PR24: an available remnant under $1 is skipped, no order is sent."""
+    executor, captured, _ = _xle_executor(monkeypatch, 0.0105)  # ~$0.95 at $90, under the $1 minimum
+    executor.execute_full_exit("XLE", reason="sector_rot_flat")
+    assert "order" not in captured
+    assert getattr(executor, "_last_exit_action", None) in ("skip_dust", "skip_held")
+
+
+def test_execute_full_exit_caps_qty_to_available_xle(monkeypatch):
+    """Regression: never over-request sell qty when qty_available << qty (XLE 403)."""
+    avail = 0.5  # ~$45, above the $1 minimum
+    executor, captured, stale_qty = _xle_executor(monkeypatch, avail)
     result = executor.execute_full_exit("XLE", reason="sector_rot_flat")
     assert result is not None
     submitted_qty = float(captured["order"].qty)
-    assert submitted_qty <= tiny_avail
+    assert 0 < submitted_qty <= avail
     assert submitted_qty < stale_qty
-    assert submitted_qty > 0
 
 
 def test_submit_order_signature_accepts_side():

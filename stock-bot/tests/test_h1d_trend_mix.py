@@ -78,14 +78,14 @@ class H1dTrendMixTests(unittest.TestCase):
         self.assertTrue(lab["enabled"])
         self.assertTrue(lab["paper_chase"])
         self.assertEqual(medium["role"], "medium")
-        self.assertFalse(medium["enabled"])
-        self.assertTrue(medium["hidden"])
-        self.assertFalse(medium["paper_chase"])
+        self.assertTrue(medium["enabled"])  # live registry: Medium runs
+        self.assertFalse(medium.get("hidden"))
+        self.assertTrue(medium["paper_chase"])
         self.assertTrue(medium["default_paper"])
         menu = [book_id for _label, book_id, _ok in book_dropdown_entries()]
         self.assertIn("alpaca_live", menu)
         self.assertIn("alpaca_paper", menu)
-        self.assertNotIn("alpaca_paper_v2", menu)
+        self.assertIn("alpaca_paper_v2", menu)
         self.assertNotIn("h1d_trend_mix", BOOKS)
 
     def test_book_allowlist_fail_safe(self) -> None:
