@@ -77,6 +77,39 @@ def compute_realized_pnl(qty, price, entry_price, *, is_sell: bool):
     return (px - en) * q
 
 
+def sum_realized_pnl(rows) -> float:
+    """Sum slice P&L on fill rows only.
+
+    ``trade_closed`` markers repeat the same close and are excluded so a fill
+    and its completion row cannot be added together.
+    """
+    total = 0.0
+    for row in rows:
+        event = str(row.get("event") or "").strip().lower()
+        if event != "fill":
+            continue
+        raw = row.get("realized_pnl")
+        if _blank(raw):
+            continue
+        try:
+            total += float(raw)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
+def exit_metadata_path(journal_path: str | Path) -> Path:
+    return Path(journal_path).with_name("exit_metadata.jsonl")
+
+
+def _append_exit_metadata(journal_path: str | Path, record: dict) -> None:
+    """Append one future exit record. Does not read or rewrite the CSV journal."""
+    path = exit_metadata_path(journal_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, default=str) + "\n")
+
+
 def _ensure_header(path):
     if os.path.exists(path) and os.path.getsize(path) > 0:
         return
@@ -132,6 +165,56 @@ def _save_lots(path: Path, lots: dict[str, deque]) -> None:
         tmp.replace(path)
     except OSError as exc:
         logger.debug("open trade ledger write failed: %s", exc)
+
+
+_SIDECAR_NAMES = ("open_trade_ids.json", "exit_metadata.jsonl")
+
+
+def _refuse_portal_journal(journal_path: Path) -> None:
+    """Sidecar rollback must not run beside a live or paper portal journal."""
+    text = journal_path.resolve().as_posix().lower()
+    if "/data/portal/" in text or text.endswith("/data/portal"):
+        raise RuntimeError("refusing to snapshot or restore sidecars beside a portal journal")
+
+
+def _sidecar_paths(journal_path: Path) -> dict[str, Path]:
+    lots = _open_trades_path(str(journal_path))
+    meta = exit_metadata_path(journal_path)
+    return {"open_trade_ids.json": lots, "exit_metadata.jsonl": meta}
+
+
+def snapshot_journal_sidecars(journal_path: str | Path) -> dict:
+    """Copy lot-ledger and exit-metadata bytes. Does not read or write the CSV."""
+    journal = Path(journal_path)
+    _refuse_portal_journal(journal)
+    files: dict[str, bytes | None] = {}
+    for name, path in _sidecar_paths(journal).items():
+        files[name] = path.read_bytes() if path.is_file() else None
+    return {"journal": str(journal.resolve()), "files": files}
+
+
+def restore_journal_sidecars(journal_path: str | Path, snapshot: dict) -> None:
+    """Put sidecar bytes back. Does not rewrite the CSV journal."""
+    journal = Path(journal_path)
+    _refuse_portal_journal(journal)
+    expected = str(journal.resolve())
+    if str(snapshot.get("journal") or "") != expected:
+        raise RuntimeError("snapshot journal does not match the restore target")
+    files = snapshot.get("files") or {}
+    for name, path in _sidecar_paths(journal).items():
+        if name not in _SIDECAR_NAMES:
+            continue
+        payload = files.get(name)
+        if payload is None:
+            if path.is_file():
+                path.unlink()
+            continue
+        if not isinstance(payload, (bytes, bytearray)):
+            raise RuntimeError(f"snapshot for {name} is not bytes")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".restore.tmp")
+        tmp.write_bytes(bytes(payload))
+        tmp.replace(path)
 
 
 def _hour_bucket(when: datetime | None) -> str:
@@ -266,9 +349,103 @@ def _peek_lot(symbol: str, journal_path: str) -> dict | None:
     return dict(rows[0])
 
 
+_QTY_FLAT = 1e-4
+_CONFIRMED_ORDER = {"filled", "closed"}
+_OPEN_OR_REJECTED_ORDER = {
+    "new",
+    "accepted",
+    "pending",
+    "pending_new",
+    "accepted_for_bidding",
+    "rejected",
+    "canceled",
+    "cancelled",
+    "expired",
+    "suspended",
+    "stopped",
+    "calculated",
+    "error",
+    "dry_run",
+    "skipped",
+    "replaced",
+}
+
+
 def _full_exit(is_partial) -> bool:
     text = str(is_partial).strip().lower()
     return text in ("", "0", "false", "no")
+
+
+def _lot_remaining_qty(lots: dict, symbol: str) -> float:
+    rows = lots.get(symbol) if lots else None
+    if not rows:
+        return 0.0
+    total = 0.0
+    for lot in rows:
+        try:
+            total += float(lot.get("qty") or 0)
+        except (TypeError, ValueError):
+            return float("inf")
+    return total
+
+
+def _optional_qty(value) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and not str(value).strip():
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _order_status_text(order_status) -> str:
+    text = str(order_status or "").strip().lower()
+    return text.replace("orderstatus.", "").replace("order_status.", "")
+
+
+def classify_exit_state(
+    *,
+    lot_matched: bool,
+    lot_remains: bool,
+    broker_qty_remaining,
+    order_status: str = "",
+    caller_partial: bool = False,
+    broker_qty_source: str = "",
+) -> str:
+    """Return partial, complete, or unknown.
+
+    Complete requires a confirmed fill, a flat lot, and a post-fill broker
+    quantity whose source is ``confirmed``. A cached estimate is not that
+    quantity. Missing confirmation, a rejected or unconfirmed order, or a
+    disagreement with the lot ledger is unknown.
+    """
+    status = _order_status_text(order_status)
+    if status in _OPEN_OR_REJECTED_ORDER or status not in _CONFIRMED_ORDER | {"partially_filled"}:
+        return "unknown"
+    if str(broker_qty_source or "").strip().lower() != "confirmed":
+        return "unknown"
+    broker_qty = _optional_qty(broker_qty_remaining)
+    if not lot_matched or broker_qty is None:
+        return "unknown"
+    if broker_qty < -_QTY_FLAT:
+        return "unknown"
+    broker_flat = broker_qty <= _QTY_FLAT
+    lot_flat = not lot_remains
+    if status == "partially_filled":
+        if caller_partial and lot_flat and broker_flat:
+            return "unknown"
+        if (not lot_flat) and (not broker_flat):
+            return "partial"
+        return "unknown"
+    if lot_flat and broker_flat:
+        if caller_partial:
+            return "unknown"
+        return "complete"
+    if (not lot_flat) and (not broker_flat):
+        return "partial"
+    return "unknown"
 
 
 def log_fill(
@@ -296,8 +473,22 @@ def log_fill(
     hold_minutes="",
     trade_id="",
     ticker="",
+    exit_price="",
+    atr="",
+    atr_asof="",
+    stop_price="",
+    broker_qty_remaining=None,
+    broker_qty_source="",
+    estimated_qty_remaining=None,
+    order_status="",
 ):
-    """Append one observational fill. A full sell also appends trade_closed."""
+    """Append one observational fill.
+
+    Slice dollars stay on the fill. A ``trade_closed`` marker is written only
+    when the exit state is ``complete``, and that marker leaves ``realized_pnl``
+    blank so the same close is not stored twice. ATR and the stop threshold go
+    to ``exit_metadata.jsonl``, not the CSV.
+    """
     path = journal_path or config.PAPER_JOURNAL_CSV
     sym = str(symbol or "").strip().upper()
     side_l = str(side or "").strip().lower()
@@ -349,6 +540,48 @@ def log_fill(
                     pass
         _save_lots(ledger, lots)
 
+    if side_l == "sell" and _blank(realized_pnl) and not _blank(entry_price):
+        pnl = compute_realized_pnl(qty, price, entry_price, is_sell=True)
+        if pnl is not None:
+            realized_pnl = round(pnl, 2)
+            if _blank(realized_pnl_pct):
+                try:
+                    realized_pnl_pct = round(
+                        (float(price) / float(entry_price) - 1.0) * 100.0, 4
+                    )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
+
+    qty_source = str(broker_qty_source or "").strip().lower()
+    estimate = _optional_qty(estimated_qty_remaining)
+    confirmed_qty = None
+    if qty_source == "confirmed":
+        confirmed_qty = _optional_qty(broker_qty_remaining)
+    elif qty_source == "estimated":
+        if estimate is None:
+            estimate = _optional_qty(broker_qty_remaining)
+    elif estimate is None and _optional_qty(broker_qty_remaining) is not None:
+        qty_source = "unavailable"
+    else:
+        qty_source = "estimated" if estimate is not None else "unavailable"
+
+    exit_state = ""
+    if side_l == "sell":
+        exit_state = classify_exit_state(
+            lot_matched=matched is not None,
+            lot_remains=_lot_remaining_qty(lots, sym) > _QTY_FLAT,
+            broker_qty_remaining=confirmed_qty,
+            broker_qty_source="confirmed" if qty_source == "confirmed" else "",
+            order_status=order_status,
+            caller_partial=not _full_exit(is_partial),
+        )
+        if exit_state == "partial":
+            is_partial = "1"
+        elif exit_state == "complete":
+            is_partial = "0"
+        else:
+            is_partial = "unknown"
+
     note = _one_line(reason)
     common = dict(
         symbol=sym or symbol,
@@ -377,8 +610,40 @@ def log_fill(
         journal_path=path,
     )
     log_event("fill", **common)
-    if side_l == "sell" and _full_exit(is_partial):
-        log_event("trade_closed", **common)
+    if side_l == "sell":
+        px = exit_price if not _blank(exit_price) else price
+        asof = _cell(atr_asof) or ("at_exit" if not _blank(atr) else "")
+        _append_exit_metadata(
+            path,
+            {
+                "schema": "exit_metadata_v1",
+                "timestamp": stamp,
+                "symbol": sym,
+                "trade_id": _cell(trade_id),
+                "order_id": _cell(order_id),
+                "entry_price": _cell(entry_price),
+                "exit_price": _cell(px),
+                "hold_minutes": _cell(hold_minutes),
+                "atr": _cell(atr),
+                "atr_asof": asof,
+                "stop_price": _cell(stop_price),
+                "broker_qty_source": qty_source if side_l == "sell" else "",
+                "broker_qty_remaining": confirmed_qty,
+                "estimated_qty_remaining": estimate,
+                "exit_state": exit_state,
+                "is_partial": True if exit_state == "partial" else False if exit_state == "complete" else None,
+                "exit_complete": True if exit_state == "complete" else False if exit_state == "partial" else None,
+                "realized_pnl": _cell(realized_pnl),
+                "pnl_role": "slice",
+                "summable": True,
+            },
+        )
+    if side_l == "sell" and exit_state == "complete":
+        marker = dict(common)
+        marker["realized_pnl"] = ""
+        marker["realized_pnl_pct"] = ""
+        marker["notes"] = _one_line(f"{note} pnl_ledger=fill")
+        log_event("trade_closed", **marker)
 
 
 def _consume_lot(lots: dict[str, deque], symbol: str, qty) -> dict | None:

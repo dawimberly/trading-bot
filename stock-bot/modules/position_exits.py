@@ -93,7 +93,17 @@ def prior_session_close_return(closes, *, as_of_date: date | None = None) -> flo
     return yest / prev - 1.0
 
 
-def _a2b1_prior_return(symbol: str, executor=None, now=None) -> float | None:
+def _a2b1_prior_return(
+    symbol: str, executor=None, now=None, *, deadline: float | None = None
+) -> float | None:
+    """Prior close-to-close return for the Lab A2B1 flatten check.
+
+    Yahoo history uses the shared 8s cap. *deadline* is the exit-scan clock
+    for every open Lab name. A timeout, a delisted name, or a spent budget
+    returns None and does not flatten: unknown is not a confirmed up-day.
+    A budget skip is not cached, so a later cycle can still measure the name.
+    A finished fetch, including a timeout, is cached for the session date.
+    """
     injected = getattr(executor, "_a2b1_prior_returns", None) if executor else None
     if isinstance(injected, dict) and symbol in injected:
         return injected[symbol]
@@ -106,11 +116,15 @@ def _a2b1_prior_return(symbol: str, executor=None, now=None) -> float | None:
     key = (as_of.isoformat(), symbol)
     if key in cache:
         return cache[key]
+    from modules.volume_analysis import _deadline_reached
+
+    if _deadline_reached(deadline):
+        return None
     ret = None
     try:
-        import yfinance as yf
+        from modules.volume_analysis import yahoo_history
 
-        hist = yf.Ticker(symbol).history(period="15d", auto_adjust=True)
+        hist = yahoo_history(symbol, period="15d", auto_adjust=True)
         if hist is not None and len(hist) >= 2 and "Close" in hist.columns:
             ret = prior_session_close_return(hist["Close"], as_of_date=as_of)
     except Exception as exc:
@@ -284,6 +298,17 @@ def run_position_exits(
 
     peak_cache: dict[str, float] = getattr(executor, "_exit_peak_prices", {}) or {}
     meta_cache: dict[str, dict] = getattr(executor, "_exit_opt_meta", {}) or {}
+    a2b1_deadline: float | None = None
+
+    if config.paper_lab_concentrated_enabled():
+        from modules import lab_forward_trail as lab_trail
+
+        open_syms = set()
+        for held in positions:
+            held_qty = float(getattr(held, "qty", 0) or 0)
+            if held_qty > 0 and not config.is_crypto(_position_symbol(held.symbol)):
+                open_syms.add(config.normalize_symbol(_position_symbol(held.symbol)))
+        lab_trail.reconcile_absent(open_syms)
 
     for pos in positions:
         symbol = _position_symbol(pos.symbol)
@@ -304,6 +329,7 @@ def run_position_exits(
         pnl_pct = (current - entry) / entry
         if qty < 0:
             pnl_pct = -pnl_pct
+        exit_meta = None
 
         peak = max(float(peak_cache.get(symbol, entry)), current)
         peak_cache[symbol] = peak
@@ -314,16 +340,70 @@ def run_position_exits(
         lab = config.paper_lab_concentrated_enabled() and qty > 0 and not config.is_crypto(
             symbol
         )
-        disaster = config.paper_lab_disaster_pct() if lab else config.STOP_LOSS_PCT
-        stop_hit = pnl_pct <= -disaster
-        plpc = getattr(pos, "unrealized_plpc", None)
-        if plpc is not None and float(plpc) <= -disaster:
-            stop_hit = True
+        if lab:
+            disaster = config.paper_lab_disaster_pct()
+            stop_hit = pnl_pct <= -disaster
+            plpc = getattr(pos, "unrealized_plpc", None)
+            if plpc is not None and float(plpc) <= -disaster:
+                stop_hit = True
+        elif qty > 0 and not config.is_crypto(symbol):
+            stop_hit = config.equity_loss_stop_hit(pnl_pct)
+            plpc = getattr(pos, "unrealized_plpc", None)
+            if plpc is not None and config.equity_loss_stop_hit(float(plpc)):
+                stop_hit = True
+        else:
+            # Shorts and crypto keep their own stops. This 5% path is unchanged.
+            disaster = config.STOP_LOSS_PCT
+            stop_hit = pnl_pct <= -disaster
+            plpc = getattr(pos, "unrealized_plpc", None)
+            if plpc is not None and float(plpc) <= -disaster:
+                stop_hit = True
+
+        if lab and config.paper_lab_hold_only_enabled():
+            hold_hit = (
+                age_bars is not None and age_bars >= config.paper_lab_max_hold_days()
+            )
+            if not hold_hit:
+                continue
+            try:
+                order = executor.execute_full_exit(
+                    symbol, reason="lab_time", sleeve="NYSE"
+                )
+                if not executor.order_filled(order):
+                    continue
+                exits += 1
+                peak_cache.pop(symbol, None)
+                meta_cache.pop(symbol, None)
+                reason = f"lab_time {pnl_pct:.2%}"
+                risk_manager._log_event(
+                    f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
+                )
+                if journal:
+                    _log_position_exit(
+                        journal,
+                        journal_path,
+                        pos,
+                        symbol,
+                        "sell",
+                        reason,
+                        equity,
+                        exit_reason="lab_time",
+                    )
+            except Exception as e:
+                if journal:
+                    journal.log_event(
+                        "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                    )
+            continue
 
         if lab:
             if config.paper_nyse_a2b1_enabled():
                 entered_today = age_bars == 0
-                prior_ret = _a2b1_prior_return(symbol, executor)
+                if a2b1_deadline is None:
+                    from modules.volume_analysis import RVOL_SCAN_BUDGET_SEC, _deadline_at
+
+                    a2b1_deadline = _deadline_at(RVOL_SCAN_BUDGET_SEC)
+                prior_ret = _a2b1_prior_return(symbol, executor, deadline=a2b1_deadline)
                 if a2b1_should_flatten(
                     _et_weekday(),
                     prior_ret,
@@ -363,26 +443,98 @@ def run_position_exits(
                                 journal_path=journal_path,
                             )
                     continue
-            peak_gain = (peak - entry) / entry if entry > 0 else 0.0
-            if peak_gain >= config.paper_lab_trail_arm_pct():
-                meta["lab_trail_armed"] = True
-                meta_cache[symbol] = meta
-            half_pct = config.paper_lab_half_gain_pct()
-            if not meta.get("lab_half_taken") and pnl_pct >= half_pct:
+            hold_hit = (
+                age_bars is not None and age_bars >= config.paper_lab_max_hold_days()
+            )
+            from modules import lab_forward_trail as lab_trail
+
+            open_orders = None
+            if hasattr(executor, "open_orders_for_symbol"):
                 try:
-                    reduce_n = round(abs(qty) * current * 0.5, 2)
-                    order = executor.execute_reduce_notional(
-                        symbol,
-                        reduce_n,
-                        reason="lab_half_scale",
-                        sleeve="NYSE",
+                    open_orders = executor.open_orders_for_symbol(symbol)
+                except Exception as exc:
+                    logger.error(
+                        "LAB_FORWARD open orders unreadable: %s", type(exc).__name__
                     )
-                    if order and executor.order_filled(order):
-                        meta["lab_half_taken"] = True
-                        meta_cache[symbol] = meta
+                    open_orders = None
+            trail_action = lab_trail.on_position(
+                symbol, entry, current, open_orders=open_orders
+            )
+            if trail_action == "corrupt":
+                logger.error(
+                    "LAB_FORWARD STATE CORRUPT: protective exits still run for %s",
+                    symbol,
+                )
+            if stop_hit or hold_hit:
+                side = "sell"
+                try:
+                    if stop_hit:
+                        exit_code = "lab_disaster"
+                        reason = f"lab_disaster {pnl_pct:.2%}"
+                    else:
+                        exit_code = "lab_time"
+                        reason = f"lab_time {pnl_pct:.2%}"
+                    order = executor.execute_full_exit(
+                        symbol, reason=exit_code, sleeve="NYSE"
+                    )
+                    if not executor.order_filled(order):
+                        continue
+                    exits += 1
+                    peak_cache.pop(symbol, None)
+                    meta_cache.pop(symbol, None)
+                    risk_manager._log_event(
+                        f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
+                    )
+                    if journal:
+                        _log_position_exit(
+                            journal,
+                            journal_path,
+                            pos,
+                            symbol,
+                            side,
+                            reason,
+                            equity,
+                            exit_reason=exit_code,
+                        )
+                except Exception as e:
+                    if journal:
+                        journal.log_event(
+                            "exit_error",
+                            symbol=symbol,
+                            notes=str(e),
+                            journal_path=journal_path,
+                        )
+                continue
+            if trail_action == "wait":
+                continue
+            if trail_action == "submit":
+                try:
+                    order = executor.execute_full_exit(
+                        symbol, reason=lab_trail.EXIT_REASON, sleeve="NYSE"
+                    )
+                    detail = None
+                    if hasattr(executor, "order_fill_details"):
+                        try:
+                            detail = executor.order_fill_details(order)
+                        except Exception:
+                            detail = None
+                    lab_trail.note_exit_attempt(symbol, order, detail=detail)
+                    filled = bool(order) and executor.order_filled(order)
+                    fresh = None
+                    if filled and hasattr(executor, "_fresh_position"):
+                        try:
+                            fresh = executor._fresh_position(symbol)
+                        except Exception:
+                            fresh = pos
+                    remaining = float(getattr(fresh, "qty", 0) or 0) if fresh is not None else 0.0
+                    if filled and remaining == 0:
+                        lab_trail.note_flat_from_order(symbol)
                         exits += 1
+                        peak_cache.pop(symbol, None)
+                        meta_cache.pop(symbol, None)
                         risk_manager._log_event(
-                            f"LAB HALF: {symbol} pnl={pnl_pct:.2%} ({reduce_n:.0f})"
+                            f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} "
+                            f"({lab_trail.EXIT_REASON})"
                         )
                         if journal:
                             _log_position_exit(
@@ -391,62 +543,19 @@ def run_position_exits(
                                 pos,
                                 symbol,
                                 "sell",
-                                f"lab_half_scale {pnl_pct:.2%}",
+                                lab_trail.EXIT_REASON,
                                 equity,
-                                exit_reason="lab_half_scale",
+                                exit_reason=lab_trail.EXIT_REASON,
                             )
                 except Exception as e:
                     if journal:
                         journal.log_event(
-                            "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                            "exit_error",
+                            symbol=symbol,
+                            notes=str(e),
+                            journal_path=journal_path,
                         )
                 continue
-            trail_hit = False
-            if meta.get("lab_trail_armed") or meta.get("lab_half_taken"):
-                trail_hit = current <= peak * (1.0 - config.paper_lab_trail_pct())
-            hold_hit = (
-                age_bars is not None and age_bars >= config.paper_lab_max_hold_days()
-            )
-            if not (stop_hit or trail_hit or hold_hit):
-                continue
-            side = "sell"
-            try:
-                if stop_hit:
-                    exit_code = "lab_disaster"
-                    reason = f"lab_disaster {pnl_pct:.2%}"
-                elif trail_hit:
-                    exit_code = "lab_trail"
-                    reason = f"lab_trail {pnl_pct:.2%}"
-                else:
-                    exit_code = "lab_time"
-                    reason = f"lab_time {pnl_pct:.2%}"
-                order = executor.execute_full_exit(
-                    symbol, reason=exit_code, sleeve="NYSE"
-                )
-                if not executor.order_filled(order):
-                    continue
-                exits += 1
-                peak_cache.pop(symbol, None)
-                meta_cache.pop(symbol, None)
-                risk_manager._log_event(
-                    f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
-                )
-                if journal:
-                    _log_position_exit(
-                        journal,
-                        journal_path,
-                        pos,
-                        symbol,
-                        side,
-                        reason,
-                        equity,
-                        exit_reason=exit_code,
-                    )
-            except Exception as e:
-                if journal:
-                    journal.log_event(
-                        "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
-                    )
             continue
 
         smart_on = config.effective_smart_stops_enabled()
@@ -467,8 +576,33 @@ def run_position_exits(
                 data=getattr(executor, "_sizing_data", None),
                 side="long" if qty > 0 else "short",
             )
+            # Observability only: preserve decision and all trading branches below.
+            try:
+                import json as _audit_json
+                import os as _audit_os
+                from datetime import datetime as _audit_datetime, timezone as _audit_timezone
+
+                logger.info("SMART_STOP_EVIDENCE %s", _audit_json.dumps({
+                    "as_of": _audit_datetime.now(_audit_timezone.utc).isoformat(),
+                    "book_id": _audit_os.getenv("TRADING_BOOK_ID"),
+                    "symbol": symbol, "entry": entry, "mark": current, "qty": qty,
+                    "atr_input": float(atr),
+                    "atr_evidence": getattr(executor, "_last_atr_evidence", None),
+                    "prior_stop": meta.get("smart_stop_price"),
+                    "stop_price": decision.get("stop_price"),
+                    "stop_atr": (decision.get("meta") or {}).get("smart_stop_atr"),
+                    "multiplier": (decision.get("meta") or {}).get("atr_stop_mult"),
+                    "action": decision.get("action"), "reason": decision.get("reason"),
+                }, allow_nan=False))
+            except Exception:
+                pass
             meta = decision.get("meta") or meta
             meta_cache[symbol] = meta
+            exit_meta = {
+                "atr": atr,
+                "atr_asof": "at_exit",
+                "stop_price": decision.get("stop_price"),
+            }
             action = decision.get("action")
             if action == "reduce":
                 try:
@@ -479,6 +613,7 @@ def run_position_exits(
                         reduce_n,
                         reason=decision.get("exit_code") or "smart_size_reduce",
                         sleeve="NYSE",
+                        exit_meta=exit_meta,
                     )
                     if order and executor.order_filled(order):
                         exits += 1
@@ -502,15 +637,16 @@ def run_position_exits(
                             "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
                         )
                 continue
-            if action == "exit":
+            if action == "exit" and config.equity_loss_stop_hit(pnl_pct):
                 atr_stop_hit = True
                 stop_hit = True
                 meta["smart_exit_code"] = decision.get("exit_code") or "smart_atr_stop"
                 meta["smart_exit_reason"] = decision.get("reason") or ""
                 meta_cache[symbol] = meta
             else:
-                # Smart stops replace fixed −STOP_LOSS_PCT hard exit
-                stop_hit = False
+                # A tighter ATR/smart exit inside the book stop does not fire.
+                # A loss past the book stop still does.
+                stop_hit = config.equity_loss_stop_hit(pnl_pct)
 
         elif exit_opt and qty > 0 and not config.is_crypto(symbol):
             from modules.exit_management import (
@@ -527,9 +663,19 @@ def run_position_exits(
             plan = compute_trailing_stop_plan(
                 symbol, entry, atr, getattr(executor, "_last_regime", None), conviction
             )
-            if current <= plan["stop_price"]:
-                atr_stop_hit = True
+            exit_meta = {
+                "atr": atr,
+                "atr_asof": "at_exit",
+                "stop_price": plan.get("stop_price"),
+            }
+            atr_inside = current <= plan["stop_price"]
+            if config.equity_loss_stop_hit(pnl_pct):
                 stop_hit = True
+                if atr_inside:
+                    atr_stop_hit = True
+            elif atr_inside:
+                stop_hit = False
+                atr_stop_hit = False
             profit_target = entry + abs(entry - plan["stop_price"]) * float(
                 config.PARTIAL_EXIT_RR
             )
@@ -552,6 +698,7 @@ def run_position_exits(
                         reduce_n,
                         reason="partial_1r",
                         sleeve="NYSE",
+                        exit_meta=exit_meta,
                     )
                     if order and executor.order_filled(order):
                         meta["partial_taken"] = True
@@ -629,12 +776,14 @@ def run_position_exits(
             if quality:
                 try:
                     order = executor.execute_full_exit(
-                        symbol, reason=exit_code, sleeve="NYSE"
+                        symbol, reason=exit_code, sleeve="NYSE", exit_meta=exit_meta
                     )
                 except TypeError:
                     order = executor.execute_full_exit(symbol)
             else:
-                order = executor.execute_full_exit(symbol)
+                order = executor.execute_full_exit(
+                    symbol, reason=exit_code, exit_meta=exit_meta
+                )
             if not executor.order_filled(order):
                 continue
             exits += 1

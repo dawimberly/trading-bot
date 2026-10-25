@@ -48,6 +48,9 @@ Alignment rules that already bit us:
 | `scripts/research/exhaustive_campaign/` | MC 200/200 | fat right tail, ugly left; do not promote |
 | `scripts/research/open_price_predict_last.md` | 252d | prior close beats models |
 | `scripts/analysis/eval_fat_loser_ab_last.md` | 365d + 1000d NYSE walk | open −1% drip kills book |
+| `scripts/analysis/pit_universe_rerun_last.json` | disjoint 365d×2 | S&P PIT name-count / Lab / take_1r |
+| `scripts/analysis/a2b1_pit_ab_last.json` | disjoint 365d×2 | A2B1 CANDIDATE vs pick_15 |
+| `scripts/analysis/vol_momentum_ab_last.json` | disjoint 365d×2 | risk_adj / vol_12 FAIL recent year |
 | `data/weekly_review_*.md` | Saturdays | 2026-09-19 memo is **stale grade C** (Lab CSV). Loader now pads Medium SoT. Re-run before using that HOLD. |
 
 ## Quality grades

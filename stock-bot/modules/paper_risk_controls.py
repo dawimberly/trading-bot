@@ -338,6 +338,18 @@ def _is_tactical_long(sym: str) -> bool:
     return True
 
 
+def _backtest_fill_completed(executor, order) -> bool:
+    """A research queue accept is not an exit. Other executors are unchanged."""
+    if order is None:
+        return False
+    if type(executor).__name__ != "BacktestExecutor":
+        return True
+    checker = getattr(executor, "order_filled", None)
+    if checker is None:
+        return True
+    return bool(checker(order))
+
+
 def run_paper_position_exits(
     portfolio,
     prices,
@@ -400,9 +412,17 @@ def run_paper_position_exits(
             if action == "reduce":
                 reduce_frac = float(decision.get("reduce_frac") or 0.5)
                 sell_n = round(qty * current * reduce_frac, 2)
-                if sell_n > 0 and executor.execute_order(
-                    sym, "sell", notional=sell_n, reason=decision.get("exit_code") or "smart_size_reduce"
-                ):
+                reduce_order = (
+                    executor.execute_order(
+                        sym,
+                        "sell",
+                        notional=sell_n,
+                        reason=decision.get("exit_code") or "smart_size_reduce",
+                    )
+                    if sell_n > 0
+                    else None
+                )
+                if _backtest_fill_completed(executor, reduce_order):
                     exits += 1
                     # Refresh qty after partial; keep meta
                     new_qty = float(portfolio.positions.get(sym, 0))
@@ -422,7 +442,10 @@ def run_paper_position_exits(
             reason = "max_hold"
         if not reason:
             continue
-        if executor.execute_order(sym, "sell", notional=round(qty * current, 2), reason=reason):
+        exit_order = executor.execute_order(
+            sym, "sell", notional=round(qty * current, 2), reason=reason
+        )
+        if _backtest_fill_completed(executor, exit_order):
             exits += 1
             meta.pop(sym, None)
     portfolio.position_meta = meta

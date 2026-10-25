@@ -35,28 +35,17 @@ def _research_version() -> str:
         return "1.5.4"
 
 
-def _paper_research_tape() -> str:
-    try:
-        import config
-
-        if config.paper_medium_strategy_enabled():
-            vti = "VTI CORE OFF"
-        elif not getattr(config, "VTI_CORE_ENABLED", True) or float(
-            getattr(config, "PAPER_VTI_CORE_PCT", 0) or 0
-        ) <= 0:
-            vti = "VTI CORE OFF"
-        elif not getattr(config, "PAPER_DYNAMIC_VTI_ENABLED", True):
-            pct = float(getattr(config, "PAPER_VTI_CORE_PCT", 0.4) or 0.4)
-            vti = f"FIXED VTI {pct:.0%}"
-        else:
-            vti = "SMART DYNAMIC VTI 40–75%"
-    except Exception:
-        vti = "FIXED VTI"
-    return (
-        f"PAPER RESEARCH v{_research_version()}   ·   "
-        f"{vti}   ·   "
-        "NYSE SLEEVE   ·   THINKING ON   ·   JOURNAL = FILL"
-    )
+def _paper_research_tape(vti_label: str | None = None) -> str:
+    parts = [
+        f"PAPER RESEARCH v{_research_version()}",
+        "NYSE SLEEVE",
+        "THINKING ON",
+        "JOURNAL = FILL",
+    ]
+    label = (vti_label or "").strip()
+    if label:
+        parts.append(label)
+    return " · ".join(parts)
 
 
 def _live_fallback_tape() -> str:
@@ -85,7 +74,6 @@ def header_holdings_bits(heartbeat: dict[str, Any] | None) -> list[str]:
     bits: list[str] = []
     for label, key in (
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("NYSE", "nyse_value"),
         ("Crypto", "crypto_value"),
         ("Metal", "metal_value"),
@@ -105,14 +93,13 @@ def holdings_are_nyse_only_slogan(heartbeat: dict[str, Any] | None) -> bool:
     if equity <= 0:
         return False
     vti = _float(exp.get("vti_core_value"))
-    spy = _float(exp.get("spy_value"))
     nyse = _float(exp.get("nyse_value"))
     crypto = _float(exp.get("crypto_value"))
     metal = _float(exp.get("metal_value"))
-    invested = vti + spy + nyse + crypto + metal
+    invested = vti + nyse + crypto + metal
     if invested <= 0:
         return False
-    if vti > 0 or spy > 0:
+    if vti > 0:
         return False
     return (nyse / invested) >= _NYSE_ONLY_SHARE
 
@@ -132,8 +119,15 @@ def sleeve_mix_rows(
     *,
     equity: float,
     cash: float,
+    vti_target_frac: float | None = None,
+    override_vti_target: bool = False,
 ) -> list[dict[str, Any]]:
-    """Display-layout sleeve mix: actual vs target for VTI, NYSE, cash."""
+    """Display-layout sleeve mix: actual vs target for VTI, NYSE, cash.
+
+    When ``override_vti_target`` is set, the VTI target is the book's
+    effective config (``None`` means unknown). Heartbeat ``sleeve_caps``
+    are not used for that target.
+    """
     exp, eq_hb = _exposure(heartbeat)
     eq = equity if equity > 0 else eq_hb
     caps = (heartbeat or {}).get("sleeve_caps") if isinstance(
@@ -148,7 +142,10 @@ def sleeve_mix_rows(
 
     vti_val = _float(exp.get("vti_core_value"))
     nyse_val = _float(exp.get("nyse_value"))
-    vti_tgt = _float(caps.get("vti_core")) * 100.0
+    if override_vti_target:
+        vti_tgt = None if vti_target_frac is None else float(vti_target_frac) * 100.0
+    else:
+        vti_tgt = _float(caps.get("vti_core")) * 100.0
     nyse_tgt = _float(caps.get("nyse")) * 100.0
     cash_tgt = _float(caps.get("cash")) * 100.0
     return [
@@ -176,42 +173,50 @@ def sleeve_mix_rows(
     ]
 
 
-def _today_tape_bit() -> str:
-    from datetime import datetime
-
-    return datetime.now().strftime("%A · %b %d, %Y")
-
-
-def _book_strategy_tape(*, paper: bool, book_id: str | None = None) -> str:
-    """Stable strategy line for the cyan marquee — not live holdings."""
+def _book_strategy_tape(
+    *,
+    paper: bool,
+    book_id: str | None = None,
+    vti_label: str | None = None,
+) -> str:
+    """One strategy line for the cyan bar. VTI text is the effective label."""
     bid = (book_id or "").strip().lower()
-    today = _today_tape_bit()
+    vti = (vti_label or "").strip()
+
+    def _line(parts: list[str]) -> str:
+        if vti:
+            parts.append(vti)
+        return " · ".join(parts)
+
     if not paper:
-        return (
-            f"{today}   ·   LIVE PROFILE A   ·   "
-            "VTI CORE OFF · NYSE ACTIVE   ·   REAL MONEY   ·   DO NOT SIZE OPTIONS"
-        )
+        return _line(["LIVE PROFILE A", "NYSE ACTIVE", "REAL MONEY"])
     try:
         import config
 
         if bid == "alpaca_paper_v2" or (
             not bid and config.paper_medium_strategy_enabled()
         ):
-            return (
-                f"{today}   ·   MEDIUM SoT (alpaca_paper_v2)   ·   "
-                "15 NAMES · 30D HOLD · ATR 2.0×   ·   "
-                f"VTI CORE OFF   ·   RESEARCH v{_research_version()}"
+            return _line(
+                [
+                    "MEDIUM SoT (alpaca_paper_v2)",
+                    "15 NAMES · 30D HOLD · ATR 2.0×",
+                    f"RESEARCH v{_research_version()}",
+                ]
             )
         if bid == "alpaca_paper":
-            return (
-                f"{today}   ·   PAPER LAB (alpaca_paper)   ·   "
-                "8 NAMES ≤15%   ·   IDLE-CASH ADD ≤30% IF FULL   ·   "
-                "30D HOLD · TRAIL HIGH @ +10%   ·   "
-                f"HALF @ +20%   ·   RESEARCH v{_research_version()}"
+            return _line(
+                [
+                    "PAPER LAB (alpaca_paper)",
+                    "8 NAMES ≤15%",
+                    "IDLE-CASH ADD ≤30% IF FULL",
+                    "30D HOLD · TRAIL HIGH @ +10%",
+                    "HALF @ +20%",
+                    f"RESEARCH v{_research_version()}",
+                ]
             )
     except Exception:
         pass
-    return f"{today}   ·   {_paper_research_tape()}"
+    return _paper_research_tape(vti)
 
 
 def header_tape_text(
@@ -219,14 +224,15 @@ def header_tape_text(
     paper: bool,
     heartbeat: dict[str, Any] | None = None,
     book_id: str | None = None,
+    vti_label: str | None = None,
 ) -> str:
-    """Cyan tape under the header: date + strategy (not live holdings churn).
+    """One cyan-bar line: selected book and its strategy.
 
-    ``heartbeat`` is accepted for call-site compatibility but ignored — the
-    marquee is look/strategy chrome, not a second equity ticker.
+    ``heartbeat`` is ignored. VTI is included only when ``vti_label`` is the
+    book's effective config, so a stale sleeve cap cannot contradict it.
     """
     _ = heartbeat
-    tape = _book_strategy_tape(paper=paper, book_id=book_id)
+    tape = _book_strategy_tape(paper=paper, book_id=book_id, vti_label=vti_label)
     if _NYSE_100_RE.search(tape):
-        return _book_strategy_tape(paper=paper, book_id=None)
+        return _book_strategy_tape(paper=paper, book_id=None, vti_label=vti_label)
     return tape

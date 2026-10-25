@@ -14,6 +14,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pickle
 import sys
@@ -206,12 +207,30 @@ def _save_cache(ticker: str, df: pd.DataFrame) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     with open(_cache_path(ticker), "wb") as f:
         pickle.dump(df, f, protocol=pickle.HIGHEST_PROTOCOL)
+    meta = {
+        "schema_version": 1,
+        "symbol": ticker.upper(),
+        "source": "Alpaca historical stock bars",
+        "bar_interval": "5Min",
+        "feed": "iex",
+        "adjustment": "split",
+        "rows": int(len(df)),
+        "start": df["timestamp"].min().isoformat() if len(df) else None,
+        "end": df["timestamp"].max().isoformat() if len(df) else None,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _cache_meta_path(ticker).write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+
+
+def _cache_meta_path(ticker: str) -> Path:
+    return CACHE_DIR / f"{ticker.upper()}.meta.json"
 
 
 def fetch_alpaca_5m(ticker: str, *, days: int) -> pd.DataFrame:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    from alpaca.data.enums import Adjustment, DataFeed
 
     api_key, secret_key = _paper_keys()
     client = StockHistoricalDataClient(api_key=api_key, secret_key=secret_key)
@@ -220,6 +239,7 @@ def fetch_alpaca_5m(ticker: str, *, days: int) -> pd.DataFrame:
     start = end - timedelta(days=days + 5)
 
     frames: list[pd.DataFrame] = []
+    failed_chunks: list[Exception] = []
     chunk_start = start
     while chunk_start < end:
         chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), end)
@@ -229,14 +249,23 @@ def fetch_alpaca_5m(ticker: str, *, days: int) -> pd.DataFrame:
                 timeframe=TimeFrame(5, TimeFrameUnit.Minute),
                 start=chunk_start,
                 end=chunk_end,
+                adjustment=Adjustment.SPLIT,
+                feed=DataFeed.IEX,
             )
             bars = client.get_stock_bars(request)
             df = getattr(bars, "df", None)
             if df is not None and not df.empty:
                 frames.append(_normalize_bars(df))
         except Exception as exc:
-            print(f"  {ticker}: chunk error {chunk_start.date()}–{chunk_end.date()} — {exc}")
+            failed_chunks.append(exc)
         chunk_start = chunk_end
+
+    if failed_chunks:
+        first = failed_chunks[0]
+        raise RuntimeError(
+            f"{ticker}: {len(failed_chunks)} of the historical chunks failed "
+            f"(first error type: {type(first).__name__}); incomplete data was not cached"
+        ) from first
 
     if not frames:
         return pd.DataFrame()
@@ -880,7 +909,15 @@ def main() -> None:
         help="Compare 90-day backtest with vs without GARCH vol-target sizing",
     )
     parser.add_argument("--refresh", action="store_true", help="Force re-download of cached bars")
+    parser.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="Refresh/load bars and exit before calculating any strategy returns (requires --refresh)",
+    )
     args = parser.parse_args()
+
+    if args.cache_only and not args.refresh:
+        parser.error("--cache-only requires --refresh so the cache is actually updated")
 
     _load_env()
     if args.garch_test:
@@ -902,6 +939,10 @@ def main() -> None:
         raise SystemExit("No ticker data loaded — check Alpaca credentials and universe.")
 
     print(f"Loaded {len(frames)} tickers with 5-minute RTH bars.")
+
+    if args.cache_only:
+        print("Cache refresh complete; no strategy simulation was run.")
+        return
 
     if args.garch_test:
         _run_garch_test(frames, quality_fixes=bool(args.quality_fixes))

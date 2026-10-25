@@ -1,7 +1,9 @@
 """Daily-bar A/B of Lab add policy (research only).
 
 Not full `backtester.py` (no VTI / shorts / crypto). Same NYSE MA70 rank
-entry as `one_r_hit_backtest.py`. Current Lab stack:
+entry as `one_r_hit_backtest.py`. Signals use completed daily closes and orders
+fill at the following session close because this source has no daily open.
+This is a causal daily proxy, not a replay of the bot's intraday fills. Current Lab stack:
 
   - 8 names, 15% of equity each
   - disaster -10% close
@@ -101,12 +103,16 @@ def run_lab(
     universe: list[str] | None = None,
     eligible: pd.DataFrame | None = None,
     cost_rt_bps: float = 0.0,
+    conviction_sizing: bool = False,
 ) -> tuple[dict, list[dict]]:
     """Lab 8 walk. ``universe`` / ``eligible`` as in ``one_r_hit_backtest.run_backtest``.
 
     Drawdown is marked to market each bar; ``max_dd_booked_pct`` keeps the old
     closed-trades-only figure.
     """
+    from modules.pit_universe import session_bars
+
+    data = session_bars(data)
     base = universe if universe is not None else _universe(data.columns)
     symbols = [c for c in dict.fromkeys(base) if c in data.columns]
     frame = data[symbols].apply(pd.to_numeric, errors="coerce")
@@ -210,6 +216,9 @@ def run_lab(
             }
         )
 
+        # The signal below is known only after close i. With close-only data,
+        # model a following-session close fill; same-close execution would use
+        # the price that produced the signal and would be lookahead.
         if i >= len(frame) - 1:
             break
         scores = []
@@ -228,9 +237,17 @@ def run_lab(
                 continue
             scores.append((float(m), sym))
         scores.sort(reverse=True)
+        # Rank is the current Lab momentum signal. The eight multipliers sum
+        # to 8, so the average target remains 15% while capital tilts toward
+        # stronger ranks. Per-name sizing stays within 7.5%–22.5%.
+        rank_multipliers = (1.50, 1.35, 1.20, 1.05, 0.90, 0.80, 0.70, 0.50)
+        score_scale = {
+            sym: rank_multipliers[min(rank, len(rank_multipliers) - 1)]
+            if conviction_sizing else 1.0
+            for rank, (_score, sym) in enumerate(scores)
+        }
         clip = equity * name_pct
-        cap_val = equity * name_pct
-        hard_val = cap_val * add_max_mult
+        hard_val = equity * name_pct * add_max_mult
         min_add = clip * 0.25
         deployed = 0.0
         for held_sym, held_pos in open_pos.items():
@@ -239,21 +256,30 @@ def run_lab(
                 deployed += held_pos["qty"] * held_px
         cash_room = max(0.0, equity - deployed)
         for _m, sym in scores:
-            px = float(frame[sym].iloc[i])
-            if not np.isfinite(px) or px <= 0:
+            signal_px = float(frame[sym].iloc[i])
+            fill_px = float(frame[sym].iloc[i + 1])
+            if (
+                not np.isfinite(signal_px)
+                or signal_px <= 0
+                or not np.isfinite(fill_px)
+                or fill_px <= 0
+            ):
                 continue
+            scale = score_scale.get(sym, 1.0)
+            ticket_cap = clip * scale
+            cap_val = equity * name_pct * scale
             pos = open_pos.get(sym)
             if pos is None:
                 if len(open_pos) >= max_names:
                     continue
-                ticket = min(clip, cash_room)
+                ticket = min(ticket_cap, cash_room)
                 if ticket < min_add:
                     continue
                 open_pos[sym] = {
-                    "entry_i": i,
-                    "entry": px,
-                    "qty": ticket / px,
-                    "peak": px,
+                    "entry_i": i + 1,
+                    "entry": fill_px,
+                    "qty": ticket / fill_px,
+                    "peak": fill_px,
                     "half_taken": False,
                     "trail_armed": False,
                     "adds": 0,
@@ -261,18 +287,28 @@ def run_lab(
                 cash_room -= ticket
                 equity -= ticket * side_cost
                 continue
-            mv = pos["qty"] * px
+            mv = pos["qty"] * signal_px
             if add_policy == "fresh":
-                room = min(clip, hard_val - mv, cash_room)
+                room = min(ticket_cap, hard_val - mv, cash_room)
+            elif add_policy == "idle":
+                room = min(max(0.0, cap_val - mv), cash_room)
+                held_gain = signal_px / float(pos["entry"]) - 1.0
+                held_days = i - int(pos["entry_i"])
+                extra_ok = (
+                    held_gain < trail_arm
+                    and held_days < max(1, max_hold - 7)
+                )
+                if room <= 0 and len(open_pos) >= max_names and extra_ok:
+                    room = min(ticket_cap, hard_val - mv, cash_room)
             else:
                 room = min(cap_val - mv, cash_room)
             if room < min_add:
                 continue
-            add_qty = room / px
+            add_qty = room / fill_px
             old_cost = pos["qty"] * pos["entry"]
             pos["qty"] += add_qty
-            pos["entry"] = (old_cost + room) / pos["qty"]
-            pos["peak"] = max(float(pos["peak"]), px)
+            pos["entry"] = (old_cost + add_qty * fill_px) / pos["qty"]
+            pos["peak"] = max(float(pos["peak"]), fill_px)
             pos["adds"] = int(pos.get("adds") or 0) + 1
             add_count += 1
             cash_room -= room
@@ -296,8 +332,14 @@ def run_lab(
     )
     summary["add_policy"] = add_policy
     summary["adds"] = add_count
+    summary["conviction_sizing"] = bool(conviction_sizing)
     summary["max_dd_booked_pct"] = round(max_dd_booked * 100.0, 2)
     summary["cost_rt_bps"] = float(cost_rt_bps)
+    summary["signal_timing"] = "completed_daily_close"
+    summary["fill_timing"] = "following_session_close_proxy"
+    summary["execution_limit"] = (
+        "Daily close-only data; no intraday stop/target touch simulation or next-open fill."
+    )
     summary["pit_gated"] = eligible is not None
     mtm_curve = [float(c["equity"]) for c in curve]
     summary["sharpe"] = _sharpe(mtm_curve)
@@ -477,10 +519,18 @@ def main() -> int:
     payload = {
         "research_only": True,
         "note": (
-            "Isolated NYSE sleeve on $100k, close-to-close. "
+            "Isolated NYSE sleeve on $100k. Signals use completed daily closes; entries/adds "
+            "fill at the following session close as a causal proxy. Exits use daily closes. "
             "A/B is Lab leftover-room vs Lab fresh-ticket (2× cap). "
             "Not v2/live."
         ),
+        "execution_model": {
+            "signal": "completed_daily_close",
+            "entry_and_add_fill": "following_session_close_proxy",
+            "exit_data": "daily_close_only",
+            "intraday_high_low_available": False,
+            "claim_limit": "Not a faithful replay of the intraday production order path.",
+        },
         "lab_room": lab_room,
         "lab_fresh": lab_fresh,
         "atr_hold_15": atr15,

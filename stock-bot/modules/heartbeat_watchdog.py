@@ -18,6 +18,7 @@ Usage (run_all.py):
 
 from __future__ import annotations
 
+import datetime
 import logging
 import os
 import threading
@@ -29,6 +30,26 @@ logger = logging.getLogger(__name__)
 # Distinct exit code so the supervisor can tell a watchdog restart apart from a
 # clean exit (0) or an auth/fatal failure (1).
 EXIT_WATCHDOG = 42
+
+
+def touch_engine_heartbeat(status: str = "running") -> bool:
+    """Refresh the heartbeat file so a live engine is not treated as dead.
+
+    Merges into the existing payload. Does not change positions, orders,
+    or risk fields beyond ``timestamp`` and ``status``.
+    """
+    import config
+    from modules.safe_io import update_json_atomic
+
+    path = config.ensure_heartbeat_path_writable()
+    now = datetime.datetime.now().isoformat(timespec="seconds")
+
+    def _mutate(payload: dict) -> dict:
+        payload["timestamp"] = now
+        payload["status"] = status
+        return payload
+
+    return update_json_atomic(path, _mutate, default={"timestamp": now, "status": status})
 
 
 def watchdog_enabled(default: bool = True) -> bool:

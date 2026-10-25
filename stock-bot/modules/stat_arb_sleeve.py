@@ -18,13 +18,44 @@ from modules.pipeline_strategies import (
     _leg_has_exposure,
     _momentum_score,
     _on_cooldown,
+    consume_queued_atomic_pair,
+    delayed_research_fills,
     execute_atomic_pair_entry,
     execute_atomic_pair_exit,
+    pending_pair_exit_id,
     regime_entries_paused,
 )
 from modules.safe_io import read_json_file, write_json_file
 
 BOOK_FILE = Path(os.getenv("STAT_ARB_BOOK_FILE", "stat_arb_open_book.json"))
+
+
+def _research_entry_bar(executor, intent, now) -> int:
+    """Fill bar when the research queue has one; otherwise the signal bar."""
+    portfolio = getattr(executor, "portfolio", None)
+    fill_bar = getattr(portfolio, "_research_fill_bar", None) if portfolio is not None else None
+    if fill_bar is not None:
+        return _coerce_bar_index(fill_bar)
+    return _coerce_bar_index(intent.get("entry_bar", now))
+
+
+def _stamp_pair_owner_state(
+    executor,
+    pair_key: str,
+    z: float,
+    now,
+    *,
+    pair_cooldown=None,
+    portfolio_manager=None,
+) -> None:
+    """Cooldown and manager rows that must outlive the signal-bar executor."""
+    portfolio = getattr(executor, "portfolio", None)
+    fill_bar = getattr(portfolio, "_research_fill_bar", None) if portfolio is not None else None
+    stamp = now if fill_bar is None else fill_bar
+    if pair_cooldown is not None:
+        pair_cooldown[pair_key] = stamp
+    if portfolio_manager is not None:
+        portfolio_manager.add_position(pair_key, z, 0)
 
 
 def _coerce_bar_index(value) -> int:
@@ -701,7 +732,16 @@ def pair_leg_notional(
     return leg, leg
 
 
-def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int | None = None) -> int:
+def _execute_entry(
+    executor,
+    intent,
+    *,
+    log_fn=None,
+    regime: str = "",
+    now: int | None = None,
+    pair_cooldown=None,
+    portfolio_manager=None,
+) -> int:
     long_sym = intent["long_symbol"]
     short_sym = intent["short_symbol"]
     z = intent["z_score"]
@@ -741,7 +781,81 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int 
     ok, long_fill_n, short_fill_n = execute_atomic_pair_entry(
         executor, long_sym, short_sym, leg_n, pair_key=pair_key, strategy=leg_strategy
     )
+    def _commit_open():
+        book = _open_book(executor)
+        book[pair_key] = {
+            "long_symbol": long_sym,
+            "short_symbol": short_sym,
+            "y_symbol": intent.get("y_symbol", long_sym),
+            "x_symbol": intent.get("x_symbol", short_sym),
+            "beta": intent.get("beta", 1.0),
+            "leg_notional": leg_n,
+            "long_filled_notional": long_fill_n or leg_n,
+            "short_filled_notional": short_fill_n or leg_n,
+        "entry_z": z,
+        "entry_bar": _research_entry_bar(executor, intent, now),
+        "entry_regime": regime,
+    }
+        _save_book(executor)
+        if hasattr(executor, "register_pair_symbols"):
+            executor.register_pair_symbols(long_sym, short_sym)
+        att = getattr(executor, "_attribution", None)
+        if att:
+            if intent.get("phase") == "stat_arb_crypto":
+                att.on_crypto_entry(pair_key, symbol=long_sym, regime=regime, entry_bar=now)
+            else:
+                att.on_stat_arb_pair_entry(
+                    pair_key, long_sym, short_sym, entry_z=float(z)
+                )
+        if config.effective_insider_signal_boost_enabled():
+            try:
+                from modules.insider_signal_handler import (
+                    get_boost_snapshot,
+                    record_insider_boost_trade,
+                )
+
+                snap = get_boost_snapshot()
+                if float((snap.get("stat_arb_boosts") or {}).get(long_sym, 1.0)) > 1.0:
+                    record_insider_boost_trade("stat_arb")
+            except Exception as exc:
+                logger.debug("stat arb soft-fail: %s", exc)
+
+        msg = (
+            f"Stat arb: LONG {long_sym} / SHORT {short_sym}, "
+            f"Z={round(z, 1)} (cointegrated)"
+        )
+        if log_fn:
+            log_fn(long_sym, "buy", regime, pair_key, z, leg_n, pair_msg=msg)
+            log_fn(short_sym, "sell", regime, pair_key, z, leg_n, pair_msg=msg)
+        logger.info(
+            "stat arb entry executed",
+            extra={"pair": pair_key, "long": long_sym, "short": short_sym, "z": round(z, 1)},
+        )
+        log_event(
+            "stat_arb_entry",
+            pair=pair_key,
+            long_sym=long_sym,
+            short_sym=short_sym,
+            z_score=round(z, 1),
+        )
+
     if not ok:
+        pair_id = consume_queued_atomic_pair(executor)
+        if pair_id and hasattr(executor, "defer_until_pair_fill"):
+
+            def _commit_when_filled():
+                _commit_open()
+                _stamp_pair_owner_state(
+                    executor,
+                    pair_key,
+                    z,
+                    now,
+                    pair_cooldown=pair_cooldown,
+                    portfolio_manager=portfolio_manager,
+                )
+
+            executor.defer_until_pair_fill(pair_id, _commit_when_filled)
+            return 0
         if intent.get("phase") == "stat_arb_crypto":
             att = getattr(executor, "_attribution", None)
             if att:
@@ -750,50 +864,7 @@ def _execute_entry(executor, intent, *, log_fn=None, regime: str = "", now: int 
             _stat_arb_reject(executor, "atomic_fail")
         return 0
 
-    book = _open_book(executor)
-    book[pair_key] = {
-        "long_symbol": long_sym,
-        "short_symbol": short_sym,
-        "y_symbol": intent.get("y_symbol", long_sym),
-        "x_symbol": intent.get("x_symbol", short_sym),
-        "beta": intent.get("beta", 1.0),
-        "leg_notional": leg_n,
-        "long_filled_notional": long_fill_n or leg_n,
-        "short_filled_notional": short_fill_n or leg_n,
-        "entry_z": z,
-        "entry_bar": _coerce_bar_index(intent.get("entry_bar", now)),
-        "entry_regime": regime,
-    }
-    _save_book(executor)
-    if hasattr(executor, "register_pair_symbols"):
-        executor.register_pair_symbols(long_sym, short_sym)
-    att = getattr(executor, "_attribution", None)
-    if att:
-        if intent.get("phase") == "stat_arb_crypto":
-            att.on_crypto_entry(pair_key, symbol=long_sym, regime=regime, entry_bar=now)
-        else:
-            att.on_stat_arb_pair_entry(
-                pair_key, long_sym, short_sym, entry_z=float(z)
-            )
-    if config.effective_insider_signal_boost_enabled():
-        try:
-            from modules.insider_signal_handler import get_boost_snapshot, record_insider_boost_trade
-
-            snap = get_boost_snapshot()
-            if float((snap.get("stat_arb_boosts") or {}).get(long_sym, 1.0)) > 1.0:
-                record_insider_boost_trade("stat_arb")
-        except Exception as exc:
-            logger.debug("stat arb soft-fail: %s", exc)
-
-    msg = (
-        f"Stat arb: LONG {long_sym} / SHORT {short_sym}, "
-        f"Z={round(z, 1)} (cointegrated)"
-    )
-    if log_fn:
-        log_fn(long_sym, "buy", regime, pair_key, z, leg_n, pair_msg=msg)
-        log_fn(short_sym, "sell", regime, pair_key, z, leg_n, pair_msg=msg)
-    logger.info("stat arb entry executed", extra={"pair": pair_key, "long": long_sym, "short": short_sym, "z": round(z,1)})
-    log_event("stat_arb_entry", pair=pair_key, long_sym=long_sym, short_sym=short_sym, z_score=round(z, 1))
+    _commit_open()
     return 1
 
 
@@ -818,6 +889,11 @@ def _close_position(
         from modules.exit_management import partial_exit_fraction
 
         reduce = round(float(leg_n or 0) * partial_exit_fraction(), 2)
+        if reduce > 0 and delayed_research_fills(executor):
+            if pending_pair_exit_id(executor, long_sym, short_sym):
+                return 0
+            _queue_partial_pair_reduction(executor, position, pair_key, reduce)
+            return 0
         if reduce > 0:
             executor.execute_reduce_notional(
                 long_sym, reduce, reason="partial_1r", sleeve="stat_arb"
@@ -835,7 +911,31 @@ def _close_position(
     exited = execute_atomic_pair_exit(
         executor, long_sym, short_sym, pair_key=pair_key
     )
+    queued_exit = consume_queued_atomic_pair(executor) if delayed_research_fills(executor) else None
+    if queued_exit and hasattr(executor, "defer_until_pair_fill"):
+
+        def _commit_close(mark_pnl=mark_pnl):
+            _finalize_pair_book_close(
+                executor,
+                pair_key,
+                position,
+                long_sym=long_sym,
+                short_sym=short_sym,
+                leg_n=leg_n,
+                regime=regime,
+                now=now,
+                force=force,
+                att=att,
+                mark_pnl=mark_pnl,
+                is_crypto=is_crypto,
+                log_fn=log_fn,
+            )
+
+        executor.defer_until_pair_fill(queued_exit, _commit_close)
+        return 0
     if not exited:
+        if delayed_research_fills(executor):
+            return 0
         if not force:
             return 0
         leg_strat = "crypto" if is_crypto else "stat_arb"
@@ -847,6 +947,109 @@ def _close_position(
         if att:
             mark_pnl = att.pair_mark_pnl(executor, position, getattr(executor, "prices", {}))
 
+    _finalize_pair_book_close(
+        executor,
+        pair_key,
+        position,
+        long_sym=long_sym,
+        short_sym=short_sym,
+        leg_n=leg_n,
+        regime=regime,
+        now=now,
+        force=force,
+        att=att,
+        mark_pnl=mark_pnl,
+        is_crypto=is_crypto,
+        log_fn=log_fn,
+    )
+    return 1
+
+
+def _queue_partial_pair_reduction(executor, position: dict, pair_key: str, reduce: float) -> None:
+    """Queue both partial legs. Recorded notional changes only after they fill."""
+    long_sym = position["long_symbol"]
+    short_sym = position["short_symbol"]
+    pair_id = executor.begin_atomic_pair(long_sym, short_sym, float(reduce), pair_key=pair_key)
+    orders = []
+    for symbol, leg in ((long_sym, "long"), (short_sym, "short")):
+        qty = float(executor.portfolio.positions.get(symbol, 0.0) or 0.0)
+        if abs(qty) < 1e-9:
+            continue
+        side = "sell" if qty > 0 else "buy"
+        orders.append(
+            executor.execute_order(
+                symbol,
+                side,
+                notional=float(reduce),
+                reduce_only=True,
+                reason="partial_1r",
+                sleeve="stat_arb",
+                atomic_pair_id=pair_id,
+                atomic_pair_leg=leg,
+            )
+        )
+    queued = [order for order in orders if isinstance(order, dict) and order.get("queued")]
+    if not orders:
+        return
+    if len(queued) != len(orders):
+        pending = getattr(executor.portfolio, "_pending_intents", []) or []
+        executor.portfolio._pending_intents = [
+            row for row in pending if row.get("atomic_pair_id") != pair_id
+        ]
+        from backtester import _record_pair_rejection
+
+        _record_pair_rejection(
+            executor.portfolio, pair_id, "leg_not_queued", [long_sym, short_sym]
+        )
+        return
+
+    def _apply_partial(pair_id=pair_id, reduce=reduce):
+        fills = (getattr(executor.portfolio, "_research_pair_fills", None) or {}).get(pair_id) or []
+        filled = [
+            float(order.get("notional") or 0.0)
+            for order in fills
+            if float(order.get("notional") or 0.0) > 0
+        ]
+        applied = min(filled) if filled else float(reduce)
+        position["leg_notional"] = round(
+            max(0.0, float(position.get("leg_notional") or 0.0) - applied), 2
+        )
+
+    executor._last_queued_atomic_pair_id = pair_id
+    executor.defer_until_pair_fill(pair_id, _apply_partial)
+    consume_queued_atomic_pair(executor)
+
+
+def _finalize_pair_book_close(
+    executor,
+    pair_key: str,
+    position: dict,
+    *,
+    long_sym: str,
+    short_sym: str,
+    leg_n,
+    regime: str,
+    now,
+    force: bool,
+    att,
+    mark_pnl,
+    is_crypto: bool,
+    log_fn,
+) -> None:
+    portfolio = getattr(executor, "portfolio", None)
+    fill_bar = getattr(portfolio, "_research_fill_bar", None) if portfolio is not None else None
+    exit_bar = now if fill_bar is None else fill_bar
+    # 1e-9 shares matches BacktestPortfolio.trade deleting a flat position.
+    # A research next_close fill that leaves more than that keeps the book.
+    # same_close and live still remove the book on the immediate path.
+    if delayed_research_fills(executor) and _pair_has_exposure(
+        executor, {"long_symbol": long_sym, "short_symbol": short_sym}
+    ):
+        logger.warning(
+            "stat arb book kept; residual exposure",
+            extra={"pair": pair_key, "long": long_sym, "short": short_sym},
+        )
+        return
     book = _open_book(executor)
     book.pop(pair_key, None)
     _save_book(executor)
@@ -859,7 +1062,7 @@ def _close_position(
                     leg_notional=float(leg_n or 0),
                     regime=position.get("entry_regime") or regime,
                     entry_bar=position.get("entry_bar"),
-                    exit_bar=now,
+                    exit_bar=exit_bar,
                 )
             else:
                 att.record_stat_arb_realized(
@@ -868,7 +1071,7 @@ def _close_position(
                     leg_notional=float(leg_n or 0),
                     exit_reason=position.get("exit_reason", ""),
                     entry_bar=position.get("entry_bar"),
-                    exit_bar=now,
+                    exit_bar=exit_bar,
                 )
         elif is_crypto and force:
             att.record_crypto_pair_realized(
@@ -877,7 +1080,7 @@ def _close_position(
                 leg_notional=float(leg_n or 0),
                 regime=position.get("entry_regime") or regime,
                 entry_bar=position.get("entry_bar"),
-                exit_bar=now,
+                exit_bar=exit_bar,
             )
         elif not is_crypto and force and mark_pnl is None:
             att.record_stat_arb_realized(
@@ -886,7 +1089,7 @@ def _close_position(
                 leg_notional=float(leg_n or 0),
                 exit_reason=position.get("exit_reason", "force_close"),
                 entry_bar=position.get("entry_bar"),
-                exit_bar=now,
+                exit_bar=exit_bar,
             )
         if is_crypto:
             att.on_crypto_pair_exit(pair_key)
@@ -904,7 +1107,6 @@ def _close_position(
         )
     logger.info("stat arb exit executed", extra={"pair": pair_key, "long": long_sym, "short": short_sym})
     log_event("stat_arb_exit", pair=pair_key, long_sym=long_sym, short_sym=short_sym)
-    return 1
 
 
 def _is_crypto_pair_position(position: dict) -> bool:
@@ -1562,7 +1764,15 @@ def run_crypto_stat_arb(
             if att:
                 att.record_crypto_reject("in_book")
             continue
-        if _execute_entry(executor, intent, log_fn=log_fn, regime=regime, now=now):
+        if _execute_entry(
+            executor,
+            intent,
+            log_fn=log_fn,
+            regime=regime,
+            now=now,
+            pair_cooldown=pair_cooldown,
+            portfolio_manager=portfolio_manager,
+        ):
             pair_cooldown[intent["pair_key"]] = now
             open_live.add(intent["pair_key"])
             trades += 1
@@ -1709,7 +1919,15 @@ def run_equity_stat_arb(
         if intent["pair_key"] in book:
             _stat_arb_reject(executor, "in_book")
             continue
-        if _execute_entry(executor, intent, log_fn=log_fn, regime=regime, now=now):
+        if _execute_entry(
+            executor,
+            intent,
+            log_fn=log_fn,
+            regime=regime,
+            now=now,
+            pair_cooldown=pair_cooldown,
+            portfolio_manager=portfolio_manager,
+        ):
             pair_cooldown[intent["pair_key"]] = now
             trades += 1
             if portfolio_manager:

@@ -93,10 +93,17 @@ def test_paper_medium_tape_has_date_and_strategy():
             "spy_value": 8_000.0,
         },
     }
-    tape = header_tape_text(paper=True, heartbeat=hb, book_id="alpaca_paper_v2")
+    tape = header_tape_text(
+        paper=True,
+        heartbeat=hb,
+        book_id="alpaca_paper_v2",
+        vti_label="VTI off · target 0%",
+    )
     assert "MEDIUM" in tape
     assert "15 NAMES" in tape
-    assert "VTI CORE OFF" in tape
+    assert tape.count("VTI off · target 0%") == 1
+    assert "VTI CORE OFF" not in tape
+    assert "33%" not in tape
     assert "33/67" not in tape
     assert "VTI 55%" not in tape
     _assert_no_nyse_100(tape)
@@ -171,6 +178,31 @@ def test_look_helper_strips_hardcoded_nyse_100():
     assert "NYSE 100" not in cleaned
     assert "header_stamp_text" in cleaned
     assert "header_tape_text" in cleaned
+
+
+def test_sleeve_mix_ignores_heartbeat_vti_cap_when_book_target_is_zero():
+    hb = {
+        "equity": 96_967.81,
+        "cash": 12_097.18,
+        "sleeve_caps": {"vti_core": 0.33, "nyse": 0.67, "cash": 0.0},
+        "sleeve_exposure": {
+            "equity": 96_967.81,
+            "vti_core_value": 48_448.0,
+            "nyse_value": 36_423.0,
+        },
+    }
+    rows = {
+        r["key"]: r
+        for r in sleeve_mix_rows(
+            hb,
+            equity=96_967.81,
+            cash=12_097.18,
+            vti_target_frac=0.0,
+            override_vti_target=True,
+        )
+    }
+    assert rows["vti"]["target_pct"] == 0.0
+    assert rows["vti"]["target_pct"] != 33.0
 
 
 def test_sleeve_mix_rows_match_display_layout():

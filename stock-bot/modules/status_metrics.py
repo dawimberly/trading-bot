@@ -24,6 +24,27 @@ def status_inception_date() -> date:
         return date(2026, 1, 1)
 
 
+def _env_date(key: str) -> date | None:
+    raw = (os.getenv(key) or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def start_equity_env_key(*, paper_chase: bool, book_id: str | None = None) -> str:
+    """Per-book baseline. Medium and aggressive do not share one paper start."""
+    if book_id == "alpaca_paper_v2":
+        return "STATUS_MEDIUM_START_EQUITY"
+    if book_id == "alpaca_paper":
+        return "STATUS_AGGRESSIVE_START_EQUITY"
+    if paper_chase:
+        return "STATUS_PAPER_START_EQUITY"
+    return "STATUS_LIVE_START_EQUITY"
+
+
 def _env_float(key: str) -> float | None:
     raw = (os.getenv(key) or "").strip()
     if not raw:
@@ -145,7 +166,8 @@ def resolve_start_equity(
     override = _env_float(env_override_key)
     if override is not None and override > 0:
         inc = inception or status_inception_date()
-        return override, inc, "env"
+        dated = _env_date(env_override_key.replace("EQUITY", "DATE"))
+        return override, dated or inc, "env"
 
     inc = inception or status_inception_date()
     inc_dt = datetime.combine(inc, datetime.min.time())
@@ -244,15 +266,16 @@ def _money(val: float | None) -> str:
 
 def daily_breaker_banner(*, live_active: bool, live_dl: dict, paper_dl: dict) -> str:
     def _one(label: str, dl: dict) -> str:
-        limit = float(dl.get("limit_pct") or 0.0)
+        raw_limit = dl.get("limit_pct")
+        limit_s = f"{float(raw_limit):.0f}%" if raw_limit not in (None, "") else "unavailable"
         if dl.get("tripped"):
             loss = dl.get("loss_pct")
             loss_s = f"{loss:.2f}%" if loss is not None else "?"
-            return f"{label} TRIPPED ({loss_s} vs {limit:.0f}%)"
+            return f"{label} TRIPPED ({loss_s} vs {limit_s})"
         loss = dl.get("loss_pct")
         if loss is not None:
-            return f"{label} OK ({loss:+.2f}% today, limit {limit:.0f}%)"
-        return f"{label} OK (limit {limit:.0f}%, no session anchor)"
+            return f"{label} {loss:+.2f}% vs strategy anchor, limit {limit_s} (not the broker close)"
+        return f"{label} strategy anchor unavailable; not verified"
 
     if live_active:
         return f"Daily Breaker:  {_one('Live', live_dl)} | {_one('Paper', paper_dl)}"
@@ -302,6 +325,50 @@ def metrics_30d(*, paper_chase: bool) -> dict:
     return {"return_pct": None, "sharpe": None, "max_drawdown_pct": None, "source": "none"}
 
 
+def _selected_book_breaker(
+    *,
+    book_id: str | None,
+    equity: float | None,
+    heartbeat: dict | None,
+    now: datetime | None = None,
+    state_path: Path | None = None,
+) -> str:
+    from zoneinfo import ZoneInfo
+
+    from modules.dashboard_safety import format_daily_breaker, read_safety_snapshot, safety_state_path
+    from modules.trading_books import BOOKS
+
+    limit_ratio = None
+    spec = BOOKS.get(book_id or "")
+    if spec and "default_paper" in spec:
+        try:
+            from modules.trading_safety import daily_loss_limit_pct
+
+            limit_ratio = float(daily_loss_limit_pct(paper=bool(spec.get("default_paper"))))
+        except Exception:
+            limit_ratio = None
+    bounds = None
+    if isinstance(heartbeat, dict):
+        if heartbeat.get("book_id") and str(heartbeat.get("book_id")) != str(book_id):
+            bounds = None
+        else:
+            sched = heartbeat.get("scan_schedule")
+            bounds = sched if isinstance(sched, dict) else None
+    clock = now or datetime.now(ZoneInfo("America/New_York"))
+    try:
+        snapshot = read_safety_snapshot(
+            book_id=book_id,
+            state_path=state_path or safety_state_path(),
+            now=clock,
+            equity=equity,
+            session_bounds=bounds,
+            limit_ratio=limit_ratio,
+        )
+    except Exception:
+        return f"Daily Breaker: {book_id or 'book'} — safety state unavailable"
+    return format_daily_breaker(snapshot)
+
+
 def vti_allocation_pct(hb: dict | None) -> float | None:
     if not hb:
         return None
@@ -320,22 +387,21 @@ def vti_allocation_pct(hb: dict | None) -> float | None:
         return None
 
 
-def thinking_tilt_snip(hb: dict | None) -> str:
-    te = (hb or {}).get("thinking_engine") or {}
-    for key in ("regime_narrative", "narrative", "apply_log"):
-        val = te.get(key)
-        if val:
-            return str(val).split("|")[0].strip()[:90]
-    try:
-        from modules.thinking_engine import evaluate_live_apply_status
+def thinking_pill_snapshot(heartbeat: dict | None, book_id: str | None) -> dict:
+    from modules.dashboard_safety import thinking_pill_snapshot as _pill
 
-        mon = evaluate_live_apply_status()
-        tilt = mon.get("recommended_tilt")
-        if tilt:
-            return str(tilt)[:90]
-    except Exception as exc:
-        logger.debug("status metrics soft-fail: %s", exc)
-    return "none (thinking engine off or no recent decision)"
+    return _pill(heartbeat, book_id)
+
+
+def thinking_tilt_snip(
+    hb: dict | None, *, book_id: str | None = None, now: datetime | None = None
+) -> str:
+    from modules.dashboard_safety import thinking_rotation_text
+
+    bounds = None
+    if isinstance(hb, dict) and isinstance(hb.get("scan_schedule"), dict):
+        bounds = hb.get("scan_schedule")
+    return thinking_rotation_text(hb, book_id=book_id, now=now, session_bounds=bounds)
 
 
 _ROTATE_LABELS = (
@@ -345,7 +411,15 @@ _ROTATE_LABELS = (
 )
 
 
-def rotating_insight_line(*, hb: dict | None, paper_chase: bool, slot: int | None = None) -> str:
+def rotating_insight_line(
+    *,
+    hb: dict | None,
+    paper_chase: bool,
+    slot: int | None = None,
+    vti_label: str | None = None,
+    book_id: str | None = None,
+    now: datetime | None = None,
+) -> str:
     """One-line stat that rotates across 30d return, Sharpe, max DD, VTI %, thinking tilt."""
     if slot is None:
         slot = (datetime.now().minute // 3) % 5
@@ -357,9 +431,12 @@ def rotating_insight_line(*, hb: dict | None, paper_chase: bool, slot: int | Non
             variants.append((label, fmt.format(float(val))))
         else:
             variants.append((label, "n/a"))
-    vti = vti_allocation_pct(hb)
-    variants.append(("VTI allocation", f"{vti:.1f}%" if vti is not None else "n/a"))
-    variants.append(("Last Thinking tilt", thinking_tilt_snip(hb)))
+    if vti_label:
+        variants.append(("VTI", vti_label))
+    else:
+        vti = vti_allocation_pct(hb)
+        variants.append(("VTI allocation", f"{vti:.1f}%" if vti is not None else "n/a"))
+    variants.append(("Thinking", thinking_tilt_snip(hb, book_id=book_id, now=now)))
     label, value = variants[slot % len(variants)]
     return f"Insight (rotates):  {label}: {value}"
 
@@ -371,50 +448,39 @@ def dashboard_stats_lines(
     paper_chase: bool,
     live_only: bool,
     extra_journal_paths: list[Path] | None = None,
+    book_id: str | None = None,
+    vti_label: str | None = None,
+    account_performance: dict | None = None,
+    safety_now: datetime | None = None,
+    safety_state: Path | None = None,
+    insight_slot: int | None = None,
 ) -> tuple[str, str, str]:
     """Two-line GUI banner + since-start detail (dashboard monitor)."""
-    inception = status_inception_date()
-    env_key = "STATUS_PAPER_START_EQUITY" if paper_chase else "STATUS_LIVE_START_EQUITY"
-    start, start_date, _ = resolve_start_equity(
-        paper_chase=paper_chase,
-        live_only=live_only,
-        inception=inception,
-        env_override_key=env_key,
-        extra_journal_paths=extra_journal_paths,
-    )
-    since_pct = pct_change(equity, start)
+    from modules.dashboard_accounting import investment_text, daily_text
+
+    performance = account_performance or {}
+    if performance.get("book_id") != book_id:
+        performance = {}
+    since_detail = investment_text(performance)
     regime = str((heartbeat or {}).get("regime") or "n/a")
     regime_short = regime.split(":")[-1].strip() if ":" in regime else regime
-    try:
-        from modules.trading_safety import get_daily_loss_status
-
-        dl = get_daily_loss_status(paper=paper_chase, current_equity=equity)
-    except Exception:
-        dl = {"tripped": False, "limit_pct": 4.0 if paper_chase else 2.0, "loss_pct": None}
-    book = "Paper" if paper_chase else "Live"
-    limit = float(dl.get("limit_pct") or (4.0 if paper_chase else 2.0))
-    if dl.get("tripped"):
-        loss = dl.get("loss_pct")
-        loss_s = f"{loss:.2f}%" if loss is not None else "?"
-        breaker = f"Daily Breaker: {book} TRIPPED ({loss_s} vs {limit:.0f}%)"
-    elif dl.get("loss_pct") is not None:
-        breaker = f"Daily Breaker: {book} OK ({float(dl['loss_pct']):+.2f}% today, limit {limit:.0f}%)"
-    else:
-        breaker = f"Daily Breaker: {book} OK (limit {limit:.0f}%, no session anchor)"
+    breaker = _selected_book_breaker(
+        book_id=book_id,
+        equity=equity,
+        heartbeat=heartbeat,
+        now=safety_now,
+        state_path=safety_state,
+    )
 
     line1 = (
         f"Account Total: {_money(equity)}   ·   "
-        f"Since Start: {fmt_pct(since_pct)}   ·   "
+        f"{since_detail}   ·   {daily_text(performance)}   ·   "
         f"Regime: {regime_short}"
     )
-    line2 = f"{breaker}   ·   {rotating_insight_line(hb=heartbeat, paper_chase=paper_chase)}"
-    since_detail = fmt_since_start_line(
-        current=equity,
-        start=start,
-        start_date=start_date,
-        inception=inception,
-        label="Since Start",
-    ).replace("      Since Start:", "Since Start:").strip()
+    line2 = (
+        f"{breaker}   ·   "
+        f"{rotating_insight_line(hb=heartbeat, paper_chase=paper_chase, vti_label=vti_label, book_id=book_id, slot=insight_slot, now=safety_now)}"
+    )
     return line1, line2, since_detail
 
 

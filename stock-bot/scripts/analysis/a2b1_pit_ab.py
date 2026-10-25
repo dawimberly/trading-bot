@@ -26,7 +26,6 @@ load_dotenv(ROOT / ".env", override=False)
 
 import config  # noqa: E402
 from modules import pit_universe as pit  # noqa: E402
-from modules.data_loader import load_close_matrix  # noqa: E402
 from modules.trial_ledger import deflate_trial, load_trials, record_trial  # noqa: E402
 from one_r_hit_backtest import SKIP, run_backtest  # noqa: E402
 from pit_universe_rerun import load_alpaca_open_gaps  # noqa: E402
@@ -43,13 +42,13 @@ GAIN_PCT = 8.0
 def _sp500_book(data):
     membership = pit.load_sp500_membership()
     in_window = pit.sp500_tickers_in_window(membership, data.index[0], data.index[-1])
-    symbols = [
-        s
-        for s in in_window
-        if s in data.columns and s not in SKIP and not config.is_crypto(s)
-    ]
+    symbols = []
+    for s in in_window:
+        col = pit.resolve_column(s, data.columns)
+        if col and col not in SKIP and not config.is_crypto(col):
+            symbols.append(col)
     elig = pit.membership_matrix(data.index, membership, tickers=symbols)
-    return symbols, elig, pit.coverage_report(elig, data.columns)
+    return symbols, elig, pit.coverage_report(elig, data.columns, members_in_window=in_window)
 
 
 def _gate(cand: dict, base: dict) -> str:
@@ -75,6 +74,8 @@ def _slim(r: dict) -> dict:
         "start": r.get("start"),
         "end": r.get("end"),
         "gain_fades": fades,
+        "gap_skips": r.get("gap_skips", 0),
+        "weekend_fades": r.get("weekend_fades", 0),
         "fade_by_dow": r.get("fade_by_dow"),
         "exit_reasons": r.get("exit_reasons"),
     }
@@ -138,14 +139,17 @@ def run_window(data, *, label: str, ma_win: int, gaps) -> dict:
 def main() -> int:
     pit.ensure_sp500_membership()
     membership = pit.load_sp500_membership()
-    wanted = sorted(set(config.backtest_fetch_tickers()) | set(membership["ticker"].unique()))
-    print(f"Loading daily closes for up to {len(wanted)} names...")
-    data = load_close_matrix(interval="1d", tickers=wanted)
+    print("Loading research closes (prefetch missing S&P members)...")
+    data, pref = pit.load_research_closes(membership, extra_tickers=config.backtest_fetch_tickers())
+    print(
+        f"Prefetch: already {pref['already']}, fetched {pref['fetched']}, "
+        f"failed {len(pref['failed'])}"
+    )
     if data is None or data.empty or len(data) < 200:
         print("Not enough daily history")
         return 1
     ma_win = int(getattr(config, "PAPER_NYSE_MA_WINDOW", 70))
-    print(f"Matrix {data.shape[0]} bars x {data.shape[1]} names, {data.index[0].date()} -> {data.index[-1].date()}")
+    print(f"Matrix {data.shape[0]} session bars x {data.shape[1]} names, {data.index[0].date()} -> {data.index[-1].date()}")
 
     symbols = [
         s
@@ -160,10 +164,7 @@ def main() -> int:
     sessions = int(gaps.notna().any(axis=1).sum())
     print(f"Open gaps: {gaps.shape[1]} names, {sessions} sessions")
 
-    windows = [
-        ("365d", data.tail(365 + ma_win + 40)),
-        (f"full_db_{len(data)}bars", data),
-    ]
+    windows = pit.disjoint_session_windows(data, days=365, ma_win=ma_win)
     results = []
     for label, frame in windows:
         print(f"\n== {label}: {len(frame)} bars ==")

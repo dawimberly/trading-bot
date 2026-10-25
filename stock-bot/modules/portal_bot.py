@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -119,7 +120,12 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
 
         env = apply_realistic_research_env(env)
         if book_id == "alpaca_paper":
-            # Aggressive lab: 8 names, 30d, trail-from-peak (not 4×25 / 10d).
+            # Aggressive lab: 8 names, 30d disaster and time stop.
+            # The +10%/8% trail and +20% half exit are replaced by the fixed
+            # lab forward experiment (arm +5%, full exit at -2% from the
+            # observed peak, 30 minutes after broker flat). Those three
+            # environment values are not the exit. The 10% arm is still read
+            # by the second-ticket sizing guard.
             env["PAPER_LAB_CONCENTRATED"] = "true"
             env["PAPER_SMART_STOPS"] = "false"
             env["MAX_ACTIVE_TICKERS"] = "8"
@@ -132,6 +138,9 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PAPER_LAB_TRAIL_ARM_PCT"] = "0.10"
             env["PAPER_LAB_TRAIL_PCT"] = "0.08"
             env["PAPER_LAB_DISASTER_PCT"] = "0.10"
+            # 2026-10-25 experiment: ignore the loss stop, trail, half, and
+            # A2B1. The only exit is the 30-day hold. Sizing is unchanged.
+            env["PAPER_LAB_HOLD_ONLY"] = "true"
             # Idle cash can complete a 15% name, or add a second ticket up to
             # 30% only when all 8 slots are full (cash would otherwise sit).
             env["PAPER_LAB_ADD_POLICY"] = "idle"
@@ -192,6 +201,9 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
             env["PAPER_SMART_STOPS"] = "true"
             env["ATR_STOP_MULTIPLIER"] = "2.0"
+            # 2026-10-25 experiment: hard loss stop 10% (was the 5% default).
+            # 2× ATR stays, and cannot close a name before this stop.
+            env["STOP_LOSS_PCT"] = "0.10"
             env["STOP_LOSS_REEVAL_PCTS"] = "[-50,-50]"
             env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
@@ -239,6 +251,8 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["NYSE_SLEEVE_CAP_PCT"] = "0.95"
             env["VTI_REBALANCE_CADENCE"] = "drift"
             env["PAPER_NYSE_A2B1_ENABLED"] = "false"
+            # 2026-10-25 experiment: hard loss stop 10% (was the 5% default).
+            env["STOP_LOSS_PCT"] = "0.10"
     return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 
@@ -382,6 +396,34 @@ def _win_taskkill(pid: int, *, force: bool) -> None:
     )
 
 
+def _force_stop_pid(pid: int) -> tuple[bool, str]:
+    """Kill a bot supervisor and its children immediately (taskkill /F /T)."""
+    if not _pid_alive(pid):
+        return True, f"PID {pid} already stopped."
+    tree = {pid} | _descendant_pids(pid)
+    try:
+        if sys.platform == "win32":
+            _win_taskkill(pid, force=True)
+            for leftover in _tree_still_alive(tree):
+                _win_taskkill(leftover, force=True)
+        else:
+            for member in tree:
+                if _pid_alive(member):
+                    try:
+                        os.kill(member, signal.SIGKILL)
+                    except OSError:
+                        pass
+        time.sleep(0.4)
+        leftover = _tree_still_alive(tree | _descendant_pids(pid) | {pid})
+        if leftover:
+            return False, f"Could not fully stop PID {pid}; still alive: {leftover}"
+        return True, f"Force-stopped PID {pid} (process tree)."
+    except subprocess.CalledProcessError as exc:
+        return False, f"Could not stop PID {pid}: {exc}"
+    except OSError as exc:
+        return False, f"Could not stop PID {pid}: {exc}"
+
+
 def _graceful_stop_pid(pid: int, *, wait_sec: float = 8.0) -> tuple[bool, str]:
     """Stop a bot supervisor and its children (paper: run_paper_bot + run_all)."""
     if not _pid_alive(pid):
@@ -484,6 +526,29 @@ def _is_paper_book(username: str, book_id: str) -> bool:
     return bool(spec.get("paper_chase") or prefs.get("paper"))
 
 
+def _lab_next_launch(username: str) -> tuple[list[str], Path] | None:
+    """alpaca_paper only. Medium and Live never read this marker."""
+    marker = book_dir(username, "alpaca_paper") / "lab_next_owner.json"
+    if not marker.is_file():
+        return None
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    if data.get("book") != "alpaca_paper" or data.get("owner") != "lab_next":
+        return None
+    env_path = Path(data["book_env"])
+    cwd = Path(data["cwd"])
+    if env_path.parent.name != "alpaca_paper" or not cwd.is_dir():
+        return None
+    return [
+        _python(),
+        "-B",
+        "-m",
+        "lab_next.paper_owner",
+        "--start",
+        "--book-env",
+        str(env_path),
+    ], cwd
+
+
 def _bot_entry_script(username: str, book_id: str) -> Path:
     """Paper chase books use run_paper_bot supervisor; live uses run_all."""
     pid = bot_pid(username, book_id)
@@ -513,6 +578,8 @@ def bot_status_label(username: str, book_id: str = "alpaca_paper") -> str:
     cmd = _process_cmdline(pid) or ""
     if BOT_EXE_NAME.replace(".exe", "") in cmd or BOT_EXE_NAME in cmd:
         script = BOT_EXE_NAME
+    elif "lab_next.paper_owner" in cmd:
+        script = "Lab Next — Alpaca Paper"
     elif "run_paper_bot" in cmd:
         script = "run_paper_bot"
     else:
@@ -548,6 +615,27 @@ def bot_pid(username: str, book_id: str = "alpaca_paper") -> int | None:
     except ValueError:
         return None
     if _pid_alive(pid):
+        cmd = _process_cmdline(pid) or ""
+        marker = book_dir(username, "alpaca_paper") / "lab_next_owner.json"
+        if book_id == "alpaca_paper" and marker.is_file():
+            if "lab_next.paper_owner" not in cmd.lower():
+                path.unlink(missing_ok=True)
+                return None
+            return pid
+        if cmd:
+            low = cmd.lower()
+            ours = any(
+                token in low
+                for token in (
+                    "run_all.py",
+                    "run_paper_bot.py",
+                    "lab_next.paper_owner",
+                    BOT_EXE_NAME.lower().replace(".exe", ""),
+                )
+            )
+            if not ours:
+                path.unlink(missing_ok=True)
+                return None
         return pid
     path.unlink(missing_ok=True)
     return None
@@ -625,6 +713,63 @@ def restart_all_bots(username: str) -> tuple[bool, str]:
         prefix = f"All {n} books restarted" if n != 3 else "All 3 books restarted"
     else:
         prefix = "Restart finished with errors"
+    return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
+
+
+def hard_update_all_bots(username: str) -> tuple[bool, str]:
+    """Force-kill Lab, Medium, and Live, then start each from current source."""
+    messages: list[str] = []
+    ok_all = True
+    books_to_update = [
+        book_id
+        for book_id in BOOKS
+        if book_enabled(book_id) and _book_has_keys(username, book_id)
+    ]
+    if not books_to_update:
+        return False, "No books with API keys found to update."
+
+    old_pids: dict[str, int | None] = {}
+    for book_id in books_to_update:
+        pid = bot_pid(username, book_id)
+        old_pids[book_id] = pid
+        if pid is None:
+            book_pid_path(username, book_id).unlink(missing_ok=True)
+            messages.append(f"--- {book_id} (stop) ---\nNot running.")
+            continue
+        ok_stop, stop_msg = _force_stop_pid(pid)
+        book_pid_path(username, book_id).unlink(missing_ok=True)
+        if not ok_stop:
+            ok_all = False
+        messages.append(f"--- {book_id} (stop) ---\n{stop_msg}")
+
+    stopped, orphan_msg = stop_orphan_project_bots(username=username)
+    if stopped:
+        messages.append(orphan_msg)
+    time.sleep(0.8)
+
+    for book_id in books_to_update:
+        old_pid = old_pids.get(book_id)
+        if old_pid is not None and _pid_alive(old_pid):
+            ok_all = False
+            messages.append(
+                f"--- {book_id} ---\nStill running after force stop; update aborted."
+            )
+            continue
+        ok, msg = start_bot(username, book_id, skip_orphan_stop=True)
+        new_pid = bot_pid(username, book_id)
+        if ok and old_pid is not None and new_pid == old_pid:
+            ok = False
+            msg = f"Update did not spawn a new process (still PID {old_pid}).\n{msg}"
+        prefix = "Bot updated" if ok else "Bot failed to update"
+        mode = "paper" if _is_paper_book(username, book_id) else "live"
+        messages.append(f"--- {book_id} ---\n{prefix} ({mode} mode).\n{msg}")
+        ok_all = ok_all and ok
+
+    n = len(books_to_update)
+    if ok_all:
+        prefix = f"All {n} books hard-updated" if n != 3 else "All 3 books hard-updated"
+    else:
+        prefix = "Update finished with errors"
     return ok_all, f"{prefix}:\n\n" + "\n\n".join(messages)
 
 
@@ -782,17 +927,24 @@ def start_bot(username: str, book_id: str = "alpaca_paper", *, skip_orphan_stop:
     orphan_msg = ""
     if not skip_orphan_stop:
         preserve = _tracked_book_pids(username)
-        orphans_stopped, orphan_msg = stop_orphan_project_bots(preserve_pids=preserve)
+        orphans_stopped, orphan_msg = stop_orphan_project_bots(
+            preserve_pids=preserve, username=username
+        )
         if orphans_stopped:
             time.sleep(1.0)
-    bot_script = _bot_entry_script(username, book_id)
-    launch_argv, launch_cwd = _bot_launch_command(bot_script)
-    if bot_script.name != "run_all.py" and not bot_script.is_file():
+    special = _lab_next_launch(username) if book_id == "alpaca_paper" else None
+    if special:
+        launch_argv, launch_cwd = special
+        bot_script = Path("lab_next.paper_owner")
+    else:
+        bot_script = _bot_entry_script(username, book_id)
+        launch_argv, launch_cwd = _bot_launch_command(bot_script)
+    if special is None and bot_script.name != "run_all.py" and not bot_script.is_file():
         return False, f"{bot_script.name} not found in project root."
     if bot_script.name == "run_all.py" and launch_argv[0].endswith(BOT_EXE_NAME):
         if not Path(launch_argv[0]).is_file():
             return False, f"{BOT_EXE_NAME} not found beside dist/ runtime data."
-    elif not bot_script.is_file():
+    elif special is None and not bot_script.is_file():
         return False, f"{bot_script.name} not found in project root."
     log_path = book_bot_log_path(username, book_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -482,7 +482,7 @@ def check_strategy_performance() -> SectionResult:
         if missing:
             sec.checks.append(CheckResult("Labels", "FAIL", f"missing {missing}"))
         else:
-            sec.checks.append(CheckResult("Labels", "PASS", "all 10 strategies labeled"))
+            sec.checks.append(CheckResult("Labels", "PASS", f"all {len(STRATEGY_IDS)} strategies labeled"))
     except Exception as exc:
         sec.checks.append(CheckResult("get_strategy_ratings", "FAIL", str(exc)[:80]))
     return sec

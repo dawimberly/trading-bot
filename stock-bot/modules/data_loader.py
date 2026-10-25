@@ -38,14 +38,16 @@ def daily_table_name(symbol: str) -> str:
     return f"{sql_ticker_key(symbol)}_daily"
 
 
-def restore_sql_ticker(key: str) -> str:
+def restore_sql_ticker(key: str, tickers=None) -> str:
     """Map BRK_B back to BRK.B when the universe still uses the dotted ticker."""
     raw = str(key or "")
-    try:
-        tickers = list(config.backtest_fetch_tickers())
-    except Exception:
-        tickers = []
-    for tick in tickers:
+    pool = list(tickers) if tickers is not None else []
+    if not pool:
+        try:
+            pool = list(config.backtest_fetch_tickers())
+        except Exception:
+            pool = []
+    for tick in pool:
         if sql_ticker_key(tick) == raw:
             return config.normalize_symbol(tick)
     return raw
@@ -119,7 +121,14 @@ def _load_table_close(conn: sqlite3.Connection, table: str) -> pd.Series | None:
 
 
 def load_close_matrix(
-    db_path=None, interval="5m", days=None, *, force_refresh=False, tickers=None
+    db_path=None,
+    interval="5m",
+    days=None,
+    *,
+    force_refresh=False,
+    tickers=None,
+    ffill=True,
+    session_calendar_ticker=None,
 ):
     """
     Read ticker tables into a wide DataFrame of close prices.
@@ -134,7 +143,12 @@ def load_close_matrix(
     """
     path = str(db_path or config.resolve_db_path())
     ticker_key = tuple(sorted(str(t) for t in tickers)) if tickers is not None else None
-    cache_key = (str(path), interval, days, ticker_key)
+    calendar_key = (
+        config.normalize_symbol(session_calendar_ticker)
+        if session_calendar_ticker
+        else None
+    )
+    cache_key = (str(path), interval, days, ticker_key, bool(ffill), calendar_key)
     mtime = os.path.getmtime(path) if os.path.isfile(path) else 0.0
     ttl = _cache_ttl_sec()
     now = time.time()
@@ -150,10 +164,23 @@ def load_close_matrix(
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
     tables = [t[0] for t in cursor.fetchall()]
 
+    calendar_dates = None
+    calendar_col = None
+    requested_tickers = None
     if interval == "1d":
         fetch_list = tickers if tickers is not None else config.backtest_fetch_tickers()
+        requested_tickers = {config.normalize_symbol(t) for t in fetch_list}
         allowed = {daily_table_name(ticker) for ticker in fetch_list}
-        tables = [t for t in tables if t.endswith("_daily") and t in allowed]
+        calendar_table = (
+            daily_table_name(session_calendar_ticker)
+            if session_calendar_ticker
+            else None
+        )
+        tables = [
+            t
+            for t in tables
+            if t.endswith("_daily") and (t in allowed or t == calendar_table)
+        ]
     else:
         tables = [t for t in tables if "_5m" not in t and "_daily" not in t]
 
@@ -163,19 +190,54 @@ def load_close_matrix(
         if series is None:
             continue
         col = restore_sql_ticker(
-            table.removesuffix("_daily") if interval == "1d" else table
+            table.removesuffix("_daily") if interval == "1d" else table,
+            tickers=(
+                list(fetch_list) + ([session_calendar_ticker] if session_calendar_ticker else [])
+                if interval == "1d"
+                else None
+            ),
         )
         columns[col] = series
+        if interval == "1d" and session_calendar_ticker:
+            if config.normalize_symbol(col) == config.normalize_symbol(session_calendar_ticker):
+                calendar_col = col
+                calendar_dates = pd.DatetimeIndex(series.index).normalize().unique().sort_values()
 
     conn.close()
     data = pd.DataFrame(columns) if columns else pd.DataFrame()
+    if interval == "1d" and session_calendar_ticker and (
+        calendar_dates is None or len(calendar_dates) == 0
+    ):
+        raise ValueError(
+            f"Cannot build market-session daily matrix: missing "
+            f"{session_calendar_ticker} daily history."
+        )
     if not data.empty:
         data.index = pd.to_datetime(data.index, utc=True, errors="coerce")
         if getattr(data.index, "tz", None) is not None:
             data.index = data.index.tz_convert(None)
+        if interval == "1d":
+            data.index = data.index.normalize()
+            if data.index.has_duplicates:
+                data = data.groupby(level=0).last()
         if data.index.duplicated().any():
             data = data[~data.index.duplicated(keep="last")]
-        data = data.sort_index().ffill().dropna(how="all")
+        data = data.sort_index()
+        if session_calendar_ticker:
+            data = data.reindex(calendar_dates)
+            data.attrs["session_calendar_ticker"] = config.normalize_symbol(
+                session_calendar_ticker
+            )
+        if ffill:
+            data = data.ffill()
+        data = data.dropna(how="all")
+        if (
+            interval == "1d"
+            and session_calendar_ticker
+            and calendar_col is not None
+            and config.normalize_symbol(session_calendar_ticker) not in requested_tickers
+        ):
+            data = data.drop(columns=[calendar_col], errors="ignore")
     if days is not None and len(data) > days:
         data = data.iloc[-days:]
 

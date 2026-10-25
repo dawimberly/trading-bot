@@ -90,7 +90,14 @@ def main() -> int:
         flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
     try:
         subprocess.Popen(
-            [str(pyw), str(script), "--book", "alpaca_paper_v2"],
+            [
+                str(pyw),
+                str(script),
+                "--book",
+                "alpaca_paper_v2",
+                "--user",
+                "dawimberly",
+            ],
             cwd=str(root),
             env=env,
             stdout=subprocess.DEVNULL,

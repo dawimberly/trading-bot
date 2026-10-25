@@ -242,10 +242,23 @@ def resolve_ca_bundle_path(root: Path | None = None) -> Path | None:
     """Return a readable certifi cacert.pem for source, dist/, or frozen EXE."""
     root = root or resolve_runtime_root()
     data_root = resolve_data_root(root)
-    candidates: list[Path] = [
-        data_root / "certifi" / "cacert.pem",
-        root / "certifi" / "cacert.pem",
-    ]
+    candidates: list[Path] = []
+
+    try:
+        import certifi
+
+        # Source runs: prefer the venv bundle over a stale dist/ copy.
+        if not is_frozen():
+            candidates.append(Path(certifi.where()))
+    except ImportError:
+        certifi = None  # type: ignore[assignment]
+
+    candidates.extend(
+        [
+            data_root / "certifi" / "cacert.pem",
+            root / "certifi" / "cacert.pem",
+        ]
+    )
 
     if is_frozen():
         meipass = getattr(sys, "_MEIPASS", None)
@@ -259,13 +272,8 @@ def resolve_ca_bundle_path(root: Path | None = None) -> Path | None:
                 exe_dir / "_internal" / "certifi" / "cacert.pem",
             ]
         )
-
-    try:
-        import certifi
-
-        candidates.append(Path(certifi.where()))
-    except ImportError:
-        pass
+        if certifi is not None:
+            candidates.append(Path(certifi.where()))
 
     seen: set[Path] = set()
     for path in candidates:

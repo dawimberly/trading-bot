@@ -3,38 +3,38 @@
 No orders, no `.env`. 10 bps RT, sleeve 0.95, marked-to-market DD.
 Knob: flatten after prior close ≥8%, next open, skip Monday. Open gap is open[t]/close[t-1] from one OHLC source (Alpaca, else yfinance).
 
-**Verdict:** HOLD
+**Verdict:** CANDIDATE
 
-## Window 365d: 2025-09-16 → 2026-10-10
+## Window 365d_recent: 2025-04-11 → 2026-10-09
 
-Coverage 100.0% (299/299 members).
-
-| policy | book% | maxDD% | Sharpe | trades | fades | vs pick_15 |
-|---|---:|---:|---:|---:|---:|---|
-| pick_15 | +95.53 | 13.79 | 1.91 | 325 | 0 | base |
-| a2b1_skip_mon | +86.68 | 14.51 | 1.88 | 412 | 84 | FAIL (-8.8pp ret, +0.7pp DD) |
-
-Fades by weekday: Mon=0, Tue=0, Wed=0, Thu=24, Fri=32
-
-## Window full_db_1568bars: 2022-06-11 → 2026-10-10
-
-Coverage 100.0% (307/307 members).
+Coverage 97.4% (530/544 members).
 
 | policy | book% | maxDD% | Sharpe | trades | fades | vs pick_15 |
 |---|---:|---:|---:|---:|---:|---|
-| pick_15 | +134.38 | 19.61 | 1.06 | 655 | 0 | base |
-| a2b1_skip_mon | +112.14 | 18.18 | 0.99 | 785 | 142 | FAIL (-22.2pp ret, -1.4pp DD) |
+| pick_15 | +100.16 | 18.69 | 1.66 | 338 | 0 | base |
+| a2b1_skip_mon | +108.09 | 15.99 | 1.9 | 442 | 118 | PASS (+7.9pp ret, -2.7pp DD) |
 
-Fades by weekday: Mon=0, Tue=23, Wed=31, Thu=50, Fri=38
+Fades by weekday: Mon=0, Tue=23, Wed=26, Thu=41, Fri=28
+
+## Window 365d_prior: 2023-10-02 → 2025-04-10
+
+Coverage 95.4% (515/540 members).
+
+| policy | book% | maxDD% | Sharpe | trades | fades | vs pick_15 |
+|---|---:|---:|---:|---:|---:|---|
+| pick_15 | +6.17 | 22.77 | 0.27 | 369 | 0 | base |
+| a2b1_skip_mon | +6.65 | 19.02 | 0.29 | 396 | 37 | PASS (+0.5pp ret, -3.8pp DD) |
+
+Fades by weekday: Mon=0, Tue=2, Wed=9, Thu=13, Fri=13
 
 ## Deflated Sharpe (family ledger)
 
 | window | policy | Sharpe (ann) | E[max SR] | trials | DSR | PSR>0 |
 |---|---|---:|---:|---:|---:|---:|
-| 365d | pick_15 | 1.913 | 0.811 | 10 | 0.9147 | 0.9913 |
-| 365d | a2b1_skip_mon | 1.879 | 0.811 | 10 | 0.9046 | 0.9893 |
-| full_db_1568bars | pick_15 | 1.057 | 0.811 | 10 | 0.725 | 0.9949 |
-| full_db_1568bars | a2b1_skip_mon | 0.987 | 0.811 | 10 | 0.6652 | 0.9916 |
+| 365d_recent | pick_15 | 1.657 | 1.511 | 58 | 0.5712 | 0.9788 |
+| 365d_recent | a2b1_skip_mon | 1.896 | 1.511 | 58 | 0.6819 | 0.99 |
+| 365d_prior | pick_15 | 0.269 | 1.511 | 58 | 0.064 | 0.6291 |
+| 365d_prior | a2b1_skip_mon | 0.292 | 1.511 | 58 | 0.0671 | 0.6399 |
 
 ## Verdict rule
 

@@ -44,8 +44,11 @@ def walk_path(
                 return j, px, "1r", True
         if px <= stop:
             return j, px, "stop", touched
-    px = float(closes[last])
-    return last, px, "time", touched
+    for j in range(last, int(entry_i), -1):
+        px = float(closes[j])
+        if px == px and px > 0:
+            return j, px, "time", touched
+    return last, float("nan"), "time", touched
 
 
 def enabled() -> bool:

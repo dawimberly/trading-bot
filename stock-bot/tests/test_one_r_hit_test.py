@@ -46,3 +46,6 @@ def test_walk_path_take_1r_and_stop():
     down = np.array([100.0, 97.0, 96.0], dtype=float)
     i, px, reason, touched = walk_path(down, 0, stop=98.0, target=103.0, max_hold=5, take_1r=False)
     assert reason == "stop" and touched is False
+    dead = np.array([100.0, 101.0, np.nan, np.nan], dtype=float)
+    i, px, reason, touched = walk_path(dead, 0, stop=90.0, target=120.0, max_hold=5, take_1r=False)
+    assert reason == "time" and i == 1 and px == 101.0

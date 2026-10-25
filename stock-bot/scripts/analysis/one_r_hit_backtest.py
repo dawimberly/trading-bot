@@ -41,6 +41,21 @@ OUT_MD = Path(__file__).with_name("one_r_hit_backtest_last.md")
 SKIP = frozenset({"VTI", "VOO", "SPY", "QQQ", "BND", "AGG"})
 
 
+def align_to_frame(aux: pd.DataFrame | None, frame: pd.DataFrame) -> pd.DataFrame | None:
+    """Align an auxiliary OHLC frame to ``frame`` by date, not by row number.
+
+    A 365d tail walk used to read ``open_gaps.iloc[i]`` against a full-history
+    gap table that started years earlier, so Monday's fade used a 2022 gap.
+    """
+    if aux is None or aux.empty:
+        return aux
+    out = aux.copy()
+    out.index = pd.DatetimeIndex(out.index).normalize()
+    aligned = out.reindex(pd.DatetimeIndex(frame.index).normalize())
+    aligned.index = frame.index
+    return aligned
+
+
 def _universe(columns) -> list[str]:
     cols = config.nyse_momentum_universe(columns)
     out = []
@@ -175,9 +190,14 @@ def run_backtest(
     Drawdown and Sharpe are marked to market every bar; booked-only drawdown
     is kept as ``max_dd_booked_pct`` for comparison with older runs.
     """
+    from modules.pit_universe import session_bars
+
+    data = session_bars(data)
     base = universe if universe is not None else _universe(data.columns)
     symbols = [c for c in dict.fromkeys(base) if c in data.columns]
     frame = data[symbols].apply(pd.to_numeric, errors="coerce")
+    open_gaps = align_to_frame(open_gaps, frame)
+    opens = align_to_frame(opens, frame)
     ma = frame.rolling(ma_win, min_periods=ma_win).mean()
     mom = frame / ma - 1.0
     above = frame > ma
@@ -212,6 +232,7 @@ def run_backtest(
     kelly_sleeves: list[float] = []
     vol_scales: list[float] = []
     equity_path: list[float] = []
+    gap_skips = 0
 
     def _mark_to_market(i: int) -> float:
         mtm = equity
@@ -279,6 +300,7 @@ def run_backtest(
                         if np.isfinite(ox) and ox > 0:
                             exit_px = ox
                     if not np.isfinite(exit_px):
+                        gap_skips += 1
                         continue
                     ret = exit_px / pos["entry"] - 1.0
                     equity += pos["notional"] * ret
@@ -350,7 +372,13 @@ def run_backtest(
             )
             if exit_i > i:
                 continue
+            if not np.isfinite(exit_px) or exit_px <= 0 or not np.isfinite(pos["entry"]) or pos["entry"] <= 0:
+                closed_today.append(sym)
+                continue
             ret = exit_px / pos["entry"] - 1.0
+            if not np.isfinite(ret):
+                closed_today.append(sym)
+                continue
             notional = pos["notional"]
             equity += notional * ret
             equity -= notional * side_cost
@@ -632,6 +660,12 @@ def run_backtest(
         "universe_mode": "custom" if universe is not None else "runtime",
         "pit_gated": eligible is not None,
         "cost_rt_bps": float(cost_rt_bps),
+        "gap_skips": gap_skips,
+        "weekend_fades": sum(
+            1
+            for t in trades
+            if t["reason"] == "gain_fade" and pd.Timestamp(t["exit_date"]).weekday() >= 5
+        ),
         "exit_reasons": {
             k: sum(1 for t in trades if t["reason"] == k)
             for k in ("1r", "stop", "time", "friday", "gain_fade", "fat_loser", "stall_rotate", "eod")

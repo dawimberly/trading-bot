@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Sleeve / book labels → primary strategy_id for feedback sizing.
 SLEEVE_STRATEGY_MAP: dict[str, str] = {
     "NYSE": "nyse_momentum_base",
-    "SPY": "spy_trend",
+    "SPY": "nyse_momentum_base",
     "STAT_ARB": "stat_arb",
     "STATARB": "stat_arb",
     "PAIR": "stat_arb",

@@ -1,85 +1,101 @@
-# Findings (measured, as of 2026-10-10)
+# Findings (measured, as of 2026-10-10, session bars, disjoint years)
 
 Do not re-litigate a reject without a new window and a new knob.
 
 Research SoT for the isolated NYSE MA70 walk is **S&P 500 membership by
-date**, 10 bps round trip, sleeve 0.95, drawdown marked to market
+date**, Mon–Fri session bars only, interior ffill (no post-delist flat),
+10 bps round trip, sleeve 0.95, drawdown marked to market
 (`scripts/analysis/pit_universe_rerun.py`). Numbers that used today's
-screener on history (`current`, or any walk dated before 2026-10-10) are
-look-ahead. Do not quote them as evidence.
+screener on history (`current`) are look-ahead. Do not quote them.
+
+Windows are **two disjoint 365-session walks**, not a full-DB that contains
+the recent year:
+
+| Window | Walk dates | Coverage |
+|--------|------------|----------|
+| **365d_recent** | 2025-04-11 → 2026-10-09 | **97.4%** (530 / 544 members) |
+| **365d_prior** | 2023-10-02 → 2025-04-10 | **95.4%** (515 / 540 members) |
+
+Missing names are Yahoo-dead M&A tickers (ANSS, DFS, JNPR, WBA, …), not
+the old “sqlite only had the fetch list” hole. The 55% / overlapping
+full-DB figures from earlier on 2026-10-10 are superseded.
+
+DSR is directional only (family ledger mixes windows and universes).
+Prior-year Sharpe is not distinguishable from the best of N lucky trials
+(pick_15 DSR 0.06). PSR>0 is high on the recent year only.
 
 ## Keep / watch
 
-**NYSE MA70 rank, 30d, 2× ATR, no 1R, pick_15** is the only simple walk that
-is still decent on the honest book.
+**NYSE MA70 rank, 30d, 2× ATR, no 1R, pick_15** is the isolated-walk keep.
+The recent year is the one that looked like +100%. The prior year is almost
+flat. That is the honest two-year picture.
 
-| Universe | 365d book / DD / Sharpe | full DB book / DD / Sharpe |
-|----------|-------------------------|----------------------------|
-| current (look-ahead) | +246% / 13.8 / 2.72 | +298% / 30.6 / 1.28 |
-| frozen (static lists) | +71% / 14.5 / 1.63 | +103% / 22.2 / 0.90 |
-| **sp500 PIT** | **+95.5% / 13.8 / 1.91** | **+134% / 19.6 / 1.06** |
-
-365d = 2025-09-16 → 2026-10-10. Full DB = 2022-06-11 → 2026-10-10.
-Deflated Sharpe on pick_15 / S&P (90 trials in the family ledger): 365d DSR
-0.71, full-DB 0.16. PSR>0 is ~0.99 — the book beats cash; it is not the best
-of N lucky trials at 95%.
+| Universe | 365d_recent book / DD / Sharpe | 365d_prior book / DD / Sharpe |
+|----------|--------------------------------|-------------------------------|
+| current (look-ahead) | +266% / 14.4 / 2.51 | **−14.2% / 31.0 / −0.47** |
+| frozen (static lists) | +125% / 13.7 / 2.06 | −9.7% / 22.8 / −0.45 |
+| **sp500 PIT** | **+100.2% / 18.7 / 1.66** | **+6.2% / 22.8 / 0.27** |
 
 Medium SoT is the cousin (portal 15 names / 2.0×; disk file still says 10 /
 2.5× — see MEDIUM_DRIFT.md).
 
-**Name count on S&P PIT** (same isolated walk; not the full-stack STRICT
-table in NAME_COUNT.md):
+**Name count on S&P PIT** (isolated walk). The STRICT executor table in
+NAME_COUNT.md is **not PIT** — `backtester.py` still uses today's screener.
 
-| Count | 365d book | 365d DD | full book | full DD | vs pick_15 |
-|------:|----------:|--------:|----------:|--------:|------------|
-| 8 | +103.5% | 20.4% | +165.8% | 23.2% | FAIL DD |
-| 15 | +95.5% | 13.8% | +134.4% | 19.6% | base |
-| 25 | +71.8% | 12.6% | +109.0% | 14.2% | FAIL ret |
+| Count | recent book | recent DD | prior book | prior DD | vs pick_15 |
+|------:|------------:|----------:|-----------:|---------:|------------|
+| 8 | +167.3% | 26.7% | +1.6% | 29.0% | FAIL DD both |
+| 15 | +100.2% | 18.7% | +6.2% | 22.8% | base |
+| 25 | +68.3% | 17.4% | +10.1% | 17.9% | FAIL recent ret; PASS prior |
 
-Fewer names no longer win once look-ahead is removed. pick_8 makes more and
-breaks the 2 pp DD gate. Aggressive runtime stays **Lab 8** because that is
-the executor stack (STRICT 8 vs 25 in NAME_COUNT.md still stands), not
-because this isolated walk prefers 8.
+Aggressive runtime stays **Lab 8** from the non-PIT STRICT executor table, not
+because this walk prefers 8.
 
-**Lab 8 concentrated** on S&P PIT: 365d +121% / 20.8 DD; full +189% / 22.7.
-More return, FAIL 2 pp DD vs pick_15 both windows. HOLD. Not a promote.
+**Lab 8 concentrated** on S&P PIT: recent +96% / 16.0 (FAIL ret vs pick_15);
+prior +24.0% / 24.8 (PASS, DD +2.0 pp on the gate). HOLD both-windows. Not a
+promote. Runtime stays Lab 8 via portal.
 
-**STRICT vs FULL on employed Lab 8 / VTI=0** (365d 2025-11-14→2026-09-20):
-STRICT +1.60% / 0.16 / −11.90%; FULL +7.66% / 0.57 / −12.38% (dDD +0.48pp).
-FULL is **not PIT** — do not promote scanners. Runtime scanners stay ON.
+**A2B1 skip-Monday fade** (≥8% prior close, next open) on S&P PIT:
+recent **+108.1% / 16.0 / 1.90** vs pick_15 +100.2% / 18.7 (**+7.9 pp**, DD
+−2.7 pp, 118 fades, 0 weekend); prior **+6.7% / 19.0 / 0.29** vs +6.2% / 22.8
+(**+0.5 pp**, DD −3.8 pp, 37 fades). **CANDIDATE** both windows. Prior-year
+edge is tiny. Lab already has the flag. **No `.env`.** Not Medium/live
+until named.
 
-**Time of day:** a 9:30–10:00 entry block failed the prior-365d gate. Do not
-deploy it.
+**STRICT vs FULL on employed Lab 8 / VTI=0** (365d 2025-11-14→2026-09-20,
+non-PIT): STRICT +1.60% / 0.16 / −11.90%; FULL +7.66% / 0.57 / −12.38%.
+Do not promote scanners. Runtime scanners stay ON.
+
+**Time of day:** a 9:30–10:00 entry block failed the prior-365d gate
+(pre-PIT). Do not deploy it.
 
 ## Reject
 
 | Idea | Evidence |
 |------|----------|
-| A2B1 skip-Monday fade (≥8% prior close, next open) | S&P PIT 10bps MTM 2026-10-10: 365d −8.9pp / DD +0.7pp (84 fades); full −22.2pp / DD −1.4pp (142 fades). FAIL return both windows. Open gaps yfinance (Alpaca SIP blocked). Pre-PIT +9pp does not survive. Lab flag left on — named kill only. |
-| Risk-adjusted rank (distance / 20d vol) | S&P PIT 365d −61pp / full −103pp vs pick_15. 365d DD better. Kills the book. |
-| 12% vol target (126-bar book vol) | S&P PIT 365d −23pp / full −29pp. DD −4.7 / −5.3 pp. FAIL return gate. |
-| Lab 8 vs pick_15 on S&P PIT | More book, DD +7.0 / +3.0 pp. FAIL 2 pp gate. |
-| Friday flatten | S&P PIT 365d +38% / 24.9 DD vs pick_15 +96% / 13.8; full +53% / 24.9 vs +134% / 19.6 |
-| Fade Friday winners into Monday | After ≥5% up-day, Monday open **+0.70%** continuation |
-| Thursday-only flatten on the long book | A1–A3 B2 negative on all four exit policies |
-| EW short-winners overnight | −0.21%/night at ≥5%; Monday −0.73% (short beta) |
-| take_1r as default | S&P PIT 365d +82% / 14.3 vs +96% / 13.8; full +111% / 19.9 vs +134% / 19.6 |
-| Open-price models | Ridge / gap-persist lose to `pred = prior close` |
-| “Monday is a unique first-hour dump” | WOP ≈ 1.0 every weekday; Tuesday slightly worse |
-| MC 200/200 as a promote | Median return 4.7%, mean 21%, p5 −44% |
-| Always-on metals 33/10 | HOLD vs 33/67; not promoted |
-| VTI tactical $5k shadow | Promote criteria not passed |
-| Block NYSE entries 9:30–10:00 | 5m walk: last 365d +3.09pp, prior 365d −0.25pp / Sharpe worse |
-| Fat-loser open −1% drip | 365d −33pp book vs hold; 1000d −59pp. Shallower DD, kills the book |
+| Close trail: arm at +5% of the filled entry, exit next open after a later close is 3% under the peak close | Daily baseline A, frozen ABC panel, 5 bps/side. Prior 2023-11-15→2025-05-01: **−11.7 pp** and drawdown worse. Recent 2025-05-02→2026-10-14: **−43.6 pp**, drawdown better. FAIL both windows. Not a Live test. |
+| Risk-adjusted rank (distance / 20d vol) | Disjoint S&P PIT: recent **−61 pp** (FAIL); prior +17 pp (PASS). Kill — fails the year that has the edge. |
+| 12% vol target (126-bar book vol) | Disjoint S&P PIT: recent **−31 pp** (FAIL); prior +5 pp (PASS). DD better. FAIL return gate on the recent year. |
+| Lab 8 vs pick_15 on S&P PIT | recent FAIL ret; prior PASS. FAIL both-windows. |
+| take_1r as default | recent scrapes PASS (+0.5 pp / DD +0.9); prior FAIL (−3.8 pp). FAIL both-windows. |
+| Friday flatten | recent +28% / 33.7 vs pick_15 +100% / 18.7; prior +2.4% / 17.4 vs +6.2% / 22.8 |
+| Fat-loser open −1% drip | Session S&P PIT recent +24% / 6.6 vs +100% / 18.7; prior +3.6% / 9.3 vs +6.2% / 22.8. FAIL ret. Portal already OFF. |
+| Fade Friday winners into Monday *(pre-PIT)* | After ≥5% up-day, Monday open **+0.70%** continuation |
+| Thursday-only flatten on the long book *(pre-PIT)* | A1–A3 B2 negative on all four exit policies |
+| EW short-winners overnight *(pre-PIT)* | −0.21%/night at ≥5%; Monday −0.73% (short beta) |
+| Open-price models *(pre-PIT)* | Ridge / gap-persist lose to `pred = prior close` |
+| “Monday is a unique first-hour dump” *(pre-PIT)* | WOP ≈ 1.0 every weekday |
+| MC 200/200 as a promote *(pre-PIT)* | Median return 4.7%, mean 21%, p5 −44% |
+| Always-on metals 33/10 *(pre-PIT)* | HOLD vs 33/67; not promoted |
+| VTI tactical $5k shadow *(pre-PIT)* | Promote criteria not passed |
+| Block NYSE entries 9:30–10:00 *(pre-PIT)* | last 365d +3.09pp, prior 365d −0.25pp |
 
 ## Do not confuse with production
 
-The old Lab 8 walk that printed +123% / DD 12% (365d, no costs, today's
-screener) is look-ahead. On S&P PIT with 10 bps it is +121% / 20.8 DD and
-fails the gate vs pick_15. Aggressive runtime is still Lab 8 + scanners ON +
-fat-loser OFF + A2B1 ON (portal). A2B1 is leftover wiring; the PIT walk
-failed. Named kill only.
+Aggressive runtime is still Lab 8 + scanners ON + fat-loser OFF + A2B1 ON
+(portal). A2B1 now clears the isolated-walk gate; Lab already has it.
+Medium and live stay off until you name them. Lab-8-as-walk-promote still
+fails the honest book.
 
 v1.5.4 “Dynamic VTI 40–75%” is the **documented** lock. Both paper books
-currently run **VTI = 0**. Treat that as an explicit employed stack until a
-STRICT A/B vs 40% floor is re-run on **this** tape.
+currently run **VTI = 0**.

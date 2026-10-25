@@ -36,6 +36,7 @@ DEFAULT_CRYPTO_COMMISSION_BPS = float(os.getenv("BACKTEST_CRYPTO_COMMISSION_BPS"
 class BacktestRunOptions:
     fast_mode: bool = False
     no_thinking: bool = False
+    strict_pit: bool = False
     equity_slippage_bps: float = DEFAULT_EQUITY_SLIPPAGE_BPS
     crypto_slippage_bps: float = DEFAULT_CRYPTO_SLIPPAGE_BPS
     equity_commission_bps: float = DEFAULT_EQUITY_COMMISSION_BPS
@@ -50,6 +51,7 @@ class BacktestRunOptions:
     export_csv: Path | None = None
     slippage_sensitivity: bool = False
     slippage_levels_bps: tuple[int, ...] = (0, 5, 10, 25)
+    fill_timing: str = "same_close"
 
 
 RUN_OPTIONS = BacktestRunOptions()
@@ -97,8 +99,16 @@ def _db_mtime() -> float | None:
         return None
 
 
-def _disk_key(sim_days: int | None, use_max: bool) -> str:
+def _disk_key(
+    sim_days: int | None,
+    use_max: bool,
+    *,
+    session_calendar_ticker: str | None = None,
+) -> str:
     tag = "max" if use_max else f"days_{sim_days or 0}"
+    if session_calendar_ticker:
+        calendar = str(session_calendar_ticker).strip().upper().replace("/", "_")
+        return f"sessions_v2_{calendar}_{tag}"
     return tag
 
 
@@ -132,11 +142,16 @@ def _save_disk_cache(key_str: str, data: pd.DataFrame) -> None:
 
 
 def calendar_days_to_fetch(sim_days: int, *, min_history: int, warmup_buffer: int = 45) -> int:
-    return int(sim_days + min_history + warmup_buffer)
+    # `sim_days` is a calendar-day window; `min_history` is market-session bars.
+    warmup_calendar_days = int(np.ceil(min_history * 365.25 / 252.0))
+    return int(sim_days + warmup_calendar_days + warmup_buffer)
 
 
 def min_rows_for_backtest(sim_days: int, *, min_history: int) -> int:
-    return min_history + max(10, int(sim_days * 0.85))
+    # Count actual exchange sessions, not calendar rows that may include crypto
+    # weekends carried forward into the equity panel.
+    sim_sessions = int(np.ceil(max(0, sim_days) * 252.0 / 365.25))
+    return min_history + max(10, sim_sessions)
 
 
 def ensure_daily_data_cached(
@@ -149,16 +164,34 @@ def ensure_daily_data_cached(
     load_close_matrix: Callable[..., pd.DataFrame],
     fetch_daily_history: Callable[..., Any],
     fetch_daily_history_for_tickers: Callable[..., Any] | None = None,
+    session_calendar_ticker: str | None = None,
 ) -> pd.DataFrame:
-    """Memory + disk cache for daily close matrix."""
+    """Memory + disk cache for daily closes, optionally limited to market sessions."""
     if refresh:
         reset_caches(disk=True)
 
-    disk_key = _disk_key(days if not use_max else None, use_max)
+    disk_key = _disk_key(
+        days if not use_max else None,
+        use_max,
+        session_calendar_ticker=session_calendar_ticker,
+    )
+    session_tag = (
+        str(session_calendar_ticker).strip().upper()
+        if session_calendar_ticker
+        else "all_dates"
+    )
+
+    def _load_matrix() -> pd.DataFrame:
+        if session_calendar_ticker:
+            return load_close_matrix(
+                interval="1d", session_calendar_ticker=session_calendar_ticker
+            )
+        return load_close_matrix(interval="1d")
+
     if not refresh:
         disk_df = _load_disk_cache(disk_key)
         if disk_df is not None and len(disk_df) >= min_history + 10:
-            _DATA_CACHE[("1d", disk_key)] = disk_df.copy()
+            _DATA_CACHE[("1d", disk_key, session_tag)] = disk_df.copy()
             _trim_data_cache()
             if use_max:
                 return disk_df.copy()
@@ -166,18 +199,18 @@ def ensure_daily_data_cached(
             need_rows = min_rows_for_backtest(sim_days, min_history=min_history)
             if len(disk_df) >= need_rows:
                 out = disk_df.iloc[-need_rows:].copy() if len(disk_df) > need_rows else disk_df.copy()
-                _DATA_CACHE[("1d", "days", sim_days)] = out.copy()
+                _DATA_CACHE[("1d", "days", sim_days, session_tag)] = out.copy()
                 _trim_data_cache()
                 return out
 
     if use_max:
-        mem_key = ("1d", "max", None)
+        mem_key = ("1d", "max", None, session_tag)
         if not refresh and mem_key in _DATA_CACHE:
             cached = _DATA_CACHE[mem_key]
             if len(cached) >= min_history + 10:
                 return cached.copy()
         fetch_daily_history(use_max=True)
-        data = load_close_matrix(interval="1d")
+        data = _load_matrix()
         _DATA_CACHE[mem_key] = data.copy()
         _trim_data_cache()
         _save_disk_cache(disk_key, data)
@@ -185,7 +218,7 @@ def ensure_daily_data_cached(
 
     sim_days = days or backtest_days
     need_rows = min_rows_for_backtest(sim_days, min_history=min_history)
-    mem_key = ("1d", "days", sim_days)
+    mem_key = ("1d", "days", sim_days, session_tag)
 
     if not refresh and mem_key in _DATA_CACHE:
         cached = _DATA_CACHE[mem_key]
@@ -195,7 +228,7 @@ def ensure_daily_data_cached(
     for extra in (1000, 730, 500):
         if extra <= sim_days:
             continue
-        long_key = ("1d", "days", extra)
+        long_key = ("1d", "days", extra, session_tag)
         if long_key in _DATA_CACHE and len(_DATA_CACHE[long_key]) >= need_rows:
             data = _DATA_CACHE[long_key].iloc[-need_rows:].copy()
             _DATA_CACHE[mem_key] = data.copy()
@@ -203,7 +236,7 @@ def ensure_daily_data_cached(
             return data
 
     if not refresh:
-        data = load_close_matrix(interval="1d")
+        data = _load_matrix()
         if len(data) >= need_rows:
             if len(data) > need_rows:
                 data = data.iloc[-need_rows:]
@@ -214,15 +247,21 @@ def ensure_daily_data_cached(
 
     fetch_days = calendar_days_to_fetch(sim_days, min_history=min_history)
     fetch_daily_history(fetch_days)
-    data = load_close_matrix(interval="1d")
+    data = _load_matrix()
     if len(data) > need_rows:
         data = data.iloc[-need_rows:]
     if len(data) < min_history:
         fetch_daily_history(use_max=True)
-        data = load_close_matrix(interval="1d")
+        data = _load_matrix()
     need_rows = min_rows_for_backtest(sim_days, min_history=min_history)
     if len(data) > need_rows:
         data = data.iloc[-need_rows:].copy()
+    if session_calendar_ticker and len(data) < need_rows:
+        raise RuntimeError(
+            "Insufficient exchange-session history for requested backtest: "
+            f"need {need_rows} rows ({min_history} warmup + requested calendar window), "
+            f"found {len(data)}. Refresh/fetch more daily history before running."
+        )
     _DATA_CACHE[mem_key] = data.copy()
     _trim_data_cache()
     _save_disk_cache(disk_key, data)
@@ -307,6 +346,15 @@ def effective_execution(
     return adj_price, total_cost, slip
 
 
+def _downside_deviation(values) -> float:
+    """Sqrt of the mean squared shortfall below zero, over every observation."""
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return float("nan")
+    return float(np.sqrt(np.mean(np.minimum(arr, 0.0) ** 2)))
+
+
 def rolling_metric_series(
     equity_curve: list[float] | pd.Series,
     *,
@@ -318,9 +366,8 @@ def rolling_metric_series(
         return {}
     roll = returns.rolling(window, min_periods=max(21, window // 3))
     sharpe = (roll.mean() / roll.std()) * SHARPE_SCALE
-    downside = returns.where(returns < 0)
-    roll_down = downside.rolling(window, min_periods=max(21, window // 3))
-    sortino = (roll.mean() / roll_down.std()) * SHARPE_SCALE
+    downside_dev = roll.apply(_downside_deviation, raw=True)
+    sortino = (roll.mean() / downside_dev.replace(0, np.nan)) * SHARPE_SCALE
     dd = (curve / curve.cummax()) - 1
     roll_peak = curve.rolling(window, min_periods=1).max()
     roll_dd = ((curve - roll_peak) / roll_peak) * 100
@@ -334,6 +381,62 @@ def rolling_metric_series(
     }
 
 
+def _closed_trade_stats(
+    trades: list | None,
+    *,
+    total_return_pct: float,
+    total_orders: int,
+) -> dict[str, Any]:
+    """Trade-level stats from closed-trade rows, or the legacy per-order quotient."""
+    per_order = (total_return_pct / total_orders) if total_orders > 0 else 0.0
+    if trades is None:
+        return {
+            "avg_trade_return_pct": round(per_order, 3),
+            "avg_trade_return_basis": "return_per_order",
+            "return_per_order_pct": round(per_order, 3),
+            "closed_trade_count": None,
+            "closed_trade_unknown_count": None,
+            "closed_trade_win_rate_pct": None,
+            "trade_profit_factor": None,
+        }
+    known = [
+        t
+        for t in trades
+        if t.get("realized_pnl") is not None and t.get("return_pct") is not None
+    ]
+    unknown_n = len(trades) - len(known)
+    pnls = [float(t["realized_pnl"]) for t in known]
+    rets = [float(t["return_pct"]) for t in known]
+    gains = sum(p for p in pnls if p > 0)
+    losses = abs(sum(p for p in pnls if p < 0))
+    n = len(known)
+    if n == 0:
+        trade_pf = None
+        win_rate = None if unknown_n else 0.0
+        avg = None if unknown_n else 0.0
+    elif losses > 0:
+        trade_pf = gains / losses
+        win_rate = 100.0 * sum(1 for p in pnls if p > 0) / n
+        avg = sum(rets) / len(rets)
+    elif gains > 0:
+        trade_pf = None
+        win_rate = 100.0 * sum(1 for p in pnls if p > 0) / n
+        avg = sum(rets) / len(rets)
+    else:
+        trade_pf = 0.0
+        win_rate = 0.0
+        avg = sum(rets) / len(rets)
+    return {
+        "avg_trade_return_pct": None if avg is None else round(avg, 3),
+        "avg_trade_return_basis": "closed_trade",
+        "return_per_order_pct": round(per_order, 3),
+        "closed_trade_count": n,
+        "closed_trade_unknown_count": unknown_n,
+        "closed_trade_win_rate_pct": None if win_rate is None else round(win_rate, 1),
+        "trade_profit_factor": None if trade_pf is None else round(trade_pf, 2),
+    }
+
+
 def compute_performance_metrics(
     equity_curve: list[float] | pd.Series,
     *,
@@ -341,38 +444,83 @@ def compute_performance_metrics(
     benchmark_return_pct: float | None = None,
     total_orders: int = 0,
     equity_index: list[str] | None = None,
+    closed_trades: list | None = None,
 ) -> dict[str, Any]:
+    """Performance from an equity mark series.
+
+    The path used for returns starts at ``initial_capital`` and then follows
+    each supplied mark. Sharpe stays mean / sample std (ddof=1) * sqrt(252),
+    rf=0, on that path. Sortino uses downside deviation
+    sqrt(mean(min(r, 0)^2)) over every return, MAR=0. ``calmar`` is CAGR /
+    |max drawdown|. ``return_over_max_dd`` is total return / |max drawdown|.
+    ``win_rate_pct`` and ``profit_factor`` are daily (up-mark rate and the
+    ratio of positive to negative mark returns). ``avg_trade_return_pct`` is
+    the mean known-basis closed-trade return when ``closed_trades`` is passed.
+    When ``closed_trades`` is omitted it stays the total-return / order-count
+    quotient, and ``avg_trade_return_basis`` is ``return_per_order``.
+    Unknown-basis closes are omitted from the trade win rate, trade profit
+    factor, and average closed-trade return.
+    """
     curve = pd.Series(equity_curve, dtype=float)
     if equity_index and len(equity_index) == len(curve):
         curve.index = pd.to_datetime(equity_index)
 
     if curve.empty:
-        base = {
+        trade_stats = _closed_trade_stats(
+            closed_trades, total_return_pct=0.0, total_orders=total_orders
+        )
+        return {
             "final_equity": initial_capital,
             "total_return_pct": 0.0,
             "sharpe": 0.0,
             "sortino": 0.0,
+            "sortino_negative_subset": 0.0,
             "calmar": 0.0,
+            "return_over_max_dd": 0.0,
+            "cagr_pct": 0.0,
             "max_drawdown_pct": 0.0,
             "win_rate_pct": 0.0,
             "rolling_sharpe_mean": 0.0,
             "profit_factor": 0.0,
-            "avg_trade_return_pct": 0.0,
+            "total_orders": total_orders,
+            **trade_stats,
         }
-        return base
 
-    returns = curve.pct_change().dropna()
-    total_ret = (curve.iloc[-1] / initial_capital - 1) * 100
-    sharpe = (returns.mean() / returns.std()) * SHARPE_SCALE if returns.std() != 0 else 0.0
-    downside = returns[returns < 0]
-    sortino = (
-        (returns.mean() / downside.std()) * SHARPE_SCALE
-        if len(downside) > 0 and downside.std() != 0
+    path = pd.concat(
+        [pd.Series([float(initial_capital)], dtype=float), curve.reset_index(drop=True)],
+        ignore_index=True,
+    )
+    returns = path.pct_change().dropna()
+    total_ret = (float(curve.iloc[-1]) / initial_capital - 1) * 100 if initial_capital else 0.0
+    ret_std = float(returns.std()) if len(returns) else 0.0
+    sharpe = (
+        (returns.mean() / ret_std) * SHARPE_SCALE
+        if np.isfinite(ret_std) and ret_std != 0
         else 0.0
     )
-    dd = (curve / curve.cummax()) - 1
-    max_dd = float(dd.min() * 100)
-    calmar = (total_ret / abs(max_dd)) if max_dd != 0 else 0.0
+    downside = returns[returns < 0]
+    sortino_negative_subset = (
+        (returns.mean() / downside.std()) * SHARPE_SCALE
+        if len(downside) > 1 and downside.std() != 0
+        else 0.0
+    )
+    down_dev = _downside_deviation(returns.to_numpy(dtype=float)) if len(returns) else float("nan")
+    sortino = (
+        float(returns.mean() / down_dev * SHARPE_SCALE)
+        if np.isfinite(down_dev) and down_dev > 0
+        else 0.0
+    )
+    dd = (path / path.cummax()) - 1
+    max_dd = float(dd.min() * 100) if len(dd) else 0.0
+    n_rets = int(len(returns))
+    final_eq = float(curve.iloc[-1])
+    if n_rets > 0 and initial_capital > 0 and final_eq > 0:
+        cagr = (final_eq / float(initial_capital)) ** (252.0 / n_rets) - 1.0
+    else:
+        cagr = 0.0
+    max_dd_frac = abs(max_dd) / 100.0
+    calmar = (cagr / max_dd_frac) if max_dd_frac > 1e-12 else 0.0
+    return_over_max_dd = (total_ret / abs(max_dd)) if max_dd != 0 else 0.0
     win_rate = float((returns > 0).mean() * 100) if len(returns) else 0.0
 
     roll = returns.rolling(ROLLING_METRIC_WINDOW, min_periods=21)
@@ -384,29 +532,35 @@ def compute_performance_metrics(
     gains = returns[returns > 0].sum()
     losses = abs(returns[returns < 0].sum())
     profit_factor = float(gains / losses) if losses > 0 else (float(gains) if gains > 0 else 0.0)
-    avg_trade = (total_ret / total_orders) if total_orders > 0 else 0.0
+    trade_stats = _closed_trade_stats(
+        closed_trades, total_return_pct=total_ret, total_orders=total_orders
+    )
 
     rolling = rolling_metric_series(curve)
 
     out: dict[str, Any] = {
-        "final_equity": round(float(curve.iloc[-1]), 2),
+        "final_equity": round(final_eq, 2),
         "total_return_pct": round(total_ret, 2),
-        "sharpe": round(sharpe, 2),
-        "sortino": round(sortino, 2),
-        "calmar": round(calmar, 2),
+        "sharpe": round(float(sharpe), 2),
+        "sortino": round(float(sortino), 2),
+        "sortino_negative_subset": round(float(sortino_negative_subset), 2),
+        "calmar": round(float(calmar), 2),
+        "return_over_max_dd": round(float(return_over_max_dd), 2),
+        "cagr_pct": round(float(cagr * 100.0), 2),
         "max_drawdown_pct": round(max_dd, 2),
         "win_rate_pct": round(win_rate, 1),
         "rolling_sharpe_mean": round(rolling_sharpe_mean, 2),
         "profit_factor": round(profit_factor, 2),
-        "avg_trade_return_pct": round(avg_trade, 3),
         "total_orders": total_orders,
+        **trade_stats,
     }
+    path_dd_pct = ((path / path.cummax()) - 1.0) * 100.0
+    mark_dd = path_dd_pct.iloc[1:]
+    if len(mark_dd):
+        out["drawdown_series"] = [round(float(v), 3) for v in mark_dd.tolist()[-120:]]
     if rolling:
         out["rolling_sharpe_series"] = [
             round(float(v), 3) for v in rolling["rolling_sharpe"].dropna().tolist()[-120:]
-        ]
-        out["drawdown_series"] = [
-            round(float(v), 3) for v in rolling["drawdown_pct"].dropna().tolist()[-120:]
         ]
     if benchmark_return_pct is not None:
         out["benchmark_return_pct"] = round(benchmark_return_pct, 2)
@@ -466,20 +620,22 @@ def compute_regime_breakdown(
 ) -> list[dict[str, Any]]:
     """Attribute daily PnL and return stats to each RHYME regime label."""
     curve = list(equity_curve)
-    if len(curve) != len(regime_labels) or len(curve) < 2:
+    if len(curve) != len(regime_labels) or len(curve) < 1:
         return []
 
     pnl_by_regime: dict[str, float] = {}
     returns_by_regime: dict[str, list[float]] = {}
-    trade_days = len(curve) - 1
+    trade_days = len(curve)
 
-    for i in range(1, len(curve)):
-        reg = regime_labels[i]
-        prev_eq = curve[i - 1]
-        day_ret = curve[i] / prev_eq - 1.0 if prev_eq else 0.0
-        day_pnl = curve[i] - prev_eq
+    def _add(reg: str, prev_eq: float, eq: float) -> None:
+        day_ret = eq / prev_eq - 1.0 if prev_eq else 0.0
+        day_pnl = eq - prev_eq
         pnl_by_regime[reg] = pnl_by_regime.get(reg, 0.0) + day_pnl
         returns_by_regime.setdefault(reg, []).append(day_ret)
+
+    _add(regime_labels[0], float(initial_capital), float(curve[0]))
+    for i in range(1, len(curve)):
+        _add(regime_labels[i], float(curve[i - 1]), float(curve[i]))
 
     total_pnl = curve[-1] - initial_capital
     rows: list[dict[str, Any]] = []
@@ -519,7 +675,7 @@ def format_regime_breakdown_table(rows: list[dict[str, Any]]) -> str:
         return "--- Regime breakdown ---\n(no data)"
     lines = ["--- Regime breakdown ---"]
     lines.append(
-        f"{'Regime':<38} {'Days':>5} {'%Days':>6} {'Win%':>6} "
+        f"{'Regime':<38} {'Days':>5} {'%Days':>6} {'Up%':>6} "
         f"{'AvgDay%':>8} {'Sharpe':>7} {'PnL $':>10} {'Contrib%':>9}"
     )
     lines.append("-" * 95)
@@ -537,6 +693,57 @@ def format_regime_breakdown_table(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def score_chronological_holdout(
+    equity_values: list[float] | pd.Series,
+    bar_indices: list[int],
+    *,
+    test_begin: int,
+    test_end: int,
+    initial_capital: float,
+) -> dict[str, Any]:
+    """Score equity marks whose bar index is in ``[test_begin, test_end)``.
+
+    Starting equity is the last mark strictly before ``test_begin``. When the
+    test interval begins on the first mark, starting equity is
+    ``initial_capital``. The curve is not rebuilt and no portfolio is reset:
+    cash and positions already inside the marks stay there. Only test-window
+    P&L enters the reported return, Sharpe, Sortino, and max drawdown.
+    """
+    pairs = [
+        (int(bar), float(eq))
+        for eq, bar in zip(equity_values, bar_indices)
+        if eq is not None and bar is not None
+    ]
+    prior = [eq for bar, eq in pairs if bar < int(test_begin)]
+    window = [(bar, eq) for bar, eq in pairs if int(test_begin) <= bar < int(test_end)]
+    start = float(prior[-1]) if prior else float(initial_capital)
+    if not window:
+        return {
+            "total_return_pct": 0.0,
+            "sharpe": 0.0,
+            "sortino": 0.0,
+            "max_drawdown_pct": 0.0,
+            "start_equity": start,
+            "final_equity": start,
+            "test_marks": 0,
+            "test_bar_first": None,
+            "test_bar_last": None,
+        }
+    marks = [eq for _bar, eq in window]
+    perf = compute_performance_metrics(marks, initial_capital=start, total_orders=0)
+    return {
+        "total_return_pct": perf["total_return_pct"],
+        "sharpe": perf["sharpe"],
+        "sortino": perf["sortino"],
+        "max_drawdown_pct": perf["max_drawdown_pct"],
+        "start_equity": start,
+        "final_equity": perf["final_equity"],
+        "test_marks": len(marks),
+        "test_bar_first": window[0][0],
+        "test_bar_last": window[-1][0],
+    }
+
+
 def walk_forward_purged(
     data: pd.DataFrame,
     *,
@@ -544,8 +751,16 @@ def walk_forward_purged(
     n_folds: int,
     run_fn: Callable[[pd.DataFrame, int, int], dict],
     embargo_bars: int = PURGE_EMBARGO_BARS,
+    select_fn: Callable[[pd.DataFrame], Any] | None = None,
 ) -> list[dict]:
-    """Purged walk-forward: expanding train, OOS test segment, embargo gap."""
+    """Chronological holdout over expanding prefixes.
+
+    Each reported return, Sharpe, Sortino, and max drawdown uses only
+    ``[test_begin, test_end)``. The full-prefix metrics stay on the legacy
+    fields. ``embargo_bars`` is metadata: nothing is fitted, so the gap does
+    not purge a training set. ``select_fn``, when supplied by a test or a
+    future caller, receives only ``data.iloc[:train_end]``.
+    """
     if n_folds < 2 or len(data) < min_history + n_folds * 40:
         return []
     sim_start = min_history
@@ -560,18 +775,43 @@ def walk_forward_purged(
         if test_end - test_begin < 15 or train_end < min_history:
             continue
         train_data = data.iloc[:train_end].copy()
-        _ = train_data  # expanding context — run_fn receives full history through test_end
+        if select_fn is not None:
+            select_fn(train_data)
         result = run_fn(data.iloc[:test_end].copy(), test_begin, test_end)
+        equity_values = result.get("holdout_equity_values") or result.get("equity_values") or []
+        bar_index = result.get("holdout_equity_bar_index") or result.get("equity_bar_index") or []
+        holdout = score_chronological_holdout(
+            equity_values,
+            bar_index,
+            test_begin=test_begin,
+            test_end=test_end,
+            initial_capital=float(result.get("initial_capital") or 0.0),
+        )
+        scored = bool(bar_index)
         rows.append(
             {
                 "fold": fold + 1,
+                "train_end": train_end,
+                "test_begin": test_begin,
+                "test_end": test_end,
                 "train_bars": train_end - min_history,
                 "test_bars": test_end - test_begin,
                 "embargo_bars": embargo_bars,
-                "return_pct": result.get("total_return_pct"),
-                "sharpe": result.get("sharpe"),
-                "sortino": result.get("sortino"),
-                "max_dd_pct": result.get("max_drawdown_pct"),
+                "scoring": "chronological_holdout" if scored else "legacy_full_prefix",
+                "embargo_note": (
+                    "Embargo is recorded only. No parameter fit uses these bars."
+                ),
+                "return_pct": holdout["total_return_pct"] if scored else result.get("total_return_pct"),
+                "sharpe": holdout["sharpe"] if scored else result.get("sharpe"),
+                "sortino": holdout["sortino"] if scored else result.get("sortino"),
+                "max_dd_pct": holdout["max_drawdown_pct"] if scored else result.get("max_drawdown_pct"),
+                "holdout_start_equity": holdout["start_equity"],
+                "test_bar_first": holdout["test_bar_first"],
+                "test_bar_last": holdout["test_bar_last"],
+                "legacy_return_pct": result.get("total_return_pct"),
+                "legacy_sharpe": result.get("sharpe"),
+                "legacy_sortino": result.get("sortino"),
+                "legacy_max_dd_pct": result.get("max_drawdown_pct"),
             }
         )
     return rows
@@ -580,22 +820,33 @@ def walk_forward_purged(
 def format_walk_forward_table(rows: list[dict], *, purged: bool = False) -> str:
     if not rows:
         return "Walk-forward: insufficient bars for requested folds."
-    title = "Purged walk-forward" if purged else "Walk-forward"
+    holdout = any(r.get("scoring") == "chronological_holdout" for r in rows)
+    if holdout:
+        title = "Chronological holdout"
+    else:
+        title = "Purged walk-forward" if purged else "Walk-forward"
     lines = [
         f"--- {title} ---",
-        f"{'Fold':>4} {'Train':>6} {'Test':>5} {'Return':>9} {'Sharpe':>7} {'Sort':>6} {'MaxDD':>8}",
-        "-" * 52,
+        f"{'Fold':>4} {'Train':>6} {'Test':>5} {'Return':>9} {'Sharpe':>7} {'Sort':>6} {'MaxDD':>8} {'Legacy':>9}",
+        "-" * 62,
     ]
     for r in rows:
+        legacy = r.get("legacy_return_pct")
+        legacy_s = f"{legacy:>+8.2f}%" if legacy is not None else f"{'':>9}"
         lines.append(
             f"{r['fold']:>4} {r.get('train_bars', r.get('bars', 0)):>6} "
             f"{r.get('test_bars', 0):>5} "
             f"{r['return_pct']:>+8.2f}% {r['sharpe']:>7.2f} "
-            f"{r.get('sortino', 0):>6.2f} {r['max_dd_pct']:>7.2f}%"
+            f"{r.get('sortino', 0):>6.2f} {r['max_dd_pct']:>7.2f}% {legacy_s}"
         )
     avg_sh = sum(r["sharpe"] or 0 for r in rows) / len(rows)
-    lines.append("-" * 52)
+    lines.append("-" * 62)
     lines.append(f"{'Avg':>4} {'':>6} {'':>5} {'':>9} {avg_sh:>7.2f}")
+    if holdout:
+        lines.append(
+            "Reported Return/Sharpe/Sortino/MaxDD use the test window only. "
+            "Legacy is the full-prefix return. Embargo bars are metadata; nothing is fitted."
+        )
     return "\n".join(lines)
 
 
@@ -799,10 +1050,17 @@ def generate_html_report(
         ("Return", f"{result.get('total_return_pct', 0):+.2f}%"),
         ("Sharpe", f"{result.get('sharpe', 0):.2f}"),
         ("Sortino", f"{result.get('sortino', 0):.2f}"),
-        ("Calmar", f"{result.get('calmar', 0):.2f}"),
+        ("Calmar (CAGR)", f"{result.get('calmar', 0):.2f}"),
+        ("Return/MaxDD", f"{result.get('return_over_max_dd', 0):.2f}"),
         ("Max DD", f"{result.get('max_drawdown_pct', 0):.2f}%"),
-        ("Win rate", f"{result.get('win_rate_pct', 0):.1f}%"),
-        ("Profit factor", f"{result.get('profit_factor', 0):.2f}"),
+        ("Up-day rate", f"{result.get('win_rate_pct', 0):.1f}%"),
+        ("Daily PF", f"{result.get('profit_factor', 0):.2f}"),
+        (
+            "Closed-trade win",
+            "n/a"
+            if result.get("closed_trade_win_rate_pct") is None
+            else f"{result.get('closed_trade_win_rate_pct'):.1f}%",
+        ),
         ("Orders", f"{result.get('total_orders', 0)}"),
     ]
     stat_html = "".join(
