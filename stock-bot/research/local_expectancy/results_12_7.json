@@ -1,0 +1,271 @@
+{
+  "hypothesis_id": "twelve_seven_v1",
+  "status": "reject",
+  "beats_vti_both_windows_both_costs": false,
+  "promotion": false,
+  "annual_target_claim": false,
+  "generated_at": "2026-10-25T04:25:25Z",
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "symbols_included": [
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "PLTR",
+    "NFLX",
+    "INTC",
+    "MU",
+    "SMCI",
+    "COIN",
+    "CRM",
+    "SHOP",
+    "SNOW",
+    "OKTA",
+    "HPE",
+    "BB",
+    "ARM",
+    "XOM",
+    "CVX",
+    "LNG",
+    "RTX",
+    "LMT",
+    "KTOS"
+  ],
+  "windows": {
+    "prior_365": {
+      "slip_5": {
+        "window_start": "2024-10-24",
+        "window_end": "2025-10-23",
+        "sessions": 250,
+        "learner": {
+          "return": -0.182721,
+          "max_drawdown": 0.216429,
+          "first_half": -0.182721,
+          "second_half": 0.0,
+          "sharpe": -1.172236,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.649966,
+          "mean_trade_pnl": -0.001965,
+          "monday_trade_pnl_share": 0.246289,
+          "bootstrap": {
+            "paths": 200,
+            "mean": -0.158089,
+            "median": -0.168701,
+            "p05": -0.3667
+          }
+        },
+        "baseline": {
+          "return": 0.002283,
+          "max_drawdown": 0.182648,
+          "first_half": 0.002283,
+          "second_half": 0.0,
+          "sharpe": 0.091113,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.25232,
+          "mean_trade_pnl": 2.5e-05,
+          "monday_trade_pnl_share": 9.278348
+        },
+        "vti_hold": {
+          "return": 0.17029,
+          "max_drawdown": 0.193036,
+          "sharpe": 0.904565
+        },
+        "spy_hold": {
+          "return": 0.171157,
+          "max_drawdown": 0.187552
+        },
+        "equal_weight_hold": {
+          "return": 0.59309,
+          "max_drawdown": 0.280443
+        }
+      },
+      "slip_10": {
+        "window_start": "2024-10-24",
+        "window_end": "2025-10-23",
+        "sessions": 250,
+        "learner": {
+          "return": -0.165912,
+          "max_drawdown": 0.199745,
+          "first_half": -0.165912,
+          "second_half": 0.0,
+          "sharpe": -1.091636,
+          "sessions": 250,
+          "trades": 91,
+          "turnover": 9.339233,
+          "mean_trade_pnl": -0.001823,
+          "monday_trade_pnl_share": 0.207536,
+          "bootstrap": {
+            "paths": 200,
+            "mean": -0.143534,
+            "median": -0.150878,
+            "p05": -0.352669
+          }
+        },
+        "baseline": {
+          "return": -0.006447,
+          "max_drawdown": 0.185058,
+          "first_half": -0.006447,
+          "second_half": 0.0,
+          "sharpe": 0.033053,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.274856,
+          "mean_trade_pnl": -6.9e-05,
+          "monday_trade_pnl_share": -3.03401
+        },
+        "vti_hold": {
+          "return": 0.16912,
+          "max_drawdown": 0.193036,
+          "sharpe": 0.89945
+        },
+        "spy_hold": {
+          "return": 0.169986,
+          "max_drawdown": 0.187552
+        },
+        "equal_weight_hold": {
+          "return": 0.591498,
+          "max_drawdown": 0.280443
+        }
+      }
+    },
+    "recent_365": {
+      "slip_5": {
+        "window_start": "2025-10-24",
+        "window_end": "2026-10-23",
+        "sessions": 251,
+        "learner": {
+          "return": 0.304805,
+          "max_drawdown": 0.105263,
+          "first_half": 0.113326,
+          "second_half": 0.171988,
+          "sharpe": 1.496936,
+          "sessions": 251,
+          "trades": 202,
+          "turnover": 18.8314,
+          "mean_trade_pnl": 0.001509,
+          "monday_trade_pnl_share": 0.188193,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.321937,
+            "median": 0.295457,
+            "p05": -0.043976
+          }
+        },
+        "baseline": {
+          "return": 0.093612,
+          "max_drawdown": 0.098524,
+          "first_half": 0.040055,
+          "second_half": 0.051494,
+          "sharpe": 0.563153,
+          "sessions": 251,
+          "trades": 206,
+          "turnover": 19.391679,
+          "mean_trade_pnl": 0.000454,
+          "monday_trade_pnl_share": -0.088209
+        },
+        "vti_hold": {
+          "return": 0.130586,
+          "max_drawdown": 0.089182,
+          "sharpe": 1.018184
+        },
+        "spy_hold": {
+          "return": 0.134437,
+          "max_drawdown": 0.08885
+        },
+        "equal_weight_hold": {
+          "return": 0.38216,
+          "max_drawdown": 0.149955
+        }
+      },
+      "slip_10": {
+        "window_start": "2025-10-24",
+        "window_end": "2026-10-23",
+        "sessions": 251,
+        "learner": {
+          "return": 0.287027,
+          "max_drawdown": 0.108346,
+          "first_half": 0.101676,
+          "second_half": 0.168245,
+          "sharpe": 1.426762,
+          "sessions": 251,
+          "trades": 202,
+          "turnover": 18.842301,
+          "mean_trade_pnl": 0.001421,
+          "monday_trade_pnl_share": 0.210185,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.30426,
+            "median": 0.27845,
+            "p05": -0.055706
+          }
+        },
+        "baseline": {
+          "return": 0.071934,
+          "max_drawdown": 0.103512,
+          "first_half": 0.030547,
+          "second_half": 0.04016,
+          "sharpe": 0.45891,
+          "sessions": 251,
+          "trades": 206,
+          "turnover": 19.390607,
+          "mean_trade_pnl": 0.000349,
+          "monday_trade_pnl_share": -0.176977
+        },
+        "vti_hold": {
+          "return": 0.129456,
+          "max_drawdown": 0.089182,
+          "sharpe": 1.010238
+        },
+        "spy_hold": {
+          "return": 0.133303,
+          "max_drawdown": 0.08885
+        },
+        "equal_weight_hold": {
+          "return": 0.380779,
+          "max_drawdown": 0.149955
+        }
+      }
+    }
+  },
+  "cells": [
+    {
+      "window": "prior_365",
+      "cost": "slip_5",
+      "failures": [
+        "vti_return",
+        "extension_return",
+        "extension_drawdown"
+      ],
+      "passed": false
+    },
+    {
+      "window": "prior_365",
+      "cost": "slip_10",
+      "failures": [
+        "vti_return",
+        "extension_return"
+      ],
+      "passed": false
+    },
+    {
+      "window": "recent_365",
+      "cost": "slip_5",
+      "failures": [],
+      "passed": true
+    },
+    {
+      "window": "recent_365",
+      "cost": "slip_10",
+      "failures": [],
+      "passed": true
+    }
+  ],
+  "entry_quote_max_age_seconds": 420,
+  "drawdown_slack_pp": 2.0
+}

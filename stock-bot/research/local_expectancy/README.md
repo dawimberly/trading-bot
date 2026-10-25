@@ -31,3 +31,13 @@ python run_study.py --refresh
 ```
 
 `results.json` is the gate output. The write-up is `RESULTS.md`. Status: **reject**. Promotion stays false.
+
+## 12-to-7, one later knob
+
+`preregistration_12_7.json` freezes the next sort before its returns: same eligibility, rank by adjusted close from t-12 months to t-7 months. Extension stays ma50 extension on that set.
+
+```bash
+python run_twelve_seven.py
+```
+
+`results_12_7.json` is the gate output. The write-up is `RESULTS_12_7.md`. Status: **reject**. It does not beat VTI on both windows. Promotion stays false.
