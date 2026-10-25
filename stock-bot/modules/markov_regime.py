@@ -7,7 +7,10 @@ RHYME_A–E. Soft-signals Dynamic VTI, conviction, and short sizing.
 
 Falls back to the current RHYME classifier (and a lightweight 3-state
 count matrix for thinking-engine prompts) when hmmlearn is missing or
-fit fails. Paper-focused; live stays off unless explicitly enabled.
+fit fails. A missing install is a warning plus ``reason=hmmlearn_missing``
+on the heartbeat (sizing stays 1.0). Paper-focused; live stays off unless
+``MARKOV_HMM_LIVE_ENABLED`` is set. Backtests neutralize time-of-day inputs
+so they do not read the present-day cache or the wall clock.
 """
 
 from __future__ import annotations
@@ -47,6 +50,9 @@ BEAR_THRESHOLD = -0.05
 HIGH_CONFIDENCE_FLOOR = 0.55
 
 _last_prediction: dict[str, Any] | None = None
+_last_fit_failure: str | None = None
+_hmmlearn_missing_logged = False
+_research_neutralize_tod = False
 _model_cache: dict[str, Any] = {
     "model": None,
     "state_order": list(HMM_STATE_KEYS),  # model component i → letter
@@ -236,6 +242,7 @@ def build_hmm_features(
     bubble_score_100: float | None = None,
     insider_intensity: float | None = None,
     sentiment: float | None = None,
+    neutralize_tod: bool | None = None,
 ) -> tuple[pd.DataFrame, list[str]] | tuple[None, list[str]]:
     """Build a daily feature matrix aligned to SPY closes.
 
@@ -282,8 +289,10 @@ def build_hmm_features(
     # Sector correlation proxy: rolling corr of SPY vs equal-weight sector cols when present
     sector_corr = _sector_corr_proxy(data, spy)
 
-    # Time-of-day bucket code from cached edge preference (daily series = best-entry bias)
-    tod_code = _tod_feature_series(spy.index)
+    # Time-of-day bucket. Neutral in backtests; live reads the present-day cache.
+    tod_code = _tod_feature_series(
+        spy.index, neutralize=_should_neutralize_tod(neutralize_tod)
+    )
 
     frame = pd.DataFrame(
         {
@@ -362,8 +371,52 @@ def _sector_corr_proxy(data, spy: pd.Series) -> pd.Series:
     return stacked.mean(axis=1).clip(-1.0, 1.0).fillna(0.5)
 
 
-def _tod_feature_series(index: pd.Index) -> pd.Series:
-    """Daily TOD feature: preferred entry-bucket code from analysis cache (static bias)."""
+def set_research_tod_neutral(active: bool) -> None:
+    """Block present-day time-of-day inputs while a backtest is replaying history.
+
+    Live and paper cycles leave this off and keep the session clock. ``run_backtest``
+    turns it on for the replay and off again before returning.
+    """
+    global _research_neutralize_tod
+    _research_neutralize_tod = bool(active)
+
+
+def research_tod_neutral() -> bool:
+    return bool(_research_neutralize_tod)
+
+
+def _should_neutralize_tod(explicit: bool | None) -> bool:
+    if explicit is not None:
+        return bool(explicit)
+    if _research_neutralize_tod:
+        return True
+    try:
+        if (
+            config.backtest_paper_sleeves_context()
+            or config.backtest_strict_pit_context()
+            or config.backtest_live_conservative_context()
+        ):
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def _stamp_tod_policy(result: dict[str, Any], neutralize: bool) -> dict[str, Any]:
+    result["tod_research"] = "neutralized" if neutralize else "live_clock"
+    result["tod_lookahead_blocked"] = bool(neutralize)
+    return result
+
+
+def _tod_feature_series(index: pd.Index, *, neutralize: bool = False) -> pd.Series:
+    """Daily TOD feature.
+
+    Live uses the cached best-entry bucket as a static bias. Backtests pass
+    ``neutralize=True`` and emit 0.5 for every bar. The cache is fit on
+    present-day history, so replaying it through a past window is lookahead.
+    """
+    if neutralize:
+        return pd.Series(0.5, index=index)
     code = 0.5
     try:
         from modules.time_of_day import (
@@ -443,10 +496,19 @@ def _label_states_by_emissions(
 def _fit_gaussian_hmm(
     X: np.ndarray, n_states: int, feature_names: list[str]
 ) -> tuple[Any, list[str], np.ndarray | None] | tuple[None, list[str], None]:
+    global _last_fit_failure, _hmmlearn_missing_logged
     try:
         from hmmlearn.hmm import GaussianHMM
     except ImportError as exc:
-        logger.debug("hmmlearn unavailable: %s", exc)
+        _last_fit_failure = "hmmlearn_missing"
+        if not _hmmlearn_missing_logged:
+            _hmmlearn_missing_logged = True
+            logger.warning(
+                "hmmlearn is not installed; Markov HMM fit skipped and "
+                "sizing stays 1.0 (%s). Install hmmlearn or set "
+                "MARKOV_HMM_ENABLED=false.",
+                exc,
+            )
         return None, [], None
 
     n_states = max(2, min(int(n_states), max(2, len(X) // 20)))
@@ -493,6 +555,7 @@ def _fit_gaussian_hmm(
             order = order[: len(model.means_)]
         return model, order, np.vstack([mu, sigma])
     except Exception as exc:
+        _last_fit_failure = "fit_failed"
         logger.warning("GaussianHMM fit failed: %s", exc)
         return None, [], None
 
@@ -536,7 +599,9 @@ def _probs_from_model(
     return current, predicted, probs, confidence, labeled
 
 
-def _signal_from_probs(probs: dict[str, float]) -> dict[str, float]:
+def _signal_from_probs(
+    probs: dict[str, float], *, neutralize_tod: bool = False
+) -> dict[str, float]:
     """Map next-day probs → VTI adj (pp), sizing mult, short boost, conviction."""
     p_bull = probs.get("A", 0) + probs.get("C", 0)
     p_bear = probs.get("B", 0) + probs.get("E", 0)
@@ -560,8 +625,16 @@ def _signal_from_probs(probs: dict[str, float]) -> dict[str, float]:
     # Conviction 0–1 (bullish = high for long sleeves)
     conviction = float(np.clip(0.35 + 0.45 * p_bull - 0.35 * p_bear - 0.25 * p_panic, 0.05, 0.95))
 
-    # Blend time-of-day edge when analysis is active
-    tod_edge = _tod_soft_edge()
+    # Live blends the current session bucket. Backtests must not use wall clock.
+    if neutralize_tod:
+        tod_edge = {
+            "entry_mult": 1.0,
+            "sa_boost": 1.0,
+            "vti_adj_pp": 0.0,
+            "bucket": None,
+        }
+    else:
+        tod_edge = _tod_soft_edge()
     vti_adj = float(vti_adj + tod_edge.get("vti_adj_pp", 0.0))
     sizing = float(np.clip(sizing * tod_edge.get("entry_mult", 1.0), 0.50, 1.30))
     return {
@@ -641,12 +714,16 @@ def update_markov_hmm(
     insider_state: dict | None = None,
     sentiment: float | None = None,
     force_retrain: bool = False,
+    neutralize_tod: bool | None = None,
 ) -> dict[str, Any]:
     """Train/predict HMM; store result for consumers. Safe no-op when disabled."""
-    global _last_prediction
+    global _last_prediction, _last_fit_failure
 
+    neutralize = _should_neutralize_tod(neutralize_tod)
     if not config.effective_markov_hmm_enabled():
-        result = _empty_hmm_result(rhyme=regime, reason="disabled")
+        result = _stamp_tod_policy(
+            _empty_hmm_result(rhyme=regime, reason="disabled"), neutralize
+        )
         _last_prediction = result
         return result
 
@@ -659,9 +736,12 @@ def update_markov_hmm(
         bubble_score_100=bubble_score_100,
         insider_intensity=_insider_intensity(insider_state),
         sentiment=sentiment,
+        neutralize_tod=neutralize,
     )
     if features is None or len(features) < max(60, n_states * 12):
-        result = _empty_hmm_result(rhyme=regime, reason="insufficient_data")
+        result = _stamp_tod_policy(
+            _empty_hmm_result(rhyme=regime, reason="insufficient_data"), neutralize
+        )
         _last_prediction = result
         return result
 
@@ -673,9 +753,13 @@ def update_markov_hmm(
         or abs(len(window) - int(_model_cache["trained_at_len"])) >= retrain_every
     )
     if need_fit:
+        _last_fit_failure = None
         model, order, scale = _fit_gaussian_hmm(X, n_states, names)
         if model is None:
-            result = _empty_hmm_result(rhyme=regime, reason="fit_failed")
+            reason = _last_fit_failure or "fit_failed"
+            result = _empty_hmm_result(rhyme=regime, reason=reason)
+            result["dependency_missing"] = reason == "hmmlearn_missing"
+            result = _stamp_tod_policy(result, neutralize)
             _last_prediction = result
             return result
         _model_cache["model"] = model
@@ -692,12 +776,14 @@ def update_markov_hmm(
         )
     except Exception as exc:
         logger.debug("HMM predict failed: %s", exc)
-        result = _empty_hmm_result(rhyme=regime, reason="predict_failed")
+        result = _stamp_tod_policy(
+            _empty_hmm_result(rhyme=regime, reason="predict_failed"), neutralize
+        )
         _last_prediction = result
         return result
 
     _model_cache["transmat_labeled"] = labeled
-    signals = _signal_from_probs(probs)
+    signals = _signal_from_probs(probs, neutralize_tod=neutralize)
     conf_label = "high" if confidence >= 0.45 else "low"
 
     result = {
@@ -716,10 +802,12 @@ def update_markov_hmm(
         "p_sideways_tomorrow": round(probs["D"], 4),
         "transmat": labeled.round(3).tolist(),
         "fallback": None,
+        "dependency_missing": False,
         "n_states": len(order),
         "train_bars": len(window),
         **signals,
     }
+    result = _stamp_tod_policy(result, neutralize)
     _last_prediction = result
     return result
 
@@ -730,8 +818,10 @@ def get_last_hmm_prediction() -> dict[str, Any] | None:
 
 def reset_markov_hmm_state() -> None:
     """Clear cached model + prediction (compare runs / tests)."""
-    global _last_prediction
+    global _last_prediction, _last_fit_failure, _hmmlearn_missing_logged
     _last_prediction = None
+    _last_fit_failure = None
+    _hmmlearn_missing_logged = False
     _model_cache["model"] = None
     _model_cache["trained_at_len"] = 0
     _model_cache["transmat_labeled"] = None
@@ -794,7 +884,16 @@ def format_markov_hmm_banner() -> str | None:
             f"bull={pred.get('p_bull_tomorrow', 0):.0%} "
             f"bear={pred.get('p_bear_tomorrow', 0):.0%}{tod_note})"
         )
-    return f"Markov {mode_label} ({n} states, fallback=RHYME{tod_note})"
+    reason = (pred or {}).get("reason") or "idle"
+    if reason == "hmmlearn_missing":
+        return (
+            f"Markov {mode_label} ({n} states, INACTIVE hmmlearn missing, "
+            f"sizing x1.00, fallback=RHYME)"
+        )
+    return (
+        f"Markov {mode_label} ({n} states, INACTIVE {reason}, "
+        f"fallback=RHYME{tod_note})"
+    )
 
 
 def hmm_stat_arb_boost() -> float:
@@ -885,12 +984,33 @@ def format_weekly_hmm_section() -> list[str]:
 
 
 def heartbeat_hmm_payload() -> dict[str, Any] | None:
-    """Compact dict for heartbeat / dashboard."""
+    """Compact dict for heartbeat / dashboard.
+
+    When the master flag is on but the live/paper gate is off, return an
+    explicit inactive payload (sizing 1.0) instead of omitting the key.
+    A missing hmmlearn install sets ``dependency_missing``.
+    """
     if not config.effective_markov_hmm_enabled():
-        return None
+        if not bool(getattr(config, "MARKOV_HMM_ENABLED", False)):
+            return None
+        return {
+            "enabled": False,
+            "ok": False,
+            "reason": "gated_off",
+            "live_opt_in": bool(getattr(config, "MARKOV_HMM_LIVE_ENABLED", False)),
+            "sizing_mult": 1.0,
+            "dependency_missing": False,
+            "inactive_explicit": True,
+        }
     pred = get_last_hmm_prediction()
     if not pred:
-        return {"enabled": True, "ok": False, "reason": "pending"}
+        return {
+            "enabled": True,
+            "ok": False,
+            "reason": "pending",
+            "sizing_mult": 1.0,
+            "dependency_missing": False,
+        }
     return {
         "enabled": True,
         "ok": bool(pred.get("ok")),
@@ -900,10 +1020,12 @@ def heartbeat_hmm_payload() -> dict[str, Any] | None:
         "confidence_label": pred.get("confidence_label"),
         "next_probs": pred.get("next_probs"),
         "vti_adj_pp": pred.get("vti_adj_pp"),
-        "sizing_mult": pred.get("sizing_mult"),
+        "sizing_mult": pred.get("sizing_mult", 1.0),
         "short_boost": pred.get("short_boost"),
         "tod_bucket": pred.get("tod_bucket"),
         "tod_entry_mult": pred.get("tod_entry_mult"),
         "tod_sa_boost": pred.get("tod_sa_boost"),
+        "tod_research": pred.get("tod_research"),
         "reason": pred.get("reason"),
+        "dependency_missing": bool(pred.get("dependency_missing")),
     }

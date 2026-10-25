@@ -1338,9 +1338,11 @@ def run_backtest(
 
     reset_regime_hysteresis()
     try:
-        from modules.markov_regime import reset_markov_hmm_state
+        from modules.markov_regime import reset_markov_hmm_state, set_research_tod_neutral
 
         reset_markov_hmm_state()
+        # Present-day TOD cache and wall clock are lookahead on a replay.
+        set_research_tod_neutral(True)
     except Exception:
         pass
     try:
@@ -2792,6 +2794,12 @@ def run_backtest(
     config.DEEP_HISTORY_INDICATORS_ONLY = saved_deep_indicators_only
     config.PAPER_IPO_SAFETY_ENABLED = saved_paper_ipo_safety
     config.PAPER_PROFIT_TARGET_ENABLED = saved_paper_profit_target
+    try:
+        from modules.markov_regime import set_research_tod_neutral
+
+        set_research_tod_neutral(False)
+    except Exception:
+        pass
     store_last_result(result)
     return result
 
