@@ -3,6 +3,10 @@
 As of 2026-10-25. Read-only survey of this repo, its branches, and open
 research PRs. No orders were sent and no book config was changed.
 
+Macro, war, inflation, sector rotation, and the yield gate are written up
+in `MACRO_REGIME_POSTMORTEM.md`, including one frozen CPI-vintage hypothesis.
+None of those earlier attempts is a protocol pass.
+
 There is **no** top-level `research/` directory. The body of work is:
 
 | Location | Where it exists |
