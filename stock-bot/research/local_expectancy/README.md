@@ -41,3 +41,13 @@ python run_twelve_seven.py
 ```
 
 `results_12_7.json` is the gate output. The write-up is `RESULTS_12_7.md`. Status: **reject**. It does not beat VTI on both windows. Promotion stays false.
+
+## Recovering halt, one later knob
+
+`preregistration_halt_rearm.json` freezes a 21-session re-arm of the 15% entry halt. The rank stays 12-to-7. Sticky mode is the default and is what the earlier studies ran.
+
+```bash
+python run_halt_rearm.py
+```
+
+`results_halt_rearm.json` is the gate output. The write-up is `RESULTS_HALT_REARM.md`. Status: **reject**. It does not beat VTI on both windows. The account-level note is `STRATEGIC_REVIEW.md`. Promotion stays false.

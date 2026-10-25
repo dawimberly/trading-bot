@@ -38,3 +38,5 @@ One passing window does not clear a failed window. The prior window fails return
 Reject. 12-to-7 does not beat VTI after costs on both required windows. The recent window does, with a deeper drawdown than VTI and with turnover still near 19x. The prior window is a large loss. Nothing here is a reason to change a live, Medium, or Lab book. `ENTRY_QUOTE_MAX_AGE_SECONDS` stays 420. Historical opens are modeled at quote age 0.
 
 `local_expectancy` stays rejected. This run does not retune it, the halt, or the hold length.
+
+The sticky halt was tested later as its own frozen change, a 21-session re-arm, in `RESULTS_HALT_REARM.md`. That book also fails the two-window VTI test.
