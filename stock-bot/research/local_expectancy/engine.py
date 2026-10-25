@@ -31,6 +31,9 @@ SPEC = {
     "initial_nav": 1.0,
 }
 
+# Recovering halt only. Sticky mode ignores this. Not scanned on the market panel.
+HALT_COOLDOWN_SESSIONS = 21
+
 
 def session_open(day: str) -> datetime:
     year, month, dom = (int(part) for part in day.split("-"))
@@ -52,8 +55,40 @@ def _new_book() -> dict:
         "peak": nav,
         "anchor": nav,
         "entry_halt": False,
+        "halt_index": None,
+        "halt_triggers": 0,
+        "halt_trigger_days": [],
+        "rearms": 0,
+        "rearm_days": [],
         "cooldown": {},
     }
+
+
+def _arm_halt(book: dict, index: int, day: str) -> None:
+    """Start the entry halt once. A later breach does not extend the clock."""
+    if book["entry_halt"]:
+        return
+    book["entry_halt"] = True
+    book["halt_index"] = index
+    book["halt_triggers"] += 1
+    book["halt_trigger_days"].append(day)
+
+
+def _maybe_rearm(book: dict, index: int, day: str, equity: float) -> None:
+    """After 21 sessions, allow entries and measure the next 15% from this equity.
+
+    A flat cash book never climbs back to the old peak, so a drawdown-recovery
+    rule would stay halted. The peak reset is what makes the cooldown a re-arm.
+    """
+    if not book["entry_halt"] or book["halt_index"] is None:
+        return
+    if index - book["halt_index"] < HALT_COOLDOWN_SESSIONS:
+        return
+    book["entry_halt"] = False
+    book["halt_index"] = None
+    book["peak"] = equity
+    book["rearms"] += 1
+    book["rearm_days"].append(day)
 
 
 def _equity(book: dict, price_of) -> float:
@@ -186,6 +221,7 @@ def simulate(
     quote_age_seconds: float = 0.0,
     learner_skip_weekdays: set[int] | None = None,
     momentum_at=None,
+    halt_mode: str = "sticky",
 ) -> dict:
     """Replay both books. Sessions after window_end are not in the list the caller passes."""
     if window_start not in sessions or window_end not in sessions:
@@ -194,6 +230,8 @@ def simulate(
     end = sessions.index(window_end)
     if start > end:
         raise ValueError("empty window")
+    if halt_mode not in ("sticky", "cooldown_21"):
+        raise ValueError("halt_mode must be sticky or cooldown_21")
     if sessions[end] != window_end or end != len(sessions) - 1:
         sessions = sessions[: end + 1]
         end = len(sessions) - 1
@@ -306,7 +344,7 @@ def simulate(
                     continue
                 equity = _equity(book, lambda sym, raw_open=raw, held=symbol: open_price(day, sym) or book["positions"][sym]["entry"])
                 if equity <= book["peak"] * (1 - SPEC["max_book_drawdown"]):
-                    book["entry_halt"] = True
+                    _arm_halt(book, index, day)
                     continue
                 if equity <= book["anchor"] * (1 - SPEC["max_daily_loss"]):
                     continue
@@ -371,9 +409,11 @@ def simulate(
                     book["pending"].append(
                         {"side": "sell", "symbol": symbol, "reason": reason, "decision_index": index}
                     )
+            if halt_mode == "cooldown_21":
+                _maybe_rearm(book, index, day, equity)
             book["peak"] = max(book["peak"], equity)
             if equity <= book["peak"] * (1 - SPEC["max_book_drawdown"]):
-                book["entry_halt"] = True
+                _arm_halt(book, index, day)
             daily_block = equity <= book["anchor"] * (1 - SPEC["max_daily_loss"])
             if index >= end or book["entry_halt"] or daily_block:
                 continue
@@ -424,6 +464,10 @@ def simulate(
             "turnover": buys[name] / mean_nav,
             "mean_trade_pnl": (sum(pnls) / len(pnls)) if pnls else 0.0,
             "monday_trade_pnl_share": (sum(monday) / sum(pnls)) if pnls and sum(pnls) != 0 else None,
+            "halt_triggers": books[name]["halt_triggers"],
+            "rearms": books[name]["rearms"],
+            "halt_trigger_days": list(books[name]["halt_trigger_days"]),
+            "rearm_days": list(books[name]["rearm_days"]),
         }
 
     def trade_log(name: str) -> list[dict]:
@@ -448,4 +492,5 @@ def simulate(
         "model_alive_at_end": model is not None,
         "quote_age_seconds": quote_age_seconds,
         "fresh_quotes": fresh,
+        "halt_mode": halt_mode,
     }

@@ -1,0 +1,58 @@
+{
+  "hypothesis_id": "twelve_seven_halt_rearm_v1",
+  "frozen_at": "2026-10-25T05:05:00Z",
+  "frozen_before_returns": true,
+  "goal": "Beat VTI after realistic costs. The single change versus twelve_seven_v1 is the entry halt.",
+  "hypothesis": "Ranking by the same 12-to-7 adjusted return, with the 15% entry halt re-armed after 21 exchange sessions instead of left on for the rest of the window, beats a VTI hold on both disjoint 365-day windows at 5 and 10 bps per side. It also beats the already published sticky 12-to-7 book on return, without a drawdown more than 2.0 percentage points worse than that sticky book.",
+  "one_knob": "Entry halt only. Rank, eligibility, stops, hold, sizing, sleeve, name cap, fills, costs, windows, panel, and the 7-minute quote cap stay as in twelve_seven_v1.",
+  "rank": "twelve_seven",
+  "halt": {
+    "mode": "cooldown_21",
+    "trigger": "Book equity at the close, or at the next open before a buy, at or below peak * (1 - 0.15). Same 15% level as the sticky rule.",
+    "sticky_rule_being_replaced": "entry_halt stays true for the rest of the window. Peak is not reset.",
+    "why_not_drawdown_recovery": "Once the book is in cash, equity is flat, so drawdown from the old peak never heals. A re-arm-when-recovered rule would match the sticky halt on that path. The frozen rule is a clock, not a price recovery.",
+    "cooldown_sessions": 21,
+    "clock": "Re-arm on the close where session_index - halt_index >= 21. The halt session starts the count. A later breach does not push the clock out. Entries can be decided on the re-arm close and filled the next open.",
+    "peak_reset": "On re-arm, peak becomes that close's equity. Without the reset the 15% check would halt again the same day. This allows another 15% loss from the new peak. That looser budget is part of this one rule.",
+    "exits": "Stops, trails, time exits, and the end-of-window liquidation still run while entries are halted.",
+    "daily_loss": "The 2% daily-loss skip is unchanged and is not this knob.",
+    "applies_to": "Both books in this run, so the paired extension book uses the same halt. The pass baseline for the knob is the published sticky 12-to-7 result, not the paired book."
+  },
+  "primary_benchmark": "VTI buy and hold, same window, same per-side slippage",
+  "one_knob_baseline": "learner in results_12_7.json (12-to-7 rank, sticky 15% halt)",
+  "also_reported": [
+    "extension rank with this same recovering halt",
+    "sticky extension from results_12_7.json",
+    "SPY hold",
+    "equal-weight hold of the included names"
+  ],
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "universe": "symbols_included from the local_expectancy results. SPCX stays out.",
+  "windows": {
+    "prior_365": {"after": "2024-10-23", "through": "2025-10-23"},
+    "recent_365": {"after": "2025-10-23", "through": "2026-10-23"},
+    "required": ["prior_365", "recent_365"]
+  },
+  "costs": {
+    "commission_bps": 0,
+    "primary_slip_bps_per_side": 5,
+    "stress_slip_bps_per_side": 10
+  },
+  "pass_rule": {
+    "return_strictly_greater_than_vti_on_both_windows_at_both_costs": true,
+    "return_strictly_greater_than_sticky_12_7_on_both_windows_at_both_costs": true,
+    "max_drawdown_not_worse_than_sticky_12_7_by_more_than_pp": 2.0,
+    "promotion": false,
+    "reason_promotion_stays_false": "Peak reset loosens the 15% budget. Daily clock, survivorship, and quote age 0 on historical opens remain. A numerical pass does not change a live or Medium book."
+  },
+  "report": ["return", "max_drawdown", "turnover", "trades", "sharpe", "halt_triggers", "rearms"],
+  "promotion": false,
+  "does_not_change": [
+    "alpaca_live",
+    "alpaca_paper_v2",
+    "running Lab",
+    "ufc-predictor",
+    "ENTRY_QUOTE_MAX_AGE_SECONDS",
+    "twelve_seven_v1 rank formula"
+  ]
+}
