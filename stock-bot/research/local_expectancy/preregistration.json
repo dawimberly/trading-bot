@@ -1,0 +1,104 @@
+{
+  "hypothesis_id": "local_expectancy_v1",
+  "frozen_at": "2026-10-25T04:30:00Z",
+  "frozen_before_returns": true,
+  "hypothesis": "Among names that pass the fixed eligibility gate, ranking by the mean net return of the 15 nearest matured baseline trades in standardized clipped (ma50_extension, vol50, rsi14) space beats ranking by ma50_extension alone, net of costs, on two disjoint 365-day windows, without a drawdown more than 2.0 percentage points worse.",
+  "one_knob": "Rank score only. Eligibility, hold, stops, trail, sizing, sleeve, name cap, and the entry/exit fill rule stay fixed. The learner is not a second change to exits or risk.",
+  "baseline": "fixed_ma50_extension. Score is feature 0. Same eligibility and the same fills as the learner.",
+  "dumber_baselines": [
+    "equal-weight hold of the included names",
+    "VTI buy and hold"
+  ],
+  "reported_not_a_kill": ["SPY buy and hold"],
+  "not_rebuilt": "15x30x2 was not resimulated. Losing to it cannot be claimed or cleared.",
+  "book": "Research only. Not alpaca_live, not alpaca_paper_v2, not the running Lab. No orders.",
+  "feature_def": "51 contiguous completed closes. ma50_extension = last/mean(last 50 closes)-1, matching the frozen Lab Next code (the mean includes the current close and excludes the oldest of the 51). vol50 = sample standard deviation of the 50 close-to-close returns. rsi14 = simple 14-close RSI/100. No intrabar high or low.",
+  "feature_clock": "Daily adjusted session closes. The frozen sentence names five-minute closes. That tape is not used for the pass/fail windows. See data_substitution.",
+  "eligibility": "extension > 0 and rsi14 < 0.70. One top name per session. Already held, cooling down, halted, or full books are skipped.",
+  "learner": {
+    "neighbors": 15,
+    "standardize": "train mean and population std, clip z to [-5, 5]",
+    "label": "Baseline round-trip net return after entry and exit slippage. Learner trades are not labels.",
+    "accept": "Inner exit-date 60/40 split. Purge train exits that are not strictly before the earliest validation entry. Accept only when validation MAE is strictly below the training-mean constant. Otherwise the book uses extension rank.",
+    "training": "At most the last 100 completed sessions of matured baseline trades. Refit only after 30 further completed sessions. Minimum 30 rows, 10 exit dates, 20 purged train rows, 10 validation rows.",
+    "source": "Port of the unfinished local_expectancy arm in the 2026-10-24 overnight preregistration. pairwise_rank and median_linear stay rejected and are not rerun."
+  },
+  "execution": {
+    "decide": "After the session close, using closes through that close only.",
+    "fill": "Next session open. A fill on the signal session is forbidden. A non-adjacent session cancels the buy.",
+    "entry_quote_max_age_seconds": 420,
+    "entry_quote_rule": "A fill is refused when the quote age is greater than 7 minutes. This study's historical open is modeled as quote age 0 because it is the session print, not a delayed snapshot. A delayed SIP quote (about 15 minutes) stays illegal for live entries. The constant is not relaxed.",
+    "stops": "Hard stop 5% and armed 2% trail are judged on completed closes and filled on the next open. Peak is the highest completed close since the fill, not an intrabar high.",
+    "terminal": "Positions still open at the window's last close are liquidated at that close with exit slippage. Orders that would fill after the window are dropped.",
+    "window_reset": "Each window starts flat. Labels and the model may use the prior sessions. The drawdown halt and the daily-loss anchor reset at the boundary and then apply inside the window."
+  },
+  "risk": {
+    "max_names": 10,
+    "name_cap": 0.1,
+    "initial_clip": 0.095,
+    "sleeve": 0.95,
+    "hard_stop": 0.05,
+    "arm": 0.05,
+    "trail": 0.02,
+    "max_hold_sessions": 30,
+    "reentry_minutes": 30,
+    "max_daily_loss": 0.02,
+    "max_book_drawdown": 0.15,
+    "initial_nav": 1.0
+  },
+  "costs": {
+    "commission_bps": 0,
+    "primary_slip_bps_per_side": 5,
+    "primary_round_trip_bps": 10,
+    "stress_slip_bps_per_side": 10,
+    "stress_round_trip_bps": 20,
+    "note": "Primary cost matches the protocol NYSE-walk print (10 bps round trip) and the backtester equity slippage default (5 bps per side, 0 commission). The stress cost is the doubled-cost gate that rejected pairwise_rank and median_linear. Each cost is a full resimulation. Labels are net of that run's slippage."
+  },
+  "windows": {
+    "asof": "2026-10-23",
+    "prior_365": {"after": "2024-10-23", "through": "2025-10-23"},
+    "recent_365": {"after": "2025-10-23", "through": "2026-10-23"},
+    "long_1000_supplement": {"after": "2024-01-28", "through": "2026-10-23", "can_pass": false},
+    "required": ["prior_365", "recent_365"],
+    "note": "Two disjoint 365-calendar-day windows are the protocol pair. The 1000-day span is recorded and cannot rescue a failed 365-day window. The 247-session five-minute development panel is not a validation window."
+  },
+  "universe": {
+    "names": ["NVDA", "TSLA", "AMD", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "SPCX", "PLTR", "NFLX", "INTC", "MU", "SMCI", "COIN", "CRM", "SHOP", "SNOW", "OKTA", "HPE", "BB", "ARM", "XOM", "CVX", "LNG", "RTX", "LMT", "KTOS"],
+    "source": "stock-bot/data/screener_universe.json tickers as of 2026-06-12. Frozen before this run's returns. This is a current list, so survivorship remains.",
+    "benchmarks": ["SPY", "VTI"],
+    "exclude_before_returns": {
+      "min_closes_on_or_before": "2024-10-23",
+      "min_closes": 51,
+      "max_gaps_after_inception": 5,
+      "exclude_if_one_day_move_above": 1.0,
+      "exclude_if_one_day_move_below": -0.6
+    }
+  },
+  "data_substitution": {
+    "protocol_sot": "Daily close-to-close. Protocol text: stock-bot/best_strategies/PROTOCOL.md at commit 8c819ac. That file is not on main.",
+    "five_minute": "Yahoo chart 5m for AAPL, range=60d, returned bars on 2026-10-25. A 5m window ending 2025-06-01 returned HTTP 422. Free five-minute history does not cover either required window. The private 247-session SIP cache is not in this repo. Paid SIP is not purchased.",
+    "used": "Yahoo chart v8 daily bars. OHLC scaled by adjclose/close so the whole path is one adjusted series. No mix with unadjusted or Alpaca dollars.",
+    "consequence": "A pass on this daily clock is not a pass of the frozen five-minute execution. One entry per session is slower than one entry per five-minute bar. The result can reject the ranking idea. It cannot authorize a live change."
+  },
+  "pass_rule": {
+    "both_required_windows": true,
+    "both_cost_levels": true,
+    "return_strictly_greater_than_fixed_extension": true,
+    "max_drawdown_not_worse_by_more_than_pp": 2.0,
+    "both_chronological_halves_beat_extension": true,
+    "must_not_lose_to": ["equal_weight_hold", "vti_hold"],
+    "monday_kill": "If the learner beats extension only when Monday entry sessions are allowed, and the same window with Monday entries removed does not beat extension, kill.",
+    "bootstrap_kill": "200 i.i.d. resamples of the learner's daily returns, seed 0. Kill the window if the median resampled total return is negative while the sample total return beats extension. The bootstrap cannot promote.",
+    "suspect_abs_return_above": 5.0,
+    "promotion": false
+  },
+  "kill_rule": "Any failed required gate on either 365-day window, at either pre-registered cost, is a reject. Record the failure. Do not retune neighbors, features, costs, or dates after seeing returns.",
+  "promotion": false,
+  "does_not_change": [
+    "alpaca_live",
+    "alpaca_paper_v2",
+    "running Lab orders and config",
+    "ufc-predictor",
+    "the 7-minute entry quote cap"
+  ]
+}

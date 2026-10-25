@@ -1,0 +1,102 @@
+{
+  "hypothesis_id": "pick_quality_v1",
+  "frozen_at": "2026-10-25T05:30:00Z",
+  "frozen_before_returns": true,
+  "question": "Does the live ranker pick names that go on to make more than a random eligible name, the eligible-list average, and VTI, at 1, 5, and 20 sessions, before exits, sizing, and the halt?",
+  "promotion": false,
+  "cannot_prove_an_edge": "The universe is the June 12, 2026 screener (27 names after SPCX). Every result on that list is look-ahead biased. A pass on this tape cannot prove an edge.",
+  "spent_holdouts": {
+    "windows_already_used_by": [
+      "local_expectancy_v1",
+      "twelve_seven_v1",
+      "twelve_seven_halt_rearm_v1"
+    ],
+    "also_seen": "The 1000-day supplement already summarized 2024-01-29 through 2026-10-23. No unused historical block remains in the panel.",
+    "this_run": "prior_365 and recent_365 are reported as a diagnostic. They are not a confirmation sample.",
+    "clean_evaluation": {
+      "id": "prospective_250",
+      "rule": "The first 250 shared sessions after 2026-10-23. Score them with this file unchanged: same selector, same horizons, same bootstrap seeds, same thresholds. Do not retune on the way. This study does not run that window."
+    }
+  },
+  "selector": {
+    "source": "run_equity_strategy buys ranked[0] from _equity_momentum_candidates. portal_bot.py only launches the process. MAX_EQUITY_TRADES is 1.",
+    "score": "adjusted close / mean(last 50 adjusted closes) - 1, including the decision close",
+    "eligible": "At least 50 closes, a close on the decision day, and close > MA50 * (1 - 0.01). Tolerance matches NYSE_MA_ENTRY_TOLERANCE_PCT default 0.01.",
+    "ma_window": 50,
+    "not_used": [
+      "PAPER_NYSE_MA_WINDOW 70 is a banner, not this ranker",
+      "IPO 20-day MA, because listing dates are not in the panel",
+      "RSI ceiling, scanner boosts, sector cap, and the SPY overlap filter. Those are paper-flag paths. Live defaults leave them off.",
+      "Cooldown and already-held skips. Those are portfolio rules. This test scores the top name every eligible day."
+    ],
+    "tie_break": "Higher score, then symbol ascending",
+    "one_name": true
+  },
+  "fills": {
+    "signal": "Decision uses the close of day t only.",
+    "entry": "Open of the next shared session. A fill at the signal close is forbidden.",
+    "primary_forward_return": "open(entry_session + H) / open(entry_session) - 1 for H in 1, 5, 20. Both sides are opens.",
+    "path_hit": "Any close from the entry session through the session before the exit open is at least +5%, +10%, or +20% above the entry open. Intraday highs are not in the panel.",
+    "close_mark_secondary": "close(entry_session + H - 1) / open(entry_session) - 1. Reported so a close mark is not mistaken for a fill.",
+    "same_close_bias": "Also compute close(t+H) / close(t) - 1 and its mean gap versus the primary return. That number is the bias of filling the signal close. It is not a result.",
+    "horizon_must_finish_inside_the_window": true,
+    "stop_gap": "A 5% stop is judged on the close and sold at the next open. The gap is next_open / trigger_close - 1. A fantasy fill at the trigger close is reported only to measure that gap."
+  },
+  "comparisons": {
+    "random": "One name drawn uniformly from that day's eligible names that have both the entry open and the exit open. 2000 draws. Seed 0.",
+    "eligible_average": "Equal weight of those same names that day.",
+    "vti": "VTI open on the entry session to VTI open H sessions later."
+  },
+  "primary": {
+    "horizon": 20,
+    "metric": "Mean primary forward return of the pick, pooled across both spent windows, versus the random-name draws.",
+    "p_value": "(1 + count of draws whose mean return is >= the pick mean) / 2001. One-sided.",
+    "clears": "Pooled mean excess versus the random-draw mean is > 0, p < 0.05, and each window's mean excess versus its own random-draw mean is > 0.",
+    "not_a_clear": "Beating VTI is reported and is not this clear. These windows cannot confirm an edge even if the inequality holds."
+  },
+  "secondary": {
+    "horizons": [1, 5, 20],
+    "hit_thresholds": [0.05, 0.1, 0.2],
+    "hit_definition": "Path hit, primary. Terminal open-to-open return above the threshold is also reported.",
+    "vti_uncertainty": "Block bootstrap of daily pick-minus-VTI, block length 20, 2000 draws, seed 1. Lower 5th percentile of the resampled mean. Overlapping 20-session returns are not independent."
+  },
+  "turnover": {
+    "signal_change_rate": "Changed top symbols divided by consecutive decision pairs. Not a dollar turnover.",
+    "one_way_buy": "Sum of buy notionals divided by mean NAV, over the window. Not annualized until multiplied by 252 / sessions.",
+    "one_way_buy_annualized": "one_way_buy * (252 / sessions in the NAV path).",
+    "two_sided": "(buys + sells) / (2 * mean NAV). A round trip of the whole book is 1.",
+    "two_sided_annualized": "two_sided * (252 / sessions).",
+    "do_not_call_the_window_total_a_rate": true
+  },
+  "decomposition": {
+    "when": "Always computed. Read as lost edge only if the primary clears. Otherwise it is the exit stack on a selector that has not beaten random.",
+    "trade_level": "Each pick is its own unit. No sizing, no halt, no cost. Hold 30 sessions the way the research engine does: the exit is queued when session_index - entry_index >= 30 and sold at the next open. The 5% stop is queued on the close and sold at the next open. Fantasy stop fills at the trigger close.",
+    "portfolio_level": "NAV starts at 1. full_one_name deploys 100% into one name. clip uses clip 0.095, name cap 0.10, sleeve 0.95, max 10 names. Then add the stop, then the sticky 15% halt, then 5 and 10 bps per side. Cash earns zero. Window-end positions are sold at the last close.",
+    "signed_gaps": "Report full minus clip, clip minus stop, stop minus halt, halt minus 5 bps, 5 bps minus 10 bps. A negative gap means the constraint raised the NAV."
+  },
+  "actual_picks": "Reconstruct only symbol and decision date, never a price, notional, or account field. If no NYSE entry journal is in the checkout, say unavailable. Do not substitute another sleeve's journal.",
+  "alpaca_free_sip": {
+    "used_in_this_run": false,
+    "public_docs": "Alpaca Basic is free. Historical bars go back to 2016. A SIP historical query is allowed when the end time is at least 15 minutes old. The latest 15 minutes of SIP require Algo Trader Plus. The assets endpoint can list status=inactive. Forum reports and the OTC rule: delisted names that move to OTC have no free SIP bars, and inactive symbols often return no history. There is no delisting return.",
+    "conclusion": "Free delayed SIP can build a wide panel of names that still have consolidated bars. It cannot by itself build a point-in-time universe that includes delistings. It also cannot feed a live entry: the quote cap is 7 minutes and this feed is 15 minutes delayed."
+  },
+  "next_change_rule": {
+    "if_primary_not_cleared": "Do not change exits, stops, sizing, or the halt. The single next research change is to rerun this frozen test on the widest free Alpaca historical SIP panel whose bars still exist, end time at least 15 minutes old. Keep the delisting hole explicit. Do not deploy.",
+    "if_primary_cleared_on_this_tape": "Do not deploy. This tape is a spent holdout on a survivor list. The single next change is that same rerun. An exit change waits until a replication also clears."
+  },
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "universe": "symbols_included from the local_expectancy results. SPCX stays out. VTI and SPY are benchmarks.",
+  "windows": {
+    "prior_365": {"after": "2024-10-23", "through": "2025-10-23"},
+    "recent_365": {"after": "2025-10-23", "through": "2026-10-23"},
+    "reported": ["prior_365", "recent_365", "pooled"]
+  },
+  "costs_in_decomposition_only": {"commission_bps": 0, "per_side_bps": [0, 5, 10]},
+  "does_not_change": [
+    "alpaca_live",
+    "alpaca_paper_v2",
+    "running Lab",
+    "ufc-predictor",
+    "ENTRY_QUOTE_MAX_AGE_SECONDS"
+  ]
+}

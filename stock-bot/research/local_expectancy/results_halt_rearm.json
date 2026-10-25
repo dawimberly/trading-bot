@@ -1,0 +1,450 @@
+{
+  "hypothesis_id": "twelve_seven_halt_rearm_v1",
+  "status": "reject",
+  "beats_vti_both_windows_both_costs": false,
+  "promotion": false,
+  "annual_target_claim": false,
+  "generated_at": "2026-10-25T04:35:58Z",
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "halt_mode": "cooldown_21",
+  "cooldown_sessions": 21,
+  "symbols_included": [
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "PLTR",
+    "NFLX",
+    "INTC",
+    "MU",
+    "SMCI",
+    "COIN",
+    "CRM",
+    "SHOP",
+    "SNOW",
+    "OKTA",
+    "HPE",
+    "BB",
+    "ARM",
+    "XOM",
+    "CVX",
+    "LNG",
+    "RTX",
+    "LMT",
+    "KTOS"
+  ],
+  "windows": {
+    "prior_365": {
+      "slip_5": {
+        "window_start": "2024-10-24",
+        "window_end": "2025-10-23",
+        "sessions": 250,
+        "learner": {
+          "return": 0.038123,
+          "max_drawdown": 0.216429,
+          "first_half": -0.182721,
+          "second_half": 0.270217,
+          "sharpe": 0.28646,
+          "sessions": 250,
+          "trades": 181,
+          "turnover": 17.261327,
+          "mean_trade_pnl": 0.000211,
+          "monday_trade_pnl_share": -1.643257,
+          "halt_triggers": 1,
+          "rearms": 1,
+          "halt_trigger_days": [
+            "2025-04-03"
+          ],
+          "rearm_days": [
+            "2025-05-05"
+          ],
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.072218,
+            "median": 0.056889,
+            "p05": -0.251865
+          }
+        },
+        "extension_recovering": {
+          "return": 0.333454,
+          "max_drawdown": 0.182648,
+          "first_half": 0.002283,
+          "second_half": 0.330417,
+          "sharpe": 1.51211,
+          "sessions": 250,
+          "trades": 181,
+          "turnover": 17.086234,
+          "mean_trade_pnl": 0.001842,
+          "monday_trade_pnl_share": 0.314913,
+          "halt_triggers": 1,
+          "rearms": 1,
+          "halt_trigger_days": [
+            "2025-04-04"
+          ],
+          "rearm_days": [
+            "2025-05-06"
+          ]
+        },
+        "sticky_12_7": {
+          "return": -0.182721,
+          "max_drawdown": 0.216429,
+          "first_half": -0.182721,
+          "second_half": 0.0,
+          "sharpe": -1.172236,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.649966,
+          "mean_trade_pnl": -0.001965,
+          "monday_trade_pnl_share": 0.246289,
+          "bootstrap": {
+            "paths": 200,
+            "mean": -0.158089,
+            "median": -0.168701,
+            "p05": -0.3667
+          }
+        },
+        "sticky_extension": {
+          "return": 0.002283,
+          "max_drawdown": 0.182648,
+          "first_half": 0.002283,
+          "second_half": 0.0,
+          "sharpe": 0.091113,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.25232,
+          "mean_trade_pnl": 2.5e-05,
+          "monday_trade_pnl_share": 9.278348
+        },
+        "vti_hold": {
+          "return": 0.17029,
+          "max_drawdown": 0.193036,
+          "sharpe": 0.904565
+        },
+        "spy_hold": {
+          "return": 0.171157,
+          "max_drawdown": 0.187552,
+          "sharpe": 0.907399
+        },
+        "equal_weight_hold": {
+          "return": 0.59309,
+          "max_drawdown": 0.280443,
+          "sharpe": 1.688942
+        }
+      },
+      "slip_10": {
+        "window_start": "2024-10-24",
+        "window_end": "2025-10-23",
+        "sessions": 250,
+        "learner": {
+          "return": 0.05035,
+          "max_drawdown": 0.200924,
+          "first_half": -0.165912,
+          "second_half": 0.25928,
+          "sharpe": 0.346627,
+          "sessions": 250,
+          "trades": 181,
+          "turnover": 17.192195,
+          "mean_trade_pnl": 0.000278,
+          "monday_trade_pnl_share": -0.69143,
+          "halt_triggers": 1,
+          "rearms": 1,
+          "halt_trigger_days": [
+            "2025-03-31"
+          ],
+          "rearm_days": [
+            "2025-04-30"
+          ],
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.078944,
+            "median": 0.074787,
+            "p05": -0.227188
+          }
+        },
+        "extension_recovering": {
+          "return": 0.310887,
+          "max_drawdown": 0.185058,
+          "first_half": -0.006447,
+          "second_half": 0.319394,
+          "sharpe": 1.429171,
+          "sessions": 250,
+          "trades": 181,
+          "turnover": 17.094281,
+          "mean_trade_pnl": 0.001718,
+          "monday_trade_pnl_share": 0.322781,
+          "halt_triggers": 1,
+          "rearms": 1,
+          "halt_trigger_days": [
+            "2025-04-04"
+          ],
+          "rearm_days": [
+            "2025-05-06"
+          ]
+        },
+        "sticky_12_7": {
+          "return": -0.165912,
+          "max_drawdown": 0.199745,
+          "first_half": -0.165912,
+          "second_half": 0.0,
+          "sharpe": -1.091636,
+          "sessions": 250,
+          "trades": 91,
+          "turnover": 9.339233,
+          "mean_trade_pnl": -0.001823,
+          "monday_trade_pnl_share": 0.207536,
+          "bootstrap": {
+            "paths": 200,
+            "mean": -0.143534,
+            "median": -0.150878,
+            "p05": -0.352669
+          }
+        },
+        "sticky_extension": {
+          "return": -0.006447,
+          "max_drawdown": 0.185058,
+          "first_half": -0.006447,
+          "second_half": 0.0,
+          "sharpe": 0.033053,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.274856,
+          "mean_trade_pnl": -6.9e-05,
+          "monday_trade_pnl_share": -3.03401
+        },
+        "vti_hold": {
+          "return": 0.16912,
+          "max_drawdown": 0.193036,
+          "sharpe": 0.89945
+        },
+        "spy_hold": {
+          "return": 0.169986,
+          "max_drawdown": 0.187552,
+          "sharpe": 0.902283
+        },
+        "equal_weight_hold": {
+          "return": 0.591498,
+          "max_drawdown": 0.280443,
+          "sharpe": 1.685742
+        }
+      }
+    },
+    "recent_365": {
+      "slip_5": {
+        "window_start": "2025-10-24",
+        "window_end": "2026-10-23",
+        "sessions": 251,
+        "learner": {
+          "return": 0.289603,
+          "max_drawdown": 0.105263,
+          "first_half": 0.100355,
+          "second_half": 0.171988,
+          "sharpe": 1.428164,
+          "sessions": 251,
+          "trades": 203,
+          "turnover": 18.919342,
+          "mean_trade_pnl": 0.001427,
+          "monday_trade_pnl_share": 0.195837,
+          "halt_triggers": 0,
+          "rearms": 0,
+          "halt_trigger_days": [],
+          "rearm_days": [],
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.305742,
+            "median": 0.277962,
+            "p05": -0.048975
+          }
+        },
+        "extension_recovering": {
+          "return": 0.077112,
+          "max_drawdown": 0.109386,
+          "first_half": 0.024363,
+          "second_half": 0.051494,
+          "sharpe": 0.48349,
+          "sessions": 251,
+          "trades": 207,
+          "turnover": 19.483246,
+          "mean_trade_pnl": 0.000373,
+          "monday_trade_pnl_share": -0.10492,
+          "halt_triggers": 0,
+          "rearms": 0,
+          "halt_trigger_days": [],
+          "rearm_days": []
+        },
+        "sticky_12_7": {
+          "return": 0.304805,
+          "max_drawdown": 0.105263,
+          "first_half": 0.113326,
+          "second_half": 0.171988,
+          "sharpe": 1.496936,
+          "sessions": 251,
+          "trades": 202,
+          "turnover": 18.8314,
+          "mean_trade_pnl": 0.001509,
+          "monday_trade_pnl_share": 0.188193,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.321937,
+            "median": 0.295457,
+            "p05": -0.043976
+          }
+        },
+        "sticky_extension": {
+          "return": 0.093612,
+          "max_drawdown": 0.098524,
+          "first_half": 0.040055,
+          "second_half": 0.051494,
+          "sharpe": 0.563153,
+          "sessions": 251,
+          "trades": 206,
+          "turnover": 19.391679,
+          "mean_trade_pnl": 0.000454,
+          "monday_trade_pnl_share": -0.088209
+        },
+        "vti_hold": {
+          "return": 0.130586,
+          "max_drawdown": 0.089182,
+          "sharpe": 1.018184
+        },
+        "spy_hold": {
+          "return": 0.134437,
+          "max_drawdown": 0.08885,
+          "sharpe": 1.058704
+        },
+        "equal_weight_hold": {
+          "return": 0.38216,
+          "max_drawdown": 0.149955,
+          "sharpe": 1.333756
+        }
+      },
+      "slip_10": {
+        "window_start": "2025-10-24",
+        "window_end": "2026-10-23",
+        "sessions": 251,
+        "learner": {
+          "return": 0.271914,
+          "max_drawdown": 0.108346,
+          "first_half": 0.088739,
+          "second_half": 0.168245,
+          "sharpe": 1.357753,
+          "sessions": 251,
+          "trades": 203,
+          "turnover": 18.931194,
+          "mean_trade_pnl": 0.001339,
+          "monday_trade_pnl_share": 0.219332,
+          "halt_triggers": 0,
+          "rearms": 0,
+          "halt_trigger_days": [],
+          "rearm_days": [],
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.288163,
+            "median": 0.259354,
+            "p05": -0.062549
+          }
+        },
+        "extension_recovering": {
+          "return": 0.055666,
+          "max_drawdown": 0.116198,
+          "first_half": 0.014907,
+          "second_half": 0.04016,
+          "sharpe": 0.378737,
+          "sessions": 251,
+          "trades": 207,
+          "turnover": 19.483071,
+          "mean_trade_pnl": 0.000269,
+          "monday_trade_pnl_share": -0.224518,
+          "halt_triggers": 0,
+          "rearms": 0,
+          "halt_trigger_days": [],
+          "rearm_days": []
+        },
+        "sticky_12_7": {
+          "return": 0.287027,
+          "max_drawdown": 0.108346,
+          "first_half": 0.101676,
+          "second_half": 0.168245,
+          "sharpe": 1.426762,
+          "sessions": 251,
+          "trades": 202,
+          "turnover": 18.842301,
+          "mean_trade_pnl": 0.001421,
+          "monday_trade_pnl_share": 0.210185,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.30426,
+            "median": 0.27845,
+            "p05": -0.055706
+          }
+        },
+        "sticky_extension": {
+          "return": 0.071934,
+          "max_drawdown": 0.103512,
+          "first_half": 0.030547,
+          "second_half": 0.04016,
+          "sharpe": 0.45891,
+          "sessions": 251,
+          "trades": 206,
+          "turnover": 19.390607,
+          "mean_trade_pnl": 0.000349,
+          "monday_trade_pnl_share": -0.176977
+        },
+        "vti_hold": {
+          "return": 0.129456,
+          "max_drawdown": 0.089182,
+          "sharpe": 1.010238
+        },
+        "spy_hold": {
+          "return": 0.133303,
+          "max_drawdown": 0.08885,
+          "sharpe": 1.050621
+        },
+        "equal_weight_hold": {
+          "return": 0.380779,
+          "max_drawdown": 0.149955,
+          "sharpe": 1.330146
+        }
+      }
+    }
+  },
+  "cells": [
+    {
+      "window": "prior_365",
+      "cost": "slip_5",
+      "failures": [
+        "vti_return"
+      ],
+      "passed": false
+    },
+    {
+      "window": "prior_365",
+      "cost": "slip_10",
+      "failures": [
+        "vti_return"
+      ],
+      "passed": false
+    },
+    {
+      "window": "recent_365",
+      "cost": "slip_5",
+      "failures": [
+        "sticky_12_7_return"
+      ],
+      "passed": false
+    },
+    {
+      "window": "recent_365",
+      "cost": "slip_10",
+      "failures": [
+        "sticky_12_7_return"
+      ],
+      "passed": false
+    }
+  ],
+  "entry_quote_max_age_seconds": 420,
+  "drawdown_slack_pp": 2.0
+}

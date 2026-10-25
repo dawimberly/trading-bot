@@ -1,0 +1,47 @@
+{
+  "hypothesis_id": "twelve_seven_v1",
+  "frozen_at": "2026-10-25T04:40:00Z",
+  "frozen_before_returns": true,
+  "goal": "Beat VTI after realistic costs. That is the pass Dan named for this test.",
+  "hypothesis": "Among names that pass the same eligibility gate and have both endpoint closes, ranking by the split-and-dividend-adjusted return from the session 12 calendar months earlier through the session 7 calendar months earlier beats a VTI hold on both disjoint 365-day windows at 5 and 10 bps per side, and beats fixed ma50-extension rank on that same set without a drawdown more than 2.0 percentage points worse.",
+  "one_knob": "Sort key only. The learner score is close(S7)/close(S12)-1. The extension book uses feature 0. Stops, hold, sizing, sleeve, name cap, fills, and the 7-minute quote cap stay as in local_expectancy_v1.",
+  "score": {
+    "formula": "adj_close(S7) / adj_close(S12) - 1",
+    "S7": "Last shared session on or before the decision date minus 7 calendar months. Day-of-month clamps to the target month.",
+    "S12": "Last shared session on or before the decision date minus 12 calendar months.",
+    "decision": "The session close that forms eligibility. The fill is the next session open. Neither endpoint is the decision close.",
+    "missing": "If either endpoint bar is absent, or S7 is not strictly after S12, the name is out of both books that day.",
+    "price": "The same Yahoo adjusted open/close panel as local_expectancy_v1. One series. No unadjusted mix and no new download."
+  },
+  "eligibility": "extension > 0 and rsi14 < 0.70 and both endpoints present. One top name per session.",
+  "baseline": "fixed_ma50_extension on that same eligible set",
+  "primary_benchmark": "VTI buy and hold, same window, same per-side slippage, enter first open, liquidate last close",
+  "also_reported": ["SPY hold", "equal-weight hold of the included names"],
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "universe": "symbols_included from the local_expectancy results. SPCX stays out.",
+  "windows": {
+    "prior_365": {"after": "2024-10-23", "through": "2025-10-23"},
+    "recent_365": {"after": "2025-10-23", "through": "2026-10-23"},
+    "required": ["prior_365", "recent_365"]
+  },
+  "costs": {
+    "commission_bps": 0,
+    "primary_slip_bps_per_side": 5,
+    "stress_slip_bps_per_side": 10
+  },
+  "pass_rule": {
+    "return_strictly_greater_than_vti_on_both_windows_at_both_costs": true,
+    "return_strictly_greater_than_extension_on_both_windows_at_both_costs": true,
+    "max_drawdown_not_worse_than_extension_by_more_than_pp": 2.0,
+    "promotion": false
+  },
+  "report": ["return", "max_drawdown", "turnover", "trades", "sharpe"],
+  "promotion": false,
+  "does_not_change": [
+    "alpaca_live",
+    "alpaca_paper_v2",
+    "running Lab",
+    "ufc-predictor",
+    "ENTRY_QUOTE_MAX_AGE_SECONDS"
+  ]
+}
