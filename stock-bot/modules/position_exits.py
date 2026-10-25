@@ -315,11 +315,61 @@ def run_position_exits(
         lab = config.paper_lab_concentrated_enabled() and qty > 0 and not config.is_crypto(
             symbol
         )
-        disaster = config.paper_lab_disaster_pct() if lab else config.STOP_LOSS_PCT
-        stop_hit = pnl_pct <= -disaster
-        plpc = getattr(pos, "unrealized_plpc", None)
-        if plpc is not None and float(plpc) <= -disaster:
-            stop_hit = True
+        if lab:
+            disaster = config.paper_lab_disaster_pct()
+            stop_hit = pnl_pct <= -disaster
+            plpc = getattr(pos, "unrealized_plpc", None)
+            if plpc is not None and float(plpc) <= -disaster:
+                stop_hit = True
+        elif qty > 0 and not config.is_crypto(symbol):
+            stop_hit = config.equity_loss_stop_hit(pnl_pct)
+            plpc = getattr(pos, "unrealized_plpc", None)
+            if plpc is not None and config.equity_loss_stop_hit(float(plpc)):
+                stop_hit = True
+        else:
+            # Shorts and crypto keep their own stops. This 5% path is unchanged.
+            disaster = config.STOP_LOSS_PCT
+            stop_hit = pnl_pct <= -disaster
+            plpc = getattr(pos, "unrealized_plpc", None)
+            if plpc is not None and float(plpc) <= -disaster:
+                stop_hit = True
+
+        if lab and config.paper_lab_hold_only_enabled():
+            hold_hit = (
+                age_bars is not None and age_bars >= config.paper_lab_max_hold_days()
+            )
+            if not hold_hit:
+                continue
+            try:
+                order = executor.execute_full_exit(
+                    symbol, reason="lab_time", sleeve="NYSE"
+                )
+                if not executor.order_filled(order):
+                    continue
+                exits += 1
+                peak_cache.pop(symbol, None)
+                meta_cache.pop(symbol, None)
+                reason = f"lab_time {pnl_pct:.2%}"
+                risk_manager._log_event(
+                    f"EXIT: {symbol} pnl={pnl_pct:.2%} qty={qty} ({reason})"
+                )
+                if journal:
+                    _log_position_exit(
+                        journal,
+                        journal_path,
+                        pos,
+                        symbol,
+                        "sell",
+                        reason,
+                        equity,
+                        exit_reason="lab_time",
+                    )
+            except Exception as e:
+                if journal:
+                    journal.log_event(
+                        "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
+                    )
+            continue
 
         if lab:
             if config.paper_nyse_a2b1_enabled():
@@ -509,15 +559,16 @@ def run_position_exits(
                             "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
                         )
                 continue
-            if action == "exit":
+            if action == "exit" and config.equity_loss_stop_hit(pnl_pct):
                 atr_stop_hit = True
                 stop_hit = True
                 meta["smart_exit_code"] = decision.get("exit_code") or "smart_atr_stop"
                 meta["smart_exit_reason"] = decision.get("reason") or ""
                 meta_cache[symbol] = meta
             else:
-                # Smart stops replace fixed −STOP_LOSS_PCT hard exit
-                stop_hit = False
+                # A tighter ATR/smart exit inside the book stop does not fire.
+                # A loss past the book stop still does.
+                stop_hit = config.equity_loss_stop_hit(pnl_pct)
 
         elif exit_opt and qty > 0 and not config.is_crypto(symbol):
             from modules.exit_management import (
@@ -539,9 +590,14 @@ def run_position_exits(
                 "atr_asof": "at_exit",
                 "stop_price": plan.get("stop_price"),
             }
-            if current <= plan["stop_price"]:
-                atr_stop_hit = True
+            atr_inside = current <= plan["stop_price"]
+            if config.equity_loss_stop_hit(pnl_pct):
                 stop_hit = True
+                if atr_inside:
+                    atr_stop_hit = True
+            elif atr_inside:
+                stop_hit = False
+                atr_stop_hit = False
             profit_target = entry + abs(entry - plan["stop_price"]) * float(
                 config.PARTIAL_EXIT_RR
             )

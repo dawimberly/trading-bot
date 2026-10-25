@@ -132,6 +132,9 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["PAPER_LAB_TRAIL_ARM_PCT"] = "0.10"
             env["PAPER_LAB_TRAIL_PCT"] = "0.08"
             env["PAPER_LAB_DISASTER_PCT"] = "0.10"
+            # 2026-10-25 experiment: ignore the loss stop, trail, half, and
+            # A2B1. The only exit is the 30-day hold. Sizing is unchanged.
+            env["PAPER_LAB_HOLD_ONLY"] = "true"
             # Idle cash can complete a 15% name, or add a second ticket up to
             # 30% only when all 8 slots are full (cash would otherwise sit).
             env["PAPER_LAB_ADD_POLICY"] = "idle"
@@ -192,6 +195,9 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["EXIT_OPTIMIZATION_ENABLED"] = "false"
             env["PAPER_SMART_STOPS"] = "true"
             env["ATR_STOP_MULTIPLIER"] = "2.0"
+            # 2026-10-25 experiment: hard loss stop 10% (was the 5% default).
+            # 2× ATR stays, and cannot close a name before this stop.
+            env["STOP_LOSS_PCT"] = "0.10"
             env["STOP_LOSS_REEVAL_PCTS"] = "[-50,-50]"
             env["CONCENTRATION_TRIM_MIN_PCT"] = "0.005"
             env["PAPER_NYSE_FAT_LOSER_ENABLED"] = "false"
@@ -239,6 +245,8 @@ def user_bot_env(username: str, book_id: str = "alpaca_paper") -> dict[str, str]
             env["NYSE_SLEEVE_CAP_PCT"] = "0.95"
             env["VTI_REBALANCE_CADENCE"] = "drift"
             env["PAPER_NYSE_A2B1_ENABLED"] = "false"
+            # 2026-10-25 experiment: hard loss stop 10% (was the 5% default).
+            env["STOP_LOSS_PCT"] = "0.10"
     return isolate_book_alpaca_env(env, book_env_path=book_env_path)
 
 

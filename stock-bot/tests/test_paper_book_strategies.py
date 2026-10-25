@@ -147,6 +147,8 @@ def test_medium_user_bot_env_vti_core_off():
     assert lab.get("PAPER_LAB_ADD_POLICY") == "idle"
     assert lab.get("PAPER_LAB_ADD_MAX_MULT") == "2.0"
     assert lab.get("PAPER_MAX_POSITION_PCT") == "0.15"
+    assert lab.get("PAPER_LAB_HOLD_ONLY") == "true"
+    assert v2.get("STOP_LOSS_PCT") == "0.10"
     assert lab.get("PAPER_NYSE_A2B1_ENABLED") == "true"
     assert lab.get("PAPER_NYSE_GAIN_EXIT_PCT") == "8"
     assert lab.get("PAPER_NYSE_GAIN_EXIT_MODE") == "skip_monday"
@@ -172,6 +174,7 @@ def test_live_user_bot_env_vti_core_off():
     assert live.get("VTI_REBALANCE_CADENCE") == "drift"
     assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
     assert live.get("PAPER_NYSE_A2B1_ENABLED") == "false"
+    assert live.get("STOP_LOSS_PCT") == "0.10"
 
 
 def test_live_vti_off_effective_nyse_cap_not_frozen_10pct(monkeypatch):
