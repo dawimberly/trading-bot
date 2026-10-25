@@ -185,6 +185,7 @@ def simulate(
     slip_bps: float,
     quote_age_seconds: float = 0.0,
     learner_skip_weekdays: set[int] | None = None,
+    momentum_at=None,
 ) -> dict:
     """Replay both books. Sessions after window_end are not in the list the caller passes."""
     if window_start not in sessions or window_end not in sessions:
@@ -251,7 +252,7 @@ def simulate(
             buys = {"baseline": 0.0, "learner": 0.0}
             nav = {"baseline": [SPEC["initial_nav"]], "learner": [SPEC["initial_nav"]]}
 
-        if index > 0:
+        if momentum_at is None and index > 0:
             train_lo = max(0, index - SPEC["training_sessions"])
             completed = set(sessions[train_lo:index])
             due = last_train_index is None or index - last_train_index >= SPEC["freeze_sessions"]
@@ -381,7 +382,14 @@ def simulate(
                 values = feat[symbol]
                 if values is None or not _eligible(values) or symbol in book["positions"]:
                     continue
-                candidates.append((_score(name, model, values), symbol, values))
+                if momentum_at is None:
+                    score = _score(name, model, values)
+                else:
+                    momentum = momentum_at(symbol, day)
+                    if momentum is None:
+                        continue
+                    score = momentum if name == "learner" else values[0]
+                candidates.append((score, symbol, values))
             candidates.sort(key=lambda row: (-row[0], row[1]))
             if not candidates or len(book["positions"]) >= SPEC["max_names"]:
                 continue
