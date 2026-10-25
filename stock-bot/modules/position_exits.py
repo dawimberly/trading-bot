@@ -7,9 +7,32 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import config
+from modules.exit_reconcile import broker_error_note, classify_failure
 
 logger = logging.getLogger(__name__)
 _ET = ZoneInfo("America/New_York")
+
+
+def _journal_pending_exit(executor, journal, symbol, journal_path):
+    if not journal:
+        return
+    take = getattr(executor, "take_pending_exit_note", None)
+    if not callable(take):
+        return
+    note = take(symbol)
+    if note:
+        journal.log_event("exit_error", symbol=symbol, notes=note, journal_path=journal_path)
+
+
+def _journal_exit_exception(executor, journal, symbol, exc, journal_path):
+    note = broker_error_note(exc)
+    mark = getattr(executor, "note_exit_failure", None)
+    if callable(mark):
+        mark(symbol, note, lock_symbol=classify_failure(note, exc) == "code")
+        _journal_pending_exit(executor, journal, symbol, journal_path)
+        return
+    if journal:
+        journal.log_event("exit_error", symbol=symbol, notes=note, journal_path=journal_path)
 
 
 def _position_symbol(raw_symbol):
@@ -102,10 +125,11 @@ def run_position_exits(
     try:
         positions = executor._get_positions()
     except Exception as e:
+        note = broker_error_note(e)
         if journal:
-            journal.log_event("exit_error", notes=str(e), journal_path=journal_path)
+            journal.log_event("exit_error", notes=note, journal_path=journal_path)
         else:
-            logger.warning("position_exits: failed to get positions: %s", e)
+            logger.warning("position_exits: failed to get positions: %s", note)
         return 0
 
     account = executor._get_account()
@@ -122,6 +146,9 @@ def run_position_exits(
         if config.vti_core_enabled() and symbol == config.VTI_CORE_SYMBOL:
             continue
         if not equity_session_open and not config.is_crypto(symbol):
+            continue
+        allowed = getattr(executor, "exit_submit_allowed", None)
+        if callable(allowed) and not allowed(symbol):
             continue
 
         qty = float(pos.qty)
@@ -179,6 +206,7 @@ def run_position_exits(
                         reason=decision.get("exit_code") or "smart_size_reduce",
                         sleeve="NYSE",
                     )
+                    _journal_pending_exit(executor, journal, symbol, journal_path)
                     if order and executor.order_filled(order):
                         exits += 1
                         risk_manager._log_event(
@@ -193,10 +221,7 @@ def run_position_exits(
                                 journal_path=journal_path,
                             )
                 except Exception as e:
-                    if journal:
-                        journal.log_event(
-                            "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
-                        )
+                    _journal_exit_exception(executor, journal, symbol, e, journal_path)
                 continue
             if action == "exit":
                 atr_stop_hit = True
@@ -249,6 +274,7 @@ def run_position_exits(
                         reason="partial_1r",
                         sleeve="NYSE",
                     )
+                    _journal_pending_exit(executor, journal, symbol, journal_path)
                     if order and executor.order_filled(order):
                         meta["partial_taken"] = True
                         meta_cache[symbol] = meta
@@ -272,10 +298,7 @@ def run_position_exits(
                                 journal_path=journal_path,
                             )
                 except Exception as e:
-                    if journal:
-                        journal.log_event(
-                            "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
-                        )
+                    _journal_exit_exception(executor, journal, symbol, e, journal_path)
                 continue
 
         trail_hit = controls and qty > 0 and _trailing_stop_hit(
@@ -328,6 +351,7 @@ def run_position_exits(
                     order = executor.execute_full_exit(symbol)
             else:
                 order = executor.execute_full_exit(symbol)
+            _journal_pending_exit(executor, journal, symbol, journal_path)
             if not executor.order_filled(order):
                 continue
             exits += 1
@@ -362,10 +386,7 @@ def run_position_exits(
                         symbol, side, reason, equity, journal_path=journal_path
                     )
         except Exception as e:
-            if journal:
-                journal.log_event(
-                    "exit_error", symbol=symbol, notes=str(e), journal_path=journal_path
-                )
+            _journal_exit_exception(executor, journal, symbol, e, journal_path)
 
     executor._exit_peak_prices = peak_cache
     executor._exit_opt_meta = meta_cache
