@@ -51,3 +51,13 @@ python run_halt_rearm.py
 ```
 
 `results_halt_rearm.json` is the gate output. The write-up is `RESULTS_HALT_REARM.md`. Status: **reject**. It does not beat VTI on both windows. The account-level note is `STRATEGIC_REVIEW.md`. Promotion stays false.
+
+## Pick quality
+
+`preregistration_pick_quality.json` freezes a selector-only test: live close / MA50 rank, next-open fills, versus random eligible names, the equal-weight list, and VTI.
+
+```bash
+python run_pick_quality.py
+```
+
+`results_pick_quality.json` is the output. The write-up is `RESULTS_PICK_QUALITY.md`. The 20-session mean beats random on this tape. The June 2026 list and the spent windows mean that is not an edge. Promotion stays false.

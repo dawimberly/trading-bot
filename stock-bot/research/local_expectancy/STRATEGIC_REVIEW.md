@@ -1,5 +1,7 @@
 # Strategic review — October 2026
 
+Update after the pick-quality test: this account is the experiment, and the savings are elsewhere. Holding VTI is the savings policy. It is not the next change for the experiment. The measured next step is in `RESULTS_PICK_QUALITY.md`: rerun the frozen selector test on a free historical SIP panel before touching the stop.
+
 Frank notes for Dan. Research only. Nothing here places an order or edits a live or Medium book.
 
 The account in view is about $300 at Alpaca. Data stays free or delayed. The first goal is to beat VTI after realistic costs. The long-term aspiration is Medallion-like returns. Eight months of live trading have been about break-even.

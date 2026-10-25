@@ -1,0 +1,3055 @@
+{
+  "hypothesis_id": "pick_quality_v1",
+  "primary_clears": true,
+  "promotion": false,
+  "proves_an_edge": false,
+  "reason_not_proof": "June 2026 survivor list, and both windows were already used.",
+  "actual_picks": {
+    "status": "unavailable",
+    "reason": "No NYSE entry journal is in this checkout. Another sleeve's journal was not used."
+  },
+  "clean_evaluation": {
+    "id": "prospective_250",
+    "rule": "The first 250 shared sessions after 2026-10-23. Score them with this file unchanged: same selector, same horizons, same bootstrap seeds, same thresholds. Do not retune on the way. This study does not run that window."
+  },
+  "alpaca_free_sip": {
+    "used_in_this_run": false,
+    "public_docs": "Alpaca Basic is free. Historical bars go back to 2016. A SIP historical query is allowed when the end time is at least 15 minutes old. The latest 15 minutes of SIP require Algo Trader Plus. The assets endpoint can list status=inactive. Forum reports and the OTC rule: delisted names that move to OTC have no free SIP bars, and inactive symbols often return no history. There is no delisting return.",
+    "conclusion": "Free delayed SIP can build a wide panel of names that still have consolidated bars. It cannot by itself build a point-in-time universe that includes delistings. It also cannot feed a live entry: the quote cap is 7 minutes and this feed is 15 minutes delayed."
+  },
+  "generated_at": "2026-10-25T04:51:08Z",
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "symbols_included": [
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "PLTR",
+    "NFLX",
+    "INTC",
+    "MU",
+    "SMCI",
+    "COIN",
+    "CRM",
+    "SHOP",
+    "SNOW",
+    "OKTA",
+    "HPE",
+    "BB",
+    "ARM",
+    "XOM",
+    "CVX",
+    "LNG",
+    "RTX",
+    "LMT",
+    "KTOS"
+  ],
+  "bootstrap_draws": 2000,
+  "windows": {
+    "prior_365": {
+      "window_start": "2024-10-24",
+      "window_end": "2025-10-23",
+      "sessions": 250,
+      "horizons": {
+        "1": {
+          "days": 245,
+          "choice_days": 245,
+          "mean_eligible_names": 18.130612,
+          "pick_mean": 0.00205,
+          "pick_median": 0.001214,
+          "random_mean": 0.00153,
+          "excess_vs_random_mean": 0.00052,
+          "p_value_vs_random": 0.374813,
+          "excess_vs_eligible_mean": 0.000526,
+          "excess_vs_eligible_median": 0.000883,
+          "excess_vs_vti_mean": 0.001724,
+          "excess_vs_vti_median": 7.1e-05,
+          "vti_days": 245,
+          "vti_block_p05": -0.00249,
+          "path_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.069388,
+              "random_mean_rate": 0.027935,
+              "excess": 0.041453,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.0,
+              "random_mean_rate": 0.004371,
+              "excess": -0.004371,
+              "p_value": 1.0
+            },
+            "20": {
+              "pick_rate": 0.0,
+              "random_mean_rate": 0.000227,
+              "excess": -0.000227,
+              "p_value": 1.0
+            }
+          },
+          "terminal_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.114286,
+              "random_mean_rate": 0.045251,
+              "excess": 0.069035,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.016327,
+              "random_mean_rate": 0.011194,
+              "excess": 0.005133,
+              "p_value": 0.284358
+            },
+            "20": {
+              "pick_rate": 0.0,
+              "random_mean_rate": 0.001322,
+              "excess": -0.001322,
+              "p_value": 1.0
+            }
+          },
+          "signal_change_rate": 0.204918
+        },
+        "5": {
+          "days": 241,
+          "choice_days": 241,
+          "mean_eligible_names": 18.091286,
+          "pick_mean": 0.012652,
+          "pick_median": 0.01764,
+          "random_mean": 0.007895,
+          "excess_vs_random_mean": 0.004757,
+          "p_value_vs_random": 0.129435,
+          "excess_vs_eligible_mean": 0.004891,
+          "excess_vs_eligible_median": 0.00913,
+          "excess_vs_vti_mean": 0.010113,
+          "excess_vs_vti_median": 0.011017,
+          "vti_days": 241,
+          "vti_block_p05": -0.010079,
+          "path_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.435685,
+              "random_mean_rate": 0.235037,
+              "excess": 0.200647,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.107884,
+              "random_mean_rate": 0.084944,
+              "excess": 0.02294,
+              "p_value": 0.12044
+            },
+            "20": {
+              "pick_rate": 0.024896,
+              "random_mean_rate": 0.01895,
+              "excess": 0.005946,
+              "p_value": 0.321839
+            }
+          },
+          "terminal_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.307054,
+              "random_mean_rate": 0.195243,
+              "excess": 0.111811,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.078838,
+              "random_mean_rate": 0.072799,
+              "excess": 0.006039,
+              "p_value": 0.394303
+            },
+            "20": {
+              "pick_rate": 0.020747,
+              "random_mean_rate": 0.017734,
+              "excess": 0.003012,
+              "p_value": 0.418291
+            }
+          },
+          "signal_change_rate": 0.2
+        },
+        "20": {
+          "days": 226,
+          "choice_days": 226,
+          "mean_eligible_names": 17.867257,
+          "pick_mean": 0.051901,
+          "pick_median": 0.049037,
+          "random_mean": 0.034415,
+          "excess_vs_random_mean": 0.017486,
+          "p_value_vs_random": 0.01999,
+          "excess_vs_eligible_mean": 0.017481,
+          "excess_vs_eligible_median": -0.019438,
+          "excess_vs_vti_mean": 0.040251,
+          "excess_vs_vti_median": 0.013057,
+          "vti_days": 226,
+          "vti_block_p05": -0.024818,
+          "path_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.778761,
+              "random_mean_rate": 0.588732,
+              "excess": 0.190029,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.575221,
+              "random_mean_rate": 0.347914,
+              "excess": 0.227308,
+              "p_value": 0.0005
+            },
+            "20": {
+              "pick_rate": 0.261062,
+              "random_mean_rate": 0.139,
+              "excess": 0.122062,
+              "p_value": 0.0005
+            }
+          },
+          "terminal_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.495575,
+              "random_mean_rate": 0.394947,
+              "excess": 0.100628,
+              "p_value": 0.001
+            },
+            "10": {
+              "pick_rate": 0.371681,
+              "random_mean_rate": 0.24617,
+              "excess": 0.125511,
+              "p_value": 0.0005
+            },
+            "20": {
+              "pick_rate": 0.207965,
+              "random_mean_rate": 0.105655,
+              "excess": 0.10231,
+              "p_value": 0.0005
+            }
+          },
+          "signal_change_rate": 0.2,
+          "same_close_fill_bias": -0.001697,
+          "exits": {
+            "trades": 215,
+            "mean_primary_20_session": 0.044104,
+            "mean_time_exit_30_next_open": 0.08026,
+            "mean_stop_or_30_next_open": 0.035546,
+            "mean_stop_or_30_fantasy_close": 0.035861,
+            "mean_overnight_gap_on_stops": -0.000423,
+            "stopped_trades": 136,
+            "stop_minus_time_exit": -0.044714,
+            "gap_fill_minus_fantasy": -0.000315
+          },
+          "portfolio": {
+            "full_one_name": {
+              "return": 1.74491,
+              "max_drawdown": 0.404403,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 7.545613,
+                "one_way_buy_annualized": 7.605978,
+                "two_sided": 8.038382,
+                "two_sided_annualized": 8.102689,
+                "sessions": 250
+              }
+            },
+            "clip": {
+              "return": 0.213272,
+              "max_drawdown": 0.173162,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 2.815589,
+                "one_way_buy_annualized": 2.838113,
+                "two_sided": 2.912675,
+                "two_sided_annualized": 2.935976,
+                "sessions": 250
+              }
+            },
+            "clip_stop": {
+              "return": 0.069648,
+              "max_drawdown": 0.123758,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.593339,
+                "one_way_buy_annualized": 3.622086,
+                "two_sided": 3.627024,
+                "two_sided_annualized": 3.65604,
+                "sessions": 250
+              }
+            },
+            "clip_stop_halt": {
+              "return": 0.069648,
+              "max_drawdown": 0.123758,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.593339,
+                "one_way_buy_annualized": 3.622086,
+                "two_sided": 3.627024,
+                "two_sided_annualized": 3.65604,
+                "sessions": 250
+              }
+            },
+            "clip_stop_halt_5bps": {
+              "return": 0.065735,
+              "max_drawdown": 0.124592,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.594124,
+                "one_way_buy_annualized": 3.622877,
+                "two_sided": 3.625977,
+                "two_sided_annualized": 3.654985,
+                "sessions": 250
+              }
+            },
+            "clip_stop_halt_10bps": {
+              "return": 0.066903,
+              "max_drawdown": 0.125424,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.593146,
+                "one_way_buy_annualized": 3.621892,
+                "two_sided": 3.625571,
+                "two_sided_annualized": 3.654576,
+                "sessions": 250
+              }
+            },
+            "signed_gaps": {
+              "full_minus_clip": 1.531638,
+              "clip_minus_stop": 0.143624,
+              "stop_minus_halt": 0.0,
+              "halt_minus_5bps": 0.003913,
+              "bps5_minus_bps10": -0.001168
+            }
+          },
+          "picks": [
+            {
+              "decision": "2024-10-24",
+              "symbol": "PLTR",
+              "eligible": 23
+            },
+            {
+              "decision": "2024-10-25",
+              "symbol": "PLTR",
+              "eligible": 24
+            },
+            {
+              "decision": "2024-10-28",
+              "symbol": "PLTR",
+              "eligible": 25
+            },
+            {
+              "decision": "2024-10-29",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2024-10-30",
+              "symbol": "PLTR",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-10-31",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2024-11-01",
+              "symbol": "PLTR",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-11-04",
+              "symbol": "CRM",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-11-05",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2024-11-06",
+              "symbol": "PLTR",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-11-07",
+              "symbol": "PLTR",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-11-08",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2024-11-11",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2024-11-12",
+              "symbol": "COIN",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-11-13",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2024-11-14",
+              "symbol": "COIN",
+              "eligible": 21
+            },
+            {
+              "decision": "2024-11-15",
+              "symbol": "COIN",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-11-18",
+              "symbol": "COIN",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-11-19",
+              "symbol": "COIN",
+              "eligible": 18
+            },
+            {
+              "decision": "2024-11-20",
+              "symbol": "COIN",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-11-21",
+              "symbol": "SNOW",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-11-22",
+              "symbol": "COIN",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-11-25",
+              "symbol": "COIN",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-11-26",
+              "symbol": "SNOW",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-11-27",
+              "symbol": "SNOW",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-11-29",
+              "symbol": "SNOW",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-12-02",
+              "symbol": "SNOW",
+              "eligible": 22
+            },
+            {
+              "decision": "2024-12-03",
+              "symbol": "PLTR",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-12-04",
+              "symbol": "SNOW",
+              "eligible": 21
+            },
+            {
+              "decision": "2024-12-05",
+              "symbol": "PLTR",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-12-06",
+              "symbol": "PLTR",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-12-09",
+              "symbol": "PLTR",
+              "eligible": 21
+            },
+            {
+              "decision": "2024-12-10",
+              "symbol": "TSLA",
+              "eligible": 19
+            },
+            {
+              "decision": "2024-12-11",
+              "symbol": "TSLA",
+              "eligible": 21
+            },
+            {
+              "decision": "2024-12-12",
+              "symbol": "TSLA",
+              "eligible": 20
+            },
+            {
+              "decision": "2024-12-13",
+              "symbol": "TSLA",
+              "eligible": 19
+            },
+            {
+              "decision": "2024-12-16",
+              "symbol": "TSLA",
+              "eligible": 19
+            },
+            {
+              "decision": "2024-12-17",
+              "symbol": "TSLA",
+              "eligible": 19
+            },
+            {
+              "decision": "2024-12-18",
+              "symbol": "TSLA",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-12-19",
+              "symbol": "TSLA",
+              "eligible": 16
+            },
+            {
+              "decision": "2024-12-20",
+              "symbol": "BB",
+              "eligible": 17
+            },
+            {
+              "decision": "2024-12-23",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2024-12-24",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2024-12-26",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2024-12-27",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2024-12-30",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2024-12-31",
+              "symbol": "BB",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-01-02",
+              "symbol": "BB",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-01-03",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-01-06",
+              "symbol": "BB",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-01-07",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-01-08",
+              "symbol": "BB",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-01-10",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-01-13",
+              "symbol": "BB",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-01-14",
+              "symbol": "BB",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-01-15",
+              "symbol": "BB",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-01-16",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-01-17",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-01-21",
+              "symbol": "BB",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-01-22",
+              "symbol": "BB",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-01-23",
+              "symbol": "BB",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-01-24",
+              "symbol": "BB",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-01-27",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-01-28",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-01-29",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-01-30",
+              "symbol": "BB",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-01-31",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-02-03",
+              "symbol": "BB",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-02-04",
+              "symbol": "PLTR",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-02-05",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-02-06",
+              "symbol": "PLTR",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-02-07",
+              "symbol": "PLTR",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-02-10",
+              "symbol": "PLTR",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-02-11",
+              "symbol": "PLTR",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-02-12",
+              "symbol": "BB",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-02-13",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-02-14",
+              "symbol": "PLTR",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-02-18",
+              "symbol": "SMCI",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-02-19",
+              "symbol": "SMCI",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-02-20",
+              "symbol": "SMCI",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-02-21",
+              "symbol": "SMCI",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-02-24",
+              "symbol": "SMCI",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-02-25",
+              "symbol": "SMCI",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-02-26",
+              "symbol": "SMCI",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-02-27",
+              "symbol": "SMCI",
+              "eligible": 10
+            },
+            {
+              "decision": "2025-02-28",
+              "symbol": "SMCI",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-03-03",
+              "symbol": "RTX",
+              "eligible": 10
+            },
+            {
+              "decision": "2025-03-04",
+              "symbol": "OKTA",
+              "eligible": 8
+            },
+            {
+              "decision": "2025-03-05",
+              "symbol": "OKTA",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-03-06",
+              "symbol": "OKTA",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-03-07",
+              "symbol": "OKTA",
+              "eligible": 8
+            },
+            {
+              "decision": "2025-03-10",
+              "symbol": "OKTA",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-03-11",
+              "symbol": "OKTA",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-03-12",
+              "symbol": "OKTA",
+              "eligible": 8
+            },
+            {
+              "decision": "2025-03-13",
+              "symbol": "OKTA",
+              "eligible": 8
+            },
+            {
+              "decision": "2025-03-14",
+              "symbol": "OKTA",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-03-17",
+              "symbol": "OKTA",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-03-18",
+              "symbol": "INTC",
+              "eligible": 10
+            },
+            {
+              "decision": "2025-03-19",
+              "symbol": "OKTA",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-03-20",
+              "symbol": "OKTA",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-03-21",
+              "symbol": "OKTA",
+              "eligible": 10
+            },
+            {
+              "decision": "2025-03-24",
+              "symbol": "OKTA",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-03-25",
+              "symbol": "OKTA",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-03-26",
+              "symbol": "OKTA",
+              "eligible": 10
+            },
+            {
+              "decision": "2025-03-27",
+              "symbol": "OKTA",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-03-28",
+              "symbol": "OKTA",
+              "eligible": 7
+            },
+            {
+              "decision": "2025-03-31",
+              "symbol": "XOM",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-04-01",
+              "symbol": "XOM",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-04-02",
+              "symbol": "XOM",
+              "eligible": 7
+            },
+            {
+              "decision": "2025-04-03",
+              "symbol": "XOM",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-04-09",
+              "symbol": "KTOS",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-04-10",
+              "symbol": "KTOS",
+              "eligible": 3
+            },
+            {
+              "decision": "2025-04-11",
+              "symbol": "KTOS",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-04-14",
+              "symbol": "KTOS",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-04-15",
+              "symbol": "KTOS",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-04-16",
+              "symbol": "KTOS",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-04-17",
+              "symbol": "KTOS",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-04-21",
+              "symbol": "KTOS",
+              "eligible": 4
+            },
+            {
+              "decision": "2025-04-22",
+              "symbol": "NFLX",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-04-23",
+              "symbol": "KTOS",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-04-24",
+              "symbol": "PLTR",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-04-25",
+              "symbol": "PLTR",
+              "eligible": 10
+            },
+            {
+              "decision": "2025-04-28",
+              "symbol": "PLTR",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-04-29",
+              "symbol": "PLTR",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-04-30",
+              "symbol": "PLTR",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-05-01",
+              "symbol": "PLTR",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-05-02",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-05-05",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-05-06",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-05-07",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-05-08",
+              "symbol": "PLTR",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-05-09",
+              "symbol": "PLTR",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-05-12",
+              "symbol": "PLTR",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-05-13",
+              "symbol": "COIN",
+              "eligible": 26
+            },
+            {
+              "decision": "2025-05-14",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-05-15",
+              "symbol": "PLTR",
+              "eligible": 26
+            },
+            {
+              "decision": "2025-05-16",
+              "symbol": "COIN",
+              "eligible": 26
+            },
+            {
+              "decision": "2025-05-19",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-05-20",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-05-21",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-05-22",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-05-23",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-05-27",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-05-28",
+              "symbol": "TSLA",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-05-29",
+              "symbol": "TSLA",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-05-30",
+              "symbol": "SNOW",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-06-02",
+              "symbol": "SNOW",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-06-03",
+              "symbol": "SNOW",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-06-04",
+              "symbol": "SNOW",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-06-05",
+              "symbol": "MU",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-06-06",
+              "symbol": "MU",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-06-09",
+              "symbol": "MU",
+              "eligible": 26
+            },
+            {
+              "decision": "2025-06-10",
+              "symbol": "MU",
+              "eligible": 26
+            },
+            {
+              "decision": "2025-06-11",
+              "symbol": "MU",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-06-12",
+              "symbol": "MU",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-06-13",
+              "symbol": "MU",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-06-16",
+              "symbol": "MU",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-06-17",
+              "symbol": "MU",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-06-18",
+              "symbol": "MU",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-06-20",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-06-23",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-06-24",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-06-25",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-06-26",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-06-27",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-06-30",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-07-01",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-07-02",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-07-03",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-07-07",
+              "symbol": "COIN",
+              "eligible": 25
+            },
+            {
+              "decision": "2025-07-08",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-07-09",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-07-10",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-07-11",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-07-14",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-07-15",
+              "symbol": "COIN",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-07-16",
+              "symbol": "COIN",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-07-17",
+              "symbol": "KTOS",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-07-18",
+              "symbol": "KTOS",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-07-21",
+              "symbol": "KTOS",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-07-22",
+              "symbol": "COIN",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-07-23",
+              "symbol": "KTOS",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-07-24",
+              "symbol": "KTOS",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-07-25",
+              "symbol": "KTOS",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-07-28",
+              "symbol": "KTOS",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-07-29",
+              "symbol": "AMD",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-07-30",
+              "symbol": "AMD",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-07-31",
+              "symbol": "AMD",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-08-01",
+              "symbol": "AMD",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-08-04",
+              "symbol": "KTOS",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-08-05",
+              "symbol": "KTOS",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-08-06",
+              "symbol": "SHOP",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-08-07",
+              "symbol": "SHOP",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-08-08",
+              "symbol": "KTOS",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-08-11",
+              "symbol": "KTOS",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-08-12",
+              "symbol": "KTOS",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-08-13",
+              "symbol": "KTOS",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-08-14",
+              "symbol": "KTOS",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-08-15",
+              "symbol": "KTOS",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-08-18",
+              "symbol": "KTOS",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-08-19",
+              "symbol": "KTOS",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-08-20",
+              "symbol": "KTOS",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-08-21",
+              "symbol": "KTOS",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-08-22",
+              "symbol": "KTOS",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-08-25",
+              "symbol": "KTOS",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-08-26",
+              "symbol": "KTOS",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-08-27",
+              "symbol": "KTOS",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-08-28",
+              "symbol": "KTOS",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-08-29",
+              "symbol": "KTOS",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-02",
+              "symbol": "KTOS",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-09-03",
+              "symbol": "GOOGL",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-09-04",
+              "symbol": "GOOGL",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-05",
+              "symbol": "GOOGL",
+              "eligible": 18
+            },
+            {
+              "decision": "2025-09-08",
+              "symbol": "GOOGL",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-09-09",
+              "symbol": "GOOGL",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-09-10",
+              "symbol": "GOOGL",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-09-11",
+              "symbol": "MU",
+              "eligible": 20
+            },
+            {
+              "decision": "2025-09-12",
+              "symbol": "MU",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-15",
+              "symbol": "MU",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-16",
+              "symbol": "MU",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-17",
+              "symbol": "MU",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-18",
+              "symbol": "MU",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-09-19",
+              "symbol": "MU",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-09-22",
+              "symbol": "MU",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-09-23",
+              "symbol": "MU",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-09-24",
+              "symbol": "INTC",
+              "eligible": 21
+            }
+          ]
+        }
+      }
+    },
+    "recent_365": {
+      "window_start": "2025-10-24",
+      "window_end": "2026-10-23",
+      "sessions": 251,
+      "horizons": {
+        "1": {
+          "days": 249,
+          "choice_days": 249,
+          "mean_eligible_names": 15.240964,
+          "pick_mean": 0.002718,
+          "pick_median": 0.001532,
+          "random_mean": 0.001593,
+          "excess_vs_random_mean": 0.001126,
+          "p_value_vs_random": 0.284858,
+          "excess_vs_eligible_mean": 0.001151,
+          "excess_vs_eligible_median": -0.003006,
+          "excess_vs_vti_mean": 0.002229,
+          "excess_vs_vti_median": 1.5e-05,
+          "vti_days": 249,
+          "vti_block_p05": -0.000923,
+          "path_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.088353,
+              "random_mean_rate": 0.038036,
+              "excess": 0.050317,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.012048,
+              "random_mean_rate": 0.004616,
+              "excess": 0.007432,
+              "p_value": 0.091454
+            },
+            "20": {
+              "pick_rate": 0.0,
+              "random_mean_rate": 0.0,
+              "excess": 0.0,
+              "p_value": 1.0
+            }
+          },
+          "terminal_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.124498,
+              "random_mean_rate": 0.062827,
+              "excess": 0.061671,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.028112,
+              "random_mean_rate": 0.012416,
+              "excess": 0.015697,
+              "p_value": 0.024988
+            },
+            "20": {
+              "pick_rate": 0.0,
+              "random_mean_rate": 0.001349,
+              "excess": -0.001349,
+              "p_value": 1.0
+            }
+          },
+          "signal_change_rate": 0.225806
+        },
+        "5": {
+          "days": 245,
+          "choice_days": 245,
+          "mean_eligible_names": 15.257143,
+          "pick_mean": 0.008681,
+          "pick_median": 0.004892,
+          "random_mean": 0.006334,
+          "excess_vs_random_mean": 0.002346,
+          "p_value_vs_random": 0.32034,
+          "excess_vs_eligible_mean": 0.002415,
+          "excess_vs_eligible_median": -0.004104,
+          "excess_vs_vti_mean": 0.006103,
+          "excess_vs_vti_median": -0.002721,
+          "vti_days": 245,
+          "vti_block_p05": -0.007668,
+          "path_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.428571,
+              "random_mean_rate": 0.261259,
+              "excess": 0.167312,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.17551,
+              "random_mean_rate": 0.106492,
+              "excess": 0.069018,
+              "p_value": 0.0005
+            },
+            "20": {
+              "pick_rate": 0.040816,
+              "random_mean_rate": 0.028027,
+              "excess": 0.01279,
+              "p_value": 0.134933
+            }
+          },
+          "terminal_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.289796,
+              "random_mean_rate": 0.203118,
+              "excess": 0.086678,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.15102,
+              "random_mean_rate": 0.089971,
+              "excess": 0.061049,
+              "p_value": 0.0005
+            },
+            "20": {
+              "pick_rate": 0.036735,
+              "random_mean_rate": 0.026329,
+              "excess": 0.010406,
+              "p_value": 0.190405
+            }
+          },
+          "signal_change_rate": 0.229508
+        },
+        "20": {
+          "days": 230,
+          "choice_days": 230,
+          "mean_eligible_names": 14.895652,
+          "pick_mean": 0.054624,
+          "pick_median": 0.015028,
+          "random_mean": 0.036198,
+          "excess_vs_random_mean": 0.018426,
+          "p_value_vs_random": 0.045977,
+          "excess_vs_eligible_mean": 0.018466,
+          "excess_vs_eligible_median": -0.011616,
+          "excess_vs_vti_mean": 0.04177,
+          "excess_vs_vti_median": 0.004272,
+          "vti_days": 230,
+          "vti_block_p05": -0.008858,
+          "path_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.704348,
+              "random_mean_rate": 0.582672,
+              "excess": 0.121676,
+              "p_value": 0.0005
+            },
+            "10": {
+              "pick_rate": 0.482609,
+              "random_mean_rate": 0.366602,
+              "excess": 0.116007,
+              "p_value": 0.001
+            },
+            "20": {
+              "pick_rate": 0.247826,
+              "random_mean_rate": 0.17463,
+              "excess": 0.073196,
+              "p_value": 0.002499
+            }
+          },
+          "terminal_hit_vs_random": {
+            "5": {
+              "pick_rate": 0.4,
+              "random_mean_rate": 0.36937,
+              "excess": 0.03063,
+              "p_value": 0.184908
+            },
+            "10": {
+              "pick_rate": 0.321739,
+              "random_mean_rate": 0.253052,
+              "excess": 0.068687,
+              "p_value": 0.007496
+            },
+            "20": {
+              "pick_rate": 0.165217,
+              "random_mean_rate": 0.12718,
+              "excess": 0.038037,
+              "p_value": 0.044478
+            }
+          },
+          "signal_change_rate": 0.231441,
+          "same_close_fill_bias": -0.002555,
+          "exits": {
+            "trades": 219,
+            "mean_primary_20_session": 0.058851,
+            "mean_time_exit_30_next_open": 0.08514,
+            "mean_stop_or_30_next_open": 0.035186,
+            "mean_stop_or_30_fantasy_close": 0.028878,
+            "mean_overnight_gap_on_stops": 0.010173,
+            "stopped_trades": 150,
+            "stop_minus_time_exit": -0.049955,
+            "gap_fill_minus_fantasy": 0.006308
+          },
+          "portfolio": {
+            "full_one_name": {
+              "return": 0.390088,
+              "max_drawdown": 0.488258,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 7.912657,
+                "one_way_buy_annualized": 7.944181,
+                "two_sided": 8.058695,
+                "two_sided_annualized": 8.090801,
+                "sessions": 251
+              }
+            },
+            "clip": {
+              "return": 0.184051,
+              "max_drawdown": 0.120176,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 2.870816,
+                "one_way_buy_annualized": 2.882253,
+                "two_sided": 2.9516,
+                "two_sided_annualized": 2.96336,
+                "sessions": 251
+              }
+            },
+            "clip_stop": {
+              "return": 0.096108,
+              "max_drawdown": 0.099429,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.520197,
+                "one_way_buy_annualized": 3.534221,
+                "two_sided": 3.565133,
+                "two_sided_annualized": 3.579337,
+                "sessions": 251
+              }
+            },
+            "clip_stop_halt": {
+              "return": 0.096108,
+              "max_drawdown": 0.099429,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.520197,
+                "one_way_buy_annualized": 3.534221,
+                "two_sided": 3.565133,
+                "two_sided_annualized": 3.579337,
+                "sessions": 251
+              }
+            },
+            "clip_stop_halt_5bps": {
+              "return": 0.092191,
+              "max_drawdown": 0.100724,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.519735,
+                "one_way_buy_annualized": 3.533758,
+                "two_sided": 3.562909,
+                "two_sided_annualized": 3.577104,
+                "sessions": 251
+              }
+            },
+            "clip_stop_halt_10bps": {
+              "return": 0.096907,
+              "max_drawdown": 0.096604,
+              "halted": false,
+              "turnover": {
+                "one_way_buy": 3.521274,
+                "one_way_buy_annualized": 3.535303,
+                "two_sided": 3.566699,
+                "two_sided_annualized": 3.580909,
+                "sessions": 251
+              }
+            },
+            "signed_gaps": {
+              "full_minus_clip": 0.206037,
+              "clip_minus_stop": 0.087943,
+              "stop_minus_halt": 0.0,
+              "halt_minus_5bps": 0.003917,
+              "bps5_minus_bps10": -0.004717
+            }
+          },
+          "picks": [
+            {
+              "decision": "2025-10-24",
+              "symbol": "AMD",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-10-27",
+              "symbol": "AMD",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-10-28",
+              "symbol": "AMD",
+              "eligible": 23
+            },
+            {
+              "decision": "2025-10-29",
+              "symbol": "AMD",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-10-30",
+              "symbol": "AMD",
+              "eligible": 21
+            },
+            {
+              "decision": "2025-10-31",
+              "symbol": "AMD",
+              "eligible": 24
+            },
+            {
+              "decision": "2025-11-03",
+              "symbol": "MU",
+              "eligible": 22
+            },
+            {
+              "decision": "2025-11-04",
+              "symbol": "AMD",
+              "eligible": 19
+            },
+            {
+              "decision": "2025-11-05",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-11-06",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-11-07",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-11-10",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-11-11",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-11-12",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-11-13",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-11-14",
+              "symbol": "MU",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-11-17",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-11-18",
+              "symbol": "MU",
+              "eligible": 8
+            },
+            {
+              "decision": "2025-11-19",
+              "symbol": "MU",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-11-20",
+              "symbol": "GOOGL",
+              "eligible": 6
+            },
+            {
+              "decision": "2025-11-21",
+              "symbol": "GOOGL",
+              "eligible": 5
+            },
+            {
+              "decision": "2025-11-24",
+              "symbol": "GOOGL",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-11-25",
+              "symbol": "GOOGL",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-11-26",
+              "symbol": "GOOGL",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-11-28",
+              "symbol": "GOOGL",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-12-01",
+              "symbol": "GOOGL",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-12-02",
+              "symbol": "INTC",
+              "eligible": 9
+            },
+            {
+              "decision": "2025-12-03",
+              "symbol": "GOOGL",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-12-04",
+              "symbol": "GOOGL",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-12-05",
+              "symbol": "GOOGL",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-12-08",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-12-09",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-12-10",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-12-11",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-12-12",
+              "symbol": "GOOGL",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-12-15",
+              "symbol": "GOOGL",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-12-16",
+              "symbol": "TSLA",
+              "eligible": 12
+            },
+            {
+              "decision": "2025-12-17",
+              "symbol": "TSLA",
+              "eligible": 11
+            },
+            {
+              "decision": "2025-12-18",
+              "symbol": "TSLA",
+              "eligible": 13
+            },
+            {
+              "decision": "2025-12-19",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2025-12-22",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2025-12-23",
+              "symbol": "MU",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-12-24",
+              "symbol": "MU",
+              "eligible": 17
+            },
+            {
+              "decision": "2025-12-26",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-12-29",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-12-30",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2025-12-31",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-02",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-01-05",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-01-06",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-01-07",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-08",
+              "symbol": "KTOS",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-01-09",
+              "symbol": "KTOS",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-12",
+              "symbol": "KTOS",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-01-13",
+              "symbol": "KTOS",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-14",
+              "symbol": "KTOS",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-01-15",
+              "symbol": "KTOS",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-01-16",
+              "symbol": "KTOS",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-01-20",
+              "symbol": "KTOS",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-01-21",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-01-22",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-01-23",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-26",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-01-27",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-28",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-01-29",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-01-30",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-02-02",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-02-03",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-02-04",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-02-05",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-02-06",
+              "symbol": "MU",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-02-09",
+              "symbol": "LMT",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-02-10",
+              "symbol": "XOM",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-02-11",
+              "symbol": "MU",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-02-12",
+              "symbol": "MU",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-02-13",
+              "symbol": "MU",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-02-17",
+              "symbol": "MU",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-02-18",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-02-19",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-02-20",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-02-23",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-02-24",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-02-25",
+              "symbol": "MU",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-02-26",
+              "symbol": "MU",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-02-27",
+              "symbol": "LNG",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-03-02",
+              "symbol": "LNG",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-03-03",
+              "symbol": "LNG",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-03-04",
+              "symbol": "LNG",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-03-05",
+              "symbol": "LNG",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-03-06",
+              "symbol": "LNG",
+              "eligible": 8
+            },
+            {
+              "decision": "2026-03-09",
+              "symbol": "LNG",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-03-10",
+              "symbol": "LNG",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-03-11",
+              "symbol": "LNG",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-03-12",
+              "symbol": "LNG",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-03-13",
+              "symbol": "LNG",
+              "eligible": 8
+            },
+            {
+              "decision": "2026-03-16",
+              "symbol": "LNG",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-03-17",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-03-18",
+              "symbol": "LNG",
+              "eligible": 10
+            },
+            {
+              "decision": "2026-03-19",
+              "symbol": "LNG",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-03-20",
+              "symbol": "LNG",
+              "eligible": 10
+            },
+            {
+              "decision": "2026-03-23",
+              "symbol": "LNG",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-03-24",
+              "symbol": "LNG",
+              "eligible": 7
+            },
+            {
+              "decision": "2026-03-25",
+              "symbol": "ARM",
+              "eligible": 10
+            },
+            {
+              "decision": "2026-03-26",
+              "symbol": "ARM",
+              "eligible": 7
+            },
+            {
+              "decision": "2026-03-27",
+              "symbol": "LNG",
+              "eligible": 6
+            },
+            {
+              "decision": "2026-03-30",
+              "symbol": "LNG",
+              "eligible": 6
+            },
+            {
+              "decision": "2026-03-31",
+              "symbol": "ARM",
+              "eligible": 7
+            },
+            {
+              "decision": "2026-04-01",
+              "symbol": "ARM",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-04-02",
+              "symbol": "ARM",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-04-06",
+              "symbol": "ARM",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-04-07",
+              "symbol": "LNG",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-04-08",
+              "symbol": "INTC",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-04-09",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-04-10",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-04-13",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-04-14",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-04-15",
+              "symbol": "INTC",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-04-16",
+              "symbol": "INTC",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-04-17",
+              "symbol": "INTC",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-04-20",
+              "symbol": "BB",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-04-21",
+              "symbol": "BB",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-04-22",
+              "symbol": "BB",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-04-23",
+              "symbol": "ARM",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-04-24",
+              "symbol": "ARM",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-04-27",
+              "symbol": "INTC",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-04-28",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-04-29",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-04-30",
+              "symbol": "INTC",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-05-01",
+              "symbol": "INTC",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-05-04",
+              "symbol": "INTC",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-05-05",
+              "symbol": "INTC",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-05-06",
+              "symbol": "INTC",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-05-07",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-05-08",
+              "symbol": "INTC",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-05-11",
+              "symbol": "INTC",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-05-12",
+              "symbol": "INTC",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-05-13",
+              "symbol": "INTC",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-05-14",
+              "symbol": "INTC",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-05-15",
+              "symbol": "INTC",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-05-18",
+              "symbol": "INTC",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-05-19",
+              "symbol": "INTC",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-05-20",
+              "symbol": "INTC",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-05-21",
+              "symbol": "ARM",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-05-22",
+              "symbol": "ARM",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-05-26",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-05-27",
+              "symbol": "BB",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-05-28",
+              "symbol": "BB",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-05-29",
+              "symbol": "ARM",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-06-01",
+              "symbol": "ARM",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-06-02",
+              "symbol": "ARM",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-06-03",
+              "symbol": "ARM",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-06-04",
+              "symbol": "BB",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-06-05",
+              "symbol": "BB",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-06-08",
+              "symbol": "BB",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-06-09",
+              "symbol": "HPE",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-06-10",
+              "symbol": "BB",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-06-11",
+              "symbol": "MU",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-06-12",
+              "symbol": "ARM",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-06-15",
+              "symbol": "ARM",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-06-16",
+              "symbol": "ARM",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-06-17",
+              "symbol": "ARM",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-06-18",
+              "symbol": "ARM",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-06-22",
+              "symbol": "MU",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-06-23",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-06-24",
+              "symbol": "MU",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-06-25",
+              "symbol": "MU",
+              "eligible": 9
+            },
+            {
+              "decision": "2026-06-26",
+              "symbol": "BB",
+              "eligible": 10
+            },
+            {
+              "decision": "2026-06-29",
+              "symbol": "BB",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-06-30",
+              "symbol": "BB",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-07-01",
+              "symbol": "BB",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-07-02",
+              "symbol": "BB",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-07-06",
+              "symbol": "OKTA",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-07-07",
+              "symbol": "OKTA",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-07-08",
+              "symbol": "OKTA",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-07-09",
+              "symbol": "OKTA",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-07-10",
+              "symbol": "BB",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-07-13",
+              "symbol": "OKTA",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-07-14",
+              "symbol": "OKTA",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-07-15",
+              "symbol": "OKTA",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-07-16",
+              "symbol": "OKTA",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-07-17",
+              "symbol": "OKTA",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-07-20",
+              "symbol": "OKTA",
+              "eligible": 15
+            },
+            {
+              "decision": "2026-07-21",
+              "symbol": "OKTA",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-07-22",
+              "symbol": "SNOW",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-07-23",
+              "symbol": "SNOW",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-07-24",
+              "symbol": "RTX",
+              "eligible": 11
+            },
+            {
+              "decision": "2026-07-27",
+              "symbol": "RTX",
+              "eligible": 13
+            },
+            {
+              "decision": "2026-07-28",
+              "symbol": "RTX",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-07-29",
+              "symbol": "SNOW",
+              "eligible": 10
+            },
+            {
+              "decision": "2026-07-30",
+              "symbol": "SNOW",
+              "eligible": 12
+            },
+            {
+              "decision": "2026-07-31",
+              "symbol": "SNOW",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-08-03",
+              "symbol": "SNOW",
+              "eligible": 14
+            },
+            {
+              "decision": "2026-08-04",
+              "symbol": "SNOW",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-08-05",
+              "symbol": "SNOW",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-08-06",
+              "symbol": "SHOP",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-08-07",
+              "symbol": "PLTR",
+              "eligible": 17
+            },
+            {
+              "decision": "2026-08-10",
+              "symbol": "PLTR",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-08-11",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-08-12",
+              "symbol": "PLTR",
+              "eligible": 16
+            },
+            {
+              "decision": "2026-08-13",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-08-14",
+              "symbol": "SMCI",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-08-17",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-08-18",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-08-19",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-08-20",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-08-21",
+              "symbol": "PLTR",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-08-24",
+              "symbol": "PLTR",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-08-25",
+              "symbol": "SMCI",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-08-26",
+              "symbol": "PLTR",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-08-27",
+              "symbol": "CRM",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-08-28",
+              "symbol": "CRM",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-08-31",
+              "symbol": "CRM",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-09-01",
+              "symbol": "CRM",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-09-02",
+              "symbol": "CRM",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-09-03",
+              "symbol": "CRM",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-09-04",
+              "symbol": "CRM",
+              "eligible": 18
+            },
+            {
+              "decision": "2026-09-08",
+              "symbol": "CRM",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-09-09",
+              "symbol": "CRM",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-09-10",
+              "symbol": "CRM",
+              "eligible": 19
+            },
+            {
+              "decision": "2026-09-11",
+              "symbol": "CRM",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-09-14",
+              "symbol": "CRM",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-09-15",
+              "symbol": "OKTA",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-09-16",
+              "symbol": "OKTA",
+              "eligible": 20
+            },
+            {
+              "decision": "2026-09-17",
+              "symbol": "OKTA",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-09-18",
+              "symbol": "OKTA",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-09-21",
+              "symbol": "INTC",
+              "eligible": 23
+            },
+            {
+              "decision": "2026-09-22",
+              "symbol": "ARM",
+              "eligible": 23
+            },
+            {
+              "decision": "2026-09-23",
+              "symbol": "OKTA",
+              "eligible": 21
+            },
+            {
+              "decision": "2026-09-24",
+              "symbol": "OKTA",
+              "eligible": 22
+            }
+          ]
+        }
+      }
+    }
+  },
+  "pooled": {
+    "1": {
+      "days": 494,
+      "choice_days": 494,
+      "mean_eligible_names": 16.674089,
+      "pick_mean": 0.002387,
+      "pick_median": 0.001422,
+      "random_mean": 0.001566,
+      "excess_vs_random_mean": 0.000821,
+      "p_value_vs_random": 0.263868,
+      "excess_vs_eligible_mean": 0.000841,
+      "excess_vs_eligible_median": -0.000946,
+      "excess_vs_vti_mean": 0.001978,
+      "excess_vs_vti_median": 4.3e-05,
+      "vti_days": 494,
+      "vti_block_p05": -0.000869,
+      "path_hit_vs_random": {
+        "5": {
+          "pick_rate": 0.078947,
+          "random_mean_rate": 0.033174,
+          "excess": 0.045773,
+          "p_value": 0.0005
+        },
+        "10": {
+          "pick_rate": 0.006073,
+          "random_mean_rate": 0.004417,
+          "excess": 0.001656,
+          "p_value": 0.370315
+        },
+        "20": {
+          "pick_rate": 0.0,
+          "random_mean_rate": 0.000118,
+          "excess": -0.000118,
+          "p_value": 1.0
+        }
+      },
+      "terminal_hit_vs_random": {
+        "5": {
+          "pick_rate": 0.119433,
+          "random_mean_rate": 0.054378,
+          "excess": 0.065056,
+          "p_value": 0.0005
+        },
+        "10": {
+          "pick_rate": 0.022267,
+          "random_mean_rate": 0.011739,
+          "excess": 0.010528,
+          "p_value": 0.028486
+        },
+        "20": {
+          "pick_rate": 0.0,
+          "random_mean_rate": 0.001322,
+          "excess": -0.001322,
+          "p_value": 1.0
+        }
+      },
+      "signal_change_rate": 0.21501
+    },
+    "5": {
+      "days": 486,
+      "choice_days": 486,
+      "mean_eligible_names": 16.662551,
+      "pick_mean": 0.01065,
+      "pick_median": 0.009652,
+      "random_mean": 0.006946,
+      "excess_vs_random_mean": 0.003704,
+      "p_value_vs_random": 0.122939,
+      "excess_vs_eligible_mean": 0.003643,
+      "excess_vs_eligible_median": 0.002289,
+      "excess_vs_vti_mean": 0.008092,
+      "excess_vs_vti_median": 0.005261,
+      "vti_days": 486,
+      "vti_block_p05": -0.004817,
+      "path_hit_vs_random": {
+        "5": {
+          "pick_rate": 0.432099,
+          "random_mean_rate": 0.248675,
+          "excess": 0.183424,
+          "p_value": 0.0005
+        },
+        "10": {
+          "pick_rate": 0.141975,
+          "random_mean_rate": 0.095478,
+          "excess": 0.046497,
+          "p_value": 0.0005
+        },
+        "20": {
+          "pick_rate": 0.032922,
+          "random_mean_rate": 0.023856,
+          "excess": 0.009066,
+          "p_value": 0.108946
+        }
+      },
+      "terminal_hit_vs_random": {
+        "5": {
+          "pick_rate": 0.298354,
+          "random_mean_rate": 0.19921,
+          "excess": 0.099144,
+          "p_value": 0.0005
+        },
+        "10": {
+          "pick_rate": 0.115226,
+          "random_mean_rate": 0.081165,
+          "excess": 0.034062,
+          "p_value": 0.002999
+        },
+        "20": {
+          "pick_rate": 0.028807,
+          "random_mean_rate": 0.02214,
+          "excess": 0.006667,
+          "p_value": 0.176912
+        }
+      },
+      "signal_change_rate": 0.214433
+    },
+    "20": {
+      "days": 456,
+      "choice_days": 456,
+      "mean_eligible_names": 16.368421,
+      "pick_mean": 0.053274,
+      "pick_median": 0.026434,
+      "random_mean": 0.035187,
+      "excess_vs_random_mean": 0.018087,
+      "p_value_vs_random": 0.006997,
+      "excess_vs_eligible_mean": 0.017978,
+      "excess_vs_eligible_median": -0.016152,
+      "excess_vs_vti_mean": 0.041017,
+      "excess_vs_vti_median": 0.011261,
+      "vti_days": 456,
+      "vti_block_p05": -0.003176,
+      "path_hit_vs_random": {
+        "5": {
+          "pick_rate": 0.741228,
+          "random_mean_rate": 0.585008,
+          "excess": 0.15622,
+          "p_value": 0.0005
+        },
+        "10": {
+          "pick_rate": 0.528509,
+          "random_mean_rate": 0.357467,
+          "excess": 0.171042,
+          "p_value": 0.0005
+        },
+        "20": {
+          "pick_rate": 0.254386,
+          "random_mean_rate": 0.157113,
+          "excess": 0.097273,
+          "p_value": 0.0005
+        }
+      },
+      "terminal_hit_vs_random": {
+        "5": {
+          "pick_rate": 0.447368,
+          "random_mean_rate": 0.382068,
+          "excess": 0.0653,
+          "p_value": 0.001499
+        },
+        "10": {
+          "pick_rate": 0.346491,
+          "random_mean_rate": 0.249372,
+          "excess": 0.09712,
+          "p_value": 0.0005
+        },
+        "20": {
+          "pick_rate": 0.186404,
+          "random_mean_rate": 0.116168,
+          "excess": 0.070236,
+          "p_value": 0.0005
+        }
+      },
+      "signal_change_rate": 0.217582,
+      "same_close_fill_bias": -0.002129
+    }
+  },
+  "entry_quote_max_age_seconds": 420
+}
