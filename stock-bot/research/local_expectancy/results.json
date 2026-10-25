@@ -1,0 +1,437 @@
+{
+  "hypothesis_id": "local_expectancy_v1",
+  "status": "reject",
+  "promotion": false,
+  "annual_target_claim": false,
+  "generated_at": "2026-10-25T04:17:06Z",
+  "panel_sha256": "54c9057ab11bbc43846e999c3fc4405a05deef4e5e8e788ea26e6b3ee46cffb2",
+  "symbols_included": [
+    "NVDA",
+    "TSLA",
+    "AMD",
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "META",
+    "PLTR",
+    "NFLX",
+    "INTC",
+    "MU",
+    "SMCI",
+    "COIN",
+    "CRM",
+    "SHOP",
+    "SNOW",
+    "OKTA",
+    "HPE",
+    "BB",
+    "ARM",
+    "XOM",
+    "CVX",
+    "LNG",
+    "RTX",
+    "LMT",
+    "KTOS"
+  ],
+  "symbols_excluded": {
+    "SPCX": "short_history"
+  },
+  "windows": {
+    "prior_365": {
+      "slip_5": {
+        "window_start": "2024-10-24",
+        "window_end": "2025-10-23",
+        "sessions": 250,
+        "learner": {
+          "return": -0.016599,
+          "max_drawdown": 0.178303,
+          "first_half": -0.016599,
+          "second_half": 0.0,
+          "sharpe": -0.042819,
+          "sessions": 250,
+          "trades": 91,
+          "turnover": 9.090548,
+          "mean_trade_pnl": -0.000182,
+          "monday_trade_pnl_share": -1.418012,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.005673,
+            "median": -0.014013,
+            "p05": -0.205229
+          }
+        },
+        "baseline": {
+          "return": 0.002283,
+          "max_drawdown": 0.182648,
+          "first_half": 0.002283,
+          "second_half": 0.0,
+          "sharpe": 0.091113,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.25232,
+          "mean_trade_pnl": 2.5e-05,
+          "monday_trade_pnl_share": 9.278348
+        },
+        "equal_weight_hold": {
+          "return": 0.59309,
+          "max_drawdown": 0.280443,
+          "sharpe": 1.688942
+        },
+        "vti_hold": {
+          "return": 0.17029,
+          "max_drawdown": 0.193036,
+          "sharpe": 0.904565
+        },
+        "spy_hold": {
+          "return": 0.171157,
+          "max_drawdown": 0.187552,
+          "sharpe": 0.907399
+        },
+        "monday_learner_return": -0.059638,
+        "accepted_refits": 3,
+        "rejected_refits": 2,
+        "model_alive_at_end": false,
+        "quote_age_seconds": 0
+      },
+      "slip_10": {
+        "window_start": "2024-10-24",
+        "window_end": "2025-10-23",
+        "sessions": 250,
+        "learner": {
+          "return": -0.024439,
+          "max_drawdown": 0.180657,
+          "first_half": -0.024439,
+          "second_half": 0.0,
+          "sharpe": -0.09842,
+          "sessions": 250,
+          "trades": 91,
+          "turnover": 9.111403,
+          "mean_trade_pnl": -0.000269,
+          "monday_trade_pnl_share": -0.866574,
+          "bootstrap": {
+            "paths": 200,
+            "mean": -0.002222,
+            "median": -0.020803,
+            "p05": -0.210594
+          }
+        },
+        "baseline": {
+          "return": -0.006447,
+          "max_drawdown": 0.185058,
+          "first_half": -0.006447,
+          "second_half": 0.0,
+          "sharpe": 0.033053,
+          "sessions": 250,
+          "trades": 93,
+          "turnover": 9.274856,
+          "mean_trade_pnl": -6.9e-05,
+          "monday_trade_pnl_share": -3.03401
+        },
+        "equal_weight_hold": {
+          "return": 0.591498,
+          "max_drawdown": 0.280443,
+          "sharpe": 1.685742
+        },
+        "vti_hold": {
+          "return": 0.16912,
+          "max_drawdown": 0.193036,
+          "sharpe": 0.89945
+        },
+        "spy_hold": {
+          "return": 0.169986,
+          "max_drawdown": 0.187552,
+          "sharpe": 0.902283
+        },
+        "monday_learner_return": -0.073232,
+        "accepted_refits": 3,
+        "rejected_refits": 2,
+        "model_alive_at_end": false,
+        "quote_age_seconds": 0
+      }
+    },
+    "recent_365": {
+      "slip_5": {
+        "window_start": "2025-10-24",
+        "window_end": "2026-10-23",
+        "sessions": 251,
+        "learner": {
+          "return": -0.009518,
+          "max_drawdown": 0.11883,
+          "first_half": 0.039066,
+          "second_half": -0.046757,
+          "sharpe": 0.033175,
+          "sessions": 251,
+          "trades": 210,
+          "turnover": 19.812019,
+          "mean_trade_pnl": -4.5e-05,
+          "monday_trade_pnl_share": 2.489328,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.001264,
+            "median": -0.022728,
+            "p05": -0.236429
+          }
+        },
+        "baseline": {
+          "return": 0.093612,
+          "max_drawdown": 0.098524,
+          "first_half": 0.040055,
+          "second_half": 0.051494,
+          "sharpe": 0.563153,
+          "sessions": 251,
+          "trades": 206,
+          "turnover": 19.391679,
+          "mean_trade_pnl": 0.000454,
+          "monday_trade_pnl_share": -0.088209
+        },
+        "equal_weight_hold": {
+          "return": 0.38216,
+          "max_drawdown": 0.149955,
+          "sharpe": 1.333756
+        },
+        "vti_hold": {
+          "return": 0.130586,
+          "max_drawdown": 0.089182,
+          "sharpe": 1.018184
+        },
+        "spy_hold": {
+          "return": 0.134437,
+          "max_drawdown": 0.08885,
+          "sharpe": 1.058704
+        },
+        "monday_learner_return": 0.145215,
+        "accepted_refits": 4,
+        "rejected_refits": 4,
+        "model_alive_at_end": false,
+        "quote_age_seconds": 0
+      },
+      "slip_10": {
+        "window_start": "2025-10-24",
+        "window_end": "2026-10-23",
+        "sessions": 251,
+        "learner": {
+          "return": -0.024316,
+          "max_drawdown": 0.122085,
+          "first_half": 0.029574,
+          "second_half": -0.052342,
+          "sharpe": -0.052606,
+          "sessions": 251,
+          "trades": 210,
+          "turnover": 19.80941,
+          "mean_trade_pnl": -0.000116,
+          "monday_trade_pnl_share": 1.314582,
+          "bootstrap": {
+            "paths": 200,
+            "mean": -0.01377,
+            "median": -0.036217,
+            "p05": -0.242433
+          }
+        },
+        "baseline": {
+          "return": 0.071934,
+          "max_drawdown": 0.103512,
+          "first_half": 0.030547,
+          "second_half": 0.04016,
+          "sharpe": 0.45891,
+          "sessions": 251,
+          "trades": 206,
+          "turnover": 19.390607,
+          "mean_trade_pnl": 0.000349,
+          "monday_trade_pnl_share": -0.176977
+        },
+        "equal_weight_hold": {
+          "return": 0.380779,
+          "max_drawdown": 0.149955,
+          "sharpe": 1.330146
+        },
+        "vti_hold": {
+          "return": 0.129456,
+          "max_drawdown": 0.089182,
+          "sharpe": 1.010238
+        },
+        "spy_hold": {
+          "return": 0.133303,
+          "max_drawdown": 0.08885,
+          "sharpe": 1.050621
+        },
+        "monday_learner_return": 0.135802,
+        "accepted_refits": 4,
+        "rejected_refits": 4,
+        "model_alive_at_end": false,
+        "quote_age_seconds": 0
+      }
+    },
+    "long_1000_supplement": {
+      "slip_5": {
+        "window_start": "2024-01-29",
+        "window_end": "2026-10-23",
+        "sessions": 688,
+        "learner": {
+          "return": 0.130267,
+          "max_drawdown": 0.150268,
+          "first_half": 0.130267,
+          "second_half": 0.0,
+          "sharpe": 0.409476,
+          "sessions": 688,
+          "trades": 227,
+          "turnover": 21.63419,
+          "mean_trade_pnl": 0.000574,
+          "monday_trade_pnl_share": 0.279244,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.169425,
+            "median": 0.149933,
+            "p05": -0.210325
+          }
+        },
+        "baseline": {
+          "return": 0.151929,
+          "max_drawdown": 0.182648,
+          "first_half": 0.151929,
+          "second_half": 0.0,
+          "sharpe": 0.447407,
+          "sessions": 688,
+          "trades": 230,
+          "turnover": 21.882686,
+          "mean_trade_pnl": 0.000661,
+          "monday_trade_pnl_share": -0.441063
+        },
+        "equal_weight_hold": {
+          "return": 1.677332,
+          "max_drawdown": 0.287682,
+          "sharpe": 1.347684
+        },
+        "vti_hold": {
+          "return": 0.590836,
+          "max_drawdown": 0.193036,
+          "sharpe": 1.162998
+        },
+        "spy_hold": {
+          "return": 0.60756,
+          "max_drawdown": 0.187552,
+          "sharpe": 1.194454
+        },
+        "monday_learner_return": 0.120997,
+        "accepted_refits": 5,
+        "rejected_refits": 4,
+        "model_alive_at_end": false,
+        "quote_age_seconds": 0
+      },
+      "slip_10": {
+        "window_start": "2024-01-29",
+        "window_end": "2026-10-23",
+        "sessions": 688,
+        "learner": {
+          "return": 0.070223,
+          "max_drawdown": 0.189984,
+          "first_half": 0.070223,
+          "second_half": 0.0,
+          "sharpe": 0.254269,
+          "sessions": 688,
+          "trades": 229,
+          "turnover": 22.426528,
+          "mean_trade_pnl": 0.000307,
+          "monday_trade_pnl_share": -0.047606,
+          "bootstrap": {
+            "paths": 200,
+            "mean": 0.111347,
+            "median": 0.101525,
+            "p05": -0.261531
+          }
+        },
+        "baseline": {
+          "return": 0.129823,
+          "max_drawdown": 0.185058,
+          "first_half": 0.129823,
+          "second_half": 0.0,
+          "sharpe": 0.395449,
+          "sessions": 688,
+          "trades": 229,
+          "turnover": 21.899895,
+          "mean_trade_pnl": 0.000567,
+          "monday_trade_pnl_share": -0.518593
+        },
+        "equal_weight_hold": {
+          "return": 1.674656,
+          "max_drawdown": 0.287682,
+          "sharpe": 1.34651
+        },
+        "vti_hold": {
+          "return": 0.589246,
+          "max_drawdown": 0.193036,
+          "sharpe": 1.160662
+        },
+        "spy_hold": {
+          "return": 0.605954,
+          "max_drawdown": 0.187552,
+          "sharpe": 1.192093
+        },
+        "monday_learner_return": 0.110596,
+        "accepted_refits": 5,
+        "rejected_refits": 4,
+        "model_alive_at_end": false,
+        "quote_age_seconds": 0
+      }
+    }
+  },
+  "cells": [
+    {
+      "window": "prior_365",
+      "cost": "slip_5",
+      "failures": [
+        "return",
+        "first_half",
+        "second_half",
+        "equal_weight_hold",
+        "vti_hold"
+      ],
+      "passed": false
+    },
+    {
+      "window": "prior_365",
+      "cost": "slip_10",
+      "failures": [
+        "return",
+        "first_half",
+        "second_half",
+        "equal_weight_hold",
+        "vti_hold"
+      ],
+      "passed": false
+    },
+    {
+      "window": "recent_365",
+      "cost": "slip_5",
+      "failures": [
+        "return",
+        "drawdown",
+        "first_half",
+        "second_half",
+        "equal_weight_hold",
+        "vti_hold"
+      ],
+      "passed": false
+    },
+    {
+      "window": "recent_365",
+      "cost": "slip_10",
+      "failures": [
+        "return",
+        "first_half",
+        "second_half",
+        "equal_weight_hold",
+        "vti_hold"
+      ],
+      "passed": false
+    }
+  ],
+  "entry_quote_max_age_seconds": 420,
+  "limitations": [
+    "Daily adjusted Yahoo bars stand in for the frozen five-minute feature clock because free five-minute history does not cover the protocol windows.",
+    "One entry per session, not one entry per five-minute bar.",
+    "Historical opens are modeled at quote age 0. A delayed SIP quote still fails the 7-minute gate and was not used as an entry feed.",
+    "The June 2026 screener list has survivorship. Corporate actions are not independently audited.",
+    "15x30x2 was not rebuilt. This does not promote, deploy, or touch a live or paper book."
+  ]
+}

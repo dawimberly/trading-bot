@@ -30,4 +30,4 @@ python -m unittest discover -s tests
 python run_study.py --refresh
 ```
 
-`results.json` is the gate output. Promotion stays false.
+`results.json` is the gate output. The write-up is `RESULTS.md`. Status: **reject**. Promotion stays false.
