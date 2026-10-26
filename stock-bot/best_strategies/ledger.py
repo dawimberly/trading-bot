@@ -282,6 +282,16 @@ STRATEGIES: list[dict[str, Any]] = [
         "next": "Rejected. Insider Form-4 clusters tested separately.",
         "knob": None,
     },
+    {
+        "id": "insider_form4_clusters",
+        "name": "Insider Form-4 open-market buying clusters (>=3 insiders / 30d)",
+        "status": "reject",
+        "book": "aggressive",
+        "priority": 95,
+        "evidence": "2026-10-26 frozen+sha256, SEC bulk 2006-2026q1, filing-date PIT, 3164 trades, 30 bps/side: 8.13%/-58.9%/0.41 vs H1D 12.99/-27.5/0.79; fails 2013-18 and 2019-26; CI incl 0. Survivorship-biased up. research/2026-10-26/insider",
+        "next": "Rejected. Do not re-run with new thresholds.",
+        "knob": None,
+    },
 ]
 
 
