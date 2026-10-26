@@ -948,13 +948,24 @@ def send_daily_live_summary(
     if not dry_run and not alerts.alerts_configured():
         return False
 
-    data = gather_live_daily_summary(
-        equity=equity,
-        cash=cash,
-        regime=regime,
-        sleeves=sleeves,
-    )
-    message = format_live_daily_summary_message(data)
+    message = None
+    data: dict[str, Any] = {"equity": equity, "regime": regime}
+    try:
+        from modules import h1d_telegram_summary as _h1d_tg
+
+        if _h1d_tg.h1d_summary_active():
+            message = _h1d_tg.build_h1d_summary()
+            data["regime"] = "h1d_trend_mix"
+    except Exception as exc:
+        logger.debug("h1d summary skipped: %s", type(exc).__name__)
+    if message is None:
+        data = gather_live_daily_summary(
+            equity=equity,
+            cash=cash,
+            regime=regime,
+            sleeves=sleeves,
+        )
+        message = format_live_daily_summary_message(data)
     subject = "[PythonTrading LIVE] Daily close summary"
     if dry_run:
         print(message)

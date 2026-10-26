@@ -574,15 +574,26 @@ def maybe_daily_summary(equity: float, cash: float, regime: str, halted: bool) -
         f"Date:       {today} (ET)\n"
         f"Sent:       {now_et:%H:%M} ET\n"
     )
+    h1d_body = None
     try:
-        from modules.entry_skip_tracker import format_daily_summary
+        from modules import h1d_telegram_summary as _h1d_tg
 
-        skip_line = format_daily_summary()
-        if "cycles=0" not in skip_line:
-            body += f"\n{skip_line}\n"
-    except ImportError:
-        pass
-    body += f"\nLogs: {config.PAPER_JOURNAL_CSV}, {config.HEARTBEAT_FILE}"
+        if _h1d_tg.h1d_summary_active():
+            h1d_body = _h1d_tg.build_h1d_summary()
+    except Exception:
+        h1d_body = None
+    if h1d_body:
+        body = h1d_body + ("\nStatus: HALTED" if halted else "")
+    else:
+        try:
+            from modules.entry_skip_tracker import format_daily_summary
+
+            skip_line = format_daily_summary()
+            if "cycles=0" not in skip_line:
+                body += f"\n{skip_line}\n"
+        except ImportError:
+            pass
+        body += f"\nLogs: {config.PAPER_JOURNAL_CSV}, {config.HEARTBEAT_FILE}"
     if broadcast(subject, body, category="daily_summary"):
         state = _load_state()
         state["last_daily_summary"] = today
