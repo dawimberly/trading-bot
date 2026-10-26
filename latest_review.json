@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-10-24T05:08:36.140277+00:00",
+  "generated_at": "2026-10-26T23:02:40.971774+00:00",
   "scope": "observational research evidence only; no deployment",
   "target_net_annual_return": 0.5,
   "annual_target_status": "unverified",
@@ -9,11 +9,11 @@
   "books": [
     {
       "book": "alpaca_live",
-      "source_as_of": "2026-10-24T00:34:36.700939+00:00",
-      "purchases": 425,
-      "sales": 377,
-      "plans_available": 12,
-      "post_sale_30_price_observations": 168,
+      "source_as_of": "2026-10-26T23:00:00.862495+00:00",
+      "purchases": 438,
+      "sales": 386,
+      "plans_available": 24,
+      "post_sale_30_price_observations": 166,
       "gaps": [
         "action_scoping_unverified",
         "unresolved_initial_inventory_or_corporate_actions",
@@ -25,11 +25,11 @@
     },
     {
       "book": "alpaca_paper_v2",
-      "source_as_of": "2026-10-24T00:34:36.700939+00:00",
-      "purchases": 491,
-      "sales": 312,
-      "plans_available": 44,
-      "post_sale_30_price_observations": 75,
+      "source_as_of": "2026-10-26T23:00:00.862495+00:00",
+      "purchases": 504,
+      "sales": 348,
+      "plans_available": 57,
+      "post_sale_30_price_observations": 74,
       "gaps": [
         "action_scoping_unverified",
         "unresolved_initial_inventory_or_corporate_actions",
@@ -42,7 +42,7 @@
     },
     {
       "book": "alpaca_paper",
-      "source_as_of": "2026-10-24T00:34:36.700939+00:00",
+      "source_as_of": "2026-10-26T23:00:00.862495+00:00",
       "purchases": 4600,
       "sales": 3805,
       "plans_available": 6,
@@ -74,117 +74,5 @@
     "No balances, positions, account IDs, order IDs, credentials, raw fills or account-return figures are published.",
     "Price-only post-sale observations are not trade profitability or hindsight timing verdicts.",
     "Fixed/adaptive strategy search, full portfolio accounting, missing original plans and corporate-action reconciliation remain separate unfinished work."
-  ],
-  "overnight_research": {
-    "batch_status": "RUNNING",
-    "updated_at": "2026-10-24T05:30:51.224418+00:00",
-    "completed_jobs": 4,
-    "total_jobs": 6,
-    "candidates": [
-      {
-        "variant": "pairwise_rank",
-        "status": "reject",
-        "gates": {
-          "return": true,
-          "drawdown": true,
-          "first_half": true,
-          "second_half": false,
-          "higher_cost": false,
-          "ledger": true,
-          "no_action_blocks": true
-        },
-        "normal_cost": {
-          "baseline": {
-            "return": 0.032615441725100114,
-            "max_drawdown": 0.11193493723374992,
-            "first_half": -0.032429116085397225,
-            "second_half": 0.06722459190518393,
-            "all147_return": 0.06937846050277274
-          },
-          "learner": {
-            "return": 0.03649666106585148,
-            "max_drawdown": 0.08742769285016683,
-            "first_half": -0.026024585825952684,
-            "second_half": 0.06419181221820036,
-            "all147_return": 0.04781561473678897
-          }
-        },
-        "higher_cost": {
-          "baseline": {
-            "return": 0.04265441761797217,
-            "max_drawdown": 0.11067222284728329,
-            "first_half": 0.04873172251020108,
-            "second_half": -0.005794908995107484,
-            "all147_return": 0.056517645994189625
-          },
-          "learner": {
-            "return": -0.029230185053570668,
-            "max_drawdown": 0.09854754480754857,
-            "first_half": -0.046218738214892086,
-            "second_half": 0.017811791698995272,
-            "all147_return": 0.019698365942964813
-          }
-        },
-        "promotion": false
-      },
-      {
-        "variant": "median_linear",
-        "status": "reject",
-        "gates": {
-          "return": true,
-          "drawdown": true,
-          "first_half": true,
-          "second_half": true,
-          "higher_cost": false,
-          "ledger": true,
-          "no_action_blocks": true
-        },
-        "normal_cost": {
-          "baseline": {
-            "return": 0.032615441725100114,
-            "max_drawdown": 0.11193493723374992,
-            "first_half": -0.032429116085397225,
-            "second_half": 0.06722459190518393,
-            "all147_return": 0.06937846050277274
-          },
-          "learner": {
-            "return": 0.09469928506298131,
-            "max_drawdown": 0.07298876002845789,
-            "first_half": 0.007009032072461396,
-            "second_half": 0.08707990712858882,
-            "all147_return": 0.10953065196539535
-          }
-        },
-        "higher_cost": {
-          "baseline": {
-            "return": 0.04265441761797217,
-            "max_drawdown": 0.11067222284728329,
-            "first_half": 0.04873172251020108,
-            "second_half": -0.005794908995107484,
-            "all147_return": 0.056517645994189625
-          },
-          "learner": {
-            "return": -0.04761307460978059,
-            "max_drawdown": 0.11723497707942332,
-            "first_half": -0.06209960639945389,
-            "second_half": 0.015445703923910648,
-            "all147_return": -0.07107849313431347
-          }
-        },
-        "promotion": false
-      },
-      {
-        "variant": "local_expectancy",
-        "status": "pending_or_blocked",
-        "promotion": false
-      }
-    ],
-    "lab_better_than_live_and_medium": "NOT_PROVEN",
-    "promotion": false,
-    "limitations": [
-      "previously exposed247session29namepanel",
-      "required protocol windows and faithful Live/Medium decision inputs unavailable",
-      "no paid data or delayed-feed execution; risk and live books unchanged"
-    ]
-  }
+  ]
 }
