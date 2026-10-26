@@ -198,8 +198,10 @@ def is_auth_alpaca_error(exc: BaseException) -> bool:
         return False
     status = getattr(exc, "status_code", None)
     msg = str(exc).lower()
-    # Order rejects share HTTP 403 with a real credential failure.
-    if status == 403 and "insufficient qty" in msg:
+    # Insufficient qty / shares held on an open order are not credential auth.
+    if status == 403 and (
+        "insufficient qty" in msg or "held_for_orders" in msg or "held for orders" in msg
+    ):
         return False
     if is_not_fractionable_error(exc):
         return False
@@ -232,7 +234,9 @@ def is_skippable_order_error(exc: BaseException) -> bool:
         return True
     if status == 422:
         return True
-    if status == 403 and "insufficient qty" in msg:
+    if status == 403 and (
+        "insufficient qty" in msg or "held_for_orders" in msg or "held for orders" in msg
+    ):
         return True
     # Notional orders fail on non-fractionable equities (e.g. PS) — skip/retry as shares.
     if "not fractionable" in msg or "is not fractionable" in msg:
@@ -243,6 +247,21 @@ def is_skippable_order_error(exc: BaseException) -> bool:
 def is_not_fractionable_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "not fractionable" in msg or "is not fractionable" in msg
+
+
+def broker_error_text(exc: BaseException) -> str:
+    """Non-empty broker/client error text for logs and the trade journal."""
+    try:
+        from modules.exit_reconcile import broker_error_note
+
+        return broker_error_note(exc)
+    except Exception:
+        text = ""
+        try:
+            text = str(exc).strip()
+        except Exception:
+            text = ""
+        return text or type(exc).__name__
 
 
 def call_with_retry(
@@ -303,14 +322,14 @@ def call_with_retry(
                     getattr(exc, "status_code", "?"),
                     exc,
                 )
-                raise AlpacaValidationError(str(exc)) from exc
+                raise AlpacaValidationError(broker_error_text(exc)) from exc
             logger.error(
                 "Alpaca %s failed (HTTP %s): %s",
                 op_name,
                 getattr(exc, "status_code", "?"),
                 exc,
             )
-            raise AlpacaCriticalError(str(exc)) from exc
+            raise AlpacaCriticalError(broker_error_text(exc)) from exc
         except (TimeoutError, OSError, ConnectionError) as exc:
             last_exc = exc
             if attempt < max_attempts:
@@ -326,7 +345,7 @@ def call_with_retry(
                 time.sleep(delay)
                 continue
             logger.error("Alpaca %s network failure after retries: %s", op_name, exc)
-            raise AlpacaCriticalError(str(exc)) from exc
+            raise AlpacaCriticalError(broker_error_text(exc)) from exc
         except Exception as exc:
             if not is_ssl_verify_error(exc):
                 raise
@@ -344,7 +363,7 @@ def call_with_retry(
                 time.sleep(delay)
                 continue
             logger.error("Alpaca %s TLS failure after retries: %s", op_name, exc)
-            raise AlpacaCriticalError(str(exc)) from exc
+            raise AlpacaCriticalError(broker_error_text(exc)) from exc
     if last_exc is not None:
-        raise AlpacaCriticalError(str(last_exc)) from last_exc
+        raise AlpacaCriticalError(broker_error_text(last_exc)) from last_exc
     raise AlpacaCriticalError(f"{op_name} failed with no exception captured")

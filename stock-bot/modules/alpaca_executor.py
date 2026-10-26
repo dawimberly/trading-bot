@@ -24,6 +24,13 @@ from modules.alpaca_client import (
     is_not_fractionable_error,
     is_unknown_asset_error,
 )
+from modules.exit_reconcile import (
+    ExitRetryBook,
+    broker_error_note,
+    classify_failure,
+    exit_fingerprint,
+    plan_exit_submission,
+)
 from modules.cost_basis import underwater_sizing_scale
 from modules.logging_utils import log_event
 
@@ -980,6 +987,11 @@ class AlpacaExecutor:
         """Return fill metadata: filled, qty, notional, status, partial."""
         if order is None:
             return None
+        status_text = str(getattr(order, "status", "") or "").lower()
+        if status_text in {"skipped", "error", "dry_run", "closed"} and not getattr(
+            order, "filled_qty", None
+        ):
+            return None
 
         def _details(o) -> dict | None:
             qty = self._order_filled_qty(o)
@@ -1523,33 +1535,392 @@ class AlpacaExecutor:
             )
         return None
 
+    def _exit_retry_book(self) -> ExitRetryBook:
+        book = self.__dict__.get("_exit_retries")
+        if book is None:
+            book = ExitRetryBook(now=self._exit_now)
+            self._exit_retries = book
+        return book
+
+    def _exit_now(self) -> float:
+        clock = getattr(self, "_exit_clock", None)
+        if callable(clock):
+            return float(clock())
+        return time.time()
+
+    def _exit_symbol(self, symbol: str) -> str:
+        return config.normalize_symbol(symbol)
+
+    def _stash_exit_note(self, symbol: str, note: str) -> None:
+        pending = getattr(self, "_pending_exit_notes", None)
+        if pending is None:
+            pending = {}
+            self._pending_exit_notes = pending
+        text = (note or "").strip() or "exit failed"
+        pending[self._exit_symbol(symbol)] = text
+
+    def take_pending_exit_note(self, symbol: str) -> str:
+        pending = getattr(self, "_pending_exit_notes", None) or {}
+        return pending.pop(self._exit_symbol(symbol), "")
+
+    def exit_submit_allowed(self, symbol: str) -> bool:
+        """False while a code bug is locked or a retry backoff is still running."""
+        st = self._exit_retry_book().state.get(self._exit_symbol(symbol))
+        if not st:
+            return True
+        if st.get("lock_symbol"):
+            return False
+        if st.get("terminal"):
+            return True
+        return self._exit_now() >= float(st.get("next_ok") or 0)
+
+    def note_exit_failure(self, symbol: str, note: str, *, lock_symbol: bool = False) -> None:
+        """Remember a failure that escaped the submit helper so it is not retried every cycle."""
+        pos = None
+        try:
+            pos = self._find_position(symbol)
+        except Exception:
+            pos = None
+        if pos is None:
+            sym = self._exit_symbol(symbol)
+            self._exit_retry_book().record(
+                sym,
+                note,
+                fingerprint="locked",
+                terminal=True,
+                lock_symbol=True,
+            )
+            self._stash_exit_note(symbol, note)
+            return
+        self._block_exit(symbol, note, pos, kind="code" if lock_symbol else "retry")
+
+    def _position_exit_fingerprint(self, pos) -> str:
+        price = float(getattr(pos, "current_price", 0) or getattr(pos, "avg_entry_price", 0) or 0)
+        return exit_fingerprint(
+            self._position_signed_qty(pos),
+            self._position_available_qty(pos),
+            price,
+            float(config.ALPACA_MIN_NOTIONAL),
+        )
+
+    def _block_exit(self, symbol: str, note: str, pos, *, kind: str) -> None:
+        terminal = kind in {"dust", "fractional", "code"}
+        self._exit_retry_book().record(
+            self._exit_symbol(symbol),
+            note,
+            fingerprint=self._position_exit_fingerprint(pos),
+            terminal=terminal,
+            lock_symbol=kind == "code",
+        )
+        self._stash_exit_note(symbol, note)
+        logger.info("exit skipped for %s: %s", self._exit_symbol(symbol), note)
+
+    def _block_broker_dust(self, symbol: str, pos) -> bool:
+        """True when the whole position is under Alpaca's $1 minimum and must not be retried."""
+        price = float(getattr(pos, "current_price", 0) or getattr(pos, "avg_entry_price", 0) or 0)
+        signed = abs(self._position_signed_qty(pos))
+        min_n = float(config.ALPACA_MIN_NOTIONAL)
+        if price <= 0 or signed <= 0 or signed * price + 1e-9 >= min_n:
+            return False
+        fp = self._position_exit_fingerprint(pos)
+        if not self._exit_retry_book().allow(self._exit_symbol(symbol), fp):
+            return True
+        note = (
+            f"below alpaca ${min_n:.2f} minimum (notional ${signed * price:.2f}); leaving dust"
+        )
+        self._block_exit(symbol, note, pos, kind="dust")
+        return True
+
+    def _consume_dust_exit(self, symbol, pos, *, reason: str, sleeve=None):
+        """Return (handled, order_or_none). Handled means the caller should not submit."""
+        dust = self._maybe_dust_exit(symbol, pos, reason=reason, sleeve=sleeve)
+        if dust is None:
+            return False, None
+        from modules.dust_cleanup import DustCloseResult
+
+        if not isinstance(dust, DustCloseResult):
+            return True, dust
+        detail = (dust.detail or "").strip()
+        if dust.status in ("closed", "dry_run"):
+            self._exit_retry_book().clear(self._exit_symbol(symbol))
+            return True, dust
+        if dust.status == "skipped" and "already closed" in detail.lower():
+            self._exit_retry_book().clear(self._exit_symbol(symbol))
+            return True, None
+        if dust.status == "skipped" and "not dust" in detail.lower():
+            return False, None
+        kind = classify_failure(detail, RuntimeError(detail))
+        if kind not in {"held", "fractional", "dust"}:
+            kind = "dust" if dust.status == "skipped" else "retry"
+        self._block_exit(symbol, detail or "dust close failed", pos, kind=kind)
+        return True, None
+
+    def _symbol_fractionable(self, symbol: str) -> bool | None:
+        _formatted, _tif, is_crypto_sym = self.get_order_params(symbol)
+        if is_crypto_sym:
+            return True
+        sym = self._exit_symbol(symbol)
+        cache = getattr(self, "_fractionable_cache", None)
+        if cache is None:
+            cache = {}
+            self._fractionable_cache = cache
+        if sym in cache:
+            return cache[sym]
+        try:
+            formatted, _, _ = self.get_order_params(symbol)
+            asset = self._api("get_asset", self.client.get_asset, formatted)
+        except Exception as exc:
+            logger.debug("fractionable check skipped for %s: %s", sym, exc)
+            return None
+        flag = getattr(asset, "fractionable", None)
+        if flag is None:
+            return None
+        cache[sym] = bool(flag)
+        return cache[sym]
+
+    def _mark_not_fractionable(self, symbol: str) -> None:
+        cache = getattr(self, "_fractionable_cache", None)
+        if cache is None:
+            cache = {}
+            self._fractionable_cache = cache
+        cache[self._exit_symbol(symbol)] = False
+
+    def _open_orders_for_symbol(self, symbol: str) -> list:
+        target = self._exit_symbol(symbol)
+        request = GetOrdersRequest(status="open", limit=500)
+        raw = self._api("get_orders", self.client.get_orders, filter=request)
+        out = []
+        for order in raw or []:
+            if config.normalize_symbol(getattr(order, "symbol", "")) == target:
+                out.append(order)
+        return out
+
+    def _cancel_order_ids(self, order_ids) -> None:
+        cancelled = False
+        for oid in order_ids or []:
+            if not oid:
+                continue
+            self._api("cancel_order_by_id", self.client.cancel_order_by_id, oid)
+            cancelled = True
+            logger.info("cancelled open order", extra={"order_id": oid})
+        if cancelled:
+            time.sleep(0.5)
+            self._invalidate_cache()
+
+    def _submit_reconciled_exit(
+        self,
+        symbol,
+        pos,
+        *,
+        requested_qty: float,
+        reason: str,
+        sleeve,
+        formatted_symbol: str,
+        tif,
+        is_crypto_sym: bool,
+        attempt: int = 0,
+        fraction_retry: bool = False,
+        exit_meta: dict | None = None,
+    ):
+        """Submit an exit only for free shares, or skip when one is already working."""
+        sym = self._exit_symbol(symbol)
+        fp = self._position_exit_fingerprint(pos)
+        if attempt == 0 and not fraction_retry:
+            if not self._exit_retry_book().allow(sym, fp):
+                return None
+        price = float(getattr(pos, "current_price", 0) or getattr(pos, "avg_entry_price", 0) or 0)
+        signed = self._position_signed_qty(pos)
+        available = self._position_available_qty(pos)
+        try:
+            orders = self._open_orders_for_symbol(symbol)
+        except Exception as exc:
+            note = broker_error_note(exc)
+            kind = classify_failure(note, exc)
+            self._block_exit(symbol, note, pos, kind=kind)
+            return None
+
+        fractionable = False if fraction_retry else self._symbol_fractionable(symbol)
+        plan = plan_exit_submission(
+            position_qty=signed,
+            available_qty=available,
+            requested_qty=requested_qty,
+            price=price,
+            open_orders=orders,
+            fractionable=fractionable,
+            min_notional=float(config.ALPACA_MIN_NOTIONAL),
+        )
+        self._last_exit_action = plan.action
+        if plan.action == "skip_equivalent" and plan.existing is not None:
+            logger.debug("exit already working for %s", sym)
+            return plan.existing
+        if plan.cancel_ids and attempt == 0:
+            try:
+                self._cancel_order_ids(plan.cancel_ids)
+            except Exception as exc:
+                note = broker_error_note(exc)
+                self._block_exit(symbol, note, pos, kind=classify_failure(note, exc))
+                return None
+            refreshed = self._fresh_position(symbol)
+            if refreshed is None:
+                self._exit_retry_book().clear(sym)
+                return None
+            return self._submit_reconciled_exit(
+                symbol,
+                refreshed,
+                requested_qty=requested_qty,
+                reason=reason,
+                sleeve=sleeve,
+                formatted_symbol=formatted_symbol,
+                tif=tif,
+                is_crypto_sym=is_crypto_sym,
+                attempt=1,
+                fraction_retry=fraction_retry,
+                exit_meta=exit_meta,
+            )
+        if plan.action != "submit":
+            kind = {
+                "skip_dust": "dust",
+                "skip_unsellable": "fractional",
+                "skip_held": "held",
+            }.get(plan.action, "retry")
+            self._block_exit(symbol, plan.note or plan.action, pos, kind=kind)
+            return None
+
+        side_label = "Sell" if signed > 0 else "Buy"
+        send_qty = float(plan.qty)
+        # Floor to broker precision at or below free qty. A 1e-9 haircut
+        # turned an exact 10-share exit into 9.999999 and left unsellable dust.
+        if fractionable is False:
+            max_qty = send_qty
+        else:
+            max_qty = abs(available) if available != 0 else abs(signed)
+            send_qty = min(send_qty, max_qty)
+        safe_qty = self._format_qty_for_alpaca(
+            send_qty, is_crypto=is_crypto_sym, max_qty=max_qty if max_qty > 0 else None
+        )
+        if safe_qty is None or safe_qty == "0":
+            self._block_exit(
+                symbol,
+                "exit qty rounded to zero after broker caps",
+                pos,
+                kind="dust" if abs(signed) * price < float(config.ALPACA_MIN_NOTIONAL) else "held",
+            )
+            return None
+        if fractionable is False and "." in str(safe_qty):
+            safe_qty = str(int(math.floor(float(safe_qty) + 1e-9)))
+            if safe_qty == "0":
+                self._block_exit(
+                    symbol, "not fractionable; no whole shares available", pos, kind="fractional"
+                )
+                return None
+        order = MarketOrderRequest(
+            symbol=formatted_symbol,
+            qty=safe_qty,
+            side=OrderSide.SELL if signed > 0 else OrderSide.BUY,
+            time_in_force=tif,
+        )
+        try:
+            submitted = self._submit_order(
+                order,
+                symbol=symbol,
+                side=side_label,
+                reason=reason,
+                sleeve=sleeve,
+                qty=safe_qty,
+                exit_meta=exit_meta,
+            )
+        except Exception as exc:
+            if is_unknown_asset_error(exc):
+                self._mark_unknown_asset(symbol, exc)
+            note = broker_error_note(exc)
+            kind = classify_failure(note, exc)
+            if kind == "fractional" and not fraction_retry:
+                self._mark_not_fractionable(symbol)
+                whole = math.floor(abs(available if available != 0 else signed) + 1e-9)
+                if whole >= 1:
+                    return self._submit_reconciled_exit(
+                        symbol,
+                        pos,
+                        requested_qty=float(whole),
+                        reason=reason,
+                        sleeve=sleeve,
+                        formatted_symbol=formatted_symbol,
+                        tif=tif,
+                        is_crypto_sym=is_crypto_sym,
+                        attempt=attempt,
+                        fraction_retry=True,
+                        exit_meta=exit_meta,
+                    )
+            self._block_exit(symbol, note, pos, kind=kind)
+            return None
+        if submitted is None:
+            self._block_exit(symbol, "exit order was not submitted", pos, kind="retry")
+            return None
+        self._exit_retry_book().clear(sym)
+        self._last_exit_action = "submit"
+        self._last_exit_qty = safe_qty
+        logger.info(
+            "exit order submitted",
+            extra={
+                "symbol": sym,
+                "order_id": getattr(submitted, "id", None),
+                "qty": safe_qty,
+                "reason": reason,
+            },
+        )
+        return submitted
+
+    def _exit_context(self, symbol, *, skip_dust: bool, reason: str, sleeve):
+        """Load the position and apply dust / sub-$1 gates. (pos, params, done, result)."""
+        if not self._equity_trading_allowed(symbol):
+            return None, None, True, None
+        pos = self._fresh_position(symbol)
+        if pos is None:
+            self._exit_retry_book().clear(self._exit_symbol(symbol))
+            return None, None, True, None
+        params = self.get_order_params(symbol)
+        signed = self._position_signed_qty(pos)
+        price = float(getattr(pos, "current_price", 0) or getattr(pos, "avg_entry_price", 0) or 0)
+        if signed == 0 or price <= 0:
+            return None, None, True, None
+        if self._block_broker_dust(symbol, pos):
+            return None, None, True, None
+        if not skip_dust:
+            handled, dust = self._consume_dust_exit(
+                symbol, pos, reason=reason or "dust_exit", sleeve=sleeve
+            )
+            if handled:
+                return None, None, True, dust
+        return pos, params, False, None
+
     def execute_reduce_notional(
         self, symbol, reduce_notional, *, reason="reduce", sleeve=None, skip_dust: bool = False,
         exit_meta: dict | None = None,
     ):
         """Reduce long (sell) or short (buy cover) up to reduce_notional."""
-        if not self._equity_trading_allowed(symbol):
-            return None
-        formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
-        self._cancel_open_orders_for(symbol)
-        pos = self._fresh_position(symbol)
-        if pos is None:
-            return None
-
-        qty = self._position_available_qty(pos)
+        pos, params, done, dust = self._exit_context(
+            symbol, skip_dust=skip_dust, reason=reason, sleeve=sleeve
+        )
+        if done:
+            return dust
+        formatted_symbol, tif, is_crypto_sym = params
+        signed = self._position_signed_qty(pos)
+        avail = self._position_available_qty(pos)
         price = float(pos.current_price or pos.avg_entry_price or 0)
-        if qty == 0 or price <= 0:
-            return None
-
-        if not skip_dust:
-            dust = self._maybe_dust_exit(
-                symbol, pos, reason=reason or "dust_exit", sleeve=sleeve
+        if avail == 0:
+            return self._submit_reconciled_exit(
+                symbol,
+                pos,
+                requested_qty=abs(signed),
+                reason=reason,
+                sleeve=sleeve,
+                formatted_symbol=formatted_symbol,
+                tif=tif,
+                is_crypto_sym=is_crypto_sym,
             )
-            if dust is not None:
-                return dust
 
+        qty = avail
         reduce_notional = float(reduce_notional)
-        side_label = "Sell" if qty > 0 else "Buy"
         if qty > 0:
             mv = qty * price
             sell_notional = min(reduce_notional, mv)
@@ -1561,6 +1932,7 @@ class AlpacaExecutor:
                         reason=reason or "dust_exit",
                         sleeve=sleeve,
                         exit_meta=exit_meta,
+                        skip_dust=True,
                     )
                 return None
             sell_notional = self._skip_if_notional_invalid(
@@ -1568,117 +1940,49 @@ class AlpacaExecutor:
             )
             if sell_notional is None:
                 return None
-            # Qty-capped to available — never let notional→qty overshoot broker free qty.
-            raw_qty = min(qty, sell_notional / price)
-            raw_qty = min(raw_qty, max(0.0, qty * (1.0 - 1e-9)))
-            safe_qty = self._format_qty_for_alpaca(
-                raw_qty, is_crypto=is_crypto_sym, max_qty=qty
-            )
-            if safe_qty is None:
-                return None
-            order = MarketOrderRequest(
-                symbol=formatted_symbol,
-                qty=safe_qty,
-                side=OrderSide.SELL,
-                time_in_force=tif,
-            )
+            raw_qty = min(abs(qty), sell_notional / price)
         else:
             abs_qty = abs(qty)
-            mv = abs_qty * price
-            cover_notional = min(reduce_notional, mv)
+            cover_notional = min(reduce_notional, abs_qty * price)
             cover_notional = self._skip_if_notional_invalid(
                 cover_notional, symbol=symbol, op="execute_reduce_notional"
             )
             if cover_notional is None:
                 return None
             raw_qty = min(abs_qty, cover_notional / price)
-            raw_qty = min(raw_qty, max(0.0, abs_qty * (1.0 - 1e-9)))
-            safe_qty = self._format_qty_for_alpaca(
-                raw_qty, is_crypto=is_crypto_sym, max_qty=abs_qty
-            )
-            if safe_qty is None:
-                return None
-            order = MarketOrderRequest(
-                symbol=formatted_symbol,
-                qty=safe_qty,
-                side=OrderSide.BUY,
-                time_in_force=tif,
-            )
-        submitted = self._submit_order(
-            order,
-            symbol=symbol,
-            side=side_label,
+        return self._submit_reconciled_exit(
+            symbol,
+            pos,
+            requested_qty=raw_qty,
             reason=reason,
             sleeve=sleeve,
-            qty=safe_qty,
+            formatted_symbol=formatted_symbol,
+            tif=tif,
+            is_crypto_sym=is_crypto_sym,
             exit_meta=exit_meta,
         )
-        if submitted is None:
-            return None
-        logger.info(
-            "execute_reduce_notional submitted",
-            extra={"symbol": symbol, "order_id": getattr(submitted, "id", None)},
-        )
-        return submitted
 
     def execute_full_exit(
         self, symbol, *, reason="exit", sleeve=None, skip_dust: bool = False,
         exit_meta: dict | None = None,
     ):
-        if not self._equity_trading_allowed(symbol):
-            return None
-        self._cancel_open_orders_for(symbol)
-        pos = self._fresh_position(symbol)
-        if pos is None:
-            return None
-        formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
-        qty = self._position_available_qty(pos)
-        price = float(pos.current_price or pos.avg_entry_price or 0)
-        if qty == 0 or price <= 0:
-            return None
-
-        if not skip_dust:
-            dust = self._maybe_dust_exit(
-                symbol, pos, reason=reason or "dust_exit", sleeve=sleeve
-            )
-            if dust is not None:
-                return dust
-
-        side_label = "Sell" if qty > 0 else "Buy"
-        abs_qty = abs(qty)
-        trade_qty = max(0.0, abs_qty * (1.0 - 1e-9))
-        safe_qty = self._format_qty_for_alpaca(
-            trade_qty, is_crypto=is_crypto_sym, max_qty=abs_qty
+        pos, params, done, dust = self._exit_context(
+            symbol, skip_dust=skip_dust, reason=reason, sleeve=sleeve
         )
-        if safe_qty is None:
-            return None
-        order = MarketOrderRequest(
-            symbol=formatted_symbol,
-            qty=safe_qty,
-            side=OrderSide.SELL if qty > 0 else OrderSide.BUY,
-            time_in_force=tif,
-        )
-        submitted = self._submit_order(
-            order,
-            symbol=symbol,
-            side=side_label,
+        if done:
+            return dust
+        formatted_symbol, tif, is_crypto_sym = params
+        return self._submit_reconciled_exit(
+            symbol,
+            pos,
+            requested_qty=abs(self._position_signed_qty(pos)),
             reason=reason,
             sleeve=sleeve,
-            qty=safe_qty,
+            formatted_symbol=formatted_symbol,
+            tif=tif,
+            is_crypto_sym=is_crypto_sym,
             exit_meta=exit_meta,
         )
-        if submitted is None:
-            return None
-        logger.info(
-            "execute_full_exit submitted",
-            extra={
-                "symbol": symbol,
-                "order_id": getattr(submitted, "id", None),
-                "qty": safe_qty,
-                "available": abs_qty,
-            },
-        )
-        return submitted
 
     def execute_qty_exit(self, symbol, qty, *, reason="exit", sleeve=None, skip_dust: bool = False):
         """Market exit for an exact share/unit quantity (no notional rounding).
@@ -1686,71 +1990,28 @@ class AlpacaExecutor:
         Positive *qty* sells that many shares of a long; for shorts, positive *qty*
         covers (buys) that many shares. Caps to broker-available size.
         """
-        if not self._equity_trading_allowed(symbol):
-            return None
-        self._cancel_open_orders_for(symbol)
-        pos = self._fresh_position(symbol)
-        if pos is None:
-            return None
-        formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
-        held = self._position_available_qty(pos)
-        if held == 0:
-            return None
         try:
             want = abs(float(qty))
         except (TypeError, ValueError):
             return None
         if want <= 0:
             return None
-
-        if not skip_dust:
-            dust = self._maybe_dust_exit(
-                symbol, pos, reason=reason or "dust_exit", sleeve=sleeve
-            )
-            if dust is not None:
-                return dust
-
-        trade_qty = min(want, abs(held))
-        trade_qty = max(0.0, trade_qty * (1.0 - 1e-9))
-        if trade_qty <= 0:
-            return None
-        if held > 0:
-            side = OrderSide.SELL
-            side_label = "Sell"
-        else:
-            side = OrderSide.BUY
-            side_label = "Buy"
-        safe_qty = self._format_qty_for_alpaca(
-            trade_qty, is_crypto=is_crypto_sym, max_qty=abs(held)
+        pos, params, done, dust = self._exit_context(
+            symbol, skip_dust=skip_dust, reason=reason, sleeve=sleeve
         )
-        if safe_qty is None or safe_qty == "0":
-            return None
-        order = MarketOrderRequest(
-            symbol=formatted_symbol,
-            qty=safe_qty,
-            side=side,
-            time_in_force=tif,
-        )
-        submitted = self._submit_order(
-            order,
-            symbol=symbol,
-            side=side_label,
+        if done:
+            return dust
+        formatted_symbol, tif, is_crypto_sym = params
+        return self._submit_reconciled_exit(
+            symbol,
+            pos,
+            requested_qty=min(want, abs(self._position_signed_qty(pos))),
             reason=reason,
             sleeve=sleeve,
-            qty=safe_qty,
+            formatted_symbol=formatted_symbol,
+            tif=tif,
+            is_crypto_sym=is_crypto_sym,
         )
-        if submitted is None:
-            return None
-        logger.info(
-            "execute_qty_exit submitted",
-            extra={
-                "symbol": symbol,
-                "qty": safe_qty,
-                "side": side_label,
-                "order_id": getattr(submitted, "id", None),
-            },
-        )
-        return submitted
 
     def execute_order(
         self,
@@ -1809,7 +2070,8 @@ class AlpacaExecutor:
         if is_crypto_sym and not reduce_only and not self._asset_tradable(symbol):
             return None
 
-        self._cancel_open_orders_for(symbol)
+        if side_lower != "sell":
+            self._cancel_open_orders_for(symbol)
 
         target_notional = notional if notional is not None else self.compute_notional()
         if target_notional is not None and not is_crypto_sym:
@@ -1857,54 +2119,48 @@ class AlpacaExecutor:
         elif side_lower == "sell":
             # Cap sell notional to broker-available position value.
             pos = self._fresh_position(symbol)
+            if pos is None:
+                # New short (no position yet) keeps the previous cancel-before-submit.
+                self._cancel_open_orders_for(symbol)
             if pos is not None:
+                if self._block_broker_dust(symbol, pos):
+                    return None
                 avail = abs(self._position_available_qty(pos))
                 price = float(pos.current_price or pos.avg_entry_price or 0)
-                if avail <= 0 or price <= 0:
+                if price <= 0:
                     return None
-                dust = self._maybe_dust_exit(
+                handled, dust = self._consume_dust_exit(
                     symbol, pos, reason=reason or "dust_exit", sleeve=sleeve
                 )
-                if dust is not None:
+                if handled:
                     return dust
+                if avail <= 0:
+                    return self.execute_full_exit(
+                        symbol, reason=reason or "exit", sleeve=sleeve, skip_dust=True
+                    )
                 max_n = avail * price
                 if target_notional > max_n:
                     target_notional = max_n
                 if target_notional < self._min_notional():
                     return self.execute_full_exit(
-                        symbol, reason=reason or "dust_exit", sleeve=sleeve
+                        symbol, reason=reason or "dust_exit", sleeve=sleeve, skip_dust=True
                     )
                 # Prefer qty-capped sell over notional to avoid 403 overshoot.
                 raw_qty = min(avail, float(target_notional) / price)
-                raw_qty = min(raw_qty, max(0.0, avail * (1.0 - 1e-9)))
-                safe_qty = self._format_qty_for_alpaca(
-                    raw_qty, is_crypto=is_crypto_sym, max_qty=avail
+                submitted = self._submit_reconciled_exit(
+                    symbol,
+                    pos,
+                    requested_qty=raw_qty,
+                    reason=reason,
+                    sleeve=sleeve,
+                    formatted_symbol=formatted_symbol,
+                    tif=tif,
+                    is_crypto_sym=is_crypto_sym,
                 )
-                if safe_qty is None:
-                    return None
-                order = MarketOrderRequest(
-                    symbol=formatted_symbol,
-                    qty=safe_qty,
-                    side=OrderSide.SELL,
-                    time_in_force=tif,
-                )
-                try:
-                    submitted = self._submit_order(
-                        order,
-                        symbol=symbol,
-                        side=side,
-                        reason=reason,
-                        sleeve=sleeve,
-                        qty=safe_qty,
-                    )
-                except AlpacaValidationError as exc:
-                    if is_unknown_asset_error(exc):
-                        self._mark_unknown_asset(symbol, exc)
-                        return None
-                    raise
-                if submitted is None:
-                    return None
+                if submitted is None or getattr(self, "_last_exit_action", "") != "submit":
+                    return submitted
                 order_id = getattr(submitted, "id", None)
+                safe_qty = getattr(self, "_last_exit_qty", None)
                 logger.info(
                     "order submitted",
                     extra={
