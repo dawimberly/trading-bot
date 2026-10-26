@@ -89,6 +89,9 @@ Do not promote scanners. Runtime scanners stay ON.
 | Always-on metals 33/10 *(pre-PIT)* | HOLD vs 33/67; not promoted |
 | VTI tactical $5k shadow *(pre-PIT)* | Promote criteria not passed |
 | Block NYSE entries 9:30–10:00 *(pre-PIT)* | last 365d +3.09pp, prior 365d −0.25pp |
+| VTI vs SPY inside H1D (2026-10-26, not pre-registered) | 2008-03..2026-10, 5 bps: VTI in Sleeve B 0.00pp, dynamic VTI/SPY -0.01pp, VTI 200d signal +0.43pp CI [-0.54,+1.45] and worse 2019-26. No change. `research/2026-10-26/vti_spy/` |
+| Cross-asset Sleeve B tilts H1-H4 (2026-10-26, frozen+sha256) | Stock-bond corr->BIL +0.00pp; gold/real-rates -0.12pp; credit HYG/IEF -0.66pp and DD -3.3pp 2019-26; dollar +0.07pp. All fail >=1 window, CIs include zero. REJECT. `research/2026-10-26/cross_asset/` |
+| Small-account edges H1-H4 (2026-10-26, frozen+sha256) | Turn-of-month IWM -0.34% CAGR; pre-holiday IWM 1.31%; weekly reversal S&P600 -8.2% (gross +21% eaten by 92x turnover @30bps, survivorship-biased); 52wk-high S&P600 -0.9%. All CIs vs H1D below zero. REJECT. PEAD / index add-delete untested (no free PIT data). `research/2026-10-26/small_edge/` |
 
 ## Do not confuse with production
 

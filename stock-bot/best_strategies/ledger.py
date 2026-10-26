@@ -252,6 +252,36 @@ STRATEGIES: list[dict[str, Any]] = [
         "next": "Owner-only if they want 0.675. Do not copy to live.",
         "knob": None,
     },
+    {
+        "id": "vti_vs_spy_h1d",
+        "name": "VTI vs SPY variants inside H1D",
+        "status": "reject",
+        "book": "live",
+        "priority": 95,
+        "evidence": "2026-10-26 box run, not pre-registered: all variants within noise; VTI-200d signal +0.43pp CI incl 0, worse 2019-26.",
+        "next": "No change. Do not re-run with a new story.",
+        "knob": None,
+    },
+    {
+        "id": "xasset_sleeveb_tilts",
+        "name": "Cross-asset Sleeve B tilts (stock-bond corr, gold/real rates, credit, dollar)",
+        "status": "reject",
+        "book": "live",
+        "priority": 95,
+        "evidence": "2026-10-26 frozen+sha256, 3 windows 2008-2026, 5 bps: all four fail >=1 window; CIs include zero. research/2026-10-26/cross_asset",
+        "next": "Rejected. Do not re-run with new thresholds.",
+        "knob": None,
+    },
+    {
+        "id": "small_edge_seasonal_xsec",
+        "name": "Small-account edges: turn-of-month, pre-holiday, weekly reversal, 52wk-high",
+        "status": "reject",
+        "book": "aggressive",
+        "priority": 95,
+        "evidence": "2026-10-26 frozen+sha256: all four CIs vs H1D below zero after costs (30 bps/side small caps). S&P600 tests survivorship-biased. PEAD/index changes untested. research/2026-10-26/small_edge",
+        "next": "Rejected. Insider Form-4 clusters tested separately.",
+        "knob": None,
+    },
 ]
 
 
