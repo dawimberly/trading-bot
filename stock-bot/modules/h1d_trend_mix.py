@@ -33,6 +33,7 @@ import config
 
 STRATEGY_ID = "h1d_trend_mix"
 SMA_WINDOW = 200
+SPY_BAR_LOOKBACK = 450  # real NYSE sessions kept for the SMA
 SLEEVE_WEIGHT = 0.5
 TREND_SIGNAL = "SPY"
 TREND_RISK_ON = "SSO"
@@ -215,6 +216,33 @@ def _finite(value: Any) -> float | None:
     if not math.isfinite(number):
         return None
     return number
+
+
+def is_nyse_session(day: date) -> bool:
+    """True for NYSE trading days (weekday and not an exchange holiday).
+
+    Calendar-padded rows (weekends, holidays, forward-filled synthetic bars)
+    must never enter the 200-session SMA.
+    """
+    if isinstance(day, datetime):
+        day = day.date()
+    if not isinstance(day, date) or day.weekday() >= 5:
+        return False
+    try:
+        from modules.nyse_calendar import nyse_holidays
+
+        return day not in nyse_holidays(day.year)
+    except Exception:
+        return True
+
+
+def real_session_bars(
+    bars: list[tuple[date, float]] | None,
+) -> list[tuple[date, float]] | None:
+    """Keep only NYSE-session bars, newest ``SPY_BAR_LOOKBACK`` sessions."""
+    kept = [(day, close) for day, close in (bars or []) if is_nyse_session(day)]
+    kept.sort(key=lambda row: row[0])
+    return kept[-SPY_BAR_LOOKBACK:] or None
 
 
 def completed_closes(
@@ -745,7 +773,9 @@ def _load_spy_bars() -> list[tuple[date, float]] | None:
     try:
         from modules.data_loader import load_close_matrix
 
-        frame = load_close_matrix(interval="1d", days=450)
+        # Raw SPY rows only: no forward-fill and no calendar padding, so each
+        # row is a real bar. Non-sessions are dropped below.
+        frame = load_close_matrix(interval="1d", tickers=["SPY"], ffill=False)
     except Exception:
         return None
     if frame is None or getattr(frame, "empty", True) or "SPY" not in getattr(frame, "columns", []):
@@ -762,7 +792,7 @@ def _load_spy_bars() -> list[tuple[date, float]] | None:
         if not isinstance(day, date) or isinstance(day, datetime):
             continue
         bars.append((day, close))
-    return bars or None
+    return real_session_bars(bars)
 
 
 def _broker_positions(executor: Any) -> dict[str, float] | None:
