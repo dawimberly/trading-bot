@@ -23,6 +23,7 @@ import argparse
 import logging
 import math
 import os
+import time
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -361,6 +362,9 @@ def plan_rebalance(
         }
         if delta < 0:
             row["position_value"] = current
+            if float(weight) == 0.0:
+                # Close by quantity, not by a notional from a stale snapshot.
+                row["full_exit"] = True
         orders.append(row)
     orders.sort(key=lambda row: (row["side"] != "sell", row["symbol"]))
     return orders
@@ -393,6 +397,7 @@ def wind_down_orders(
                 "position_value": market_value,
                 "strategy": STRATEGY_ID,
                 "wind_down": True,
+                "full_exit": True,
             }
         )
     return orders
@@ -832,6 +837,70 @@ def _broker_equity(executor: Any) -> float | None:
     return equity
 
 
+DEFAULT_CASH_CUSHION = 0.25
+DEFAULT_CASH_CUSHION_PCT = 0.001
+
+
+def cash_cushion(equity: float | None = None) -> float:
+    """Dollars kept back from the buy budget so rounding cannot reject a buy."""
+    raw = os.getenv("H1D_TREND_MIX_CASH_CUSHION", str(DEFAULT_CASH_CUSHION))
+    try:
+        flat = max(0.0, float(raw))
+    except ValueError:
+        flat = DEFAULT_CASH_CUSHION
+    pct = 0.0
+    eq = _finite(equity)
+    if eq is not None and eq > 0:
+        pct = eq * DEFAULT_CASH_CUSHION_PCT
+    return round(max(flat, pct), 2)
+
+
+def _available_cash(executor: Any) -> float | None:
+    """Spendable cash without margin: min(cash, buying_power). None if unknown."""
+    try:
+        account = executor._get_account()
+    except Exception:
+        return None
+    cash = _finite(getattr(account, "cash", None))
+    power = _finite(getattr(account, "buying_power", None))
+    values = [v for v in (cash, power) if v is not None]
+    if not values:
+        return None
+    return max(0.0, min(values))
+
+
+def size_buy_to_cash(
+    notional: float, available: float | None, cushion: float
+) -> float:
+    """Cap a buy at available cash minus the cushion. Unknown cash leaves it."""
+    if available is None:
+        return round(float(notional), 2)
+    room = float(available) - float(cushion)
+    return round(max(0.0, min(float(notional), room)), 2)
+
+
+def _await_sells(executor: Any, submitted: list[Any], timeout: float = 15.0) -> None:
+    """Give submitted sells a moment to fill so their cash funds the buys."""
+    client = getattr(executor, "client", None)
+    ids = [getattr(o, "id", None) for o in submitted]
+    ids = [i for i in ids if i]
+    if client is None or not ids or timeout <= 0:
+        return
+    deadline = time.monotonic() + timeout
+    pending = set(ids)
+    while pending and time.monotonic() < deadline:
+        for oid in list(pending):
+            try:
+                status = str(getattr(client.get_order_by_id(oid), "status", "")).lower()
+            except Exception:
+                pending.discard(oid)
+                continue
+            if any(k in status for k in ("filled", "canceled", "rejected", "expired")) and "partially" not in status:
+                pending.discard(oid)
+        if pending:
+            time.sleep(0.5)
+
+
 def _submit_orders(executor: Any, orders: list[dict[str, Any]], reason: str) -> bool:
     """Submit sells then buys. False if any sized order is not accepted.
 
@@ -842,6 +911,8 @@ def _submit_orders(executor: Any, orders: list[dict[str, Any]], reason: str) -> 
     broker_min = float(config.effective_min_notional())
     submitted_any = False
     deferred_any = False
+    sells_sent: list[Any] = []
+    waited = False
     for order in orders:
         if order.get("status") == "deferred_below_min":
             deferred_any = True
@@ -856,6 +927,21 @@ def _submit_orders(executor: Any, orders: list[dict[str, Any]], reason: str) -> 
                 )
             else:
                 notional = float(order["notional"])
+                if order["side"] == "buy":
+                    if not waited:
+                        _await_sells(executor, sells_sent)
+                        waited = True
+                    available = _available_cash(executor)
+                    sized = size_buy_to_cash(
+                        notional, available, cash_cushion(_broker_equity(executor))
+                    )
+                    if sized < notional:
+                        order["requested_notional"] = notional
+                        order["notional"] = sized
+                        notional = sized
+                    if notional < broker_min or notional <= 0:
+                        order["status"] = "skipped_cash"
+                        continue
                 if notional < broker_min:
                     order["status"] = "skipped_broker_min"
                     continue
@@ -874,6 +960,8 @@ def _submit_orders(executor: Any, orders: list[dict[str, Any]], reason: str) -> 
             return False
         order["status"] = "submitted"
         submitted_any = True
+        if order["side"] == "sell":
+            sells_sent.append(submitted)
     if deferred_any and not submitted_any:
         return False
     return True
