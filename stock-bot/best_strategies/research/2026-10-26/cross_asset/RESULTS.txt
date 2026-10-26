@@ -1,0 +1,29 @@
+start 2008-03-17 end 2026-10-23
+BASE turnover/yr 5.48  FULL CAGR/DD/Sh 12.89/-27.5/0.79
+   W1: 7.25 / -25.7 / 0.47
+   W2: 11.86 / -21.0 / 0.82
+   W3: 16.82 / -27.5 / 0.97
+H1 turnover/yr 5.58  FULL CAGR/DD/Sh 12.90/-27.6/0.79
+   W1: 7.25 / -25.7 / 0.47
+   W2: 11.93 / -21.0 / 0.82
+   W3: 16.78 / -27.6 / 0.97
+   % months tilted: 22
+   excess 0.00pp/yr CI [-0.12,0.13]  VERDICT: REJECT
+H2 turnover/yr 5.67  FULL CAGR/DD/Sh 12.81/-27.5/0.80
+   W1: 7.29 / -24.7 / 0.47
+   W2: 11.42 / -21.0 / 0.80
+   W3: 16.95 / -27.5 / 0.99
+   % months tilted: 51
+   excess -0.12pp/yr CI [-0.43,0.22]  VERDICT: REJECT
+H3 turnover/yr 6.47  FULL CAGR/DD/Sh 12.42/-30.8/0.82
+   W1: 8.23 / -24.4 / 0.56
+   W2: 11.78 / -18.0 / 0.85
+   W3: 15.07 / -30.8 / 0.94
+   % months tilted: 34
+   excess -0.66pp/yr CI [-2.44,1.02]  VERDICT: REJECT
+H4 turnover/yr 5.70  FULL CAGR/DD/Sh 12.97/-28.9/0.79
+   W1: 7.16 / -26.4 / 0.46
+   W2: 12.50 / -20.9 / 0.85
+   W3: 16.57 / -28.9 / 0.95
+   % months tilted: 59
+   excess 0.07pp/yr CI [-0.21,0.35]  VERDICT: REJECT

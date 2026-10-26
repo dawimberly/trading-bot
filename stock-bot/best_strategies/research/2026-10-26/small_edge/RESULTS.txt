@@ -1,0 +1,30 @@
+H1D_base turnover/yr 5.5 FULL 12.89/-27.5/0.79
+    W1 7.25 / -25.7 / 0.47
+    W2 12.49 / -21.0 / 0.85
+    W3 16.82 / -27.5 / 0.97
+VTI_BH turnover/yr 0.0 FULL 11.95/-51.8/0.67
+    W1 5.11 / -51.8 / 0.32
+    W2 11.82 / -20.0 / 0.93
+    W3 16.47 / -35.0 / 0.88
+H1_TOM turnover/yr 48.1 FULL -0.34/-33.8/0.02
+    W1 1.54 / -20.8 / 0.18
+    W2 -3.65 / -28.5 / -0.46
+    W3 1.11 / -23.3 / 0.16
+    excess vs H1D -13.39pp CI [-21.08,-5.70] | vs VTI -13.04pp | VERDICT REJECT
+H2_preholiday turnover/yr 37.0 FULL 1.31/-14.0/0.36
+    W1 0.52 / -11.6 / 0.12
+    W2 -0.72 / -6.4 / -0.23
+    W3 3.40 / -6.5 / 1.15
+    excess vs H1D -12.23pp CI [-20.25,-4.07] | vs VTI -11.89pp | VERDICT REJECT
+H3_weekly_reversal turnover/yr 92.5 FULL -8.16/-90.7/-0.07
+    W1 -7.92 / -67.1 / 0.00
+    W2 -10.87 / -58.4 / -0.37
+    W3 -6.16 / -74.2 / 0.03
+    excess vs H1D -15.93pp CI [-28.15,-3.03] | vs VTI -15.59pp | VERDICT REJECT
+H4_52wk_high turnover/yr 17.2 FULL -0.86/-55.2/0.07
+    W1 -10.45 / -55.2 / -0.27
+    W2 5.82 / -24.8 / 0.46
+    W3 0.38 / -41.6 / 0.13
+    excess vs H1D -12.12pp CI [-18.31,-5.24] | vs VTI -11.78pp | VERDICT REJECT
+universe with data: 599 of 603 ; with data by 2008-03: 352
+days in market H1: 19 % H2: 3.7 %

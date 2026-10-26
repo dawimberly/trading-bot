@@ -1,0 +1,19 @@
+clusters 16644 trades 3164 {'nohist': 606, 'filter': 10245, 'held': 240}
+avg open positions 43.3, avg stock exposure 96%
+per-trade 63d mean 6.07% median 3.59% | SPY same windows mean 4.59%
+H1D FULL 12.99/-27.5/0.79
+   W1 7.25 / -25.7 / 0.47
+   W2 12.49 / -21.0 / 0.85
+   W3 17.26 / -27.5 / 0.98
+VTI FULL 12.10/-51.8/0.67
+   W1 5.11 / -51.8 / 0.32
+   W2 11.82 / -20.0 / 0.93
+   W3 17.07 / -35.0 / 0.89
+INSIDER FULL 8.13/-58.9/0.41
+   W1 13.08 / -52.8 / 0.51
+   W2 8.03 / -31.8 / 0.52
+   W3 5.15 / -56.8 / 0.32
+  trades entered W1 581
+  trades entered W2 785
+  trades entered W3 1798
+turnover/yr 12.4; excess vs H1D -1.41pp CI [-11.61,8.60]; vs VTI -1.12pp; VERDICT REJECT
