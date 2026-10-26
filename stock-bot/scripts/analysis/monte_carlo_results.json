@@ -1,0 +1,50 @@
+{
+  "n_trades": 2,
+  "n_iters": 1000,
+  "start_equity": 100000.0,
+  "noise_pct": 0.003,
+  "original": {
+    "final_equity": 98233.52,
+    "max_drawdown_pct": 2.93,
+    "total_return_pct": -1.77,
+    "equity_path": [
+      100000.0,
+      101200.0,
+      98233.52
+    ]
+  },
+  "simulations": {
+    "median_final_equity": 98236.42,
+    "p5_final_equity": 97827.82,
+    "p95_final_equity": 98634.78,
+    "prob_loss": 1.0,
+    "prob_dd_gt_20pct": 0.0,
+    "prob_dd_gt_30pct": 0.0,
+    "original_percentile_rank": 49.8
+  },
+  "verdict": "WEAK EDGE",
+  "verdict_emoji": "\u274c",
+  "fan_chart": {
+    "trade_index": [
+      0,
+      1,
+      2
+    ],
+    "p5": [
+      100000.0,
+      96843.62,
+      97827.82
+    ],
+    "p50": [
+      100000.0,
+      100912.86,
+      98236.42
+    ],
+    "p95": [
+      100000.0,
+      101435.03,
+      98634.78
+    ]
+  },
+  "source_csv": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\research\\bb_squeeze_results.csv"
+}

@@ -1,0 +1,206 @@
+{
+  "generated_at": "2026-07-29 21:27 UTC",
+  "db_path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\market_data.db",
+  "db_size_mb": 105.59,
+  "disclaimer": "Union panel start != full-bot testability. 2022 STRICT = price-path / realized-vol stress; VIX-dependent behavior partially simulated.",
+  "key_series": {
+    "SPY": {
+      "table": "SPY_daily",
+      "symbol": "SPY",
+      "first": "2016-07-29",
+      "last": "2026-07-29",
+      "rows": 2513,
+      "close_rows": 2513,
+      "present": true
+    },
+    "VTI": {
+      "table": "VTI_daily",
+      "symbol": "VTI",
+      "first": "2001-06-15",
+      "last": "2026-07-29",
+      "rows": 6316,
+      "close_rows": 6316,
+      "present": true
+    },
+    "XLE": {
+      "table": "XLE_daily",
+      "symbol": "XLE",
+      "first": "1998-12-22",
+      "last": "2026-07-29",
+      "rows": 6941,
+      "close_rows": 6941,
+      "present": true
+    },
+    "GLD": {
+      "table": "GLD_daily",
+      "symbol": "GLD",
+      "first": "2016-07-29",
+      "last": "2026-07-29",
+      "rows": 2513,
+      "close_rows": 2513,
+      "present": true
+    },
+    "VIX": {
+      "table": "VIX_daily",
+      "symbol": "VIX",
+      "first": "2024-06-17",
+      "last": "2026-06-15",
+      "rows": 501,
+      "close_rows": 501,
+      "present": true
+    },
+    "^VIX": {
+      "present": false
+    },
+    "TLT": {
+      "table": "TLT_daily",
+      "symbol": "TLT",
+      "first": "2016-07-29",
+      "last": "2026-07-29",
+      "rows": 2513,
+      "close_rows": 2513,
+      "present": true
+    },
+    "XOM": {
+      "table": "XOM_daily",
+      "symbol": "XOM",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251,
+      "present": true
+    },
+    "CL=F": {
+      "present": false
+    },
+    "GC=F": {
+      "present": false
+    }
+  },
+  "missing_key": [
+    "^VIX",
+    "CL=F",
+    "GC=F"
+  ],
+  "daily_table_count": 605,
+  "coverage_cutoffs": {
+    "1990-01-01": {
+      "symbols_reaching": 141,
+      "of": 605
+    },
+    "2000-01-01": {
+      "symbols_reaching": 205,
+      "of": 605
+    },
+    "2004-01-01": {
+      "symbols_reaching": 224,
+      "of": 605
+    },
+    "2008-01-01": {
+      "symbols_reaching": 240,
+      "of": 605
+    },
+    "2014-01-01": {
+      "symbols_reaching": 263,
+      "of": 605
+    },
+    "2020-01-01": {
+      "symbols_reaching": 305,
+      "of": 605
+    },
+    "2022-01-01": {
+      "symbols_reaching": 324,
+      "of": 605
+    }
+  },
+  "earliest_10": [
+    {
+      "table": "AEP_daily",
+      "symbol": "AEP",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "BA_daily",
+      "symbol": "BA",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "CAT_daily",
+      "symbol": "CAT",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "CVX_daily",
+      "symbol": "CVX",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "DIS_daily",
+      "symbol": "DIS",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "ED_daily",
+      "symbol": "ED",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "GD_daily",
+      "symbol": "GD",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "GE_daily",
+      "symbol": "GE",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "HON_daily",
+      "symbol": "HON",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    },
+    {
+      "table": "IBM_daily",
+      "symbol": "IBM",
+      "first": "1962-01-02",
+      "last": "2026-07-29",
+      "rows": 16251,
+      "close_rows": 16251
+    }
+  ],
+  "caveats": [
+    "SPY in prod DB starts 2016-07-29 \u2014 truncated vs ETF inception (~1993).",
+    "GLD in prod DB starts 2016-07-29 \u2014 truncated vs ETF inception (~2004).",
+    "VIX in prod DB starts 2024-06-17 \u2014 2022 stress cannot use true VIX level/rising gates.",
+    "WTI/gold futures missing from prod DB \u2014 oil/gold shock studies need research store / FRED.",
+    "Panel union start 1962-01-02 is driven by AEP et al. \u2014 not full-strategy coverage."
+  ],
+  "audit_sha256": "14b1f1c78f8dc3d4"
+}

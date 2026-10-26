@@ -1,0 +1,130 @@
+{
+  "summary": {
+    "generated": "2026-08-21 16:49",
+    "book": "paper",
+    "start": "2026-08-19",
+    "end": "2026-08-21",
+    "sources": [
+      "journal:paper_journal.csv"
+    ],
+    "n_fills": 37,
+    "n_buy": 20,
+    "n_sell": 17,
+    "gross": 6109.19,
+    "net": 1427.37,
+    "cancel_ratio": 0.7664,
+    "cancel_ex_core": 0.7664,
+    "median_daily_cancel": 0.65,
+    "n_pairs": 2,
+    "n_regime_mismatch_pairs": 0,
+    "mismatch_frac": 0.0,
+    "n_flip_both": 0,
+    "n_days_with_fills": 3,
+    "verdict": "elevated self-conflict - keep RHYME but do not add more regime overlays until freeze ends",
+    "load_notes": [
+      "journal paper_journal.csv: rows=19410 preferred_trade_rows=37",
+      "SoT journal: C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\portal\\users\\dawimberly\\books\\alpaca_paper\\paper_journal.csv",
+      "using 37 journal event=fill rows",
+      "jsonl present (2209) but ignored; journal event=fill is SoT",
+      "verdict tape: 37 event=fill rows (submit $ is biased; many sells have null notional)",
+      "submit+fill days with both sides: 2/3"
+    ]
+  },
+  "daily": [
+    {
+      "date": "2026-08-19",
+      "regime": "A",
+      "n_buy": 12,
+      "n_sell": 9,
+      "gross": 3966.6,
+      "net": 1388.28,
+      "cancel_ratio": 0.65,
+      "count_cancel": 0.8571,
+      "cancel_ex_core": 0.65,
+      "same_sym_rt": 1,
+      "paired_rt_syms": 2,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    },
+    {
+      "date": "2026-08-20",
+      "regime": "A",
+      "n_buy": 8,
+      "n_sell": 3,
+      "gross": 1644.76,
+      "net": 536.92,
+      "cancel_ratio": 0.6736,
+      "count_cancel": 0.5455,
+      "cancel_ex_core": 0.6736,
+      "same_sym_rt": 0,
+      "paired_rt_syms": 2,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": "buy+sell same day"
+    },
+    {
+      "date": "2026-08-21",
+      "regime": "A",
+      "n_buy": 0,
+      "n_sell": 5,
+      "gross": 497.83,
+      "net": -497.83,
+      "cancel_ratio": 0.0,
+      "count_cancel": 0.0,
+      "cancel_ex_core": 0.0,
+      "same_sym_rt": 0,
+      "paired_rt_syms": 0,
+      "regime_flip": false,
+      "flip_both_sides": false,
+      "notes": ""
+    }
+  ],
+  "by_regime": [
+    {
+      "regime": "A",
+      "n_buy": 20,
+      "n_sell": 15,
+      "gross": 6080.75,
+      "net": 1455.81,
+      "cancel_ratio": 0.7606,
+      "n_days": 3
+    },
+    {
+      "regime": "B",
+      "n_buy": 0,
+      "n_sell": 1,
+      "gross": 23.33,
+      "net": -23.33,
+      "cancel_ratio": 0.0,
+      "n_days": 1
+    },
+    {
+      "regime": "D",
+      "n_buy": 0,
+      "n_sell": 1,
+      "gross": 5.11,
+      "net": -5.11,
+      "cancel_ratio": 0.0,
+      "n_days": 1
+    }
+  ],
+  "top_symbols": [
+    {
+      "symbol": "MHK",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 96.08,
+      "sell_notional": 197.62
+    },
+    {
+      "symbol": "TPG",
+      "pairs": 1,
+      "regime_mismatch": 0,
+      "cross_sleeve": 0,
+      "buy_notional": 185.45,
+      "sell_notional": 350.91
+    }
+  ]
+}

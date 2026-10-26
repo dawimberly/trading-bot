@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
@@ -36,6 +37,11 @@ class DustCloseResult:
     status: str  # dry_run | closed | skipped | error
     detail: str
     order_id: str | None = None
+
+    @property
+    def id(self):
+        """Order id attribute callers already read on broker order objects."""
+        return self.order_id
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -117,14 +123,33 @@ def _close_via_qty_order(executor: AlpacaExecutor, pos, qty: float) -> Any:
     if abs_qty <= 0:
         raise ValueError(f"zero qty for {symbol}")
 
+    if not is_crypto_sym:
+        fractionable = True
+        probe = getattr(executor, "_symbol_fractionable", None)
+        if callable(probe):
+            flag = probe(symbol)
+            if flag is False:
+                fractionable = False
+        if not fractionable:
+            whole = math.floor(abs_qty + 1e-9)
+            if whole < 1:
+                raise ValueError(f"not fractionable; no whole shares for {symbol}")
+            abs_qty = float(whole)
+
     if qty > 0:
         side = OrderSide.SELL
     else:
         side = OrderSide.BUY
 
+    if is_crypto_sym:
+        order_qty = abs_qty
+    elif not fractionable:
+        order_qty = str(int(math.floor(abs_qty + 1e-9)))
+    else:
+        order_qty = str(abs_qty)
     order = MarketOrderRequest(
         symbol=formatted_symbol,
-        qty=abs_qty if is_crypto_sym else str(abs_qty),
+        qty=order_qty,
         side=side,
         time_in_force=tif,
     )
@@ -174,6 +199,16 @@ def close_dust_position(
 
     alpaca_sym = getattr(pos, "symbol", sym)
     last_err: str | None = None
+    broker_min = float(getattr(config, "ALPACA_MIN_NOTIONAL", 1.0) or 1.0)
+    if 0 < notional < broker_min:
+        # Alpaca rejects this every time. Leave the remnant; do not resubmit.
+        return DustCloseResult(
+            sym,
+            qty,
+            round(notional, 4),
+            "skipped",
+            f"below alpaca ${broker_min:.2f} minimum; leaving dust",
+        )
 
     for attempt in range(1, CLOSE_RETRIES + 1):
         try:
@@ -252,6 +287,17 @@ def close_dust_position(
         return DustCloseResult(sym, qty, round(notional, 4), "error", detail)
 
 
+def _h1d_dust_skip(symbol: str) -> bool:
+    """Exclusive h1d keeps its ETFs. Other names still go through this cleaner."""
+    try:
+        import config
+        from modules.h1d_trend_mix import guards_bypass_symbol
+
+        return guards_bypass_symbol(symbol, exclusive=config.h1d_trend_mix_exclusive())
+    except Exception:
+        return False
+
+
 def cleanup_dust_positions(
     executor: AlpacaExecutor,
     *,
@@ -271,6 +317,7 @@ def cleanup_dust_positions(
                 max_qty=max_qty,
             )
             for sym in symbols
+            if not _h1d_dust_skip(sym)
         ]
 
     dust = list_dust_positions(
@@ -279,6 +326,8 @@ def cleanup_dust_positions(
     results: list[DustCloseResult] = []
     for pos, qty, notional in dust:
         sym = executor._normalize_pos_symbol(pos)
+        if _h1d_dust_skip(sym):
+            continue
         if dry_run:
             results.append(
                 DustCloseResult(

@@ -106,6 +106,21 @@ def trailing_stop_hit(row: dict, current: float) -> bool:
     return float(current) <= floor
 
 
+def _profit_exit_bar(executor, signal_bar: int | None):
+    """Research next_close stamps the fill bar. same_close and live keep the signal bar."""
+    if type(executor).__name__ != "BacktestExecutor":
+        return signal_bar
+    from modules.backtester_core import RUN_OPTIONS
+
+    if getattr(RUN_OPTIONS, "fill_timing", "same_close") != "next_close":
+        return signal_bar
+    portfolio = getattr(executor, "portfolio", None)
+    fill_bar = getattr(portfolio, "_research_fill_bar", None) if portfolio is not None else None
+    if fill_bar is None:
+        return signal_bar
+    return int(fill_bar)
+
+
 def record_profit_exit(executor, symbol: str, *, now=None, bar_idx: int | None = None) -> None:
     sym = config.normalize_symbol(symbol)
     _state_map(executor).pop(sym, None)
@@ -236,46 +251,60 @@ def run_profit_target_exits(
             order = executor.execute_full_exit(symbol)
         if order is None:
             continue
+        pnl = _position_pnl_pct(entry, current, float(pos.qty))
+
+        def _complete_profit_exit(exit_symbol=symbol, pnl=pnl, row=dict(row), pos=pos):
+            stats["exits"] = stats.get("exits", 0) + 1
+            record_profit_exit(
+                executor,
+                exit_symbol,
+                now=now,
+                bar_idx=_profit_exit_bar(executor, bar_idx),
+            )
+            if risk_manager is not None:
+                risk_manager._log_event(
+                    f"PROFIT TRAIL EXIT: {exit_symbol} pnl={pnl:.2%} hwm={row.get('hwm'):.4f}"
+                )
+            if journal is not None:
+                try:
+                    eq = float(executor._get_account().equity)
+                except Exception:
+                    eq = 0.0
+                exit_kw = {}
+                try:
+                    if config.effective_paper_momentum_quality_fixes():
+                        exit_kw["exit_reason"] = "take_profit"
+                        from modules.position_exits import _position_entry_hour_et
+
+                        exit_kw["entry_hour"] = _position_entry_hour_et(pos)
+                except Exception as exc:
+                    logger.debug("profit target soft-fail: %s", exc)
+                journal.log_exit(
+                    exit_symbol,
+                    "sell",
+                    f"profit_trailing {pnl:.2%}",
+                    eq,
+                    journal_path=journal_path,
+                    **exit_kw,
+                )
+            logger.info(
+                "profit_target exit %s pnl=%.2f%% trail=%.0f%%",
+                exit_symbol,
+                pnl * 100,
+                PROFIT_TARGET_TRAIL_PCT * 100,
+            )
+
         if hasattr(executor, "order_filled") and not executor.order_filled(order):
+            if (
+                isinstance(order, dict)
+                and order.get("queued")
+                and hasattr(executor, "defer_until_fill")
+            ):
+                executor.defer_until_fill(order, _complete_profit_exit)
             continue
         if isinstance(order, dict) and not order:
             continue
-
+        _complete_profit_exit()
         exits += 1
-        stats["exits"] = stats.get("exits", 0) + 1
-        pnl = _position_pnl_pct(entry, current, float(pos.qty))
-        record_profit_exit(executor, symbol, now=now, bar_idx=bar_idx)
-        if risk_manager is not None:
-            risk_manager._log_event(
-                f"PROFIT TRAIL EXIT: {symbol} pnl={pnl:.2%} hwm={row.get('hwm'):.4f}"
-            )
-        if journal is not None:
-            try:
-                eq = float(executor._get_account().equity)
-            except Exception:
-                eq = 0.0
-            exit_kw = {}
-            try:
-                if config.effective_paper_momentum_quality_fixes():
-                    exit_kw["exit_reason"] = "take_profit"
-                    from modules.position_exits import _position_entry_hour_et
-
-                    exit_kw["entry_hour"] = _position_entry_hour_et(pos)
-            except Exception as exc:
-                logger.debug("profit target soft-fail: %s", exc)
-            journal.log_exit(
-                symbol,
-                "sell",
-                f"profit_trailing {pnl:.2%}",
-                eq,
-                journal_path=journal_path,
-                **exit_kw,
-            )
-        logger.info(
-            "profit_target exit %s pnl=%.2f%% trail=%.0f%%",
-            symbol,
-            pnl * 100,
-            PROFIT_TARGET_TRAIL_PCT * 100,
-        )
 
     return exits

@@ -1,0 +1,281 @@
+{
+  "research_only": true,
+  "cost_rt_bps": 10.0,
+  "sleeve": 0.95,
+  "gain_exit_pct": 8.0,
+  "gain_exit_mode": "skip_monday",
+  "windows": [
+    {
+      "label": "365d_recent",
+      "start": "2025-04-11",
+      "end": "2026-10-09",
+      "coverage": {
+        "members_in_window": 544,
+        "members_with_data": 530,
+        "members_missing_data": 14,
+        "coverage_pct": 97.4,
+        "avg_members_per_day": 497.0,
+        "avg_covered_per_day": 497.0,
+        "missing_sample": [
+          "ANSS",
+          "CTLT",
+          "CTRA",
+          "DAY",
+          "DFS",
+          "FI",
+          "HES",
+          "HOLX",
+          "IPG",
+          "JNPR",
+          "K",
+          "MMC",
+          "SATS",
+          "WBA"
+        ]
+      },
+      "policies": {
+        "pick_15": {
+          "book_ret_pct": 100.16,
+          "max_dd_pct": 18.69,
+          "max_dd_booked_pct": 11.48,
+          "sharpe": 1.66,
+          "sharpe_daily": 0.10439,
+          "n_days": 388,
+          "daily_skew": -0.1435,
+          "daily_kurt": 4.422,
+          "trades": 338,
+          "win_rate": 41.7,
+          "symbols": 530,
+          "start": "2025-04-11",
+          "end": "2026-10-09",
+          "gain_fades": 0,
+          "gap_skips": 0,
+          "weekend_fades": 0,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 0,
+            "Wed": 0,
+            "Thu": 0,
+            "Fri": 0
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 189,
+            "time": 136,
+            "friday": 0,
+            "gain_fade": 0,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 13
+          }
+        },
+        "a2b1_skip_mon": {
+          "book_ret_pct": 108.09,
+          "max_dd_pct": 15.99,
+          "max_dd_booked_pct": 12.61,
+          "sharpe": 1.9,
+          "sharpe_daily": 0.11945,
+          "n_days": 388,
+          "daily_skew": -0.067,
+          "daily_kurt": 4.4236,
+          "trades": 442,
+          "win_rate": 43.7,
+          "symbols": 530,
+          "start": "2025-04-11",
+          "end": "2026-10-09",
+          "gain_fades": 118,
+          "gap_skips": 7,
+          "weekend_fades": 0,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 23,
+            "Wed": 26,
+            "Thu": 41,
+            "Fri": 28
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 214,
+            "time": 97,
+            "friday": 0,
+            "gain_fade": 118,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 13
+          },
+          "gate_vs_pick_15": "PASS",
+          "d_book_pp": 7.93,
+          "d_dd_pp": -2.7
+        }
+      }
+    },
+    {
+      "label": "365d_prior",
+      "start": "2023-10-02",
+      "end": "2025-04-10",
+      "coverage": {
+        "members_in_window": 540,
+        "members_with_data": 515,
+        "members_missing_data": 25,
+        "coverage_pct": 95.4,
+        "avg_members_per_day": 486.1,
+        "avg_covered_per_day": 486.1,
+        "missing_sample": [
+          "ABC",
+          "ANSS",
+          "ATVI",
+          "CDAY",
+          "CMA",
+          "CTLT",
+          "CTRA",
+          "DAY",
+          "DFS",
+          "DISH",
+          "FI",
+          "FLT",
+          "HES",
+          "HOLX",
+          "IPG",
+          "JNPR",
+          "K",
+          "MMC",
+          "MRO",
+          "PEAK",
+          "PXD",
+          "RE",
+          "SEE",
+          "WBA",
+          "WRK"
+        ]
+      },
+      "policies": {
+        "pick_15": {
+          "book_ret_pct": 6.17,
+          "max_dd_pct": 22.77,
+          "max_dd_booked_pct": 15.7,
+          "sharpe": 0.27,
+          "sharpe_daily": 0.01693,
+          "n_days": 388,
+          "daily_skew": -1.2712,
+          "daily_kurt": 10.3799,
+          "trades": 369,
+          "win_rate": 36.0,
+          "symbols": 515,
+          "start": "2023-10-02",
+          "end": "2025-04-10",
+          "gain_fades": 0,
+          "gap_skips": 0,
+          "weekend_fades": 0,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 0,
+            "Wed": 0,
+            "Thu": 0,
+            "Fri": 0
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 231,
+            "time": 123,
+            "friday": 0,
+            "gain_fade": 0,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 15
+          }
+        },
+        "a2b1_skip_mon": {
+          "book_ret_pct": 6.65,
+          "max_dd_pct": 19.02,
+          "max_dd_booked_pct": 16.41,
+          "sharpe": 0.29,
+          "sharpe_daily": 0.01837,
+          "n_days": 388,
+          "daily_skew": -0.9066,
+          "daily_kurt": 7.5386,
+          "trades": 396,
+          "win_rate": 37.9,
+          "symbols": 515,
+          "start": "2023-10-02",
+          "end": "2025-04-10",
+          "gain_fades": 37,
+          "gap_skips": 0,
+          "weekend_fades": 0,
+          "fade_by_dow": {
+            "Mon": 0,
+            "Tue": 2,
+            "Wed": 9,
+            "Thu": 13,
+            "Fri": 13
+          },
+          "exit_reasons": {
+            "1r": 0,
+            "stop": 228,
+            "time": 116,
+            "friday": 0,
+            "gain_fade": 37,
+            "fat_loser": 0,
+            "stall_rotate": 0,
+            "eod": 15
+          },
+          "gate_vs_pick_15": "PASS",
+          "d_book_pp": 0.48,
+          "d_dd_pp": -3.75
+        }
+      }
+    }
+  ],
+  "deflated_sharpe": [
+    {
+      "sharpe_daily": 0.10439,
+      "sharpe_annual": 1.657,
+      "n_trials": 58,
+      "sr0_daily": 0.09516,
+      "sr0_annual": 1.511,
+      "n_obs": 388,
+      "dsr": 0.5712,
+      "psr_vs_zero": 0.9788,
+      "window": "365d_recent",
+      "policy": "pick_15"
+    },
+    {
+      "sharpe_daily": 0.11945,
+      "sharpe_annual": 1.896,
+      "n_trials": 58,
+      "sr0_daily": 0.09516,
+      "sr0_annual": 1.511,
+      "n_obs": 388,
+      "dsr": 0.6819,
+      "psr_vs_zero": 0.99,
+      "window": "365d_recent",
+      "policy": "a2b1_skip_mon"
+    },
+    {
+      "sharpe_daily": 0.01693,
+      "sharpe_annual": 0.269,
+      "n_trials": 58,
+      "sr0_daily": 0.09516,
+      "sr0_annual": 1.511,
+      "n_obs": 388,
+      "dsr": 0.064,
+      "psr_vs_zero": 0.6291,
+      "window": "365d_prior",
+      "policy": "pick_15"
+    },
+    {
+      "sharpe_daily": 0.01837,
+      "sharpe_annual": 0.292,
+      "n_trials": 58,
+      "sr0_daily": 0.09516,
+      "sr0_annual": 1.511,
+      "n_obs": 388,
+      "dsr": 0.0671,
+      "psr_vs_zero": 0.6399,
+      "window": "365d_prior",
+      "policy": "a2b1_skip_mon"
+    }
+  ],
+  "ledger_trials_in_family": 64,
+  "verdict": "CANDIDATE",
+  "note": "No .env / restart. Promote only if both windows PASS. Not Medium/live."
+}

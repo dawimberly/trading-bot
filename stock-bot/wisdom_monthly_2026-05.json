@@ -1,0 +1,73 @@
+{
+  "rolled_up_at": "2026-06-15T14:19:30",
+  "month": "2026-05",
+  "config": {
+    "wisdom_mode": "dynamic",
+    "gap_threshold": 0.25
+  },
+  "live": null,
+  "simulated_modes": {
+    "baseline": {
+      "return_pct": 4.61,
+      "sharpe": 4.47,
+      "max_drawdown_pct": -1.96,
+      "samples": 31,
+      "orders": 2,
+      "paused_days": 0,
+      "from_date": "2026-05-01",
+      "to_date": "2026-05-31"
+    },
+    "dynamic": {
+      "return_pct": 4.61,
+      "sharpe": 4.47,
+      "max_drawdown_pct": -1.96,
+      "samples": 31,
+      "orders": 2,
+      "paused_days": 5,
+      "from_date": "2026-05-01",
+      "to_date": "2026-05-31"
+    },
+    "web_regime": {
+      "return_pct": 4.61,
+      "sharpe": 4.47,
+      "max_drawdown_pct": -1.96,
+      "samples": 31,
+      "orders": 2,
+      "paused_days": 0,
+      "from_date": "2026-05-01",
+      "to_date": "2026-05-31"
+    },
+    "arbitrage": {
+      "return_pct": 4.61,
+      "sharpe": 4.47,
+      "max_drawdown_pct": -1.96,
+      "samples": 31,
+      "orders": 2,
+      "paused_days": 0,
+      "from_date": "2026-05-01",
+      "to_date": "2026-05-31"
+    },
+    "wisdom_pause": {
+      "return_pct": 4.57,
+      "sharpe": 4.53,
+      "max_drawdown_pct": -1.94,
+      "samples": 31,
+      "orders": 2,
+      "paused_days": 43,
+      "from_date": "2026-05-01",
+      "to_date": "2026-05-31"
+    },
+    "governor": {
+      "return_pct": 4.61,
+      "sharpe": 4.47,
+      "max_drawdown_pct": -1.96,
+      "samples": 31,
+      "orders": 2,
+      "paused_days": 0,
+      "from_date": "2026-05-01",
+      "to_date": "2026-05-31"
+    }
+  },
+  "best_sim_mode": "baseline",
+  "recommendation": "No live equity journal yet. Best 30d sim: baseline (+4.6%)."
+}

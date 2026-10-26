@@ -64,10 +64,9 @@ def _et_now_time(now=None) -> time | None:
         if now is None:
             return datetime.now(et).timetz().replace(tzinfo=None)
         if isinstance(now, datetime):
-            if now.tzinfo is None:
-                # Assume already ET/local wall time from live loop.
-                return now.time()
-            return now.astimezone(et).time()
+            from modules.market_hours import attach_local_tz
+
+            return attach_local_tz(now).astimezone(et).time()
         return None
     except Exception:
         return None
@@ -110,6 +109,9 @@ NYSE_PREF_ENTRY_END = time(14, 0)
 NYSE_RSI_MAX_OFF_PEAK = 70
 NYSE_RSI_MAX_PREF_WINDOW = 72
 NYSE_PREF_WINDOW_RANK_BOOST = 0.02
+# 45 minutes won the ET cooldown sweep vs 30 and 60.
+NYSE_OPEN_COOLDOWN_START = time(9, 30)
+NYSE_OPEN_COOLDOWN_END = time(10, 15)
 NYSE_RSI_PERIOD = 14
 
 
@@ -165,17 +167,23 @@ def _nyse_time_of_day_rank_boost(now=None) -> float:
 
 
 def _nyse_open_cooldown_active(now=None) -> bool:
-    """True during 9:30–10:00 ET (first 30 minutes). Daily backtests (bar index / midnight) skip."""
+    """True during 9:30–10:15 ET. Daily backtests (bar index / midnight) skip."""
     if isinstance(now, (int, float)):
         return False
     t = _et_now_time(now)
     if t is None:
         return False
-    return time(9, 30) <= t <= time(10, 0)
+    return NYSE_OPEN_COOLDOWN_START <= t <= NYSE_OPEN_COOLDOWN_END
 
 
-def _overnight_gap_pct(symbol: str, data) -> float | None:
-    """(today_open / prior_close) - 1. Prefers yfinance OHLC; falls back to close/close."""
+def _overnight_gap_pct(symbol: str, data, *, deadline: float | None = None) -> float | None:
+    """(today_open / prior_close) - 1. Prefers bounded yfinance OHLC; else close/close.
+
+    Yahoo is one timed history call, and *deadline* is the scan clock shared
+    by the candidate loop. A timeout or a spent budget is not a measured gap.
+    The close/close matrix is the existing fallback. None means unknown, and
+    the quality skip does not treat unknown as a confirmed small or large gap.
+    """
     sym = config.normalize_symbol(symbol)
     # Backtests must stay PIT — no live yfinance gaps.
     try:
@@ -183,17 +191,20 @@ def _overnight_gap_pct(symbol: str, data) -> float | None:
     except Exception:
         use_yf = True
     if use_yf:
-        try:
-            import yfinance as yf
+        from modules.volume_analysis import _deadline_reached
 
-            hist = yf.Ticker(sym).history(period="10d", auto_adjust=True)
-            if hist is not None and len(hist) >= 2 and "Open" in hist.columns:
-                prior_close = float(hist["Close"].iloc[-2])
-                today_open = float(hist["Open"].iloc[-1])
-                if prior_close > 0 and today_open > 0:
-                    return today_open / prior_close - 1.0
-        except Exception as exc:
-            logger.debug("gap yfinance fallback for %s: %s", sym, exc)
+        if not _deadline_reached(deadline):
+            try:
+                from modules.volume_analysis import yahoo_history
+
+                hist = yahoo_history(sym, period="10d", auto_adjust=True)
+                if hist is not None and len(hist) >= 2 and "Open" in hist.columns:
+                    prior_close = float(hist["Close"].iloc[-2])
+                    today_open = float(hist["Open"].iloc[-1])
+                    if prior_close > 0 and today_open > 0:
+                        return today_open / prior_close - 1.0
+            except Exception as exc:
+                logger.debug("gap yfinance fallback for %s: %s", sym, exc)
 
     if data is None or not hasattr(data, "columns") or sym not in data.columns:
         return None
@@ -257,13 +268,15 @@ def _mark_nyse_entered_today(symbol: str, now=None, data=None) -> None:
     _nyse_mom_entries_by_day.setdefault(day, set()).add(config.normalize_symbol(symbol))
 
 
-def _nyse_momentum_quality_skip(symbol: str, data, now=None) -> str | None:
+def _nyse_momentum_quality_skip(
+    symbol: str, data, now=None, *, deadline: float | None = None
+) -> str | None:
     """Return skip reason string when PAPER_MOMENTUM_QUALITY_FIXES blocks entry."""
     if not config.effective_paper_momentum_quality_fixes():
         return None
     if _nyse_open_cooldown_active(now):
-        return "open cooldown (9:30-10:00 ET)"
-    gap = _overnight_gap_pct(symbol, data)
+        return "open cooldown (9:30-10:15 ET)"
+    gap = _overnight_gap_pct(symbol, data, deadline=deadline)
     if gap is not None and gap > 0.02:
         return f"overnight gap {gap:.1%} too large"
     if _nyse_journal_entered_today(symbol, now, data=data):
@@ -294,6 +307,9 @@ def regime_entries_paused(regime, data=None, sentiment=None):
             return True
     except ImportError:
         pass
+    # Paper aggressive: size RHYME_B/E instead of freezing entries.
+    if config.effective_regime_dynamic_sizing():
+        return False
     if regime in PAUSED_REGIMES:
         return True
     if not config.DERIVED_BEAR_PAUSE_ENABLED or data is None:
@@ -360,6 +376,43 @@ def _count_if_filled(executor, order, *, max_wait=PAIR_FILL_WAIT):
     return 1
 
 
+def _apply_when_filled(executor, order, callback) -> bool:
+    """Run callback now for a completed fill.
+
+    A research queue stores it once and runs it at fill time. Rejected and
+    dropped intents never run it. Executors without a queue are unchanged.
+    """
+    if _count_if_filled(executor, order):
+        callback()
+        return True
+    if (
+        isinstance(order, dict)
+        and order.get("queued")
+        and hasattr(executor, "defer_until_fill")
+    ):
+        executor.defer_until_fill(order, callback)
+    return False
+
+
+def consume_queued_atomic_pair(executor):
+    """Return a research pair id queued by the last atomic entry, if any."""
+    pair_id = getattr(executor, "_last_queued_atomic_pair_id", None)
+    if pair_id:
+        executor._last_queued_atomic_pair_id = None
+    return pair_id
+
+
+def _defer_pair_cooldown(executor, pair_cooldown, pair_key, now) -> None:
+    """Stamp a pair cooldown once, when both delayed legs fill."""
+    pair_id = consume_queued_atomic_pair(executor)
+    if not pair_id or not hasattr(executor, "defer_until_pair_fill"):
+        return
+    executor.defer_until_pair_fill(
+        pair_id,
+        lambda pair_key=pair_key: pair_cooldown.__setitem__(pair_key, now),
+    )
+
+
 def _order_fill_notional(executor, order, *, max_wait=PAIR_FILL_WAIT) -> float | None:
     if order is None:
         return None
@@ -399,13 +452,51 @@ def execute_atomic_pair_entry(
     max_wait: float = PAIR_FILL_WAIT,
 ) -> tuple[bool, float | None, float | None]:
     """Both legs must fill; unwind any single-leg fill immediately."""
+    pair_id = None
+    long_link: dict = {}
+    short_link: dict = {}
+    if type(executor).__name__ == "BacktestExecutor" and hasattr(executor, "begin_atomic_pair"):
+        pair_id = executor.begin_atomic_pair(
+            long_sym, short_sym, float(leg_n), pair_key=pair_key
+        )
+        long_link = {"atomic_pair_id": pair_id, "atomic_pair_leg": "long"}
+        short_link = {"atomic_pair_id": pair_id, "atomic_pair_leg": "short"}
     long_order = executor.execute_order(
-        long_sym, "buy", notional=leg_n, reason=pair_key or None, strategy=strategy or None
+        long_sym,
+        "buy",
+        notional=leg_n,
+        reason=pair_key or None,
+        strategy=strategy or None,
+        **long_link,
     )
-    long_ok = bool(_count_if_filled(executor, long_order, max_wait=max_wait))
     short_order = executor.execute_order(
-        short_sym, "sell", notional=leg_n, reason=pair_key or None, strategy=strategy or None
+        short_sym,
+        "sell",
+        notional=leg_n,
+        reason=pair_key or None,
+        strategy=strategy or None,
+        **short_link,
     )
+    long_queued = isinstance(long_order, dict) and bool(long_order.get("queued"))
+    short_queued = isinstance(short_order, dict) and bool(short_order.get("queued"))
+    if pair_id and long_queued and short_queued:
+        executor._last_queued_atomic_pair_id = pair_id
+        return False, None, None
+    if pair_id and (long_queued or short_queued):
+        pending = getattr(executor.portfolio, "_pending_intents", []) or []
+        executor.portfolio._pending_intents = [
+            row for row in pending if row.get("atomic_pair_id") != pair_id
+        ]
+        if hasattr(executor, "_record_pair_rejection_now"):
+            executor._record_pair_rejection_now(pair_id, "leg_not_queued", [long_sym, short_sym])
+        else:
+            from backtester import _record_pair_rejection
+
+            _record_pair_rejection(
+                executor.portfolio, pair_id, "leg_not_queued", [long_sym, short_sym]
+            )
+        return False, None, None
+    long_ok = bool(_count_if_filled(executor, long_order, max_wait=max_wait))
     short_ok = bool(_count_if_filled(executor, short_order, max_wait=max_wait))
     if long_ok and short_ok:
         long_n = _order_fill_notional(executor, long_order, max_wait=0) or leg_n
@@ -418,6 +509,91 @@ def execute_atomic_pair_entry(
     return False, None, None
 
 
+def delayed_research_fills(executor) -> bool:
+    """True only for the research next-close queue. Live executors stay immediate."""
+    if type(executor).__name__ != "BacktestExecutor":
+        return False
+    from modules.backtester_core import RUN_OPTIONS
+
+    return getattr(RUN_OPTIONS, "fill_timing", "same_close") == "next_close"
+
+
+def pending_pair_exit_id(executor, long_sym: str, short_sym: str) -> str | None:
+    """Pair id already queued for these two symbols, if any."""
+    portfolio = getattr(executor, "portfolio", None)
+    pending = getattr(portfolio, "_pending_intents", None) or []
+    groups: dict[str, set] = {}
+    for row in pending:
+        pair_id = row.get("atomic_pair_id")
+        if not pair_id:
+            continue
+        groups.setdefault(str(pair_id), set()).add(row.get("symbol"))
+    for pair_id, symbols in groups.items():
+        if long_sym in symbols and short_sym in symbols:
+            return pair_id
+    return None
+
+
+def _research_exit_leg(executor, symbol: str) -> tuple[str | None, float | None, float | None]:
+    portfolio = getattr(executor, "portfolio", None)
+    if portfolio is None:
+        return None, None, None
+    qty = float(portfolio.positions.get(symbol, 0.0) or 0.0)
+    price = executor.prices.get(symbol) if hasattr(executor, "prices") else None
+    if price is None or not np.isfinite(price) or float(price) <= 0 or abs(qty) < 1e-9:
+        return None, None, None
+    side = "sell" if qty > 0 else "buy"
+    return side, round(abs(qty) * float(price), 2), abs(qty)
+
+
+def _queue_research_pair_exit(executor, long_sym: str, short_sym: str, pair_key: str) -> bool:
+    """Queue both exit legs, or neither. Returns False because nothing has filled yet."""
+    if pending_pair_exit_id(executor, long_sym, short_sym):
+        return False
+    long_side, long_n, long_qty = _research_exit_leg(executor, long_sym)
+    short_side, short_n, short_qty = _research_exit_leg(executor, short_sym)
+    if long_n is None and short_n is None:
+        return not _leg_has_exposure(executor, long_sym) and not _leg_has_exposure(
+            executor, short_sym
+        )
+    pair_id = executor.begin_atomic_pair(
+        long_sym, short_sym, float(long_n or short_n or 0.0), pair_key=pair_key
+    )
+    specs = []
+    if long_n is not None:
+        specs.append((long_sym, long_side, long_n, long_qty, "long"))
+    if short_n is not None:
+        specs.append((short_sym, short_side, short_n, short_qty, "short"))
+    orders = []
+    for symbol, side, notional, close_qty, leg in specs:
+        orders.append(
+            executor.execute_order(
+                symbol,
+                side,
+                notional=notional,
+                reduce_only=True,
+                reason=pair_key or None,
+                atomic_pair_id=pair_id,
+                atomic_pair_leg=leg,
+                close_qty=close_qty,
+            )
+        )
+    queued = [order for order in orders if isinstance(order, dict) and order.get("queued")]
+    if orders and len(queued) == len(orders):
+        executor._last_queued_atomic_pair_id = pair_id
+        return False
+    pending = getattr(executor.portfolio, "_pending_intents", []) or []
+    executor.portfolio._pending_intents = [
+        row for row in pending if row.get("atomic_pair_id") != pair_id
+    ]
+    from backtester import _record_pair_rejection
+
+    _record_pair_rejection(
+        executor.portfolio, pair_id, "leg_not_queued", [long_sym, short_sym]
+    )
+    return False
+
+
 def execute_atomic_pair_exit(
     executor,
     long_sym: str,
@@ -427,6 +603,8 @@ def execute_atomic_pair_exit(
     max_wait: float = PAIR_FILL_WAIT,
 ) -> bool:
     """Close both legs; return True only when neither has exposure."""
+    if delayed_research_fills(executor):
+        return _queue_research_pair_exit(executor, long_sym, short_sym, pair_key)
     if _leg_has_exposure(executor, long_sym):
         order = executor.execute_full_exit(long_sym)
         if order is None or not _count_if_filled(executor, order, max_wait=max_wait):
@@ -598,17 +776,23 @@ def _execute_market_neutral_legs(executor, intent, *, log_fn=None, regime="", po
         return 0, False
 
     ok, _, _ = execute_atomic_pair_entry(executor, long_sym, short_sym, leg_n)
-    if not ok:
-        return 0, False
 
-    msg = f"Market-neutral pair: LONG {long_sym} / SHORT {short_sym}, Z={round(z, 1)}"
-    if log_fn:
-        log_fn(long_sym, "buy", regime, pair_key, z, leg_n, pair_msg=msg)
-        log_fn(short_sym, "sell", regime, pair_key, z, leg_n, pair_msg=msg)
-    if hasattr(executor, "register_pair_symbols"):
-        executor.register_pair_symbols(long_sym, short_sym)
-    if portfolio_manager:
-        portfolio_manager.add_position(pair_key, z, 0)
+    def _commit_legs():
+        msg = f"Market-neutral pair: LONG {long_sym} / SHORT {short_sym}, Z={round(z, 1)}"
+        if log_fn:
+            log_fn(long_sym, "buy", regime, pair_key, z, leg_n, pair_msg=msg)
+            log_fn(short_sym, "sell", regime, pair_key, z, leg_n, pair_msg=msg)
+        if hasattr(executor, "register_pair_symbols"):
+            executor.register_pair_symbols(long_sym, short_sym)
+        if portfolio_manager:
+            portfolio_manager.add_position(pair_key, z, 0)
+
+    if not ok:
+        pair_id = getattr(executor, "_last_queued_atomic_pair_id", None)
+        if pair_id and hasattr(executor, "defer_until_pair_fill"):
+            executor.defer_until_pair_fill(pair_id, _commit_legs)
+        return 0, False
+    _commit_legs()
     return 1, True
 
 
@@ -741,6 +925,8 @@ def run_equity_pairs_strategy(
         if ok:
             pair_cooldown[intent["pair_key"]] = now
             trades += n
+        else:
+            _defer_pair_cooldown(executor, pair_cooldown, intent["pair_key"], now)
     return trades
 
 
@@ -830,6 +1016,8 @@ def run_crypto_strategy(
             if ok:
                 pair_cooldown[intent["pair_key"]] = now
                 trades += n
+            else:
+                _defer_pair_cooldown(executor, pair_cooldown, intent["pair_key"], now)
             continue
 
         t1 = intent["symbol"]
@@ -842,9 +1030,11 @@ def run_crypto_strategy(
         order = executor.execute_order(
             t1, side, notional=trade_notional, reason=pair_key, sleeve="Crypto"
         )
-        if not _count_if_filled(executor, order, max_wait=3.0):
+        def _crypto_fill(pair_key=pair_key):
+            pair_cooldown[pair_key] = now
+
+        if not _apply_when_filled(executor, order, _crypto_fill):
             continue
-        pair_cooldown[pair_key] = now
         trades += 1
         if portfolio_manager:
             portfolio_manager.add_position(pair_key, z, 0)
@@ -957,6 +1147,39 @@ def _nyse_equity_columns(data):
     return cols
 
 
+try:
+    from modules.decision_tape import (
+        audited as _tape_audited,
+        emit as _tape_emit,
+        candidate as _tape_candidate,
+        boost as _tape_boost,
+        note_returned as _tape_note_returned,
+        note_unfilled as _tape_note_unfilled,
+        note_fill_callback as _tape_note_fill_callback,
+    )
+except Exception:
+    def _tape_audited(fn):
+        return fn
+
+    def _tape_emit(*_args, **_kwargs):
+        return None
+
+    def _tape_candidate(*_args, **_kwargs):
+        return None
+
+    def _tape_boost(_component, _symbol, value):
+        return value
+
+    def _tape_note_returned(*_args, **_kwargs):
+        return None
+
+    def _tape_note_unfilled(*_args, **_kwargs):
+        return None
+
+    def _tape_note_fill_callback(*_args, **_kwargs):
+        return None
+
+
 def _equity_momentum_candidates(
     data, equity_cols, executor=None, now=None, *, bar_idx: int | None = None, full_data=None
 ):
@@ -986,10 +1209,12 @@ def _equity_momentum_candidates(
         min_bars = IPO_MIN_TRADING_DAYS if ipo else 20
         ma_window = 20 if ipo else 50
         if len(prices) < min_bars:
+            _tape_candidate(symbol, prices, ma_window, False, "insufficient_history")
             continue
         window = min(ma_window, len(prices))
         ma = prices.rolling(window=window).mean().iloc[-1]
         current = prices.iloc[-1]
+        _tape_candidate(symbol, prices, window, bool(ma > 0 and current > ma * entry_floor), "ma_floor" if not (ma > 0 and current > ma * entry_floor) else None)
         if ma > 0 and current > ma * entry_floor:
             rows.append((current / ma - 1, symbol))
     rows.sort(reverse=True)
@@ -1008,7 +1233,7 @@ def _equity_momentum_candidates(
             from modules.insider_monitor import momentum_rank_boost
 
             rows = [
-                (score + momentum_rank_boost(sym, executor), sym) for score, sym in rows
+                (score + _tape_boost("insider", sym, momentum_rank_boost(sym, executor)), sym) for score, sym in rows
             ]
             rows.sort(reverse=True)
         except Exception as exc:
@@ -1018,7 +1243,7 @@ def _equity_momentum_candidates(
             from modules.volume_analysis import rvol_momentum_rank_boost
 
             rows = [
-                (score + rvol_momentum_rank_boost(sym, data) * rank_w, sym)
+                (score + _tape_boost("rvol", sym, rvol_momentum_rank_boost(sym, data) * rank_w), sym)
                 for score, sym in rows
             ]
             rows.sort(reverse=True)
@@ -1029,7 +1254,7 @@ def _equity_momentum_candidates(
             from modules.orb_strategy import orb_momentum_rank_boost
 
             rows = [
-                (score + orb_momentum_rank_boost(sym, data) * rank_w, sym)
+                (score + _tape_boost("orb", sym, orb_momentum_rank_boost(sym, data) * rank_w), sym)
                 for score, sym in rows
             ]
             rows.sort(reverse=True)
@@ -1040,7 +1265,7 @@ def _equity_momentum_candidates(
             from modules.catalyst_scoring import catalyst_momentum_rank_boost
 
             rows = [
-                (score + catalyst_momentum_rank_boost(sym, data) * rank_w, sym)
+                (score + _tape_boost("catalyst", sym, catalyst_momentum_rank_boost(sym, data) * rank_w), sym)
                 for score, sym in rows
             ]
             rows.sort(reverse=True)
@@ -1051,7 +1276,7 @@ def _equity_momentum_candidates(
             from modules.multi_timeframe import multi_timeframe_momentum_rank_boost
 
             rows = [
-                (score + multi_timeframe_momentum_rank_boost(sym, data), sym)
+                (score + _tape_boost("mtf", sym, multi_timeframe_momentum_rank_boost(sym, data)), sym)
                 for score, sym in rows
             ]
             rows.sort(reverse=True)
@@ -1061,6 +1286,7 @@ def _equity_momentum_candidates(
     if tod_boost > 0 and rows:
         rows = [(score + tod_boost, sym) for score, sym in rows]
         rows.sort(reverse=True)
+    _tape_emit("ranked", scores=rows, time_of_day_boost=tod_boost)
     return [s for _, s in rows]
 
 
@@ -1164,6 +1390,12 @@ def _executor_equity(executor) -> float:
     return float(executor._get_account().equity)
 
 
+def _executor_cash(executor) -> float:
+    if hasattr(executor, "portfolio"):
+        return float(executor.portfolio.cash)
+    return float(executor._get_account().cash)
+
+
 def _apply_ipo_buy_notional(
     symbol: str,
     notional: float,
@@ -1193,7 +1425,7 @@ def _is_nyse_momentum_position(symbol: str) -> bool:
     sym = config.normalize_symbol(symbol)
     if config.is_crypto(sym):
         return False
-    if sym == config.SPY_BOT_SYMBOL:
+    if sym == config.SPY_BOT_SYMBOL and config.spy_sleeve_enabled():
         return False
     if config.is_metal_symbol(sym):
         return False
@@ -1255,17 +1487,19 @@ def run_ipo_safety_trims(
             order = executor.execute_order(
                 sym, "sell", notional=reduce_n, reason="ipo_trim", sleeve="NYSE"
             )
-        if not _count_if_filled(executor, order):
+        def _ipo_trim(sym=sym, reduce_n=reduce_n):
+            stats = getattr(executor, "ipo_stats", None)
+            if stats is None:
+                executor.ipo_stats = {"buys": 0, "trims": 0, "trim_notional": 0.0}
+                stats = executor.ipo_stats
+            stats["trims"] += 1
+            stats["trim_notional"] = round(float(stats["trim_notional"]) + reduce_n, 2)
+            if log_fn:
+                log_fn(sym, "ipo_trim", "", "ipo_trim", 0.0, reduce_n)
+
+        if not _apply_when_filled(executor, order, _ipo_trim):
             continue
         trims += 1
-        stats = getattr(executor, "ipo_stats", None)
-        if stats is None:
-            executor.ipo_stats = {"buys": 0, "trims": 0, "trim_notional": 0.0}
-            stats = executor.ipo_stats
-        stats["trims"] += 1
-        stats["trim_notional"] = round(float(stats["trim_notional"]) + reduce_n, 2)
-        if log_fn:
-            log_fn(sym, "ipo_trim", "", "ipo_trim", 0.0, reduce_n)
 
     return trims
 
@@ -1352,6 +1586,8 @@ def _spy_buy_intent(
 ):
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
+    if not config.spy_sleeve_enabled():
+        return False
     if regime_entries_paused(regime, data) or config.effective_yield_gate(
         yield_gated, regime=regime
     ):
@@ -1452,7 +1688,7 @@ def resolve_cycle_deploy(
         return
 
     rooms = {}
-    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT)
+    spy_cap = config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy")
     crypto_cap = config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT)
     nyse_cap = config.effective_nyse_sleeve_cap_pct()
     if hasattr(executor, "_get_account"):
@@ -1538,6 +1774,8 @@ def run_spy_exits(
     log_fn=None,
 ):
     """Sell full SPY position when price closes below the moving average."""
+    if not config.spy_sleeve_enabled():
+        return 0
     if not config.effective_spy_exit_on_ma_break():
         return 0
     symbol = symbol or config.SPY_BOT_SYMBOL
@@ -1593,6 +1831,8 @@ def run_spy_strategy(
     """Buy SPY when above MA — a simple bet that the broad market keeps rising."""
     symbol = symbol or config.SPY_BOT_SYMBOL
     ma_window = ma_window or config.SPY_MA_WINDOW
+    if not config.spy_sleeve_enabled():
+        return 0
     if regime_entries_paused(regime, data):
         return 0
     if config.effective_yield_gate(yield_gated, regime=regime):
@@ -1619,9 +1859,11 @@ def run_spy_strategy(
     order = executor.execute_order(
         symbol, "buy", notional=notional, reason=pair_key, sleeve="SPY"
     )
-    if not _count_if_filled(executor, order):
+    def _spy_fill(pair_key=pair_key):
+        pair_cooldown[pair_key] = now
+
+    if not _apply_when_filled(executor, order, _spy_fill):
         return 0
-    pair_cooldown[pair_key] = now
     if portfolio_manager:
         portfolio_manager.add_position(pair_key, momentum, 0)
     if log_fn:
@@ -1631,6 +1873,7 @@ def run_spy_strategy(
     return 1
 
 
+@_tape_audited
 def run_equity_strategy(
     data,
     executor,
@@ -1651,6 +1894,7 @@ def run_equity_strategy(
 ):
     """Buy the equity with the strongest momentum above MA50 (not arbitrary column order)."""
     if regime_entries_paused(regime, data):
+        _tape_emit("blocked", reason="regime_paused")
         return 0
     ipo_data = full_data if full_data is not None else data
     equity_cols = _nyse_equity_columns(data)
@@ -1664,6 +1908,7 @@ def run_equity_strategy(
         bar_idx=bar_idx,
         full_data=ipo_data,
     )
+    _tape_emit("entry_walk", ordered_symbols=ranked, max_trades=max_trades)
     if not ranked:
         return 0
 
@@ -1671,8 +1916,12 @@ def run_equity_strategy(
     trades = 0
     equity = _executor_equity(executor)
     min_n = config.effective_min_notional(equity)
+    from modules.volume_analysis import RVOL_SCAN_BUDGET_SEC, _deadline_at
+
+    gap_deadline = _deadline_at(RVOL_SCAN_BUDGET_SEC)
     for symbol in ranked:
         if trades >= max_trades:
+            _tape_emit("walk_stopped", reason="entry_cap", first_unvisited=symbol)
             break
         if bar_index is not None and _nyse_pick_rotation_blocked(symbol, bar_index):
             logger.debug(
@@ -1681,13 +1930,15 @@ def run_equity_strategy(
                 config.NYSE_MAX_PICKS_PER_SYMBOL_WINDOW,
                 config.NYSE_PICK_WINDOW_BARS,
             )
+            _tape_emit("rejected", symbol=symbol, reason="rotation_cap")
             continue
         if pick_log is not None:
             pick_log.append(symbol)
         if bar_index is not None:
             _record_nyse_pick(symbol, bar_index)
-        skip = _nyse_momentum_quality_skip(symbol, data, now=now)
+        skip = _nyse_momentum_quality_skip(symbol, data, now=now, deadline=gap_deadline)
         if skip:
+            _tape_emit("rejected", symbol=symbol, reason=skip)
             logger.info("[NYSE] Skipping %s — %s", symbol, skip)
             continue
         pair_key = symbol + "/MA50"
@@ -1698,7 +1949,18 @@ def run_equity_strategy(
             cooldown_seconds=cooldown_seconds,
             cooldown_bars=cooldown_bars,
         ):
-            continue
+            exempt = False
+            if isinstance(now, datetime):
+                try:
+                    from modules.lab_forward_trail import ma50_pair_cooldown_exempt
+
+                    exempt = ma50_pair_cooldown_exempt(symbol, now)
+                except Exception:
+                    exempt = False
+            if not exempt:
+                _tape_emit("rejected", symbol=symbol, reason="cooldown")
+                continue
+            _tape_emit("lab_forward_ma50_exempt", symbol=symbol)
         try:
             from modules.strategy_performance import classify_nyse_entry_tags, format_reason_with_tags
 
@@ -1711,6 +1973,7 @@ def run_equity_strategy(
         if hasattr(executor, "compute_nyse_notional"):
             notional = executor.compute_nyse_notional()
             if notional is None:
+                _tape_emit("rejected", symbol=symbol, reason="notional_unavailable")
                 continue
             min_n = config.effective_min_notional(float(executor._get_account().equity))
             # Paper-only GARCH vol-target sizing (PAPER_GARCH_SIZING=true)
@@ -1726,6 +1989,7 @@ def run_equity_strategy(
                     garch_multiplier = float(get_multiplier(spy_px) if spy_px is not None else 1.0)
                     notional = round(float(notional) * garch_multiplier, 2)
                     if notional < min_n:
+                        _tape_emit("rejected", symbol=symbol, reason="garch_below_min_notional")
                         continue
                     logger.info(
                         "[NYSE] garch_multiplier=%.3f notional=%.2f",
@@ -1738,6 +2002,7 @@ def run_equity_strategy(
                 _, beta = _spy_vs_equity_metrics(data, symbol)
                 scaled = round(notional * deployment_sizing.nyse_beta_scale(beta), 2)
                 if scaled < min_n:
+                    _tape_emit("rejected", symbol=symbol, reason="beta_scale_below_min_notional")
                     continue
                 notional = scaled
             vol_scale = config.dynamic_equity_position_scale(
@@ -1746,6 +2011,7 @@ def run_equity_strategy(
             if vol_scale < 1.0:
                 notional = round(float(notional) * vol_scale, 2)
                 if notional < min_n:
+                    _tape_emit("rejected", symbol=symbol, reason="vol_scale_below_min_notional")
                     continue
             if config.effective_conviction_sizing_enabled():
                 from modules.risk_management import (
@@ -1767,6 +2033,7 @@ def run_equity_strategy(
                     strategy_id="nyse_momentum_base",
                 )
                 if notional is None or notional < min_n:
+                    _tape_emit("rejected", symbol=symbol, reason="conviction_below_min_notional")
                     continue
             if config.effective_correlation_guard_enabled():
                 from modules.risk_management import apply_correlation_guard_notional
@@ -1779,6 +2046,7 @@ def run_equity_strategy(
                     symbol=symbol,
                 )
                 if notional is None or notional < min_n:
+                    _tape_emit("rejected", symbol=symbol, reason="correlation_guard_below_min_notional")
                     continue
             if config.effective_insider_signal_boost_enabled():
                 try:
@@ -1791,6 +2059,7 @@ def run_equity_strategy(
                         executor,
                     )
                     if notional is None or notional < min_n:
+                        _tape_emit("rejected", symbol=symbol, reason="insider_cap_below_min_notional")
                         continue
                 except Exception as exc:
                     logger.debug("insider notional cap skipped for %s: %s", symbol, exc)
@@ -1798,24 +2067,41 @@ def run_equity_strategy(
                 symbol, notional, equity, data=ipo_data, bar_idx=bar_idx
             )
             if notional < min_n:
+                _tape_emit("rejected", symbol=symbol, reason="ipo_cap_below_min_notional")
                 continue
+        _tape_emit("order_intent", symbol=symbol, side="buy", notional=notional, reason=pair_key, sleeve="NYSE")
         order = executor.execute_order(
             symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
         )
-        if not _count_if_filled(executor, order):
-            continue
-        _mark_nyse_entered_today(symbol, now=now, data=data)
-        if config.effective_insider_signal_boost_enabled():
-            try:
-                from modules.insider_signal_handler import get_boost_snapshot, record_insider_boost_trade
+        _tape_note_returned(symbol, order)
+        def _nyse_fill(symbol=symbol, pair_key=pair_key):
+            _tape_note_fill_callback(symbol, pair_key, executor)
+            _mark_nyse_entered_today(symbol, now=now, data=data)
+            if config.effective_insider_signal_boost_enabled():
+                try:
+                    from modules.insider_signal_handler import (
+                        get_boost_snapshot,
+                        record_insider_boost_trade,
+                    )
 
-                snap = get_boost_snapshot()
-                if float((snap.get("momentum_boosts") or {}).get(symbol, 0)) > 0:
-                    record_insider_boost_trade("momentum")
-            except Exception as exc:
-                logger.debug("insider boost trade record skipped: %s", exc)
-        _record_ipo_buy(executor, symbol, data=ipo_data, bar_idx=bar_idx)
-        pair_cooldown[pair_key] = now
+                    snap = get_boost_snapshot()
+                    if float((snap.get("momentum_boosts") or {}).get(symbol, 0)) > 0:
+                        record_insider_boost_trade("momentum")
+                except Exception as exc:
+                    logger.debug("insider boost trade record skipped: %s", exc)
+            _record_ipo_buy(executor, symbol, data=ipo_data, bar_idx=bar_idx)
+            pair_cooldown[pair_key] = now
+            if isinstance(now, datetime):
+                try:
+                    from modules.lab_forward_trail import mark_reentry_filled
+
+                    mark_reentry_filled(symbol, now)
+                except Exception:
+                    logger.debug("lab forward reentry mark skipped", exc_info=True)
+
+        if not _apply_when_filled(executor, order, _nyse_fill):
+            _tape_note_unfilled(symbol, order, executor)
+            continue
         trades += 1
         if portfolio_manager:
             portfolio_manager.add_position(pair_key, 0, 0)
@@ -1827,6 +2113,142 @@ def run_equity_strategy(
             if garch_multiplier != 1.0:
                 log_key = f"{pair_key}|garch_multiplier={garch_multiplier:.3f}"
             log_fn(symbol, "buy", regime, log_key, 0.0, notional)
+    return trades
+
+
+def _held_active_symbols(executor) -> list[str]:
+    if hasattr(executor, "list_active_tickers"):
+        try:
+            return [config.normalize_symbol(s) for s in executor.list_active_tickers()]
+        except Exception:
+            pass
+    if hasattr(executor, "portfolio"):
+        held = []
+        for sym, qty in (executor.portfolio.positions or {}).items():
+            if float(qty or 0) <= 0:
+                continue
+            name = config.normalize_symbol(sym)
+            if name == "VTI":
+                continue
+            held.append(name)
+        return sorted(set(held))
+    return []
+
+
+def _held_relative_strength(symbol: str, data) -> float:
+    """current / MA50 - 1; unknown names sort last."""
+    if data is None or not hasattr(data, "columns") or symbol not in data.columns:
+        return -1.0
+    prices = data[symbol].dropna()
+    if len(prices) < 20:
+        return -1.0
+    window = min(50, len(prices))
+    ma = float(prices.rolling(window).mean().iloc[-1])
+    current = float(prices.iloc[-1])
+    if ma <= 0 or current <= 0:
+        return -1.0
+    return current / ma - 1.0
+
+
+def _held_add_not_a_knife(executor, symbol: str) -> bool:
+    finder = getattr(executor, "_find_position", None)
+    if finder is None:
+        return True
+    try:
+        pos = finder(symbol)
+    except Exception:
+        return True
+    if pos is None:
+        return False
+    entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+    current = float(getattr(pos, "current_price", 0) or 0)
+    if entry <= 0 or current <= 0:
+        return True
+    disaster = abs(
+        config.paper_lab_disaster_pct()
+        if config.paper_lab_concentrated_enabled()
+        else 0.10
+    )
+    return (current - entry) / entry > -disaster
+
+
+def run_idle_cash_scale_in(
+    data,
+    executor,
+    regime,
+    now,
+    pair_cooldown,
+    *,
+    cooldown_seconds=COOLDOWN_SECONDS,
+    cooldown_bars=None,
+    max_trades=MAX_EQUITY_TRADES,
+    log_fn=None,
+) -> int:
+    """Paper Lab/Medium: when cash is parked, add to held names with room.
+
+    Does not open new tickers and never runs on Live. Skips names already at
+    a disaster loss; one add per name per cooldown. Open-chop still blocks
+    *new* momentum names; idle adds to held names are leftover-cash drain.
+    """
+    if max_trades <= 0:
+        return 0
+    if not getattr(executor, "equity_session_open", True):
+        return 0
+    try:
+        equity = _executor_equity(executor)
+        cash = _executor_cash(executor)
+    except Exception:
+        return 0
+    if not config.paper_idle_cash_scale_in_active(equity=equity, cash=cash):
+        return 0
+    held = _held_active_symbols(executor)
+    if not held:
+        return 0
+
+    ranked = sorted(held, key=lambda s: _held_relative_strength(s, data), reverse=True)
+    eligible = [s for s in ranked if _held_add_not_a_knife(executor, s)]
+    if not eligible:
+        return 0
+    fair = round(cash * 0.95 / len(eligible), 2)
+    trades = 0
+    for symbol in eligible:
+        if trades >= max_trades:
+            break
+        pair_key = symbol + "/IDLE_CASH"
+        if _on_cooldown(
+            pair_cooldown,
+            pair_key,
+            now,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+        ):
+            continue
+        ticket = None
+        if hasattr(executor, "compute_nyse_notional"):
+            try:
+                ticket = executor.compute_nyse_notional()
+            except Exception:
+                ticket = None
+        # Fair-share of parked cash is the size. Sleeve-ticket None is a
+        # crushed multiplier / min-clip, not "no room in the name".
+        notional = max(float(ticket or 0.0), float(fair or 0.0))
+        if notional <= 0:
+            continue
+        order = executor.execute_order(
+            symbol, "buy", notional=notional, reason=pair_key, sleeve="NYSE"
+        )
+        def _idle_fill(pair_key=pair_key):
+            pair_cooldown[pair_key] = now
+
+        if not _apply_when_filled(executor, order, _idle_fill):
+            continue
+        trades += 1
+        if log_fn:
+            if notional is None:
+                notional = getattr(executor, "compute_notional", lambda: "")()
+            log_fn(symbol, "buy", regime, pair_key, 0.0, notional)
+    if trades:
+        logger.info("idle-cash scale-in filled %s held-name add(s)", trades)
     return trades
 
 
@@ -1871,6 +2293,19 @@ def run_nyse_momentum_and_stat_arb(
         full_data=full_data,
         bar_idx=bar_idx,
     )
+    leftover = max(0, int(max_trades) - int(trades))
+    if leftover:
+        trades += run_idle_cash_scale_in(
+            data,
+            executor,
+            regime,
+            now,
+            pair_cooldown,
+            cooldown_seconds=cooldown_seconds,
+            cooldown_bars=cooldown_bars,
+            max_trades=leftover,
+            log_fn=log_fn,
+        )
     if config.effective_stat_arb_enabled() and not config.effective_equity_pairs_enabled():
         from modules.stat_arb_sleeve import run_equity_stat_arb
 
@@ -1946,8 +2381,11 @@ def nyse_mirror_intent(
     )
     if not ranked:
         return None
+    from modules.volume_analysis import RVOL_SCAN_BUDGET_SEC, _deadline_at
+
+    gap_deadline = _deadline_at(RVOL_SCAN_BUDGET_SEC)
     for symbol in ranked:
-        skip = _nyse_momentum_quality_skip(symbol, data, now=now)
+        skip = _nyse_momentum_quality_skip(symbol, data, now=now, deadline=gap_deadline)
         if skip:
             logger.info("[NYSE] Skipping %s — %s", symbol, skip)
             continue
@@ -2213,7 +2651,9 @@ def summarize_entry_skip_reason(
 ) -> str:
     """Return a token describing why no entries fired this cycle (for skip funnel)."""
     yield_gated = config.effective_yield_gate(yield_gated, regime=regime)
-    if wisdom_paused and not config.effective_paper_soft_pause():
+    if wisdom_paused and not (
+        config.effective_paper_soft_pause() or config.effective_regime_dynamic_sizing()
+    ):
         return "wisdom_paused"
     if regime_entries_paused(regime, data):
         if config.effective_paper_soft_pause():

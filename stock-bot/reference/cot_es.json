@@ -1,0 +1,11 @@
+{
+  "as_of": "2026-06-20",
+  "source": "file",
+  "contract": "E-mini S&P 500 (ES)",
+  "cftc_code": "13874A",
+  "open_interest": 2850000,
+  "large_specs_net": -412000,
+  "large_specs_net_pct_oi": -0.144,
+  "commercial_net_pct_oi": 0.098,
+  "notes": "Sample stub — replace with weekly COT export or API feed"
+}

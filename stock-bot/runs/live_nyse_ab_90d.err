@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\eval_live_nyse_ab.py", line 452, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\Owner\PythonTrading\stock-bot\scripts\analysis\eval_live_nyse_ab.py", line 371, in main
+    data = _ensure_daily_data(days, refresh=args.refresh, use_max=False)
+  File "C:\Users\Owner\PythonTrading\stock-bot\backtester.py", line 1079, in _ensure_daily_data
+    return ensure_daily_data_cached(
+        days,
+    ...<6 lines>...
+        fetch_daily_history_for_tickers=fetch_daily_history_for_tickers,
+    )
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\backtester_core.py", line 208, in ensure_daily_data_cached
+    data = load_close_matrix(interval="1d")
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\data_loader.py", line 141, in load_close_matrix
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: database is locked

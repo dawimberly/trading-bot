@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
@@ -27,6 +28,13 @@ MAX_API_ATTEMPTS = 3
 RETRY_BASE_DELAY_SEC = 0.5
 TRANSIENT_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 AUTH_HTTP_STATUS = frozenset({401, 403})
+_SERVER_ERROR_MARKERS = (
+    "internal server error",
+    "502 bad gateway",
+    "503 service unavailable",
+    "504 gateway timeout",
+    "too many requests",
+)
 
 _client_cache: dict[tuple[str, str, bool, str], TradingClient] = {}
 _cache_lock = threading.Lock()
@@ -109,10 +117,79 @@ def get_trading_client(
     return build_trading_client(api_key, secret_key, paper=use_paper)
 
 
+def alpaca_http_status(exc: BaseException) -> int | None:
+    """Best-effort HTTP status from an Alpaca SDK error or its cause chain.
+
+    alpaca-py often stringifies 500s as ``{"message":"Internal Server Error"}``
+    with ``status_code`` left unset — still treat those as HTTP 500.
+    """
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        for attr in ("status_code", "code"):
+            try:
+                val = getattr(cur, attr, None)
+            except Exception:
+                continue
+            if val is None:
+                continue
+            try:
+                code = int(val)
+            except (TypeError, ValueError):
+                continue
+            if 100 <= code <= 599:
+                return code
+        text = str(cur).strip()
+        low = text.lower()
+        if "internal server error" in low:
+            return 500
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict):
+                msg = str(payload.get("message") or "")
+                if "internal server error" in msg.lower():
+                    return 500
+                for key in ("status", "status_code", "code"):
+                    raw = payload.get(key)
+                    try:
+                        code = int(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if 100 <= code <= 599:
+                        return code
+        cur = cur.__cause__ or cur.__context__
+    return None
+
+
+def is_ssl_verify_error(exc: BaseException) -> bool:
+    """True for TLS verify failures (AV MITM / bad SSL_CERT_FILE)."""
+    name = type(exc).__name__
+    if name in {"SSLError", "SSLCertVerificationError"}:
+        return True
+    text = str(exc).lower()
+    return (
+        "certificate_verify_failed" in text
+        or "self-signed certificate" in text
+        or "unable to get local issuer certificate" in text
+    )
+
+
 def is_transient_alpaca_error(exc: BaseException) -> bool:
+    """True for retryable broker/network failures (5xx, 429, timeouts, DNS)."""
+    if is_ssl_verify_error(exc):
+        return True
+    status = alpaca_http_status(exc)
+    if status in TRANSIENT_HTTP_STATUS:
+        return True
+    text = str(exc).lower()
+    if any(marker in text for marker in _SERVER_ERROR_MARKERS):
+        return True
     if isinstance(exc, APIError):
-        status = getattr(exc, "status_code", None)
-        return status in TRANSIENT_HTTP_STATUS
+        return False
     return isinstance(exc, (TimeoutError, OSError, ConnectionError))
 
 
@@ -121,8 +198,12 @@ def is_auth_alpaca_error(exc: BaseException) -> bool:
         return False
     status = getattr(exc, "status_code", None)
     msg = str(exc).lower()
-    # Insufficient qty / missing asset are order/asset issues, not credential auth.
-    if status == 403 and "insufficient qty" in msg:
+    # Insufficient qty / shares held on an open order are not credential auth.
+    if status == 403 and (
+        "insufficient qty" in msg or "held_for_orders" in msg or "held for orders" in msg
+    ):
+        return False
+    if is_not_fractionable_error(exc):
         return False
     if is_unknown_asset_error(exc):
         return False
@@ -144,31 +225,43 @@ def is_unknown_asset_error(exc: BaseException) -> bool:
 
 
 def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation, unknown asset, or insufficient-qty 403 — do not crash the cycle."""
+    """422 notional/qty validation, unknown asset, or known 403 rejects — do not crash the cycle."""
     if not isinstance(exc, APIError):
         return is_unknown_asset_error(exc)
-    status = getattr(exc, "status_code", None)
+    status = alpaca_http_status(exc)
     msg = str(exc).lower()
     if is_unknown_asset_error(exc):
         return True
     if status == 422:
         return True
-    if status == 403 and "insufficient qty" in msg:
+    if status == 403 and (
+        "insufficient qty" in msg or "held_for_orders" in msg or "held for orders" in msg
+    ):
+        return True
+    # Notional orders fail on non-fractionable equities (e.g. PS) — skip/retry as shares.
+    if "not fractionable" in msg or "is not fractionable" in msg:
         return True
     return False
 
 
-def is_skippable_order_error(exc: BaseException) -> bool:
-    """422 notional/qty validation or insufficient-qty 403 — do not crash the cycle."""
-    if not isinstance(exc, APIError):
-        return False
-    status = getattr(exc, "status_code", None)
+def is_not_fractionable_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
-    if status == 422:
-        return True
-    if status == 403 and "insufficient qty" in msg:
-        return True
-    return False
+    return "not fractionable" in msg or "is not fractionable" in msg
+
+
+def broker_error_text(exc: BaseException) -> str:
+    """Non-empty broker/client error text for logs and the trade journal."""
+    try:
+        from modules.exit_reconcile import broker_error_note
+
+        return broker_error_note(exc)
+    except Exception:
+        text = ""
+        try:
+            text = str(exc).strip()
+        except Exception:
+            text = ""
+        return text or type(exc).__name__
 
 
 def call_with_retry(
@@ -211,10 +304,11 @@ def call_with_retry(
                 raise AlpacaAuthError(str(exc)) from exc
             if is_transient_alpaca_error(exc) and attempt < max_attempts:
                 delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+                status = alpaca_http_status(exc) or getattr(exc, "status_code", "?")
                 logger.warning(
                     "Alpaca %s transient HTTP %s — retry %s/%s in %.1fs",
                     op_name,
-                    getattr(exc, "status_code", "?"),
+                    status,
                     attempt,
                     max_attempts,
                     delay,
@@ -228,14 +322,14 @@ def call_with_retry(
                     getattr(exc, "status_code", "?"),
                     exc,
                 )
-                raise AlpacaValidationError(str(exc)) from exc
+                raise AlpacaValidationError(broker_error_text(exc)) from exc
             logger.error(
                 "Alpaca %s failed (HTTP %s): %s",
                 op_name,
                 getattr(exc, "status_code", "?"),
                 exc,
             )
-            raise AlpacaCriticalError(str(exc)) from exc
+            raise AlpacaCriticalError(broker_error_text(exc)) from exc
         except (TimeoutError, OSError, ConnectionError) as exc:
             last_exc = exc
             if attempt < max_attempts:
@@ -251,7 +345,25 @@ def call_with_retry(
                 time.sleep(delay)
                 continue
             logger.error("Alpaca %s network failure after retries: %s", op_name, exc)
-            raise AlpacaCriticalError(str(exc)) from exc
+            raise AlpacaCriticalError(broker_error_text(exc)) from exc
+        except Exception as exc:
+            if not is_ssl_verify_error(exc):
+                raise
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+                logger.warning(
+                    "Alpaca %s TLS verify error — retry %s/%s in %.1fs: %s",
+                    op_name,
+                    attempt,
+                    max_attempts,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                continue
+            logger.error("Alpaca %s TLS failure after retries: %s", op_name, exc)
+            raise AlpacaCriticalError(broker_error_text(exc)) from exc
     if last_exc is not None:
-        raise AlpacaCriticalError(str(last_exc)) from last_exc
+        raise AlpacaCriticalError(broker_error_text(last_exc)) from last_exc
     raise AlpacaCriticalError(f"{op_name} failed with no exception captured")

@@ -4,6 +4,7 @@ Run:
   python status.py
   python status.py --positions
   python status.py --positions --ticker AAPL
+  python status.py --risk-report
   python scripts/cleanup_stale_positions.py --help
 """
 from __future__ import annotations
@@ -21,7 +22,37 @@ from modules.logging_utils import setup_project_logging
 ROOT = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
 LIVE_HEARTBEAT = Path(os.getenv("HEARTBEAT_FILE", config.HEARTBEAT_FILE))
-PAPER_HEARTBEAT = Path(os.getenv("PAPER_CHASE_HEARTBEAT", "paper_chase_heartbeat.json"))
+
+
+def _default_portal_username() -> str:
+    env = (os.getenv("PORTAL_USERNAME") or "").strip().lower()
+    if env:
+        return env
+    try:
+        from modules.portal_paths import get_last_username
+
+        name = (get_last_username() or "").strip().lower()
+        if name:
+            return name
+    except Exception:
+        pass
+    return "dawimberly"
+
+
+def _resolve_paper_heartbeat_path() -> Path:
+    """Paper SoT portal heartbeat; PAPER_CHASE_HEARTBEAT env still overrides."""
+    env = (os.getenv("PAPER_CHASE_HEARTBEAT") or "").strip()
+    if env:
+        path = Path(env)
+        return path if path.is_absolute() else ROOT / path
+    try:
+        from modules.portal_paths import bind_project_root, book_heartbeat_path
+        from modules.trading_books import PAPER_SOT_BOOK_ID
+
+        bind_project_root(ROOT)
+        return book_heartbeat_path(_default_portal_username(), PAPER_SOT_BOOK_ID)
+    except Exception:
+        return ROOT / "paper_chase_heartbeat.json"
 
 
 def _load_json(path: Path) -> dict | None:
@@ -105,7 +136,6 @@ def _active_sleeves(hb: dict | None) -> list[str]:
     active: list[str] = []
     for label, key in (
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("Crypto", "crypto_value"),
         ("NYSE", "nyse_value"),
         ("Metal", "metal_value"),
@@ -500,7 +530,7 @@ def _profile_table_lines() -> list[str]:
         "=== Profiles ===",
         f"| | Live Profile A (~$300) | Paper {paper_label} |",
         "|--|------------------------|---------------------------|",
-        f"| VTI core | {config.LIVE_VTI_CORE_PCT:.0%} + {config.LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} SPY (<$500) / 80% | dynamic 40-75% |",
+        f"| VTI core | {config.LIVE_VTI_CORE_PCT:.0%} + {config.LIVE_SMALL_ACTIVE_SLEEVE_PCT:.0%} NYSE (weekly resize) | fixed 33/67 weekly |",
         f"| Risk / order | {config.SMALL_ACCOUNT_RISK_PER_TRADE:.0%} / ${config.SMALL_ACCOUNT_MAX_NOTIONAL:.0f} max | dynamic 1-3% |",
         "| Crypto sleeve | OFF (disabled) | OFF (locked) |",
         "| Stat arb / vol / options | off | on (locked stack) |",
@@ -570,6 +600,66 @@ def _print_positions(*, paper: bool = True, ticker: str | None = None, compact: 
         _emit(line)
 
 
+def _print_risk_report() -> None:
+    """Read-only sleeve / name / fill snapshot. Does not gate orders."""
+    from modules.alpaca_client import get_trading_client
+    from modules.risk_audit import exposure_snapshot, load_last_fill_audit
+
+    _emit("=== Risk report (advisory — existing caps, no new guard) ===")
+    _emit("Not wired into the order path. Limits below are already in the executor.")
+    for paper, label in ((False, "live"), (True, "paper")):
+        try:
+            client = get_trading_client(paper=paper, allow_live=not paper)
+            snap = exposure_snapshot(client, label=label, paper=paper)
+        except Exception as exc:
+            _emit(f"{label}: unavailable ({str(exc)[:160]})")
+            continue
+        _emit(
+            f"{label}  equity {_fmt_equity(snap['equity'])}  cash "
+            f"{snap.get('cash_pct') or 0:.1%}  names {snap['n_positions']}"
+        )
+        caps = snap.get("caps") or {}
+        _emit(
+            f"      caps: per-name {caps.get('per_name', 0):.0%}  "
+            f"NYSE {caps.get('nyse_sleeve', 0):.0%}  "
+            f"daily-loss {caps.get('daily_loss', 0):.0%}  "
+            f"halt-DD {caps.get('halt_dd', 0):.0%}"
+        )
+        sleeves = snap.get("sleeve_pct") or {}
+        if sleeves:
+            bits = "  ".join(f"{k} {v:.1%}" for k, v in sleeves.items())
+            _emit(f"      sleeves: {bits}")
+        for row in snap.get("largest") or []:
+            _emit(
+                f"      {row['symbol']:<6} {row['sleeve']:<6} "
+                f"{row['pct']:.1%}  ${row['value']:,.0f}"
+            )
+        flags = snap.get("flags") or []
+        if label == "paper" and snap.get("n_positions") == 8:
+            _emit("      note: portal Lab overlay is 15%/name and NYSE 95%; flags above use process .env")
+        if flags:
+            for flag in flags:
+                _emit(f"      FLAG {flag}")
+        else:
+            _emit("      flags: none vs those caps")
+    audit = load_last_fill_audit()
+    _emit()
+    if not audit:
+        _emit("Fills: no audit yet. Run: python scripts/analysis/audit_fills.py --days 14")
+        return
+    _emit(f"Fills: {audit.get('generated')}  {audit.get('days')}d  sqlite prior close")
+    for key in ("live", "paper"):
+        book = (audit.get("books") or {}).get(key) or {}
+        if book.get("error"):
+            _emit(f"      {key}: {book['error']}")
+            continue
+        ov = (book.get("summary") or {}).get("overall") or {}
+        _emit(
+            f"      {key}: n={ov.get('n')} median={ov.get('median_bps')}bps "
+            f"mean={ov.get('mean_bps')}bps flag={ov.get('flag')}"
+        )
+
+
 def _live_positions_available() -> bool:
     """True when live Alpaca credentials can be queried."""
     if _is_live_book_active():
@@ -594,9 +684,17 @@ def main() -> None:
         help="Show open holdings (entry, unrealized P/L, days held) and exit",
     )
     parser.add_argument("--ticker", "-t", help="With --positions, filter to one ticker")
+    parser.add_argument(
+        "--risk-report",
+        action="store_true",
+        help="Advisory: sleeve pct, per-name vs existing caps, last fill audit. No orders.",
+    )
     args = parser.parse_args()
 
     setup_project_logging()
+    if args.risk_report:
+        _print_risk_report()
+        return
     if args.positions:
         _print_positions(paper=True, ticker=args.ticker, compact=False)
         if _is_live_book_active():
@@ -606,7 +704,7 @@ def main() -> None:
 
     _sync_paper_stack_for_status()
     live_hb_path = LIVE_HEARTBEAT if LIVE_HEARTBEAT.is_absolute() else ROOT / LIVE_HEARTBEAT
-    paper_hb_path = ROOT / PAPER_HEARTBEAT
+    paper_hb_path = _resolve_paper_heartbeat_path()
     live_hb = _load_json(live_hb_path)
     paper_hb = _load_json(paper_hb_path)
 

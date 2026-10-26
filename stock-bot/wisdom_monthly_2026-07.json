@@ -1,0 +1,107 @@
+{
+  "rolled_up_at": "2026-08-03T15:01:57",
+  "month": "2026-07",
+  "config": {
+    "wisdom_mode": "dynamic",
+    "gap_threshold": 0.25
+  },
+  "live": {
+    "return_pct": 0.1,
+    "sharpe": 0.21,
+    "max_drawdown_pct": -1.89,
+    "samples": 17,
+    "mode": "dynamic",
+    "gap_threshold": 0.25,
+    "equity_basis": "daily_last",
+    "daily_samples": 17,
+    "intraday_cycles": 3361,
+    "cycles": 3361,
+    "pause_cycles": 0,
+    "month": "2026-07",
+    "from_date": "2026-07-01",
+    "to_date": "2026-07-31",
+    "start_equity": 297.18,
+    "end_equity": 297.48,
+    "journal_segment": {
+      "book_type": "live",
+      "live_only": true,
+      "min_equity": 50.0,
+      "jump_threshold_pct": 50.0,
+      "jump_ratio": 50.0,
+      "pre_switch_min_equity": 1000.0,
+      "live_equity_cap": 500.0,
+      "split_detected": true,
+      "split_reason": "pre_switch_ge_1000_to_lt_500",
+      "split_at": "2026-06-16 15:51:48",
+      "pre_split_equity": 98772.38,
+      "post_split_equity": 299.62,
+      "rows_before": 8065,
+      "rows_after": 6027
+    }
+  },
+  "simulated_modes": {
+    "baseline": {
+      "return_pct": -0.25,
+      "sharpe": -0.2,
+      "max_drawdown_pct": -2.81,
+      "samples": 31,
+      "orders": 0,
+      "paused_days": 0,
+      "from_date": "2026-07-01",
+      "to_date": "2026-07-31"
+    },
+    "dynamic": {
+      "return_pct": -0.25,
+      "sharpe": -0.2,
+      "max_drawdown_pct": -2.81,
+      "samples": 31,
+      "orders": 0,
+      "paused_days": 0,
+      "from_date": "2026-07-01",
+      "to_date": "2026-07-31"
+    },
+    "web_regime": {
+      "return_pct": -0.25,
+      "sharpe": -0.2,
+      "max_drawdown_pct": -2.81,
+      "samples": 31,
+      "orders": 0,
+      "paused_days": 0,
+      "from_date": "2026-07-01",
+      "to_date": "2026-07-31"
+    },
+    "arbitrage": {
+      "return_pct": -0.25,
+      "sharpe": -0.2,
+      "max_drawdown_pct": -2.81,
+      "samples": 31,
+      "orders": 0,
+      "paused_days": 0,
+      "from_date": "2026-07-01",
+      "to_date": "2026-07-31"
+    },
+    "wisdom_pause": {
+      "return_pct": -0.25,
+      "sharpe": -0.2,
+      "max_drawdown_pct": -2.81,
+      "samples": 31,
+      "orders": 0,
+      "paused_days": 22,
+      "from_date": "2026-07-01",
+      "to_date": "2026-07-31"
+    },
+    "governor": {
+      "return_pct": -0.25,
+      "sharpe": -0.2,
+      "max_drawdown_pct": -2.81,
+      "samples": 31,
+      "orders": 0,
+      "paused_days": 22,
+      "from_date": "2026-07-01",
+      "to_date": "2026-07-31"
+    }
+  },
+  "best_sim_mode": "baseline",
+  "recommendation": "Stay on dynamic \u2014 within 2% of best sim mode baseline (+0.1% vs -0.2%).",
+  "live_vs_best_sim_return_pp": 0.35
+}

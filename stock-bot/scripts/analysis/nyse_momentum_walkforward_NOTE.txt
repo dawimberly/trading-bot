@@ -1,0 +1,10 @@
+Research files created:
+  scripts\analysis\nyse_momentum_walkforward_last.md
+  scripts\analysis\nyse_momentum_walkforward_last.json
+  scripts\analysis\nyse_momentum_walkforward.py
+  scripts\analysis\nyse_momentum_walkforward_NOTE.txt
+
+No production settings, journals, credentials, or order paths were edited.
+No files under sources/ were edited.
+This script only reads market_data.db. It does not write it.
+No broker connection was opened and no order was sent.

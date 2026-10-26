@@ -1,0 +1,4 @@
+variant,n,A,A_pct,B,B_pct,C,C_pct,D,D_pct,E,E_pct,AB_pct,vol_high_pct,crypto_high_pct_separate
+BUGGY_blended,808,0,0.0,0,0.0,341,42.2,313,38.7,154,19.1,0.0,0.4,100.0
+FIXED_blended,808,330,40.8,151,18.7,8,1.0,311,38.5,8,1.0,59.5,97.4,100.0
+EQUITY_ONLY,808,73,9.0,28,3.5,268,33.2,305,37.7,134,16.6,12.5,17.9,100.0

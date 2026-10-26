@@ -1,0 +1,61 @@
+# PythonTrading — Live Conservative Bot (small account, REAL MONEY)
+#
+# Install:
+#   sudo cp cloud_bot/deploy/systemd/live-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now live-bot
+# Logs:   journalctl -u live-bot -f
+# Status: systemctl status live-bot
+#
+# Runs run_all.py (conservative live profile) as the dedicated `trader-live` user.
+# Secrets live in /etc/pythontrading/live.env (chmod 600, owned by trader-live).
+# This file holds LIVE Alpaca keys and MUST NOT be readable by trader-paper.
+#
+# SAFETY: run_all.py refuses to trade live unless ALLOW_LIVE_TRADING=yes AND
+# PAPER_TRADING=false are both set in live.env. Keep restarts slow to avoid
+# duplicate order submission on a crash mid-cycle.
+
+[Unit]
+Description=PythonTrading Live Conservative Bot (REAL MONEY, small account)
+Documentation=file:///opt/PythonTrading/stock-bot/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader-live
+Group=trader-live
+WorkingDirectory=/opt/PythonTrading/stock-bot
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=/etc/pythontrading/live.env
+ExecStart=/opt/PythonTrading/.venv/bin/python run_all.py
+
+# Slow, bounded restarts on live — never hammer the broker after a crash.
+Restart=on-failure
+RestartSec=60
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=live-bot
+
+# --- Hardening ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/opt/PythonTrading/stock-bot/data
+ReadWritePaths=/opt/PythonTrading/stock-bot/logs
+ReadWritePaths=/opt/PythonTrading/stock-bot/market_data.db
+ReadWritePaths=/opt/PythonTrading/stock-bot
+
+[Install]
+WantedBy=multi-user.target

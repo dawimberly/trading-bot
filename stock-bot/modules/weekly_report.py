@@ -285,10 +285,27 @@ def _tail_risk_section(hb: dict[str, Any], df) -> tuple[list[str], dict[str, Any
 
     skip_daily = hb.get("entry_skip_daily")
     if isinstance(skip_daily, dict) and skip_daily:
-        top = sorted(skip_daily.items(), key=lambda x: -int(x[1]))[:5]
-        events.append(
-            "Entry skips (cycle): " + ", ".join(f"{k}={v}" for k, v in top)
-        )
+        counts = skip_daily.get("by_token")
+        if not isinstance(counts, dict):
+            counts = skip_daily.get("by_category")
+        if not isinstance(counts, dict):
+            counts = skip_daily
+        ranked: list[tuple[str, int]] = []
+        for key, raw in counts.items():
+            if isinstance(raw, (dict, list)):
+                continue
+            try:
+                n = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if n > 0 and str(key) not in ("traded", "date"):
+                ranked.append((str(key), n))
+        ranked.sort(key=lambda item: -item[1])
+        top = ranked[:5]
+        if top:
+            events.append(
+                "Entry skips (cycle): " + ", ".join(f"{k}={v}" for k, v in top)
+            )
 
     if df is not None and not df.empty and "notes" in df.columns:
         note_parts = [str(x) for x in df["notes"].fillna("").tolist() if str(x).lower() != "nan"]

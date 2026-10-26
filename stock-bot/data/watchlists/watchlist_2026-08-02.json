@@ -1,0 +1,1538 @@
+{
+  "scan_date": "2026-08-02",
+  "generated_at": "2026-08-02T21:15:25.071740+00:00",
+  "freeze_note": "Research watchlist only \u2014 not auto-wired into live/paper.",
+  "config": {
+    "exchanges": [
+      "NYSE",
+      "NASDAQ"
+    ],
+    "lookback_days": 30,
+    "top_n": 150,
+    "min_price": 5.0,
+    "max_price": 500.0,
+    "min_avg_dollar_volume": 5000000.0,
+    "weights": {
+      "liquidity": 0.4,
+      "volatility": 0.3,
+      "range_cleanliness": 0.3
+    }
+  },
+  "symbols": [
+    "MUU",
+    "NVDA",
+    "TSLA",
+    "AAPL",
+    "AMD",
+    "MSFT",
+    "INTC",
+    "SPCX",
+    "GOOGL",
+    "AMZN",
+    "VEEE",
+    "AVGO",
+    "GOOG",
+    "TSM",
+    "JLHL",
+    "AMAT",
+    "ORCL",
+    "MRVL",
+    "BE",
+    "NBIS",
+    "SOXX",
+    "NFLX",
+    "SDOT",
+    "LRCX",
+    "MPLT",
+    "CLRO",
+    "JPM",
+    "IBM",
+    "ADVB",
+    "KLAC",
+    "FXHO",
+    "UNH",
+    "BEG",
+    "V",
+    "DELL",
+    "GFUZ",
+    "ALAB",
+    "CSCO",
+    "HQ",
+    "NXTC",
+    "WDC",
+    "HOOD",
+    "NBIL",
+    "NBIG",
+    "GLW",
+    "C",
+    "APP",
+    "AAOI",
+    "CRDO",
+    "CBRS",
+    "HIMZ",
+    "QCOM",
+    "WLFC",
+    "T",
+    "WYFI",
+    "BAC",
+    "NOW",
+    "IREN",
+    "CRWD",
+    "SOFI",
+    "PN",
+    "TXN",
+    "AXTI",
+    "ARM",
+    "JEM",
+    "CHRN",
+    "DOCN",
+    "FCEL",
+    "WMT",
+    "OPTX",
+    "AAL",
+    "GLWG",
+    "NU",
+    "CRWV",
+    "RDDT",
+    "LCID",
+    "ITG",
+    "JNJ",
+    "SLS",
+    "QNT",
+    "AGEN",
+    "REPL",
+    "ONDS",
+    "INIO",
+    "QTTB",
+    "SHAZ",
+    "BIYA",
+    "BRUN",
+    "PENG",
+    "IREG",
+    "PRE",
+    "ANET",
+    "RKLB",
+    "VZ",
+    "MRNA",
+    "BOT",
+    "CRM",
+    "WFC",
+    "BA",
+    "TSLL",
+    "SMCI",
+    "MXL",
+    "MS",
+    "HIMS",
+    "ABBV",
+    "RDTL",
+    "BAND",
+    "VCX",
+    "FTH",
+    "FTNT",
+    "CDNL",
+    "CLBK",
+    "PEP",
+    "OKLO",
+    "NKE",
+    "GE",
+    "ALM",
+    "GILD",
+    "AGL",
+    "COAG",
+    "IMMX",
+    "XE",
+    "COOK",
+    "KARD",
+    "FROG",
+    "AKAM",
+    "ALOY",
+    "PATH",
+    "DMRA",
+    "ARMG",
+    "SECZ",
+    "CDNS",
+    "ASTS",
+    "FBRX",
+    "CLYM",
+    "CLS",
+    "RTX",
+    "STUB",
+    "ISRG",
+    "MBX",
+    "HUT",
+    "CMCSA",
+    "JBIO",
+    "PESI",
+    "TSHA",
+    "ATEX",
+    "QXO",
+    "FPS",
+    "ICE",
+    "BB"
+  ],
+  "detail": [
+    {
+      "symbol": "MUU",
+      "last_close": 24.55,
+      "avg_dollar_volume": 1642336757.9199998,
+      "atr_pct": 336.3706430026186,
+      "range_cleanliness": 0.6304347826086957,
+      "composite_score": 13.239487731828854
+    },
+    {
+      "symbol": "NVDA",
+      "last_close": 197.01,
+      "avg_dollar_volume": 26652201601.140507,
+      "atr_pct": 3.9258304509560804,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 11.243486497772738
+    },
+    {
+      "symbol": "TSLA",
+      "last_close": 307.44,
+      "avg_dollar_volume": 16238056025.581,
+      "atr_pct": 5.293165216906438,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 6.686659513779111
+    },
+    {
+      "symbol": "AAPL",
+      "last_close": 340.08,
+      "avg_dollar_volume": 16070149371.094498,
+      "atr_pct": 2.323371391605335,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 6.493817767673599
+    },
+    {
+      "symbol": "AMD",
+      "last_close": 454.62,
+      "avg_dollar_volume": 14575756789.70725,
+      "atr_pct": 8.44919776013877,
+      "range_cleanliness": 0.782608695652174,
+      "composite_score": 5.725792129353806
+    },
+    {
+      "symbol": "MSFT",
+      "last_close": 393.35,
+      "avg_dollar_volume": 12515582067.835503,
+      "atr_pct": 2.9646425393597133,
+      "range_cleanliness": 0.782608695652174,
+      "composite_score": 4.6339499467597065
+    },
+    {
+      "symbol": "INTC",
+      "last_close": 86.3,
+      "avg_dollar_volume": 12095621480.119501,
+      "atr_pct": 8.643014401589141,
+      "range_cleanliness": 0.7608695652173914,
+      "composite_score": 4.612768128141836
+    },
+    {
+      "symbol": "SPCX",
+      "last_close": 116.41,
+      "avg_dollar_volume": 10453225970.123,
+      "atr_pct": 6.763649416471337,
+      "range_cleanliness": 0.9,
+      "composite_score": 4.346714003164892
+    },
+    {
+      "symbol": "GOOGL",
+      "last_close": 333.71,
+      "avg_dollar_volume": 10208952947.8075,
+      "atr_pct": 3.567466619862414,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 4.159488286390196
+    },
+    {
+      "symbol": "AMZN",
+      "last_close": 230.86,
+      "avg_dollar_volume": 9775378102.751999,
+      "atr_pct": 2.888915359958416,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 3.8708893851270196
+    },
+    {
+      "symbol": "VEEE",
+      "last_close": 14.9,
+      "avg_dollar_volume": 192130004.79500002,
+      "atr_pct": 80.11874400767019,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 3.0999615153926117
+    },
+    {
+      "symbol": "AVGO",
+      "last_close": 380.91,
+      "avg_dollar_volume": 8134900468.202749,
+      "atr_pct": 3.9250629132490977,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 3.067120592876127
+    },
+    {
+      "symbol": "GOOG",
+      "last_close": 332.6,
+      "avg_dollar_volume": 6779196317.044999,
+      "atr_pct": 3.5245318271626163,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 2.7159120547040096
+    },
+    {
+      "symbol": "TSM",
+      "last_close": 392.31,
+      "avg_dollar_volume": 6403851462.4730015,
+      "atr_pct": 3.940396989261405,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 2.5752435660421096
+    },
+    {
+      "symbol": "JLHL",
+      "last_close": 5.92,
+      "avg_dollar_volume": 74385953.3695,
+      "atr_pct": 56.762789575289574,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 2.324169139035177
+    },
+    {
+      "symbol": "AMAT",
+      "last_close": 476.46,
+      "avg_dollar_volume": 5465216920.776499,
+      "atr_pct": 8.565682323804728,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 2.135872304023676
+    },
+    {
+      "symbol": "ORCL",
+      "last_close": 119.96,
+      "avg_dollar_volume": 5233699447.203,
+      "atr_pct": 5.793300147668271,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 2.081212471818409
+    },
+    {
+      "symbol": "MRVL",
+      "last_close": 174.47,
+      "avg_dollar_volume": 5834720619.767,
+      "atr_pct": 9.63653186384888,
+      "range_cleanliness": 0.7608695652173914,
+      "composite_score": 2.021696542853986
+    },
+    {
+      "symbol": "BE",
+      "last_close": 166.84,
+      "avg_dollar_volume": 3349737265.4735003,
+      "atr_pct": 15.068731376511286,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 1.7494656297756
+    },
+    {
+      "symbol": "NBIS",
+      "last_close": 169.69,
+      "avg_dollar_volume": 3967875580.1505003,
+      "atr_pct": 13.275839135229786,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 1.700318477122212
+    },
+    {
+      "symbol": "SOXX",
+      "last_close": 491.46,
+      "avg_dollar_volume": 5553275087.429999,
+      "atr_pct": 5.764645865671383,
+      "range_cleanliness": 0.7391304347826086,
+      "composite_score": 1.6655908757231634
+    },
+    {
+      "symbol": "NFLX",
+      "last_close": 72.39,
+      "avg_dollar_volume": 3591234611.5155,
+      "atr_pct": 3.7051881672685667,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 1.539982609565396
+    },
+    {
+      "symbol": "SDOT",
+      "last_close": 14.96,
+      "avg_dollar_volume": 101964486.8165,
+      "atr_pct": 43.73701298701299,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 1.4075437852772796
+    },
+    {
+      "symbol": "LRCX",
+      "last_close": 269.61,
+      "avg_dollar_volume": 4028435620.804,
+      "atr_pct": 8.74273156464099,
+      "range_cleanliness": 0.8043478260869565,
+      "composite_score": 1.382367542487561
+    },
+    {
+      "symbol": "MPLT",
+      "last_close": 12.31,
+      "avg_dollar_volume": 25990018.872250002,
+      "atr_pct": 36.24724382035509,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 1.3808679339597205
+    },
+    {
+      "symbol": "CLRO",
+      "last_close": 5.09,
+      "avg_dollar_volume": 95771549.9745,
+      "atr_pct": 31.964215548694924,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 1.2338844782116296
+    },
+    {
+      "symbol": "JPM",
+      "last_close": 357.31,
+      "avg_dollar_volume": 3351748242.0145,
+      "atr_pct": 2.0813399329113986,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 1.215662259103313
+    },
+    {
+      "symbol": "IBM",
+      "last_close": 227.55,
+      "avg_dollar_volume": 3251599782.325,
+      "atr_pct": 6.62123552123552,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 1.203658416143176
+    },
+    {
+      "symbol": "ADVB",
+      "last_close": 10.88,
+      "avg_dollar_volume": 58042162.99999499,
+      "atr_pct": 32.63202468487395,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 1.167117261215836
+    },
+    {
+      "symbol": "KLAC",
+      "last_close": 190.8,
+      "avg_dollar_volume": 3067804552.7949996,
+      "atr_pct": 7.505132524708016,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 1.162781337989706
+    },
+    {
+      "symbol": "FXHO",
+      "last_close": 10.3,
+      "avg_dollar_volume": 9508250.58575,
+      "atr_pct": 32.10339805825243,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 1.1249526244868078
+    },
+    {
+      "symbol": "UNH",
+      "last_close": 428.79,
+      "avg_dollar_volume": 2444884850.9365,
+      "atr_pct": 3.144376368052292,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 1.1133887254023218
+    },
+    {
+      "symbol": "BEG",
+      "last_close": 22.01,
+      "avg_dollar_volume": 12972366.617795002,
+      "atr_pct": 42.55263841111183,
+      "range_cleanliness": 0.8043478260869565,
+      "composite_score": 1.0861822595863457
+    },
+    {
+      "symbol": "V",
+      "last_close": 366.59,
+      "avg_dollar_volume": 2811379706.5695004,
+      "atr_pct": 1.9507975044132608,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 1.061524907920019
+    },
+    {
+      "symbol": "DELL",
+      "last_close": 392.1,
+      "avg_dollar_volume": 2871179057.4570003,
+      "atr_pct": 8.630697343972017,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 1.0480613360241227
+    },
+    {
+      "symbol": "GFUZ",
+      "last_close": 8.58,
+      "avg_dollar_volume": 8459176.843,
+      "atr_pct": 24.275474525474525,
+      "range_cleanliness": 1.0,
+      "composite_score": 1.0374553723678228
+    },
+    {
+      "symbol": "ALAB",
+      "last_close": 260.23,
+      "avg_dollar_volume": 1644852968.86275,
+      "atr_pct": 12.531214145728232,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 1.0066992046795549
+    },
+    {
+      "symbol": "CSCO",
+      "last_close": 115.58,
+      "avg_dollar_volume": 2499881181.2844996,
+      "atr_pct": 3.307498825797839,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.9864274524139932
+    },
+    {
+      "symbol": "HQ",
+      "last_close": 11.69,
+      "avg_dollar_volume": 9733504.6035,
+      "atr_pct": 24.5139313210314,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.9694095817928805
+    },
+    {
+      "symbol": "NXTC",
+      "last_close": 5.42,
+      "avg_dollar_volume": 40829949.3535,
+      "atr_pct": 24.12954665260938,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.9666581055153172
+    },
+    {
+      "symbol": "WDC",
+      "last_close": 463.51,
+      "avg_dollar_volume": 3920098767.2957506,
+      "atr_pct": 10.704042446302592,
+      "range_cleanliness": 0.6739130434782609,
+      "composite_score": 0.9471775314934655
+    },
+    {
+      "symbol": "HOOD",
+      "last_close": 92.76,
+      "avg_dollar_volume": 2350794771.8005,
+      "atr_pct": 7.156710096716566,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 0.9254177334888337
+    },
+    {
+      "symbol": "NBIL",
+      "last_close": 17.86,
+      "avg_dollar_volume": 81966509.7205,
+      "atr_pct": 33.87254039353704,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.9146506862458811
+    },
+    {
+      "symbol": "NBIG",
+      "last_close": 12.34,
+      "avg_dollar_volume": 45627782.962,
+      "atr_pct": 33.59081963417457,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.887777001989431
+    },
+    {
+      "symbol": "GLW",
+      "last_close": 126.01,
+      "avg_dollar_volume": 2460691417.0625,
+      "atr_pct": 10.82495153445871,
+      "range_cleanliness": 0.8260869565217391,
+      "composite_score": 0.887431960820295
+    },
+    {
+      "symbol": "C",
+      "last_close": 132.47,
+      "avg_dollar_volume": 1819640088.1665,
+      "atr_pct": 2.8353212048010867,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.8378241389539905
+    },
+    {
+      "symbol": "APP",
+      "last_close": 418.22,
+      "avg_dollar_volume": 2612052055.2499995,
+      "atr_pct": 6.132959754606254,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.8363051995624703
+    },
+    {
+      "symbol": "AAOI",
+      "last_close": 88.14,
+      "avg_dollar_volume": 972389258.555,
+      "atr_pct": 14.582798469966612,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.8084644769132222
+    },
+    {
+      "symbol": "CRDO",
+      "last_close": 192.28,
+      "avg_dollar_volume": 1483876909.29,
+      "atr_pct": 10.683274391512377,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.7845560605879912
+    },
+    {
+      "symbol": "CBRS",
+      "last_close": 192.72,
+      "avg_dollar_volume": 1147978133.4575,
+      "atr_pct": 12.16339767538398,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.7826800424652841
+    },
+    {
+      "symbol": "HIMZ",
+      "last_close": 32.25,
+      "avg_dollar_volume": 16715054.473860001,
+      "atr_pct": 21.78547065337763,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.7816246444505789
+    },
+    {
+      "symbol": "QCOM",
+      "last_close": 162.88,
+      "avg_dollar_volume": 2437744505.276,
+      "atr_pct": 4.541511717653664,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.77591264039132
+    },
+    {
+      "symbol": "WLFC",
+      "last_close": 70.4,
+      "avg_dollar_volume": 24888602.19325,
+      "atr_pct": 21.309486607142855,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.7654659405101613
+    },
+    {
+      "symbol": "T",
+      "last_close": 24.66,
+      "avg_dollar_volume": 2003975508.2735,
+      "atr_pct": 2.9226045649403294,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.7621126716476189
+    },
+    {
+      "symbol": "WYFI",
+      "last_close": 23.51,
+      "avg_dollar_volume": 93106294.739,
+      "atr_pct": 16.600443580239407,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.757083405323392
+    },
+    {
+      "symbol": "BAC",
+      "last_close": 62.62,
+      "avg_dollar_volume": 2089002474.1885,
+      "atr_pct": 1.8841424465027148,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.755106382675609
+    },
+    {
+      "symbol": "NOW",
+      "last_close": 110.62,
+      "avg_dollar_volume": 2394686186.377,
+      "atr_pct": 5.900534648862258,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.7353602634069722
+    },
+    {
+      "symbol": "IREN",
+      "last_close": 33.93,
+      "avg_dollar_volume": 1724650861.7975,
+      "atr_pct": 10.681508147025387,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.728904466296616
+    },
+    {
+      "symbol": "CRWD",
+      "last_close": 181.8,
+      "avg_dollar_volume": 1757080062.7025,
+      "atr_pct": 5.741839541096967,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.6959829786427519
+    },
+    {
+      "symbol": "SOFI",
+      "last_close": 16.74,
+      "avg_dollar_volume": 1453589928.431,
+      "atr_pct": 4.959976105137391,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.6930103141672703
+    },
+    {
+      "symbol": "PN",
+      "last_close": 9.12,
+      "avg_dollar_volume": 6926263.670999999,
+      "atr_pct": 15.793233082706767,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.6876246155310575
+    },
+    {
+      "symbol": "TXN",
+      "last_close": 277.07,
+      "avg_dollar_volume": 2375960048.1880007,
+      "atr_pct": 4.4839081407999,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.6691702125929271
+    },
+    {
+      "symbol": "AXTI",
+      "last_close": 42.76,
+      "avg_dollar_volume": 431523506.04800004,
+      "atr_pct": 16.589185487104103,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.6636905658704836
+    },
+    {
+      "symbol": "ARM",
+      "last_close": 244.74,
+      "avg_dollar_volume": 1690866232.5279999,
+      "atr_pct": 9.291183646785507,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.6574668616878667
+    },
+    {
+      "symbol": "JEM",
+      "last_close": 5.9,
+      "avg_dollar_volume": 52413386.28657,
+      "atr_pct": 22.1,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.6527837659340593
+    },
+    {
+      "symbol": "CHRN",
+      "last_close": 20.23,
+      "avg_dollar_volume": 8547560.671,
+      "atr_pct": 18.722759692112135,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.6521093062723919
+    },
+    {
+      "symbol": "DOCN",
+      "last_close": 112.51,
+      "avg_dollar_volume": 446617096.6420001,
+      "atr_pct": 10.060185126401464,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.6364518537777759
+    },
+    {
+      "symbol": "FCEL",
+      "last_close": 19.66,
+      "avg_dollar_volume": 305426270.816,
+      "atr_pct": 13.29377997384101,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.6318163556063527
+    },
+    {
+      "symbol": "WMT",
+      "last_close": 113.1,
+      "avg_dollar_volume": 2462339739.058,
+      "atr_pct": 2.2871605406088165,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.6150497315939567
+    },
+    {
+      "symbol": "OPTX",
+      "last_close": 6.38,
+      "avg_dollar_volume": 5030469.552999999,
+      "atr_pct": 13.890618002686963,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.6085031702938075
+    },
+    {
+      "symbol": "AAL",
+      "last_close": 15.36,
+      "avg_dollar_volume": 2187550102.27875,
+      "atr_pct": 4.710751488095238,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.5993044234006165
+    },
+    {
+      "symbol": "GLWG",
+      "last_close": 9.9,
+      "avg_dollar_volume": 44771199.9685,
+      "atr_pct": 30.052164502164498,
+      "range_cleanliness": 0.8043478260869565,
+      "composite_score": 0.5849459890266335
+    },
+    {
+      "symbol": "NU",
+      "last_close": 14.68,
+      "avg_dollar_volume": 1497931400.6975002,
+      "atr_pct": 3.364636045153758,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.5675777217467896
+    },
+    {
+      "symbol": "CRWV",
+      "last_close": 67.3,
+      "avg_dollar_volume": 2062453517.6585,
+      "atr_pct": 8.978539588197835,
+      "range_cleanliness": 0.8043478260869565,
+      "composite_score": 0.5656110499662846
+    },
+    {
+      "symbol": "RDDT",
+      "last_close": 178.44,
+      "avg_dollar_volume": 773542724.8225,
+      "atr_pct": 6.878470554327984,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.5645067299907003
+    },
+    {
+      "symbol": "LCID",
+      "last_close": 7.9,
+      "avg_dollar_volume": 160549987.14599997,
+      "atr_pct": 13.071338155515372,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.5617557325703935
+    },
+    {
+      "symbol": "ITG",
+      "last_close": 12.17,
+      "avg_dollar_volume": 12012693.145789474,
+      "atr_pct": 12.608287357671088,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.558648982737201
+    },
+    {
+      "symbol": "JNJ",
+      "last_close": 266.73,
+      "avg_dollar_volume": 2120474853.4019997,
+      "atr_pct": 2.3436112494711048,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.5520576881492352
+    },
+    {
+      "symbol": "SLS",
+      "last_close": 10.09,
+      "avg_dollar_volume": 121519870.73999998,
+      "atr_pct": 13.216338666289115,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.5513173655094581
+    },
+    {
+      "symbol": "QNT",
+      "last_close": 49.78,
+      "avg_dollar_volume": 141237808.54749998,
+      "atr_pct": 11.103326063249728,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.5510185536223322
+    },
+    {
+      "symbol": "AGEN",
+      "last_close": 6.6,
+      "avg_dollar_volume": 63472629.54200001,
+      "atr_pct": 13.759415584415585,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.5492720506532041
+    },
+    {
+      "symbol": "REPL",
+      "last_close": 5.35,
+      "avg_dollar_volume": 38861035.845249996,
+      "atr_pct": 19.669425901201603,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.5470277524576781
+    },
+    {
+      "symbol": "ONDS",
+      "last_close": 7.86,
+      "avg_dollar_volume": 829250880.2685,
+      "atr_pct": 7.733460559796436,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.5447246243864642
+    },
+    {
+      "symbol": "INIO",
+      "last_close": 26.22,
+      "avg_dollar_volume": 164626803.461,
+      "atr_pct": 10.601231339217607,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.5401812614739807
+    },
+    {
+      "symbol": "QTTB",
+      "last_close": 15.71,
+      "avg_dollar_volume": 48070671.353750005,
+      "atr_pct": 15.52682549786305,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.5371578827574681
+    },
+    {
+      "symbol": "SHAZ",
+      "last_close": 44.98,
+      "avg_dollar_volume": 153053207.40825,
+      "atr_pct": 18.25806707743124,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.5369310507561996
+    },
+    {
+      "symbol": "BIYA",
+      "last_close": 6.44,
+      "avg_dollar_volume": 66074439.38531999,
+      "atr_pct": 26.681787932564326,
+      "range_cleanliness": 0.8260869565217391,
+      "composite_score": 0.533552016588472
+    },
+    {
+      "symbol": "BRUN",
+      "last_close": 16.69,
+      "avg_dollar_volume": 41967161.853,
+      "atr_pct": 15.475220405717705,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.5324676616773654
+    },
+    {
+      "symbol": "PENG",
+      "last_close": 48.13,
+      "avg_dollar_volume": 351495856.88249993,
+      "atr_pct": 15.74929506396367,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.5170748140707409
+    },
+    {
+      "symbol": "IREG",
+      "last_close": 6.43,
+      "avg_dollar_volume": 6783978.340000001,
+      "atr_pct": 24.88469229060209,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.5130447535324159
+    },
+    {
+      "symbol": "PRE",
+      "last_close": 18.26,
+      "avg_dollar_volume": 5057866.862749998,
+      "atr_pct": 13.421843217023943,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.5108187637439365
+    },
+    {
+      "symbol": "ANET",
+      "last_close": 169.71,
+      "avg_dollar_volume": 1337497460.5575001,
+      "atr_pct": 5.522454270730739,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.5105665286218777
+    },
+    {
+      "symbol": "RKLB",
+      "last_close": 63.89,
+      "avg_dollar_volume": 1602492187.153,
+      "atr_pct": 8.424177716163943,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.5062261757975723
+    },
+    {
+      "symbol": "VZ",
+      "last_close": 48.19,
+      "avg_dollar_volume": 1436472014.3815,
+      "atr_pct": 2.4812498147214908,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.5053751440953596
+    },
+    {
+      "symbol": "MRNA",
+      "last_close": 55.805,
+      "avg_dollar_volume": 494474347.70675004,
+      "atr_pct": 6.167790904552842,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.49633295612266026
+    },
+    {
+      "symbol": "BOT",
+      "last_close": 30.36,
+      "avg_dollar_volume": 21421974.71,
+      "atr_pct": 10.970261622435535,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4951722749259111
+    },
+    {
+      "symbol": "CRM",
+      "last_close": 181.5,
+      "avg_dollar_volume": 2127859971.3445003,
+      "atr_pct": 4.681951987406531,
+      "range_cleanliness": 0.8260869565217391,
+      "composite_score": 0.49462818342353543
+    },
+    {
+      "symbol": "WFC",
+      "last_close": 86.87,
+      "avg_dollar_volume": 1412239620.6985,
+      "atr_pct": 2.467110131723923,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.49460619151399704
+    },
+    {
+      "symbol": "BA",
+      "last_close": 221.56,
+      "avg_dollar_volume": 1187253564.6155,
+      "atr_pct": 2.7228741650117345,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.488953013857897
+    },
+    {
+      "symbol": "TSLL",
+      "last_close": 7.15,
+      "avg_dollar_volume": 713378825.505,
+      "atr_pct": 13.245754245754245,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 0.4877433472001119
+    },
+    {
+      "symbol": "SMCI",
+      "last_close": 28.45,
+      "avg_dollar_volume": 1281222881.7940001,
+      "atr_pct": 7.279789103690687,
+      "range_cleanliness": 0.8913043478260869,
+      "composite_score": 0.4808554789245355
+    },
+    {
+      "symbol": "MXL",
+      "last_close": 58.94,
+      "avg_dollar_volume": 376546554.1405,
+      "atr_pct": 18.277061418391582,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.4748696427642155
+    },
+    {
+      "symbol": "MS",
+      "last_close": 211.58,
+      "avg_dollar_volume": 1247561293.499,
+      "atr_pct": 3.5945437727033362,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.4717911322814412
+    },
+    {
+      "symbol": "HIMS",
+      "last_close": 29.32,
+      "avg_dollar_volume": 492170050.7570001,
+      "atr_pct": 9.293875462872737,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.4672590496618697
+    },
+    {
+      "symbol": "ABBV",
+      "last_close": 263.2,
+      "avg_dollar_volume": 1540239430.6365,
+      "atr_pct": 2.2626248371689117,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.4615990538256199
+    },
+    {
+      "symbol": "RDTL",
+      "last_close": 20.98,
+      "avg_dollar_volume": 9799610.404964998,
+      "atr_pct": 14.001123518997685,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.4582612106200736
+    },
+    {
+      "symbol": "BAND",
+      "last_close": 52.25,
+      "avg_dollar_volume": 75952297.2975,
+      "atr_pct": 11.335912508544084,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.45475052613632194
+    },
+    {
+      "symbol": "VCX",
+      "last_close": 33.82,
+      "avg_dollar_volume": 9510329.983,
+      "atr_pct": 17.723409647714792,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.45457806472404666
+    },
+    {
+      "symbol": "FTH",
+      "last_close": 29.13,
+      "avg_dollar_volume": 7777178.811500001,
+      "atr_pct": 13.914153302927756,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.4538307348181858
+    },
+    {
+      "symbol": "FTNT",
+      "last_close": 149.98,
+      "avg_dollar_volume": 755617537.9904999,
+      "atr_pct": 4.358814508601147,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.45324523919416104
+    },
+    {
+      "symbol": "CDNL",
+      "last_close": 60.25,
+      "avg_dollar_volume": 56201455.743499994,
+      "atr_pct": 9.560569057498519,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4517604836449398
+    },
+    {
+      "symbol": "CLBK",
+      "last_close": 10.99,
+      "avg_dollar_volume": 92931261.18575002,
+      "atr_pct": 14.898349148576628,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.45174615872819734
+    },
+    {
+      "symbol": "PEP",
+      "last_close": 142.86,
+      "avg_dollar_volume": 1305088120.7330003,
+      "atr_pct": 2.4657156856862907,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.4495042000424495
+    },
+    {
+      "symbol": "OKLO",
+      "last_close": 39.58,
+      "avg_dollar_volume": 398133949.8184999,
+      "atr_pct": 7.899083231069085,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.44870686252042163
+    },
+    {
+      "symbol": "NKE",
+      "last_close": 43.05,
+      "avg_dollar_volume": 1053914683.431,
+      "atr_pct": 3.09293180686909,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.44813378938325393
+    },
+    {
+      "symbol": "GE",
+      "last_close": 363.59,
+      "avg_dollar_volume": 1454506312.6745,
+      "atr_pct": 2.8076168997261455,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.4479939285965401
+    },
+    {
+      "symbol": "ALM",
+      "last_close": 12.23,
+      "avg_dollar_volume": 85492544.85350001,
+      "atr_pct": 11.02090877233968,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.44579339535488405
+    },
+    {
+      "symbol": "GILD",
+      "last_close": 134.32,
+      "avg_dollar_volume": 875848052.4785,
+      "atr_pct": 2.8857685271845495,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.4431474895178502
+    },
+    {
+      "symbol": "AGL",
+      "last_close": 99.14,
+      "avg_dollar_volume": 36501016.773,
+      "atr_pct": 11.288862791434912,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.43622902466447255
+    },
+    {
+      "symbol": "COAG",
+      "last_close": 47.26,
+      "avg_dollar_volume": 15840264.2215,
+      "atr_pct": 9.560093101989,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.43477376234713583
+    },
+    {
+      "symbol": "IMMX",
+      "last_close": 8.44,
+      "avg_dollar_volume": 19466032.6145,
+      "atr_pct": 9.429417738659446,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.43091849041048813
+    },
+    {
+      "symbol": "XE",
+      "last_close": 15.79,
+      "avg_dollar_volume": 80253350.97150001,
+      "atr_pct": 8.787885641907174,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4300626048923671
+    },
+    {
+      "symbol": "COOK",
+      "last_close": 58.97,
+      "avg_dollar_volume": 5008874.9085,
+      "atr_pct": 9.54842656072095,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.42974016510331564
+    },
+    {
+      "symbol": "KARD",
+      "last_close": 20.99,
+      "avg_dollar_volume": 8666209.645,
+      "atr_pct": 9.38810998434629,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4246779305690307
+    },
+    {
+      "symbol": "FROG",
+      "last_close": 76.43,
+      "avg_dollar_volume": 199340654.572,
+      "atr_pct": 7.42049681314368,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.42383383169045796
+    },
+    {
+      "symbol": "AKAM",
+      "last_close": 111.79,
+      "avg_dollar_volume": 437372042.8405,
+      "atr_pct": 4.959618161604027,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4225916116097816
+    },
+    {
+      "symbol": "ALOY",
+      "last_close": 7.33,
+      "avg_dollar_volume": 23252497.161999997,
+      "atr_pct": 12.98947573572403,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.422270309681554
+    },
+    {
+      "symbol": "PATH",
+      "last_close": 12.19,
+      "avg_dollar_volume": 1010571079.9230001,
+      "atr_pct": 6.694597445212702,
+      "range_cleanliness": 0.9130434782608695,
+      "composite_score": 0.42138581701429995
+    },
+    {
+      "symbol": "DMRA",
+      "last_close": 29.42,
+      "avg_dollar_volume": 15742994.619500002,
+      "atr_pct": 9.169296882587163,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.41864506008195357
+    },
+    {
+      "symbol": "ARMG",
+      "last_close": 17.47,
+      "avg_dollar_volume": 23158906.762500003,
+      "atr_pct": 22.240125930165995,
+      "range_cleanliness": 0.8478260869565217,
+      "composite_score": 0.41106026951863395
+    },
+    {
+      "symbol": "SECZ",
+      "last_close": 7.08,
+      "avg_dollar_volume": 13046370.215,
+      "atr_pct": 12.814769975786925,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.4107877662088057
+    },
+    {
+      "symbol": "CDNS",
+      "last_close": 344.72,
+      "avg_dollar_volume": 806711105.83,
+      "atr_pct": 4.707619848821403,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.4106852633301582
+    },
+    {
+      "symbol": "ASTS",
+      "last_close": 56.55,
+      "avg_dollar_volume": 1091797616.0324998,
+      "atr_pct": 9.369028672476949,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.4088336869452429
+    },
+    {
+      "symbol": "FBRX",
+      "last_close": 76.65,
+      "avg_dollar_volume": 112384951.7895,
+      "atr_pct": 9.829093281148074,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.4080353101763389
+    },
+    {
+      "symbol": "CLYM",
+      "last_close": 12.29,
+      "avg_dollar_volume": 16204283.212500002,
+      "atr_pct": 8.89497849587353,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4075461800492184
+    },
+    {
+      "symbol": "CLS",
+      "last_close": 350.2,
+      "avg_dollar_volume": 764050309.6715,
+      "atr_pct": 6.971189932283595,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.4075372679976618
+    },
+    {
+      "symbol": "RTX",
+      "last_close": 218.58,
+      "avg_dollar_volume": 1002694986.6970001,
+      "atr_pct": 2.5877743356469693,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.4058062455971924
+    },
+    {
+      "symbol": "STUB",
+      "last_close": 8.54,
+      "avg_dollar_volume": 61674167.52600001,
+      "atr_pct": 8.356557377049182,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4044958616979588
+    },
+    {
+      "symbol": "ISRG",
+      "last_close": 361.8,
+      "avg_dollar_volume": 1511481199.1005,
+      "atr_pct": 4.953008765695332,
+      "range_cleanliness": 0.8695652173913043,
+      "composite_score": 0.4034680026420989
+    },
+    {
+      "symbol": "MBX",
+      "last_close": 60.06,
+      "avg_dollar_volume": 48522958.277,
+      "atr_pct": 8.382427096712814,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.4000322993951899
+    },
+    {
+      "symbol": "HUT",
+      "last_close": 101.14,
+      "avg_dollar_volume": 436609727.42375004,
+      "atr_pct": 10.11487612644425,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.399302421784145
+    },
+    {
+      "symbol": "CMCSA",
+      "last_close": 24.19,
+      "avg_dollar_volume": 875911364.43275,
+      "atr_pct": 3.6786157207819055,
+      "range_cleanliness": 0.9565217391304348,
+      "composite_score": 0.39741506258699544
+    },
+    {
+      "symbol": "JBIO",
+      "last_close": 19.7,
+      "avg_dollar_volume": 20160289.447,
+      "atr_pct": 8.53879622915156,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.3945463470018241
+    },
+    {
+      "symbol": "PESI",
+      "last_close": 16.64,
+      "avg_dollar_volume": 8873426.279499998,
+      "atr_pct": 8.636675824175825,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.39383093549399206
+    },
+    {
+      "symbol": "TSHA",
+      "last_close": 5.46,
+      "avg_dollar_volume": 18992668.81,
+      "atr_pct": 8.526556776556777,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.39355164149816685
+    },
+    {
+      "symbol": "ATEX",
+      "last_close": 91.37,
+      "avg_dollar_volume": 44016079.24525,
+      "atr_pct": 8.258345189887272,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.3930296381891777
+    },
+    {
+      "symbol": "QXO",
+      "last_close": 14.25,
+      "avg_dollar_volume": 464861347.13049996,
+      "atr_pct": 5.851779448621555,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.3924770233944852
+    },
+    {
+      "symbol": "FPS",
+      "last_close": 32.41,
+      "avg_dollar_volume": 474896427.8464999,
+      "atr_pct": 9.465839467536476,
+      "range_cleanliness": 0.9347826086956522,
+      "composite_score": 0.3886787378261065
+    },
+    {
+      "symbol": "ICE",
+      "last_close": 152.72,
+      "avg_dollar_volume": 595747698.8295,
+      "atr_pct": 2.5165054628451724,
+      "range_cleanliness": 1.0,
+      "composite_score": 0.38859490365764493
+    },
+    {
+      "symbol": "BB",
+      "last_close": 8.09,
+      "avg_dollar_volume": 258720028.50350004,
+      "atr_pct": 7.849019954087938,
+      "range_cleanliness": 0.9782608695652174,
+      "composite_score": 0.38803878457728747
+    }
+  ],
+  "diff_vs_prior": {
+    "prior_source": "current_watchlist.json",
+    "added": [
+      "AAL",
+      "ABBV",
+      "ANET",
+      "APP",
+      "ARM",
+      "ARMG",
+      "ASTS",
+      "ATEX",
+      "AVGO",
+      "AXTI",
+      "BA",
+      "BAC",
+      "BAND",
+      "BB",
+      "BE",
+      "BEG",
+      "BIYA",
+      "BOT",
+      "BRUN",
+      "C",
+      "CBRS",
+      "CDNL",
+      "CDNS",
+      "CHRN",
+      "CLBK",
+      "CLRO",
+      "CLS",
+      "CLYM",
+      "CMCSA",
+      "COAG",
+      "COOK",
+      "CRDO",
+      "CRM",
+      "CRWD",
+      "CRWV",
+      "CSCO",
+      "DELL",
+      "DMRA",
+      "DOCN",
+      "FBRX",
+      "FCEL",
+      "FPS",
+      "FROG",
+      "FTH",
+      "FTNT",
+      "FXHO",
+      "GE",
+      "GFUZ",
+      "GILD",
+      "GLW",
+      "GLWG",
+      "GOOG",
+      "GOOGL",
+      "HIMS",
+      "HIMZ",
+      "HOOD",
+      "HQ",
+      "HUT",
+      "IBM",
+      "ICE",
+      "IMMX",
+      "INIO",
+      "INTC",
+      "IREG",
+      "IREN",
+      "ISRG",
+      "ITG",
+      "JBIO",
+      "JEM",
+      "JLHL",
+      "JNJ",
+      "JPM",
+      "KARD",
+      "KLAC",
+      "LCID",
+      "LRCX",
+      "MBX",
+      "MPLT",
+      "MRNA",
+      "MRVL",
+      "MS",
+      "MSFT",
+      "MUU",
+      "MXL",
+      "NBIG",
+      "NBIL",
+      "NBIS",
+      "NFLX",
+      "NKE",
+      "NOW",
+      "NU",
+      "NVDA",
+      "NXTC",
+      "OKLO",
+      "ONDS",
+      "OPTX",
+      "ORCL",
+      "PATH",
+      "PENG",
+      "PEP",
+      "PESI",
+      "PN",
+      "PRE",
+      "QCOM",
+      "QNT",
+      "QTTB",
+      "QXO",
+      "RDDT",
+      "RDTL",
+      "REPL",
+      "RKLB",
+      "RTX",
+      "SDOT",
+      "SECZ",
+      "SHAZ",
+      "SLS",
+      "SMCI",
+      "SOFI",
+      "SOXX",
+      "SPCX",
+      "STUB",
+      "T",
+      "TSHA",
+      "TSLA",
+      "TSLL",
+      "TSM",
+      "TXN",
+      "UNH",
+      "V",
+      "VCX",
+      "VEEE",
+      "VZ",
+      "WDC",
+      "WFC",
+      "WLFC",
+      "WMT",
+      "WYFI",
+      "XE"
+    ],
+    "dropped": [
+      "AADX",
+      "ABCL",
+      "ABSI",
+      "ABTC",
+      "ACHV",
+      "ACRS",
+      "ADV",
+      "AEVA",
+      "AI",
+      "AIR",
+      "ALIT",
+      "ALMS",
+      "ALNY",
+      "AMA",
+      "AMDL",
+      "AMN",
+      "ANAB",
+      "ANDG"
+    ]
+  }
+}

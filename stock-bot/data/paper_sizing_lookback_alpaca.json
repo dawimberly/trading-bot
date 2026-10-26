@@ -1,0 +1,761 @@
+{
+  "as_of": "2026-08-14T18:03:13.508187+00:00",
+  "equity": 97660.7,
+  "cash": 23096.24,
+  "cash_pct": 23.65,
+  "sleeves": {
+    "vti_core": {
+      "n": 1,
+      "mv": 49095.698017,
+      "upnl": 301.201295,
+      "pct_eq": 50.27170398840067
+    },
+    "nyse": {
+      "n": 25,
+      "mv": 19452.860559000004,
+      "upnl": 573.3822349999996,
+      "pct_eq": 19.918821551555542
+    }
+  },
+  "sizing_open_non_vti": {
+    "n": 25,
+    "median_pct_eq": 0.499,
+    "mean_pct_eq": 0.797,
+    "p75_pct_eq": 1.172,
+    "max_pct_eq": 2.5,
+    "median_mv": 487.74
+  },
+  "top": [
+    {
+      "symbol": "VTI",
+      "qty": 127.983363355,
+      "mv": 49095.698017,
+      "cost": 48794.496722,
+      "upnl": 301.201295,
+      "upct": 0.617,
+      "pct_eq": 50.27170398840067,
+      "entry": 381.256559,
+      "px": 383.61,
+      "sleeve": "vti_core"
+    },
+    {
+      "symbol": "SPCX",
+      "qty": 17.423516393,
+      "mv": 2439.46653,
+      "cost": 2232.526799,
+      "upnl": 206.939731,
+      "upct": 9.269,
+      "pct_eq": 2.497899902417247,
+      "entry": 128.132964,
+      "px": 140.01,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "SHOP",
+      "qty": 14.861991422,
+      "mv": 2302.419711,
+      "cost": 2212.000009,
+      "upnl": 90.419702,
+      "upct": 4.088,
+      "pct_eq": 2.3575703542980952,
+      "entry": 148.836044,
+      "px": 154.92,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "FWONA",
+      "qty": 15.177886947,
+      "mv": 1455.104022,
+      "cost": 1378.629995,
+      "upnl": 76.474027,
+      "upct": 5.547,
+      "pct_eq": 1.4899586240934175,
+      "entry": 90.831484,
+      "px": 95.87,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "FWONK",
+      "qty": 18.872458014,
+      "mv": 1971.416964,
+      "cost": 1920.629991,
+      "upnl": 50.786973,
+      "upct": 2.644,
+      "pct_eq": 2.0186389857946954,
+      "entry": 101.768937,
+      "px": 104.46,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "PFE",
+      "qty": 90.900265708,
+      "mv": 2441.581137,
+      "cost": 2391.662165,
+      "upnl": 49.918972,
+      "upct": 2.0869999999999997,
+      "pct_eq": 2.5000651613187292,
+      "entry": 26.310838,
+      "px": 26.86,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "CAMT",
+      "qty": 3.38299633,
+      "mv": 550.295098,
+      "cost": 516.13692,
+      "upnl": 34.158178,
+      "upct": 6.618,
+      "pct_eq": 0.5634765038546724,
+      "entry": 152.567981,
+      "px": 162.665,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "GIS",
+      "qty": 7.064733206,
+      "mv": 276.796247,
+      "cost": 255.289998,
+      "upnl": 21.506249,
+      "upct": 8.424,
+      "pct_eq": 0.28342644175190224,
+      "entry": 36.13583,
+      "px": 39.18,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "TSLA",
+      "qty": 1.422078255,
+      "mv": 485.867968,
+      "cost": 469.479999,
+      "upnl": 16.387969,
+      "upct": 3.4909999999999997,
+      "pct_eq": 0.49750612887271956,
+      "entry": 330.136543,
+      "px": 341.6605,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "HRB",
+      "qty": 21.260625004,
+      "mv": 1144.99096,
+      "cost": 1130.590415,
+      "upnl": 14.400545,
+      "upct": 1.274,
+      "pct_eq": 1.1724173183276385,
+      "entry": 53.177666,
+      "px": 53.855,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "NICE",
+      "qty": 1.809742647,
+      "mv": 186.3492,
+      "cost": 177.21,
+      "upnl": 9.1392,
+      "upct": 5.157,
+      "pct_eq": 0.1908128858384181,
+      "entry": 97.92,
+      "px": 102.97,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "BRKR",
+      "qty": 1.16352689,
+      "mv": 67.280942,
+      "cost": 58.403881,
+      "upnl": 8.877061,
+      "upct": 15.198999999999998,
+      "pct_eq": 0.0688925453124952,
+      "entry": 50.195558,
+      "px": 57.825,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "CDW",
+      "qty": 3.594656146,
+      "mv": 501.508452,
+      "cost": 493.402503,
+      "upnl": 8.105949,
+      "upct": 1.643,
+      "pct_eq": 0.5135212547114653,
+      "entry": 137.26,
+      "px": 139.515,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "GPC",
+      "qty": 11.325748005,
+      "mv": 1520.368412,
+      "cost": 1514.190001,
+      "upnl": 6.178411,
+      "upct": 0.40800000000000003,
+      "pct_eq": 1.5567863142492322,
+      "entry": 133.694481,
+      "px": 134.24,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "RBRK",
+      "qty": 5.229804186,
+      "mv": 539.924984,
+      "cost": 535.969997,
+      "upnl": 3.954987,
+      "upct": 0.738,
+      "pct_eq": 0.5528579909830669,
+      "entry": 102.48376,
+      "px": 103.24,
+      "sleeve": "nyse"
+    }
+  ],
+  "worst": [
+    {
+      "symbol": "TPG",
+      "qty": 2.523708558,
+      "mv": 133.226575,
+      "cost": 130.93,
+      "upnl": 2.296575,
+      "upct": 1.754,
+      "pct_eq": 0.13641779651384844,
+      "entry": 51.88,
+      "px": 52.79,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "ABNB",
+      "qty": 2.614160341,
+      "mv": 483.462813,
+      "cost": 481.350002,
+      "upnl": 2.112811,
+      "upct": 0.439,
+      "pct_eq": 0.4950433623760632,
+      "entry": 184.131782,
+      "px": 184.94,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "NAVN",
+      "qty": 0.380343997,
+      "mv": 11.18972,
+      "cost": 10.444246,
+      "upnl": 0.745474,
+      "upct": 7.138,
+      "pct_eq": 0.01145775117319454,
+      "entry": 27.46,
+      "px": 29.42,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "MU",
+      "qty": 0.209725384,
+      "mv": 202.110255,
+      "cost": 202.259999,
+      "upnl": -0.149744,
+      "upct": -0.074,
+      "pct_eq": 0.20695147075538062,
+      "entry": 964.404,
+      "px": 963.69,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "GIB",
+      "qty": 3.068607629,
+      "mv": 226.478586,
+      "cost": 227.66,
+      "upnl": -1.181414,
+      "upct": -0.519,
+      "pct_eq": 0.23190350468509852,
+      "entry": 74.19,
+      "px": 73.805,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "PATH",
+      "qty": 34.450617283,
+      "mv": 555.86071,
+      "cost": 558.1,
+      "upnl": -2.23929,
+      "upct": -0.40099999999999997,
+      "pct_eq": 0.5691754308539669,
+      "entry": 16.2,
+      "px": 16.135,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "MPC",
+      "qty": 1.738570004,
+      "mv": 614.532339,
+      "cost": 617.96,
+      "upnl": -3.427661,
+      "upct": -0.555,
+      "pct_eq": 0.6292524413607521,
+      "entry": 355.44154,
+      "px": 353.47,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "VLO",
+      "qty": 1.063514768,
+      "mv": 361.945981,
+      "cost": 365.75,
+      "upnl": -3.804019,
+      "upct": -1.04,
+      "pct_eq": 0.3706157963233932,
+      "entry": 343.906837,
+      "px": 340.33,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "SN",
+      "qty": 2.643982316,
+      "mv": 487.735418,
+      "cost": 493.541476,
+      "upnl": -5.806058,
+      "upct": -1.176,
+      "pct_eq": 0.4994183105384254,
+      "entry": 186.665952,
+      "px": 184.47,
+      "sleeve": "nyse"
+    },
+    {
+      "symbol": "VNO",
+      "qty": 12.337011482,
+      "mv": 479.169526,
+      "cost": 494.673695,
+      "upnl": -15.504169,
+      "upct": -3.134,
+      "pct_eq": 0.4906472368107131,
+      "entry": 40.09672,
+      "px": 38.84,
+      "sleeve": "nyse"
+    }
+  ],
+  "buy_sizing_21d": {
+    "n": 238,
+    "median_notional": 2317.45,
+    "mean_notional": 4583.68,
+    "median_pct_eq": 2.373,
+    "mean_pct_eq": 4.693,
+    "p25_pct_eq": 0.133,
+    "p75_pct_eq": 9.973
+  },
+  "recent_buys": [
+    {
+      "ts": "2026-08-14 17:11:23.055091+00:00",
+      "symbol": "RBRK",
+      "side": "buy",
+      "notional": 26.9,
+      "qty": 0.262116812,
+      "price": 102.626,
+      "pct_eq": 0.028,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 17:06:21.477698+00:00",
+      "symbol": "SHOP",
+      "side": "buy",
+      "notional": 49.59,
+      "qty": 0.32112884,
+      "price": 154.424,
+      "pct_eq": 0.051,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 16:51:14.552500+00:00",
+      "symbol": "SPCX",
+      "side": "buy",
+      "notional": 67.79,
+      "qty": 0.492573969,
+      "price": 137.624,
+      "pct_eq": 0.069,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 16:51:02.756731+00:00",
+      "symbol": "GPC",
+      "side": "buy",
+      "notional": 92.64,
+      "qty": 0.689614101,
+      "price": 134.336,
+      "pct_eq": 0.095,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 16:50:50.676234+00:00",
+      "symbol": "PFE",
+      "side": "buy",
+      "notional": 1.84,
+      "qty": 0.068738792,
+      "price": 26.768,
+      "pct_eq": 0.002,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:44:47.498355+00:00",
+      "symbol": "VLO",
+      "side": "buy",
+      "notional": 31.03,
+      "qty": 0.090734708,
+      "price": 341.986,
+      "pct_eq": 0.032,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:44:27.104853+00:00",
+      "symbol": "ABNB",
+      "side": "buy",
+      "notional": 59.0,
+      "qty": 0.317436405,
+      "price": 185.864,
+      "pct_eq": 0.06,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:42:11.609570+00:00",
+      "symbol": "MPC",
+      "side": "buy",
+      "notional": 309.9,
+      "qty": 0.867790117,
+      "price": 357.114,
+      "pct_eq": 0.317,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:41:36.857786+00:00",
+      "symbol": "HRB",
+      "side": "buy",
+      "notional": 555.78,
+      "qty": 10.378711484,
+      "price": 53.55,
+      "pct_eq": 0.569,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:41:18.320968+00:00",
+      "symbol": "PATH",
+      "side": "buy",
+      "notional": 558.1,
+      "qty": 34.450617283,
+      "price": 16.2,
+      "pct_eq": 0.571,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:12:54.582842+00:00",
+      "symbol": "VLO",
+      "side": "buy",
+      "notional": 334.72,
+      "qty": 0.97278006,
+      "price": 344.086,
+      "pct_eq": 0.343,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 15:12:40.272052+00:00",
+      "symbol": "PPLT",
+      "side": "buy",
+      "notional": 264.27,
+      "qty": 16.704804045,
+      "price": 15.82,
+      "pct_eq": 0.271,
+      "sleeve": "metalish"
+    },
+    {
+      "ts": "2026-08-14 14:26:33.613789+00:00",
+      "symbol": "FNV",
+      "side": "buy",
+      "notional": 246.92,
+      "qty": 1.04466877,
+      "price": 236.362,
+      "pct_eq": 0.253,
+      "sleeve": "metalish"
+    },
+    {
+      "ts": "2026-08-14 14:26:25.684469+00:00",
+      "symbol": "TEAM",
+      "side": "buy",
+      "notional": 245.97,
+      "qty": 1.500128075,
+      "price": 163.966,
+      "pct_eq": 0.252,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 14:01:51.590876+00:00",
+      "symbol": "PFE",
+      "side": "buy",
+      "notional": 49.01,
+      "qty": 1.844700391,
+      "price": 26.568,
+      "pct_eq": 0.05,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:47:08.716988+00:00",
+      "symbol": "MPC",
+      "side": "buy",
+      "notional": 183.76,
+      "qty": 0.515878363,
+      "price": 356.208,
+      "pct_eq": 0.188,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:46:58.939497+00:00",
+      "symbol": "GTLB",
+      "side": "buy",
+      "notional": 187.02,
+      "qty": 4.395299647,
+      "price": 42.55,
+      "pct_eq": 0.191,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:46:50.391160+00:00",
+      "symbol": "PATH",
+      "side": "buy",
+      "notional": 187.26,
+      "qty": 11.439218081,
+      "price": 16.37,
+      "pct_eq": 0.192,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:42:34.744931+00:00",
+      "symbol": "SN",
+      "side": "buy",
+      "notional": 180.55,
+      "qty": 0.952499024,
+      "price": 189.554,
+      "pct_eq": 0.185,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:42:22.022368+00:00",
+      "symbol": "GPC",
+      "side": "buy",
+      "notional": 182.98,
+      "qty": 1.35414354,
+      "price": 135.126,
+      "pct_eq": 0.187,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:42:10.852708+00:00",
+      "symbol": "ABNB",
+      "side": "buy",
+      "notional": 183.25,
+      "qty": 0.991065537,
+      "price": 184.902,
+      "pct_eq": 0.188,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:37:41.957257+00:00",
+      "symbol": "RBRK",
+      "side": "buy",
+      "notional": 367.65,
+      "qty": 3.528649582,
+      "price": 104.19,
+      "pct_eq": 0.376,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:37:32.503558+00:00",
+      "symbol": "HRB",
+      "side": "buy",
+      "notional": 353.02,
+      "qty": 6.669563574,
+      "price": 52.93,
+      "pct_eq": 0.361,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-14 13:37:15.711675+00:00",
+      "symbol": "SHOP",
+      "side": "buy",
+      "notional": 291.51,
+      "qty": 1.851633065,
+      "price": 157.434,
+      "pct_eq": 0.298,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 19:01:55.953370+00:00",
+      "symbol": "WDAY",
+      "side": "buy",
+      "notional": 2448.54,
+      "qty": 11.741151079,
+      "price": 208.543436,
+      "pct_eq": 2.507,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 17:18:11.062605+00:00",
+      "symbol": "SE",
+      "side": "buy",
+      "notional": 103.96,
+      "qty": 0.843256221,
+      "price": 123.284,
+      "pct_eq": 0.106,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 16:29:49.400245+00:00",
+      "symbol": "TPG",
+      "side": "buy",
+      "notional": 130.93,
+      "qty": 2.523708558,
+      "price": 51.88,
+      "pct_eq": 0.134,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 16:12:03.557411+00:00",
+      "symbol": "ABNB",
+      "side": "buy",
+      "notional": 239.1,
+      "qty": 1.305658399,
+      "price": 183.126,
+      "pct_eq": 0.245,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 16:07:42.700019+00:00",
+      "symbol": "MU",
+      "side": "buy",
+      "notional": 202.26,
+      "qty": 0.209725384,
+      "price": 964.404,
+      "pct_eq": 0.207,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 15:32:03.039351+00:00",
+      "symbol": "COMP",
+      "side": "buy",
+      "notional": 171.22,
+      "qty": 13.17076923,
+      "price": 13.0,
+      "pct_eq": 0.175,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 15:29:08.667003+00:00",
+      "symbol": "TXG",
+      "side": "buy",
+      "notional": 235.64,
+      "qty": 3.993221487,
+      "price": 59.01,
+      "pct_eq": 0.241,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 15:00:36.747440+00:00",
+      "symbol": "MPC",
+      "side": "buy",
+      "notional": 124.3,
+      "qty": 0.354901524,
+      "price": 350.238,
+      "pct_eq": 0.127,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:57:33.341982+00:00",
+      "symbol": "PAYC",
+      "side": "buy",
+      "notional": 203.88,
+      "qty": 0.9655695,
+      "price": 211.15,
+      "pct_eq": 0.209,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:53:37.961166+00:00",
+      "symbol": "PFE",
+      "side": "buy",
+      "notional": 3.82,
+      "qty": 0.144161823,
+      "price": 26.498,
+      "pct_eq": 0.004,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:50:39.432472+00:00",
+      "symbol": "SPCX",
+      "side": "buy",
+      "notional": 77.32,
+      "qty": 0.53599157,
+      "price": 144.256,
+      "pct_eq": 0.079,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:50:19.223841+00:00",
+      "symbol": "VSEC",
+      "side": "buy",
+      "notional": 195.64,
+      "qty": 0.810922837,
+      "price": 241.256,
+      "pct_eq": 0.2,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:49:42.892467+00:00",
+      "symbol": "TEAM",
+      "side": "buy",
+      "notional": 129.89,
+      "qty": 0.830732431,
+      "price": 156.356,
+      "pct_eq": 0.133,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:47:26.081607+00:00",
+      "symbol": "SN",
+      "side": "buy",
+      "notional": 210.1,
+      "qty": 1.124672126,
+      "price": 186.81,
+      "pct_eq": 0.215,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:47:00.927513+00:00",
+      "symbol": "GPC",
+      "side": "buy",
+      "notional": 211.27,
+      "qty": 1.577418728,
+      "price": 133.934,
+      "pct_eq": 0.216,
+      "sleeve": "nyse"
+    },
+    {
+      "ts": "2026-08-13 13:46:48.044524+00:00",
+      "symbol": "VEEV",
+      "side": "buy",
+      "notional": 211.77,
+      "qty": 0.879860066,
+      "price": 240.686,
+      "pct_eq": 0.217,
+      "sleeve": "nyse"
+    }
+  ],
+  "hist_1m_return_pct": null,
+  "map_to_live": {
+    "paper_median_buy_pct_eq": 2.373,
+    "live_clip_at_same_pct": 7.31,
+    "paper_per_name_cap_env": 0.025,
+    "live_at_2_5pct": 7.7,
+    "paper_nyse_cap_env": 0.2,
+    "live_nyse_at_20pct": 61.6,
+    "note": "Scale paper % of equity onto ~$308 live book"
+  },
+  "paper_env": {
+    "PAPER_NYSE_SLEEVE_CAP_PCT": "0.20",
+    "PAPER_NYSE_PER_NAME_MAX_PCT": "0.025",
+    "PAPER_NYSE_MAX_OF_SLEEVE_PCT": "0.15",
+    "PAPER_VTI_CORE_PCT": "0.40",
+    "DYNAMIC_VTI_DEFAULT_PCT": "0.45",
+    "PAPER_MAX_EQUITY_TRADES": "3"
+  }
+}

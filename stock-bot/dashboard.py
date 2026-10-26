@@ -41,6 +41,20 @@ def _inject_dashboard_css() -> None:
     st.markdown(
         """
         <style>
+        html, body, [data-testid="stAppViewContainer"], .stApp {
+            background: #0b0b0e !important;
+            color: #f2ebe0 !important;
+        }
+        [data-testid="stHeader"] { background: #0b0b0e !important; }
+        h1, h2, h3 { color: #f2ebe0 !important; font-family: Georgia, serif !important; }
+        [data-testid="stMetricValue"] { color: #f2ebe0 !important; font-variant-numeric: tabular-nums; }
+        [data-testid="stMetricLabel"] { color: #a89f91 !important; }
+        .stButton>button {
+            background: #1fa8ef !important;
+            color: #0b0b0e !important;
+            border: 0 !important;
+            font-weight: 700 !important;
+        }
         .live-trading-banner {
             background: linear-gradient(135deg, #7f0000 0%, #b91c1c 55%, #991b1b 100%);
             color: #fff;
@@ -288,8 +302,6 @@ def _load_json(path: Path) -> dict | None:
 
 def _infer_sleeve(symbol: str) -> str:
     sym = config.normalize_symbol(symbol or "")
-    if sym == config.SPY_BOT_SYMBOL:
-        return "SPY"
     if config.is_crypto(sym):
         return "Crypto"
     if config.is_metal_symbol(sym):
@@ -304,7 +316,6 @@ def _active_sleeves(heartbeat: dict) -> list[str]:
     active: list[str] = []
     checks = [
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("Crypto", "crypto_value"),
         ("NYSE", "nyse_value"),
         ("Metal", "metal_value"),
@@ -429,9 +440,9 @@ def _style_pnl_df(df: pd.DataFrame):
         if pd.isna(val):
             return ""
         if val > 0:
-            return "color: #198754; font-weight: 600"
+            return "color: #7ec13a; font-weight: 600"
         if val < 0:
-            return "color: #dc3545; font-weight: 600"
+            return "color: #e23a3a; font-weight: 600"
         return ""
 
     styler = df.style
@@ -466,7 +477,7 @@ def _load_journal(limit: int = 20) -> pd.DataFrame | None:
 
 
 def _daily_table_name(symbol: str) -> str:
-    return f"{config.normalize_symbol(symbol)}_daily"
+    return f"{config.normalize_symbol(symbol)}_daily".replace(".", "_")
 
 
 def _load_daily_ohlcv(symbol: str, days: int = CHART_DAYS) -> pd.DataFrame | None:
@@ -532,7 +543,7 @@ def _build_candlestick_figure(
             y=df["MA50"],
             mode="lines",
             name="MA50",
-            line=dict(color="#fd7e14", width=1.5),
+            line=dict(color="#f4d21e", width=1.5),
         )
     )
     fig.add_trace(
@@ -541,7 +552,7 @@ def _build_candlestick_figure(
             y=df["MA200"],
             mode="lines",
             name="MA200",
-            line=dict(color="#0d6efd", width=1.5),
+            line=dict(color="#1fa8ef", width=1.5),
         )
     )
     fig.update_layout(
@@ -552,6 +563,11 @@ def _build_candlestick_figure(
         margin=dict(t=48, b=32),
         xaxis_rangeslider_visible=False,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        paper_bgcolor="#0b0b0e",
+        plot_bgcolor="#121214",
+        font=dict(color="#f2ebe0"),
+        xaxis=dict(gridcolor="#2e2c28", zerolinecolor="#2e2c28"),
+        yaxis=dict(gridcolor="#2e2c28", zerolinecolor="#2e2c28"),
     )
     return fig
 

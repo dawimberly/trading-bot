@@ -1,0 +1,885 @@
+﻿2026-07-08 16:13:37 INFO [root] logging initialized (daily rotation, 7 days)
+--- PAPER DYNAMIC VTI A/B (social/macro off, sleeve flags on) ---
+Window: 2026-04-23 -> 2026-07-08 (76 sim bars)
+VTI buy & hold benchmark: +5.72%
+Paper boost: 140%x | social 20% | PAPER_DYNAMIC_VTI default=False
+Config                         Return  Sharpe    MaxDD  AvgAct  VTIavg
+------------------------------------------------------------------------
+2026-07-08 16:14:22 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:14:22 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:14:29 ERROR [yfinance] $INHD: possibly delisted; no price data found  (period=1d)
+2026-07-08 16:15:07 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.60)
+2026-07-08 16:15:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:19 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.60)
+2026-07-08 16:15:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:33 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.57)
+2026-07-08 16:15:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:43 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.57)
+2026-07-08 16:15:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:56 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.61)
+2026-07-08 16:15:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:15:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:10 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.62)
+2026-07-08 16:16:11 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:11 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:23 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.66)
+2026-07-08 16:16:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:45 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.66)
+2026-07-08 16:16:46 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:46 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:58 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.66)
+2026-07-08 16:16:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:16:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:13 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.72)
+2026-07-08 16:17:13 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:24 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.73)
+2026-07-08 16:17:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:40 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.62)
+2026-07-08 16:17:41 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:41 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:56 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.76)
+2026-07-08 16:17:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:17:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:18:16 INFO [modules.opportunistic_short_sleeve] Short triggered: RHYME_E + vix_31.0_rising + waived (bubble=0.77)
+2026-07-08 16:18:16 INFO [modules.opportunistic_short_sleeve] SHORT OPEN SPY $401 regime=RHYME_E: Steady_Bearish_Decline bubble=0.77 vix=31.0 trigger=RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064|streak=2
+2026-07-08 16:18:16 INFO [modules.opportunistic_short_sleeve] SHORT OPEN QQQ $282 regime=RHYME_E: Steady_Bearish_Decline bubble=0.77 vix=31.0 trigger=RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064|streak=2
+2026-07-08 16:18:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:18:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:18:43 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.77)
+2026-07-08 16:18:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:18:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:19:05 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.77)
+2026-07-08 16:19:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:19:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:19:17 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.77)
+2026-07-08 16:19:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:19:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:19:38 INFO [modules.opportunistic_short_sleeve] SHORT CLOSE SPY reason=stop_loss regime=RHYME_E: Steady_Bearish_Decline notional=411.61 hold=4 frac=100%
+2026-07-08 16:19:39 INFO [modules.opportunistic_short_sleeve] SHORT CLOSE QQQ reason=stop_loss regime=RHYME_E: Steady_Bearish_Decline notional=289.76 hold=4 frac=100%
+2026-07-08 16:19:39 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.65)
+2026-07-08 16:19:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:19:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:20:01 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.62)
+2026-07-08 16:20:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:20:02 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:20:18 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.62)
+2026-07-08 16:20:18 INFO [modules.market_context] REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:20:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:20:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:20:47 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:20:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:20:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:21:56 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:21:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:21:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:22:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:22:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:22:26 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:22:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:22:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:23:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:23:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:24:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:24:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:24:44 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:24:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:24:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:25:04 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:25:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:25:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:25:40 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:25:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:25:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:26:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:26:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:26:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:26:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:27:11 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:27:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:27:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:27:24 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:27:54 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:27:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:27:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:28:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:28:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:28:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:28:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:28:59 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:29:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:29:03 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:29:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:29:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:29:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:29:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:30:13 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:30:13 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:30:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:30:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:30:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:30:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:22 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:32 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:32 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:38 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:38 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:39 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 177, in write_json_atomic
+    with open(tmp, "w", encoding="utf-8") as f:
+         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+PermissionError: [Errno 13] Permission denied: 'data\\exit_events.json.tmp'
+2026-07-08 16:31:39 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:31:39 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:31:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:49 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:31:49 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:31:50 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:31:54 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:31:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:31:56 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:31:56 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:32:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:32:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:02 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:33:03 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:03 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:07 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:33:15 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:33:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:24 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:33:25 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:33:25 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:33:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:33:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:12 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:12 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:36 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:44 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:34:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:54 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:54 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:34:59 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:11 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:11 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:27 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:35:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:46 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:35:50 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:13 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:36:13 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:17 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:36:30 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:36:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:31 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:46 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:46 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:36:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:13 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:52 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:52 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:56 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:37:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:37:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:04 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:04 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:10 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:10 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:10 ERROR [yfinance] $INHD: possibly delisted; no price data found  (period=1d)
+2026-07-08 16:38:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:22 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:22 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:50 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:38:50 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:38:50 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:01 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:39:01 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:39:01 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:39:01 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:39:01 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:39:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:20 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:39:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:47 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:39:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:39:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:15 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:40:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:54 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:40:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:40:56 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:40:56 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:40:56 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:40:56 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:40:57 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:40:57 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:28 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:41:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:41:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:01 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:42:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:42:49 INFO [modules.stat_arb_sleeve] stat arb exit executed
+Fixed 40% core (paper)        +11.21%    2.35   -2.01%   60.1%   39.9%
+2026-07-08 16:42:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:42:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:13 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.60)
+2026-07-08 16:43:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:17 ERROR [yfinance] $INHD: possibly delisted; no price data found  (period=1d)
+2026-07-08 16:43:28 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.60)
+2026-07-08 16:43:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:34 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.57)
+2026-07-08 16:43:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:41 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.57)
+2026-07-08 16:43:41 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:41 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:54 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.61)
+2026-07-08 16:43:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:43:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:03 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.62)
+2026-07-08 16:44:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:14 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.66)
+2026-07-08 16:44:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:24 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.66)
+2026-07-08 16:44:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:26 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:39 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.66)
+2026-07-08 16:44:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:47 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.72)
+2026-07-08 16:44:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:54 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.73)
+2026-07-08 16:44:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:44:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:08 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.62)
+2026-07-08 16:45:09 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:09 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:19 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.76)
+2026-07-08 16:45:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:26 INFO [modules.opportunistic_short_sleeve] Short triggered: RHYME_E + vix_31.0_rising + waived (bubble=0.77)
+2026-07-08 16:45:26 INFO [modules.opportunistic_short_sleeve] SHORT OPEN SPY $396 regime=RHYME_E: Steady_Bearish_Decline bubble=0.77 vix=31.0 trigger=RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064|streak=2
+2026-07-08 16:45:27 INFO [modules.opportunistic_short_sleeve] SHORT OPEN QQQ $279 regime=RHYME_E: Steady_Bearish_Decline bubble=0.77 vix=31.0 trigger=RHYME_E|waived|vix_31.0_rising|bubble=0.77|depth=0.064|streak=2
+2026-07-08 16:45:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:36 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.77)
+2026-07-08 16:45:37 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:37 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:45 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.77)
+2026-07-08 16:45:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:55 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù bear_streak (bubble=0.77)
+2026-07-08 16:45:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:45:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:46:06 INFO [modules.opportunistic_short_sleeve] SHORT CLOSE SPY reason=stop_loss regime=RHYME_E: Steady_Bearish_Decline notional=406.2 hold=4 frac=100%
+2026-07-08 16:46:06 INFO [modules.opportunistic_short_sleeve] SHORT CLOSE QQQ reason=stop_loss regime=RHYME_E: Steady_Bearish_Decline notional=285.94 hold=4 frac=100%
+2026-07-08 16:46:06 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.65)
+2026-07-08 16:46:09 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:46:09 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:46:20 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.62)
+2026-07-08 16:46:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:46:20 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=44)
+2026-07-08 16:46:34 INFO [modules.opportunistic_short_sleeve] Short scan rejected: RHYME_E ù vix_not_rising (bubble=0.62)
+2026-07-08 16:46:34 INFO [modules.market_context] REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_E: Steady_Bearish_Decline -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:46:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:46:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:46:57 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:46:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:46:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:16 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:47:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:26 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:47:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:47:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:03 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:03 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:20 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:48:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:35 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:48:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:45 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:48:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:48:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:23 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:49:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:25 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:49:37 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:49:38 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:54 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:49:54 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:50:11 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:50:11 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:50:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:50:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:50:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:50:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:51:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:51:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:51:36 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:51:37 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:51:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:51:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:52:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:52:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:52:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:52:27 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:52:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:52:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:13 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:24 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:30 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:53:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:31 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:53 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:53 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:59 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:53:59 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:04 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:04 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:15 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:46 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:54:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:54:50 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:04 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:55:08 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:08 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:18 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:55:18 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:55:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:25 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:38 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:38 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:55:55 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:07 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:10 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:56:10 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:56:10 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:56:19 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 16:56:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:29 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:39 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:40 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:57 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:56:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:57:12 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:57:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:57:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:57:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:57:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:57:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:57:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:00 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:28 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 16:58:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:28 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:29 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 16:58:35 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 16:58:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:36 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:45 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:52 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:58:53 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:16 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:44 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:47 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:59:47 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 16:59:52 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 16:59:52 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:01 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 17:00:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:05 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:09 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:09 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:12 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:12 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:13 ERROR [yfinance] $INHD: possibly delisted; no price data found  (period=1d)
+2026-07-08 17:00:22 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:32 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:42 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:00:58 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:01:13 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 17:01:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:01:14 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:01:33 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:01:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:01:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:01:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:02 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 17:02:02 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:02 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:36 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:36 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:51 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 17:02:51 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:02:52 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:06 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:08 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 5] Access is denied: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:03:08 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+FileNotFoundError: [WinError 2] The system cannot find the file specified: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:03:08 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:03:08 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:03:08 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:03:17 INFO [modules.market_context] REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral
+--- REGIME CHANGE: RHYME_C: Steady_Bullish_Growth -> RHYME_D: Range_Bound_Neutral ---
+2026-07-08 17:03:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:17 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:35 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:43 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:48 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:03:49 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:02 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:03 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:18 INFO [modules.stat_arb_sleeve] stat arb entry executed
+2026-07-08 17:04:18 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:19 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:47 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:04:50 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:04:50 WARNING [modules.safe_io] Atomic write failed for data\exit_events.json
+Traceback (most recent call last):
+  File "C:\Users\Owner\PythonTrading\stock-bot\modules\safe_io.py", line 179, in write_json_atomic
+    os.replace(tmp, path)
+    ~~~~~~~~~~^^^^^^^^^^^
+PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: 'data\\exit_events.json.tmp' -> 'data\\exit_events.json'
+2026-07-08 17:05:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:01 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:12 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:12 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:13 ERROR [yfinance] $INHD: possibly delisted; no price data found  (period=1d)
+2026-07-08 17:05:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:23 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:41 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:41 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:55 INFO [modules.market_context] REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth
+--- REGIME CHANGE: RHYME_D: Range_Bound_Neutral -> RHYME_C: Steady_Bullish_Growth ---
+2026-07-08 17:05:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:05:56 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:08 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:08 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:21 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:30 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:34 INFO [modules.insider_signal_handler] Insider signal boost: 0 strong clusters, 2 short candidates (bubble=32)
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+2026-07-08 17:06:39 INFO [modules.stat_arb_sleeve] stat arb exit executed
+Smart Dynamic VTI (paper)     +16.92%    2.79   -2.76%   28.3%   71.7%
+------------------------------------------------------------------------

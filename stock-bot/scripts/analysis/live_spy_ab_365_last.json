@@ -1,0 +1,63 @@
+{
+  "generated_at": "2026-07-29 17:28 UTC",
+  "days": 365,
+  "window": "2025-09-23 -> 2026-07-29",
+  "benchmark_return_pct": 12.604490848017003,
+  "profile": "live_conservative",
+  "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+  "disclaimer": "STRICT live-shaped research only; do not change live Profile A until 365d confirms",
+  "promote_rule": {
+    "return_and_sharpe_beat_baseline": true,
+    "max_dd_worse_pp_max": 1.0
+  },
+  "legs": [
+    {
+      "name": "spy_on",
+      "config": "Live Conservative: 85% VTI + 5% SPY trend",
+      "notes": "current live default (SPY active sleeve ON)",
+      "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+      "ok": true,
+      "return_pct": 15.45,
+      "sharpe": 1.24,
+      "max_dd_pct": -7.97,
+      "trade_count": 14,
+      "spy_fills": 2,
+      "nyse_fills": 1,
+      "leg": {
+        "name": "spy_on",
+        "config_label": "Live Conservative: 85% VTI + 5% SPY trend",
+        "notes": "current live default (SPY active sleeve ON)",
+        "active_sleeve": "spy",
+        "spy_cap": null
+      },
+      "error": null,
+      "strict_pit": true,
+      "live_banner": "Live Conservative 85%/10%: 85% VTI | 5% SPY trend | 10% NYSE/active | GARCH OFF | ATR/exits/corr/tail ON | scanners/shorts/stat-arb OFF | 1% risk | $10 max/order"
+    },
+    {
+      "name": "spy_off",
+      "config": "Live Conservative: 85% VTI + 5% cash (SPY cap=0)",
+      "notes": "SPY satellite OFF; cash buffer instead of SPY trend",
+      "strict_pit_banner": "STRICT PIT: ON | insider/RVOL/catalyst/news/LLM/dyn_univ/buffett-fallback off",
+      "ok": true,
+      "return_pct": 15.45,
+      "sharpe": 1.25,
+      "max_dd_pct": -7.97,
+      "trade_count": 15,
+      "spy_fills": 0,
+      "nyse_fills": 1,
+      "leg": {
+        "name": "spy_off",
+        "config_label": "Live Conservative: 85% VTI + 5% cash (SPY cap=0)",
+        "notes": "SPY satellite OFF; cash buffer instead of SPY trend",
+        "active_sleeve": "cash",
+        "spy_cap": 0.0
+      },
+      "error": null,
+      "strict_pit": true,
+      "live_banner": "Live Conservative 85%/10%: 85% VTI | 5% SPY trend | 10% NYSE/active | GARCH OFF | ATR/exits/corr/tail ON | scanners/shorts/stat-arb OFF | 1% risk | $10 max/order"
+    }
+  ],
+  "verdict": "spy_off +15.45% Sharpe 1.25 MaxDD -7.97% SPY fills 0 vs spy_on +15.45% Sharpe 1.24 (+0.00pp ret). spy_off did not clear return+Sharpe+MaxDD rule \u2014 keep live SPY trend ON. STRICT live-shaped research only; do not change live Profile A until 365d confirms",
+  "ok": true
+}

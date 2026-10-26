@@ -1,0 +1,8 @@
+# Isolated lab environment. Do not install this into the bots' environment.
+# Versions that published Windows wheels for Python 3.14.
+streamlit==1.66.0
+pandas==3.0.6
+numpy==2.5.4
+# Frozen membership imports stock-bot config, which imports dotenv. Lab venv only.
+python-dotenv==1.2.4
+alpaca-py==0.44.0

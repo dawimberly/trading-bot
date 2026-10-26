@@ -1,0 +1,76 @@
+Pre-Market Report — 2026-07-20 00:04:54 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 39128). First heartbeat may take up to 60s. | Stopped 5 orphan bot process(es).
+Heartbeat age: 3834.267815s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • ATR sizing active (SPY probe)
+  • Strong insider clusters (2)
+  • Sharpe 30d improving (-0.38→0.24)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 34/100
+
+=== Insider Signals (top 3) ===
+• Keenova Therapeutics plc | cluster_buy | s100 $8.5M — Cluster buy: 9 insiders purchased Keenova Therapeutics 
+• MNKD | cluster_buy | s98 $2.4M — Cluster buy: 4 insiders purchased MANNKIND CORP ($2.4M 
+• MPLT | executive_sell | s94 $5.4M — CEO sale - MapLight Therapeutics, Inc. ($5.4M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 28 returned
+
+Top signals (up to 5)
+  Keenova Therapeutics plc cluster_buy      score=100  Cluster buy: 9 insiders purchased Keenova Therapeutics plc (
+  MNKD   cluster_buy      score= 98  Cluster buy: 4 insiders purchased MANNKIND CORP ($2.4M total
+  MPLT   executive_sell   score= 94  CEO sale - MapLight Therapeutics, Inc. ($5.4M)
+  VXRT   cluster_buy      score= 88  Cluster buy: 4 insiders purchased Vaxart, Inc.
+  LYEL   executive_sell   score= 84  CEO sale - Lyell Immunopharma, Inc. ($137)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: MNKD (4 insiders), VXRT (4 insiders); exec sells -> short watch: M
+
+Applied boosts
+  momentum  MNKD: +0.180
+  momentum  VXRT: +0.180
+  stat_arb  MNKD: x1.150
+  stat_arb  VXRT: x1.150
+  short     MPLT: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 34.3
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 3 | Quality signals: 28 | Boost: 2 clusters, 2 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

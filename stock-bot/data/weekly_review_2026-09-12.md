@@ -1,0 +1,105 @@
+# Paper Weekly Research — 2026-09-12
+
+_Paper book only. Never auto-applies `.env`. Live Profile A is read-only here._
+
+## Executive Decision
+**HOLD** — Monitor only — data too sparse (grade C, 0 closes); track `PAPER_RISK_PER_TRADE=0.02` until grade B+ and 90d A/B.
+
+Treatment under review: `PAPER_RISK_PER_TRADE=0.02` · _monitor only_
+
+## Mandate
+**Score: UNRELIABLE (data quality C)** · lookback 7d · regime `unknown`
+_Insufficient closed trades for strong mandate (0/5 closes, grade C) — use mark-to-market attribution below._
+
+| Target | Threshold | Actual |
+|--------|-----------|--------|
+| Ann. Sharpe | ≥ 1.0 | n/a |
+| Max DD | ≤ 15.0% | n/a |
+| 7d return | ≥ 0.5% | n/a |
+| Closed trades | ≥ 5 | 0 |
+Miss: Data grade C — do not trust mandate score this week
+
+## Data Quality
+**Grade C** · source `none`
+| Grade | Criteria | Mandate usable? |
+|-------|----------|-----------------|
+| **A** | ≥4 clean days, 0 equity jumps, ≥5 closed trades | Yes |
+| **B** | ≥4 days, ≤2 jumps after filter, trades may be sparse | Yes (cautious) |
+| **C** | Missing equity, <2 days, or noisy/unfiltered | **No** |
+
+Observations: 0 clean / 0 raw · jumps removed: 0 · method: EOD equity, √252 Sharpe, single-factor rule
+- Insufficient clean equity observations.
+
+## Performance (7d, cleaned)
+| | |
+|--|--|
+| Equity | n/a → n/a |
+| Return | n/a |
+| Sharpe / Sortino | n/a / n/a |
+| Max DD | n/a |
+| Closed trades | 0 (WR n/a, exp n/a) |
+| Daily hit rate | n/a |
+
+**Key Observations**
+- Insufficient closed trades for strong mandate (0 closes, grade C).
+- No closed trades in 7d — sleeve ranks use mark-to-market only.
+- No NYSE closed trades in 7d window.
+
+## Markov HMM regime
+
+- Markov HMM: OFF
+
+
+## Sleeve Attribution (mark-to-market)
+_Realized closes sparse — contrib = realized + unrealized from heartbeat._
+Best **n/a** (+0) · Worst **n/a** (+0)
+
+| Sleeve | Realized | Unrealized | Contrib | Cls | Src |
+|--------|----------|------------|---------|-----|-----|
+
+## NYSE Entry Quality
+`PAPER_MOMENTUM_QUALITY_FIXES`=off · 7d NYSE exits: 0 (0 with `entry_hour`)
+
+| Window (ET) | Trades | Win% | Avg PnL |
+|-------------|--------|------|---------|
+| 9:30–10:00 open-chase | 0 | n/a | n/a |
+| 12:00–14:00 midday | 0 | n/a | n/a |
+365d intraday sim (memo): Δreturn n/a pp · ΔSharpe 0.03
+- No journal — NYSE hour stats unavailable; see intraday research memo.
+
+## Live vs Paper Delta
+_Read-only. Does not modify live._
+
+| Book | 7d return | Sharpe | Equity | Source |
+|------|-----------|--------|--------|--------|
+| Paper | n/a | n/a | n/a | none |
+| Live | -0.27% | -0.86 | 302 | paper_journal.csv |
+- Paper book journal missing.
+
+## Hypothesis (single factor)
+**Proposed change:** `PAPER_RISK_PER_TRADE=0.02` (current `0.015`)
+**Rationale:** Single factor under investigation: overall sleeve is the weakest 7d contributor (contrib=+0.00).
+**Mechanism:** Tighten `PAPER_RISK_PER_TRADE` from 0.015 → 0.02 to change that sleeve's capital allocation while holding all other policy constants fixed.
+**Status: Data too sparse — monitor only.** Do not apply without grade B+ data and a passing 90d A/B.
+
+## Controlled Experiment (90d paper-aggressive A/B)
+| Metric | Baseline | Treatment | Δ |
+|--------|----------|-----------|---|
+| Return | 0.58% | 0.58% | 0.00 pp |
+| Sharpe | 0.30 | 0.30 | 0.00 |
+| Max DD | -3.00% | -3.00% | 0.00 pp |
+
+## Recommendation
+**HOLD** — Effect size mixed / within noise (ΔReturn=+0.00pp, ΔSharpe=+0.00, Δ|DD|=+0.00pp.) Gather another week of clean data. Caveats: data grade C; thin closed-trade sample; mandate unreliable.
+
+## Implementation (paper only)
+**Monitor only** — no `.env` change this week.
+- Watch: `PAPER_RISK_PER_TRADE=0.02`
+- Promote only after grade B+, ≥5 closed trades, and 90d A/B APPROVE.
+- Do **not** copy to live.
+
+## Appendix
+**Notes:**
+- Insufficient sleeve contribution for ranking.
+
+<!-- advisory only; never auto-apply -->

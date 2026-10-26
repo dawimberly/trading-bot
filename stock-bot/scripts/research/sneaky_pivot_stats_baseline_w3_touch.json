@@ -1,0 +1,30 @@
+{
+  "tag": "baseline_w3_touch",
+  "days": 90,
+  "confirm_window": 3,
+  "fill": "touch",
+  "stretch": false,
+  "symbols": [
+    "SPY",
+    "QQQ",
+    "IWM",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "BRK.B"
+  ],
+  "trades": 152,
+  "wins": 85,
+  "losses": 67,
+  "win_rate": 0.5592105263157895,
+  "total_pnl": 2466.325714401959,
+  "avg_r": 0.016066108344701714,
+  "median_r": 0.007949478575953572,
+  "max_dd_pct": -0.4502065099262533,
+  "final_equity": 102466.32571440196,
+  "signals": 152,
+  "skipped_no_levels": 141,
+  "skipped_no_touch": 132,
+  "notes": [],
+  "equity_last": 102360.98581174045
+}

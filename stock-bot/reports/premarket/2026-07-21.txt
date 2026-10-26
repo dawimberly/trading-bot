@@ -1,0 +1,76 @@
+Pre-Market Report — 2026-07-21 00:38:39 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 2744). First heartbeat may take up to 60s. | Stopped 5 orphan bot process(es).
+Heartbeat age: 3642.892699s
+Equity: $96,891.32
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • Sharpe 30d improving (-0.93→-0.15)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 33/100
+
+=== Insider Signals (top 3) ===
+• SN | executive_sell | s99 $38.8M — CEO sale - SharkNinja, Inc. ($38.8M)
+• QTTB | cluster_buy | s81 — Cluster buy: 3 insiders purchased Q32 Bio Inc.
+• SYNA | executive_sell | s78 $211K — executive sale - SYNAPTICS Inc ($211K)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 19 returned
+
+Top signals (up to 5)
+  SN     executive_sell   score= 99  CEO sale - SharkNinja, Inc. ($38.8M)
+  QTTB   cluster_buy      score= 81  Cluster buy: 3 insiders purchased Q32 Bio Inc.
+  SYNA   executive_sell   score= 78  executive sale - SYNAPTICS Inc ($211K)
+  NRDY   executive_sell   score= 78  CFO sale - Nerdy Inc. ($30K)
+  NRDY   executive_sell   score= 78  executive sale - Nerdy Inc. ($26K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: SN T1; cluster buys: QTTB (3 insiders); exec sells -> short watc
+
+Applied boosts
+  momentum  QTTB: +0.180
+  stat_arb  QTTB: x1.150
+  short     SN: base=0.420 role=ceo
+  short     SYNA: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 33.4
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 1 | Quality signals: 19 | Boost: 1 clusters, 2 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

@@ -1,0 +1,49 @@
+=== Yield Gate Analysis ===
+
+Theory (modules/macro_signals.yield_gate_blocks):
+  - Primary: TNX > MA50 AND TNX > TNX[t-5]  (10Y rising above trend)
+  - Fallback: TLT below MA50 (bond_stress) when TNX unavailable
+  - Live: raw gate blocks SPY / NYSE / sleeves when True
+  - Paper (PAPER_YIELD_GATE_OVERRIDE=true): raw gate only blocks in RHYME_B/E (panic/bear); mild rate stress is softened
+
+Config: YIELD_GATE_ENABLED=True | PAPER_YIELD_GATE_OVERRIDE=True | GAME_PLAN_YIELD_GATE_ONLY=True
+Sample bars evaluated: 365 | data end=2026-07-23
+
+--- Window 90d (n=90) ---
+  Raw gate ON:            43  ( 47.8% of days)
+  Bond stress ON:         48  ( 53.3%)
+  Hard regime days:        5  (  5.6%)
+  Effective LIVE block:   43  ( 47.8%)  [≈ SPY new-buy block rate]
+  Effective PAPER block:   3  (  3.3%)  [override softens 44.4% of days]
+
+--- Window 365d (n=252) ---
+  Raw gate ON:           115  ( 45.6% of days)
+  Bond stress ON:        150  ( 59.5%)
+  Hard regime days:       63  ( 25.0%)
+  Effective LIVE block:  115  ( 45.6%)  [≈ SPY new-buy block rate]
+  Effective PAPER block:  29  ( 11.5%)  [override softens 34.1% of days]
+
+--- Window full (n=365) ---
+  Raw gate ON:           129  ( 35.3% of days)
+  Bond stress ON:        165  ( 45.2%)
+  Hard regime days:       92  ( 25.2%)
+  Effective LIVE block:  129  ( 35.3%)  [≈ SPY new-buy block rate]
+  Effective PAPER block:  32  (  8.8%)  [override softens 26.6% of days]
+
+90d raw-gate days by regime:
+   29  RHYME_C: Steady_Bullish_Growth
+   11  RHYME_D: Range_Bound_Neutral
+    3  RHYME_E: Steady_Bearish_Decline
+
+=== Assessment ===
+Raw gate is ON 48% of recent days — fairly active / potentially over-conservative for live.
+Paper effective block ~3.3% vs live ~47.8% (override removes ~44.4pp of blocks).
+
+Tuning suggestions (if over-conservative):
+  1. Keep PAPER_YIELD_GATE_OVERRIDE=true (already softens mild stress) — DONE for paper.
+  2. Require larger TNX rise: e.g. TNX > MA50 * 1.02 OR rise over 10 bars instead of 5 (reduces whipsaw).
+  3. Live-only: add LIVE_YIELD_GATE_SOFT=true to mirror paper soft-override outside RHYME_B/E (optional; currently live stays hard).
+  4. Do NOT disable YIELD_GATE_ENABLED entirely — historical yield_gate_only A/B improved max DD vs baseline (see README game-plan table).
+
+Log scan: 7 'yield_gate' mentions in recent analysis/logs files.
+Live alert_state yield_gate_active=False

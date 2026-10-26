@@ -1,0 +1,2 @@
+Paper-only experiment for this morning (do not touch live):
+Paper-only: gate new NYSE entries when regime is RHYME_D (allow manages/exits only); measure fill count and DD vs baseline.

@@ -3079,6 +3079,36 @@ def _build_reasoning_user_prompt(market_summary: dict) -> str:
     )
     if len(news_text) > 1200:
         news_text = news_text[:1200] + "\n...(truncated for prompt size)"
+    sector_laggards = ", ".join(
+        f"{row['sector']} {float(row['change_5d_pct']):+.1f}%"
+        for row in (market_summary.get("sector_laggards") or [])
+    ) or "n/a"
+    news_block = ""
+    if market_summary.get("news_headlines"):
+        news_impact = float(market_summary.get("news_impact_score") or 0.0)
+        if news_impact >= 0.35:
+            impact_guidance = (
+                "HIGH-IMPACT NEWS: move at most 3 sleeves vs prior day (strict live cap). "
+                "Rank by conviction: keep VTI/cash barbell, SPY liquidity, NYSE energy as custodians; "
+                "merge smaller sleeve nudges into those three (e.g. gold->cash, crypto->SPY, metal->cash).\n"
+            )
+        elif news_impact >= 0.25:
+            impact_guidance = (
+                "When news_impact_score >= 0.25, prefer <=3 sleeve moves — consolidate minor tilts.\n"
+            )
+        else:
+            impact_guidance = ""
+        ai_context = market_summary.get(
+            "news_ai_tech_context"
+        ) or market_summary.get("ai_cycle_phase", "n/a")
+        news_block = (
+            f"Scheduled news digest ({market_summary.get('news_slot') or 'scheduled'}):\n"
+            f"{news_text}\n"
+            f"Use news_impact_score={news_impact:.2f} "
+            "to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
+            f"{impact_guidance}"
+            f"AI/tech boom context: {ai_context}\n"
+        )
 
     return f"""Current market snapshot:
 
@@ -3086,7 +3116,7 @@ Objective: beat VTI on risk-adjusted basis (Sharpe first). Passive VTI is the be
 
 AI/Tech cycle phase (heuristic): {market_summary.get('ai_cycle_phase', 'unknown')}
 Sector leadership (5d): {market_summary.get('sector_leadership', 'n/a')}
-Sector laggards: {', '.join(f"{r['sector']} {float(r['change_5d_pct']):+.1f}%" for r in (market_summary.get('sector_laggards') or [])) or 'n/a'}
+Sector laggards: {sector_laggards}
 
 Vol overlay regime: {market_summary.get('vol_overlay_regime', _vol_overlay_regime(market_summary))}
 Stat arb regime: {market_summary.get('stat_arb_regime', _stat_arb_regime(market_summary))}
@@ -3108,31 +3138,7 @@ Insider / filings (SEC RSS): {market_summary.get('insider_summary', 'n/a')}
 Options / unusual activity: {market_summary.get('options_flow_summary', 'n/a')}
 Short interest: {market_summary.get('short_interest_summary', 'n/a')}
 Catalyst watchlist (RVOL/ORB/news): {market_summary.get('catalyst_summary', 'n/a')}
-{(
-    "Scheduled news digest ("
-    + str(market_summary.get("news_slot") or "scheduled")
-    + "):\n"
-    + news_text
-    + "\nUse news_impact_score="
-    + f"{float(market_summary.get('news_impact_score') or 0.0):.2f}"
-    + " to scale tilt conviction (0=ignore headlines, 1=strong evidence).\n"
-    + (
-        "HIGH-IMPACT NEWS: move at most 3 sleeves vs prior day (strict live cap). "
-        "Rank by conviction: keep VTI/cash barbell, SPY liquidity, NYSE energy as custodians; "
-        "merge smaller sleeve nudges into those three (e.g. gold->cash, crypto->SPY, metal->cash).\n"
-        if float(market_summary.get("news_impact_score") or 0.0) >= 0.35
-        else (
-            "When news_impact_score >= 0.25, prefer <=3 sleeve moves — consolidate minor tilts.\n"
-            if float(market_summary.get("news_impact_score") or 0.0) >= 0.25
-            else ""
-        )
-    )
-    + "AI/tech boom context: "
-    + str(market_summary.get("news_ai_tech_context") or market_summary.get("ai_cycle_phase", "n/a"))
-    + "\n"
-    if market_summary.get("news_headlines")
-    else ""
-)}
+{news_block}
 Bot exposure: {market_summary.get('bot_exposure_str', 'n/a')}
 
 Previous day tilt: {prev_line}

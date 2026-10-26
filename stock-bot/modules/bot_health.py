@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import time
 from typing import Any
 
@@ -19,6 +20,25 @@ _EXCESS_NO_ROOM_PCT = 30.0
 _AUX_CACHE_TTL_SEC = 300.0
 
 _AUX_CACHE: dict[str, tuple[float, Any]] = {}
+_STALE_HEARTBEAT_MIN = 15.0
+
+
+def _heartbeat_age_minutes(hb: dict[str, Any] | None) -> float | None:
+    if not hb:
+        return None
+    raw = hb.get("timestamp") or hb.get("ts") or hb.get("last_cycle_at")
+    if not raw:
+        return None
+    try:
+        ts = dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        now = dt.datetime.now(ts.tzinfo) if ts.tzinfo else dt.datetime.now()
+        if ts.tzinfo and now.tzinfo is None:
+            now = now.replace(tzinfo=ts.tzinfo)
+        elif ts.tzinfo is None and now.tzinfo is not None:
+            now = now.replace(tzinfo=None)
+        return max(0.0, (now - ts).total_seconds() / 60.0)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def _clamp_score(raw: float) -> int:
@@ -86,6 +106,11 @@ def _scanner_health_snapshot() -> dict[str, Any]:
     }
     if quiet or not snap["scanners_on"]:
         return snap
+    # The paper supervisor prints this banner before it spawns the engine.
+    # A live Yahoo scan there blocks startup and never reaches the watchdog.
+    skip = os.getenv("BOT_HEALTH_SKIP_LIVE_SCAN", "").strip().lower()
+    if skip in ("1", "true", "yes", "on"):
+        return snap
     try:
         from modules.pipeline_strategies import load_pipeline_data
 
@@ -100,26 +125,43 @@ def _scanner_health_snapshot() -> dict[str, Any]:
         ][:18]
         if cols:
             data = data[cols]
+        # One shared budget so the startup banner cannot outlast the watchdog.
+        budget_end = time.monotonic() + 12.0
+
+        def _left() -> float:
+            return max(0.0, budget_end - time.monotonic())
+
         if config.effective_rvol_scanner_enabled():
             from modules.volume_analysis import get_high_rvol_stocks
 
             snap["rvol_hits"] = len(
                 get_high_rvol_stocks(
-                    data, min_rvol=float(config.RVOL_MIN_THRESHOLD), limit=5
+                    data,
+                    min_rvol=float(config.RVOL_MIN_THRESHOLD),
+                    limit=5,
+                    deadline_sec=_left(),
                 )
             )
         if config.effective_orb_enabled():
             from modules.volume_analysis import get_orb_signals
 
             snap["orb_hits"] = len(
-                get_orb_signals(data, minutes=int(config.ORB_BREAKOUT_MINUTES), limit=5)
+                get_orb_signals(
+                    data,
+                    minutes=int(config.ORB_BREAKOUT_MINUTES),
+                    limit=5,
+                    deadline_sec=_left(),
+                )
             )
         if config.effective_catalyst_scoring_enabled():
             from modules.catalyst_scoring import get_top_catalyst_stocks
 
             snap["catalyst_hits"] = len(
                 get_top_catalyst_stocks(
-                    data, min_score=float(config.CATALYST_MIN_SCORE), limit=5
+                    data,
+                    min_score=float(config.CATALYST_MIN_SCORE),
+                    limit=5,
+                    deadline_sec=_left(),
                 )
             )
     except Exception as exc:
@@ -314,6 +356,7 @@ def gather_health_context(
         "thinking_age_hours": thinking.get("age_hours"),
         "thinking_confidence": thinking.get("confidence"),
         "thinking_validation_score": thinking.get("validation_score"),
+        "heartbeat_age_min": _heartbeat_age_minutes(hb),
     }
 
 
@@ -346,6 +389,7 @@ def calculate_health_score(
     thinking_age_hours: float | None = None,
     thinking_confidence: float | None = None,
     thinking_validation_score: float | None = None,
+    heartbeat_age_min: float | None = None,
     **_: Any,
 ) -> dict[str, Any]:
     """
@@ -356,6 +400,8 @@ def calculate_health_score(
     Thinking engine (Ollama) contributes when enabled for the active book.
     """
     hb = hb or {}
+    if heartbeat_age_min is None:
+        heartbeat_age_min = _heartbeat_age_minutes(hb)
     reg = regime or str(hb.get("regime") or "")
     score = float(_BASE_SCORE)
     penalty_used = 0.0
@@ -553,6 +599,10 @@ def calculate_health_score(
         logger.debug("strategy performance bonus unavailable for health score: %s", exc)
 
     final = _clamp_score(score)
+    stale = heartbeat_age_min is not None and heartbeat_age_min > _STALE_HEARTBEAT_MIN
+    if stale:
+        notes.append(f"HEARTBEAT STALE ({heartbeat_age_min:.0f} min)")
+        final = min(final, 49)
     return {
         "score": final,
         "grade": _grade(final),

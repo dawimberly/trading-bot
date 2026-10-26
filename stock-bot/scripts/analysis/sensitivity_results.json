@@ -1,0 +1,965 @@
+{
+  "generated_at": "2026-07-21T18:45:51",
+  "strategies": {
+    "crypto": {
+      "strategy": "crypto_v4_mr",
+      "method": "bar_resim_one_load",
+      "trade_csv": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\research\\crypto_vol_backtest_v4_results.csv",
+      "n_baseline_trades": 59,
+      "parameters": [
+        {
+          "parameter": "rsi_lower",
+          "base_value": 32,
+          "score": 40.15,
+          "verdict": "Moderate",
+          "best_value": 26,
+          "best_sharpe": 1.94,
+          "worst_value": 42,
+          "worst_sharpe": 0.0,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 25,
+              "total_return_pct": 2.17,
+              "sharpe": 1.81,
+              "max_drawdown_pct": -1.04,
+              "win_rate_pct": 59.04,
+              "total_trades": 83
+            },
+            {
+              "value": 26,
+              "total_return_pct": 2.32,
+              "sharpe": 1.94,
+              "max_drawdown_pct": -1.04,
+              "win_rate_pct": 59.76,
+              "total_trades": 82
+            },
+            {
+              "value": 27,
+              "total_return_pct": 1.34,
+              "sharpe": 1.17,
+              "max_drawdown_pct": -1.2,
+              "win_rate_pct": 56.16,
+              "total_trades": 73
+            },
+            {
+              "value": 28,
+              "total_return_pct": 1.19,
+              "sharpe": 1.07,
+              "max_drawdown_pct": -1.2,
+              "win_rate_pct": 55.71,
+              "total_trades": 70
+            },
+            {
+              "value": 29,
+              "total_return_pct": 1.65,
+              "sharpe": 1.47,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.97,
+              "total_trades": 69
+            },
+            {
+              "value": 30,
+              "total_return_pct": 1.5,
+              "sharpe": 1.36,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.81,
+              "total_trades": 64
+            },
+            {
+              "value": 31,
+              "total_return_pct": 1.09,
+              "sharpe": 1.0,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 56.45,
+              "total_trades": 62
+            },
+            {
+              "value": 32,
+              "total_return_pct": 1.25,
+              "sharpe": 1.14,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 33,
+              "total_return_pct": 1.25,
+              "sharpe": 1.2,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 58.18,
+              "total_trades": 55
+            },
+            {
+              "value": 34,
+              "total_return_pct": 0.95,
+              "sharpe": 0.93,
+              "max_drawdown_pct": -0.97,
+              "win_rate_pct": 56.6,
+              "total_trades": 53
+            },
+            {
+              "value": 35,
+              "total_return_pct": 0.8,
+              "sharpe": 0.82,
+              "max_drawdown_pct": -0.75,
+              "win_rate_pct": 56.25,
+              "total_trades": 48
+            },
+            {
+              "value": 36,
+              "total_return_pct": 0.5,
+              "sharpe": 0.58,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 55.0,
+              "total_trades": 40
+            },
+            {
+              "value": 37,
+              "total_return_pct": 0.2,
+              "sharpe": 0.28,
+              "max_drawdown_pct": -1.12,
+              "win_rate_pct": 52.94,
+              "total_trades": 34
+            },
+            {
+              "value": 38,
+              "total_return_pct": 0.5,
+              "sharpe": 0.79,
+              "max_drawdown_pct": -0.82,
+              "win_rate_pct": 57.14,
+              "total_trades": 28
+            },
+            {
+              "value": 39,
+              "total_return_pct": 0.75,
+              "sharpe": 1.26,
+              "max_drawdown_pct": -0.67,
+              "win_rate_pct": 60.87,
+              "total_trades": 23
+            },
+            {
+              "value": 40,
+              "total_return_pct": 0.45,
+              "sharpe": 0.92,
+              "max_drawdown_pct": -0.5,
+              "win_rate_pct": 58.82,
+              "total_trades": 17
+            },
+            {
+              "value": 41,
+              "total_return_pct": 0.15,
+              "sharpe": 0.48,
+              "max_drawdown_pct": -0.35,
+              "win_rate_pct": 55.56,
+              "total_trades": 9
+            },
+            {
+              "value": 42,
+              "total_return_pct": 0.0,
+              "sharpe": 0.0,
+              "max_drawdown_pct": 0.0,
+              "win_rate_pct": 0.0,
+              "total_trades": 0
+            },
+            {
+              "value": 43,
+              "total_return_pct": 0.0,
+              "sharpe": 0.0,
+              "max_drawdown_pct": 0.0,
+              "win_rate_pct": 0.0,
+              "total_trades": 0
+            },
+            {
+              "value": 44,
+              "total_return_pct": 0.0,
+              "sharpe": 0.0,
+              "max_drawdown_pct": 0.0,
+              "win_rate_pct": 0.0,
+              "total_trades": 0
+            }
+          ]
+        },
+        {
+          "parameter": "rsi_upper",
+          "base_value": 42,
+          "score": 55.71,
+          "verdict": "Moderate",
+          "best_value": 35,
+          "best_sharpe": 1.73,
+          "worst_value": 36,
+          "worst_sharpe": 0.2,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 35,
+              "total_return_pct": 1.05,
+              "sharpe": 1.73,
+              "max_drawdown_pct": -0.43,
+              "win_rate_pct": 66.67,
+              "total_trades": 21
+            },
+            {
+              "value": 36,
+              "total_return_pct": 0.14,
+              "sharpe": 0.2,
+              "max_drawdown_pct": -1.09,
+              "win_rate_pct": 51.52,
+              "total_trades": 33
+            },
+            {
+              "value": 37,
+              "total_return_pct": 0.44,
+              "sharpe": 0.52,
+              "max_drawdown_pct": -0.94,
+              "win_rate_pct": 53.85,
+              "total_trades": 39
+            },
+            {
+              "value": 38,
+              "total_return_pct": 0.74,
+              "sharpe": 0.81,
+              "max_drawdown_pct": -0.97,
+              "win_rate_pct": 55.56,
+              "total_trades": 45
+            },
+            {
+              "value": 39,
+              "total_return_pct": 0.19,
+              "sharpe": 0.21,
+              "max_drawdown_pct": -1.26,
+              "win_rate_pct": 52.08,
+              "total_trades": 48
+            },
+            {
+              "value": 40,
+              "total_return_pct": 0.49,
+              "sharpe": 0.49,
+              "max_drawdown_pct": -1.03,
+              "win_rate_pct": 53.85,
+              "total_trades": 52
+            },
+            {
+              "value": 41,
+              "total_return_pct": 0.79,
+              "sharpe": 0.77,
+              "max_drawdown_pct": -1.03,
+              "win_rate_pct": 55.56,
+              "total_trades": 54
+            },
+            {
+              "value": 42,
+              "total_return_pct": 1.25,
+              "sharpe": 1.14,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 43,
+              "total_return_pct": 0.64,
+              "sharpe": 0.59,
+              "max_drawdown_pct": -1.16,
+              "win_rate_pct": 54.1,
+              "total_trades": 61
+            },
+            {
+              "value": 44,
+              "total_return_pct": 0.94,
+              "sharpe": 0.86,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 55.56,
+              "total_trades": 63
+            },
+            {
+              "value": 45,
+              "total_return_pct": 0.79,
+              "sharpe": 0.73,
+              "max_drawdown_pct": -1.03,
+              "win_rate_pct": 54.69,
+              "total_trades": 64
+            },
+            {
+              "value": 46,
+              "total_return_pct": 0.64,
+              "sharpe": 0.58,
+              "max_drawdown_pct": -1.15,
+              "win_rate_pct": 53.85,
+              "total_trades": 65
+            },
+            {
+              "value": 47,
+              "total_return_pct": 0.81,
+              "sharpe": 0.72,
+              "max_drawdown_pct": -1.14,
+              "win_rate_pct": 54.41,
+              "total_trades": 68
+            },
+            {
+              "value": 48,
+              "total_return_pct": 0.96,
+              "sharpe": 0.85,
+              "max_drawdown_pct": -1.14,
+              "win_rate_pct": 55.07,
+              "total_trades": 69
+            },
+            {
+              "value": 49,
+              "total_return_pct": 0.96,
+              "sharpe": 0.85,
+              "max_drawdown_pct": -1.14,
+              "win_rate_pct": 55.07,
+              "total_trades": 69
+            },
+            {
+              "value": 50,
+              "total_return_pct": 0.66,
+              "sharpe": 0.59,
+              "max_drawdown_pct": -1.14,
+              "win_rate_pct": 53.62,
+              "total_trades": 69
+            },
+            {
+              "value": 51,
+              "total_return_pct": 0.81,
+              "sharpe": 0.71,
+              "max_drawdown_pct": -0.99,
+              "win_rate_pct": 54.17,
+              "total_trades": 72
+            },
+            {
+              "value": 52,
+              "total_return_pct": 0.66,
+              "sharpe": 0.57,
+              "max_drawdown_pct": -1.13,
+              "win_rate_pct": 53.33,
+              "total_trades": 75
+            },
+            {
+              "value": 53,
+              "total_return_pct": 0.84,
+              "sharpe": 0.7,
+              "max_drawdown_pct": -1.05,
+              "win_rate_pct": 54.55,
+              "total_trades": 77
+            },
+            {
+              "value": 54,
+              "total_return_pct": 0.69,
+              "sharpe": 0.58,
+              "max_drawdown_pct": -1.2,
+              "win_rate_pct": 53.85,
+              "total_trades": 78
+            }
+          ]
+        },
+        {
+          "parameter": "entry_drop_pct",
+          "base_value": 3.0,
+          "score": 0.0,
+          "verdict": "Fragile",
+          "best_value": 1.5,
+          "best_sharpe": 1.35,
+          "worst_value": 5.0,
+          "worst_sharpe": -0.64,
+          "cliff_edges": [
+            {
+              "parameter": "entry_drop_pct",
+              "base_value": 3.0,
+              "base_sharpe": 1.14,
+              "neighbor_value": 2.5,
+              "neighbor_sharpe": 0.26,
+              "drop_pct": 77.2,
+              "message": "entry_drop_pct: Sharpe drops 77% from 1.14 at base=3.0 to 0.26 at 2.5 (cliff-edge overfit warning)"
+            },
+            {
+              "parameter": "entry_drop_pct",
+              "base_value": 3.0,
+              "base_sharpe": 1.14,
+              "neighbor_value": 3.5,
+              "neighbor_sharpe": 0.17,
+              "drop_pct": 85.1,
+              "message": "entry_drop_pct: Sharpe drops 85% from 1.14 at base=3.0 to 0.17 at 3.5 (cliff-edge overfit warning)"
+            }
+          ],
+          "sweep": [
+            {
+              "value": 1.5,
+              "total_return_pct": 2.08,
+              "sharpe": 1.35,
+              "max_drawdown_pct": -1.19,
+              "win_rate_pct": 55.0,
+              "total_trades": 140
+            },
+            {
+              "value": 2.0,
+              "total_return_pct": 0.55,
+              "sharpe": 0.42,
+              "max_drawdown_pct": -1.19,
+              "win_rate_pct": 51.85,
+              "total_trades": 108
+            },
+            {
+              "value": 2.5,
+              "total_return_pct": 0.3,
+              "sharpe": 0.26,
+              "max_drawdown_pct": -2.12,
+              "win_rate_pct": 51.19,
+              "total_trades": 84
+            },
+            {
+              "value": 3.0,
+              "total_return_pct": 1.25,
+              "sharpe": 1.14,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 3.5,
+              "total_return_pct": 0.14,
+              "sharpe": 0.17,
+              "max_drawdown_pct": -1.01,
+              "win_rate_pct": 51.43,
+              "total_trades": 35
+            },
+            {
+              "value": 4.0,
+              "total_return_pct": -0.01,
+              "sharpe": -0.0,
+              "max_drawdown_pct": -1.12,
+              "win_rate_pct": 50.0,
+              "total_trades": 24
+            },
+            {
+              "value": 4.5,
+              "total_return_pct": -0.3,
+              "sharpe": -0.47,
+              "max_drawdown_pct": -0.94,
+              "win_rate_pct": 43.75,
+              "total_trades": 16
+            },
+            {
+              "value": 5.0,
+              "total_return_pct": -0.3,
+              "sharpe": -0.64,
+              "max_drawdown_pct": -0.68,
+              "win_rate_pct": 40.0,
+              "total_trades": 10
+            }
+          ]
+        },
+        {
+          "parameter": "take_profit_pct",
+          "base_value": 3.5,
+          "score": 53.72,
+          "verdict": "Moderate",
+          "best_value": 6.5,
+          "best_sharpe": 2.08,
+          "worst_value": 3.0,
+          "worst_sharpe": 0.41,
+          "cliff_edges": [
+            {
+              "parameter": "take_profit_pct",
+              "base_value": 3.5,
+              "base_sharpe": 1.14,
+              "neighbor_value": 3.0,
+              "neighbor_sharpe": 0.41,
+              "drop_pct": 64.0,
+              "message": "take_profit_pct: Sharpe drops 64% from 1.14 at base=3.5 to 0.41 at 3.0 (cliff-edge overfit warning)"
+            }
+          ],
+          "sweep": [
+            {
+              "value": 2.0,
+              "total_return_pct": 0.52,
+              "sharpe": 0.64,
+              "max_drawdown_pct": -0.71,
+              "win_rate_pct": 70.49,
+              "total_trades": 61
+            },
+            {
+              "value": 2.5,
+              "total_return_pct": 0.39,
+              "sharpe": 0.43,
+              "max_drawdown_pct": -0.94,
+              "win_rate_pct": 62.71,
+              "total_trades": 59
+            },
+            {
+              "value": 3.0,
+              "total_return_pct": 0.42,
+              "sharpe": 0.41,
+              "max_drawdown_pct": -1.06,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 3.5,
+              "total_return_pct": 1.25,
+              "sharpe": 1.14,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 4.0,
+              "total_return_pct": 1.42,
+              "sharpe": 1.21,
+              "max_drawdown_pct": -0.98,
+              "win_rate_pct": 54.24,
+              "total_trades": 59
+            },
+            {
+              "value": 4.5,
+              "total_return_pct": 1.85,
+              "sharpe": 1.47,
+              "max_drawdown_pct": -1.3,
+              "win_rate_pct": 52.54,
+              "total_trades": 59
+            },
+            {
+              "value": 5.0,
+              "total_return_pct": 2.49,
+              "sharpe": 1.86,
+              "max_drawdown_pct": -1.42,
+              "win_rate_pct": 52.54,
+              "total_trades": 59
+            },
+            {
+              "value": 5.5,
+              "total_return_pct": 2.75,
+              "sharpe": 1.95,
+              "max_drawdown_pct": -1.42,
+              "win_rate_pct": 50.85,
+              "total_trades": 59
+            },
+            {
+              "value": 6.0,
+              "total_return_pct": 2.44,
+              "sharpe": 1.73,
+              "max_drawdown_pct": -1.42,
+              "win_rate_pct": 47.37,
+              "total_trades": 57
+            },
+            {
+              "value": 6.5,
+              "total_return_pct": 3.06,
+              "sharpe": 2.08,
+              "max_drawdown_pct": -1.42,
+              "win_rate_pct": 47.37,
+              "total_trades": 57
+            }
+          ]
+        },
+        {
+          "parameter": "stop_loss_pct",
+          "base_value": 2.5,
+          "score": 8.32,
+          "verdict": "Fragile",
+          "best_value": 4.0,
+          "best_sharpe": 1.59,
+          "worst_value": 1.0,
+          "worst_sharpe": -1.15,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 1.0,
+              "total_return_pct": -0.75,
+              "sharpe": -1.15,
+              "max_drawdown_pct": -1.2,
+              "win_rate_pct": 27.27,
+              "total_trades": 55
+            },
+            {
+              "value": 1.5,
+              "total_return_pct": 0.34,
+              "sharpe": 0.42,
+              "max_drawdown_pct": -0.96,
+              "win_rate_pct": 43.1,
+              "total_trades": 58
+            },
+            {
+              "value": 2.0,
+              "total_return_pct": 1.2,
+              "sharpe": 1.18,
+              "max_drawdown_pct": -0.96,
+              "win_rate_pct": 53.33,
+              "total_trades": 60
+            },
+            {
+              "value": 2.5,
+              "total_return_pct": 1.25,
+              "sharpe": 1.14,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 3.0,
+              "total_return_pct": 1.75,
+              "sharpe": 1.49,
+              "max_drawdown_pct": -1.04,
+              "win_rate_pct": 63.33,
+              "total_trades": 60
+            },
+            {
+              "value": 3.5,
+              "total_return_pct": 1.9,
+              "sharpe": 1.54,
+              "max_drawdown_pct": -1.07,
+              "win_rate_pct": 66.67,
+              "total_trades": 60
+            },
+            {
+              "value": 4.0,
+              "total_return_pct": 2.16,
+              "sharpe": 1.59,
+              "max_drawdown_pct": -1.2,
+              "win_rate_pct": 70.0,
+              "total_trades": 60
+            },
+            {
+              "value": 4.5,
+              "total_return_pct": 1.86,
+              "sharpe": 1.33,
+              "max_drawdown_pct": -1.18,
+              "win_rate_pct": 70.0,
+              "total_trades": 60
+            }
+          ]
+        },
+        {
+          "parameter": "cooldown_hours",
+          "base_value": 48,
+          "score": 81.91,
+          "verdict": "Robust",
+          "best_value": 60,
+          "best_sharpe": 1.56,
+          "worst_value": 12,
+          "worst_sharpe": 0.83,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 12,
+              "total_return_pct": 0.94,
+              "sharpe": 0.83,
+              "max_drawdown_pct": -1.18,
+              "win_rate_pct": 55.74,
+              "total_trades": 61
+            },
+            {
+              "value": 24,
+              "total_return_pct": 1.4,
+              "sharpe": 1.26,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 58.33,
+              "total_trades": 60
+            },
+            {
+              "value": 36,
+              "total_return_pct": 1.4,
+              "sharpe": 1.26,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 58.33,
+              "total_trades": 60
+            },
+            {
+              "value": 48,
+              "total_return_pct": 1.25,
+              "sharpe": 1.14,
+              "max_drawdown_pct": -0.9,
+              "win_rate_pct": 57.63,
+              "total_trades": 59
+            },
+            {
+              "value": 60,
+              "total_return_pct": 1.7,
+              "sharpe": 1.56,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 60.71,
+              "total_trades": 56
+            },
+            {
+              "value": 72,
+              "total_return_pct": 1.7,
+              "sharpe": 1.56,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 60.71,
+              "total_trades": 56
+            },
+            {
+              "value": 84,
+              "total_return_pct": 1.7,
+              "sharpe": 1.56,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 60.71,
+              "total_trades": 56
+            },
+            {
+              "value": 96,
+              "total_return_pct": 1.7,
+              "sharpe": 1.56,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 60.71,
+              "total_trades": 56
+            },
+            {
+              "value": 108,
+              "total_return_pct": 1.7,
+              "sharpe": 1.56,
+              "max_drawdown_pct": -0.85,
+              "win_rate_pct": 60.71,
+              "total_trades": 56
+            }
+          ]
+        }
+      ],
+      "overall_score": 39.97,
+      "overall_verdict": "FRAGILE",
+      "cliff_edge_warnings": [
+        {
+          "parameter": "entry_drop_pct",
+          "base_value": 3.0,
+          "base_sharpe": 1.14,
+          "neighbor_value": 2.5,
+          "neighbor_sharpe": 0.26,
+          "drop_pct": 77.2,
+          "message": "entry_drop_pct: Sharpe drops 77% from 1.14 at base=3.0 to 0.26 at 2.5 (cliff-edge overfit warning)"
+        },
+        {
+          "parameter": "entry_drop_pct",
+          "base_value": 3.0,
+          "base_sharpe": 1.14,
+          "neighbor_value": 3.5,
+          "neighbor_sharpe": 0.17,
+          "drop_pct": 85.1,
+          "message": "entry_drop_pct: Sharpe drops 85% from 1.14 at base=3.0 to 0.17 at 3.5 (cliff-edge overfit warning)"
+        },
+        {
+          "parameter": "take_profit_pct",
+          "base_value": 3.5,
+          "base_sharpe": 1.14,
+          "neighbor_value": 3.0,
+          "neighbor_sharpe": 0.41,
+          "drop_pct": 64.0,
+          "message": "take_profit_pct: Sharpe drops 64% from 1.14 at base=3.5 to 0.41 at 3.0 (cliff-edge overfit warning)"
+        }
+      ],
+      "generated_at": "2026-07-21T17:58:10"
+    },
+    "nyse": {
+      "strategy": "nyse_momentum",
+      "method": "cache_resim",
+      "trade_csv": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\research\\intraday_backtest_results.csv",
+      "n_baseline_trades": 316,
+      "parameters": [
+        {
+          "parameter": "gap_filter_pct",
+          "base_value": 2.0,
+          "score": 94.57,
+          "verdict": "Robust",
+          "best_value": 1.5,
+          "best_sharpe": 0.2695,
+          "worst_value": 1.0,
+          "worst_sharpe": 0.2225,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 0.5,
+              "total_return_pct": 6.60289621071064,
+              "sharpe": 0.2639908028130458,
+              "max_drawdown_pct": -16.192907140171286,
+              "win_rate_pct": 44.481054365733115,
+              "total_trades": 610
+            },
+            {
+              "value": 1.0,
+              "total_return_pct": 4.102986582418344,
+              "sharpe": 0.22247906609179774,
+              "max_drawdown_pct": -16.25352700430265,
+              "win_rate_pct": 45.0,
+              "total_trades": 563
+            },
+            {
+              "value": 1.5,
+              "total_return_pct": 7.290855274261032,
+              "sharpe": 0.26947351143033654,
+              "max_drawdown_pct": -16.919122894662227,
+              "win_rate_pct": 45.06578947368421,
+              "total_trades": 611
+            },
+            {
+              "value": 2.0,
+              "total_return_pct": 6.282048508564686,
+              "sharpe": 0.2600383019613302,
+              "max_drawdown_pct": -16.930432878007245,
+              "win_rate_pct": 44.35612082670906,
+              "total_trades": 632
+            },
+            {
+              "value": 2.5,
+              "total_return_pct": 6.073293056193085,
+              "sharpe": 0.2571006984001523,
+              "max_drawdown_pct": -16.54823063234132,
+              "win_rate_pct": 44.354838709677416,
+              "total_trades": 623
+            },
+            {
+              "value": 3.0,
+              "total_return_pct": 4.916521675429997,
+              "sharpe": 0.24097362583376794,
+              "max_drawdown_pct": -16.889175116553872,
+              "win_rate_pct": 44.26494345718901,
+              "total_trades": 622
+            },
+            {
+              "value": 3.5,
+              "total_return_pct": 6.30316926479253,
+              "sharpe": 0.26021060731884765,
+              "max_drawdown_pct": -16.769089789668314,
+              "win_rate_pct": 45.072697899838445,
+              "total_trades": 622
+            },
+            {
+              "value": 4.0,
+              "total_return_pct": 6.716141013348476,
+              "sharpe": 0.26568698897194565,
+              "max_drawdown_pct": -16.907509046974173,
+              "win_rate_pct": 44.390243902439025,
+              "total_trades": 618
+            },
+            {
+              "value": 4.5,
+              "total_return_pct": 5.744530608619036,
+              "sharpe": 0.25254610815040807,
+              "max_drawdown_pct": -16.924144611970696,
+              "win_rate_pct": 43.66883116883117,
+              "total_trades": 619
+            }
+          ]
+        },
+        {
+          "parameter": "cooldown_minutes",
+          "base_value": 30,
+          "score": 81.12,
+          "verdict": "Robust",
+          "best_value": 45,
+          "best_sharpe": 0.3206,
+          "worst_value": 15,
+          "worst_sharpe": 0.1841,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 0,
+              "total_return_pct": 10.119699320903553,
+              "sharpe": 0.30964211143553333,
+              "max_drawdown_pct": -16.781737415093506,
+              "win_rate_pct": 45.87301587301587,
+              "total_trades": 633
+            },
+            {
+              "value": 15,
+              "total_return_pct": 1.567302656811731,
+              "sharpe": 0.18410868224091298,
+              "max_drawdown_pct": -18.41965791017403,
+              "win_rate_pct": 44.31818181818182,
+              "total_trades": 619
+            },
+            {
+              "value": 30,
+              "total_return_pct": 6.282048508564686,
+              "sharpe": 0.2600383019613302,
+              "max_drawdown_pct": -16.930432878007245,
+              "win_rate_pct": 44.35612082670906,
+              "total_trades": 632
+            },
+            {
+              "value": 45,
+              "total_return_pct": 10.826306361002192,
+              "sharpe": 0.32064535277763945,
+              "max_drawdown_pct": -16.53056959221028,
+              "win_rate_pct": 46.15384615384615,
+              "total_trades": 588
+            },
+            {
+              "value": 60,
+              "total_return_pct": 7.412581487950698,
+              "sharpe": 0.27524388447259385,
+              "max_drawdown_pct": -16.36704638194644,
+              "win_rate_pct": 46.36678200692042,
+              "total_trades": 581
+            },
+            {
+              "value": 75,
+              "total_return_pct": 3.3697942549894,
+              "sharpe": 0.21150938850514445,
+              "max_drawdown_pct": -16.840305321241114,
+              "win_rate_pct": 44.67353951890035,
+              "total_trades": 585
+            }
+          ]
+        },
+        {
+          "parameter": "rsi_threshold",
+          "base_value": 70,
+          "score": 95.45,
+          "verdict": "Robust",
+          "best_value": 80,
+          "best_sharpe": 0.2903,
+          "worst_value": 65,
+          "worst_sharpe": 0.2567,
+          "cliff_edges": [],
+          "sweep": [
+            {
+              "value": 60,
+              "total_return_pct": 7.264716190205078,
+              "sharpe": 0.26904245246739106,
+              "max_drawdown_pct": -16.807853879557534,
+              "win_rate_pct": 44.46308724832215,
+              "total_trades": 599
+            },
+            {
+              "value": 65,
+              "total_return_pct": 6.049553431577093,
+              "sharpe": 0.2567268058269207,
+              "max_drawdown_pct": -16.449999621098993,
+              "win_rate_pct": 44.680851063829785,
+              "total_trades": 614
+            },
+            {
+              "value": 70,
+              "total_return_pct": 6.282048508564686,
+              "sharpe": 0.2600383019613302,
+              "max_drawdown_pct": -16.930432878007245,
+              "win_rate_pct": 44.35612082670906,
+              "total_trades": 632
+            },
+            {
+              "value": 75,
+              "total_return_pct": 6.921613059911547,
+              "sharpe": 0.2606485943234419,
+              "max_drawdown_pct": -16.590094359341986,
+              "win_rate_pct": 45.52980132450331,
+              "total_trades": 607
+            },
+            {
+              "value": 80,
+              "total_return_pct": 8.840464429429563,
+              "sharpe": 0.2903121144330121,
+              "max_drawdown_pct": -16.642484330304843,
+              "win_rate_pct": 45.84717607973422,
+              "total_trades": 605
+            }
+          ]
+        }
+      ],
+      "overall_score": 90.38,
+      "overall_verdict": "ROBUST",
+      "cliff_edge_warnings": [],
+      "generated_at": "2026-07-21T19:12:48"
+    }
+  },
+  "combined_overall_score": 65.17,
+  "combined_overall_verdict": "MODERATE"
+}

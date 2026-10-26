@@ -1,0 +1,77 @@
+Pre-Market Report — 2026-09-02 00:04:01 ET
+User: dawimberly | Book: alpaca_paper_v2 | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 17044). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3759.918562s
+Equity: $95,021.70
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (37)
+  • All-time Sharpe negative (-0.88)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• COHR | executive_sell | s88 $7.4M — executive sale - COHERENT CORP. ($7.4M)
+• COHR | executive_sell | s88 $3.5M — executive sale - COHERENT CORP. ($3.5M)
+• SXI | executive_sell | s88 $3.8M — executive sale - STANDEX INTERNATIONAL CORP/DE/ ($3.8M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 37 returned
+
+Top signals (up to 5)
+  COHR   executive_sell   score= 88  executive sale - COHERENT CORP. ($7.4M)
+  COHR   executive_sell   score= 88  executive sale - COHERENT CORP. ($3.5M)
+  SXI    executive_sell   score= 88  executive sale - STANDEX INTERNATIONAL CORP/DE/ ($3.8M)
+  KVYO   executive_sell   score= 88  executive sale - Klaviyo, Inc. ($2.0M)
+  KVYO   executive_sell   score= 88  executive sale - Klaviyo, Inc. ($1.2M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � exec sells -> short watch: COHR (EXECUTIVE), SXI (EXECUTIVE), COHR (EXECUTIVE), 
+
+Applied boosts
+  momentum: (none active)
+  stat_arb: (none active)
+  short     COHR: base=0.420 role=executive
+  short     SXI: base=0.420 role=executive
+  short     KVYO: base=0.420 role=executive
+  short     AII: base=0.420 role=ceo
+  short     UA: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.6
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80% (synthetic probe � no live cluster boosts this cycle)
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 0 | Quality signals: 37 | Boost: 0 clusters, 10 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

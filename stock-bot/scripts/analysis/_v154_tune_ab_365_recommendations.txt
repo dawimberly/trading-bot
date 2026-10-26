@@ -1,0 +1,43 @@
+# v1.5.4 tune impact summary — 365d paper-aggressive (HMM off)
+
+Started 2026-07-18 11:38 | Finished 2026-07-18 18:39 | No commit
+
+## Impact table
+
+| Test | Return | Sharpe | MaxDD | vs VTI | notes |
+|---|---:|---:|---:|---:|---|
+| SA fill-rate baseline (Z2.0–2.6) | +24.36% | 1.31 | -7.05% | n/a | `--compare-stat-arb-quality` |
+| SA v1.5.4 quality (Z2.1–2.7 RR1.7) | +25.81% | 1.38 | -6.26% | n/a | +1.45pp / +0.07 Sh / better DD; SA win +3.7pp |
+| ARIMA OFF | +17.23% | 1.12 | -6.05% | +4.40pp | avg VTI 47.1% |
+| ARIMA ON | +16.98% | 1.11 | -5.99% | +4.15pp | avg VTI 47.1% — worse return/Sharpe |
+| VTI floor fixed ~35% | +17.23% | 1.12 | -6.06% | +4.40pp | avg VTI 47.1% |
+| VTI optional 20%/0% | +17.23% | 1.12 | -6.05% | +4.40pp | avg VTI 47.1% — flat vs fixed this window |
+| SPY-like boost OFF | +17.23% | 1.12 | -6.05% | +4.40pp | avg VTI 47.1% |
+| SPY-like boost ON | +17.23% | 1.12 | -6.05% | +4.40pp | avg VTI 47.1% — flat this window |
+
+Prior context (`_optional_vti_365.log`, may differ HMM/stack): +16.68% / 1.09 / -6.56% / +3.85pp / avg VTI 48.1%.
+
+## What was tuned (Stat Arb)
+
+**No product-default knob changes.** Tiny SA sample in full-stack runs (3–4 pairs); quality already locked. 365d quality A/B confirms keep Z 2.1–2.7, RR 1.7, trail 45/30, partial@1.2, pairs 8–12, ADV $50M, sleeve 7%.
+
+## Recommendations (paper defaults)
+
+| Feature | Recommendation | Rationale |
+|---|---|---|
+| Stat Arb v1.5.4 quality | **Keep ON (locked)** | Clear win vs fill-rate baseline |
+| ARIMA mean boost | **Stay OFF (optional)** | −0.25pp return, −0.01 Sharpe vs OFF; do not lock ON |
+| Dynamic VTI optional floor | **Keep ON (optional path)** | Flat this window; no harm; leaves 20%/0% headroom |
+| SPY-like boost | **Keep ON (paper)** | Flat this window; no evidence of harm |
+
+## Log paths
+
+- Master: `scripts/analysis/_v154_tune_ab_master_365.log` (PID was 41428)
+- Summary: `scripts/analysis/_v154_tune_ab_365_summary.txt`
+- Stat Arb decision: `scripts/analysis/_v154_stat_arb_tune_decision.txt`
+- Stat Arb quality: `scripts/analysis/_v154_stat_arb_quality_365.log`
+- ARIMA: `_v154_arima_off_365.log`, `_v154_arima_on_365.log`
+- VTI: `_v154_vti_floor_fixed_365.log`, `_v154_vti_optional_365.log`
+- SPY-like: `_v154_spy_like_off_365.log`, `_v154_spy_like_on_365.log`
+
+Note: Stat Arb compare isolates SA knobs (higher headline returns ~25%); ARIMA/VTI/SPY legs use full paper-aggressive stack (~17%). `MARKOV_HMM_ENABLED=false` for all.

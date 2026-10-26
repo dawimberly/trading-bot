@@ -1,0 +1,73 @@
+Pre-Market Report — 2026-07-06 22:22:20 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 33496). First heartbeat may take up to 60s. | Stopped 5 orphan bot process(es).
+Heartbeat age: 3804.288884s
+Equity: $0.00
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • ATR sizing active (SPY probe)
+  • Quality insider signals (39)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • Strategy stack strong (avg 100/100)
+
+=== Regime & Bubble ===
+Regime: —
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• FRSH | executive_sell | s84 $232K — CEO sale - Freshworks Inc. ($232K)
+• SNOW | executive_sell | s83 $646K — executive sale - Snowflake Inc. ($646K)
+• DLTR | cluster_buy | s79 $300K — Cluster buy: 2 insiders purchased DOLLAR TREE, INC. ($3
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 39 returned
+
+Top signals (up to 5)
+  FRSH   executive_sell   score= 84  CEO sale - Freshworks Inc. ($232K)
+  SNOW   executive_sell   score= 83  executive sale - Snowflake Inc. ($646K)
+  DLTR   cluster_buy      score= 79  Cluster buy: 2 insiders purchased DOLLAR TREE, INC. ($300K t
+  TXRH   cluster_buy      score= 79  Cluster buy: 2 insiders purchased Texas Roadhouse, Inc. ($27
+  IBEX   executive_sell   score= 78  executive sale - IBEX Ltd ($10K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � CEO/CFO sells -> short watch: FRSH (CEO, s84), ARLO (CFO, s78), FRSH (CFO, s78)
+
+Applied boosts
+  momentum: (none active)
+  stat_arb: (none active)
+  short     FRSH: base=0.240 role=cfo
+  short     ARLO: base=0.240 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 31.8
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � short boosts amplified (RHYME_B panic)
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 5 | Quality signals: 41 | Boost: 0 clusters, 3 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

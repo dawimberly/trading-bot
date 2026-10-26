@@ -1,0 +1,28 @@
+{
+  "days": 365,
+  "tiers": {
+    "stress": 0.75,
+    "default": 0.65,
+    "calm": 0.5,
+    "floor": 0.4,
+    "ceiling": 0.75
+  },
+  "rows": [
+    {
+      "label": "Fixed 20% VTI (legacy)",
+      "return_pct": 18.32,
+      "sharpe": 1.11,
+      "max_dd_pct": -8.7,
+      "avg_active_pct": 80.0,
+      "avg_vti_pct": 20.0
+    },
+    {
+      "label": "Dynamic VTI \u226540% (paper)",
+      "return_pct": 26.18,
+      "sharpe": 1.4,
+      "max_dd_pct": -7.61,
+      "avg_active_pct": 35.69,
+      "avg_vti_pct": 64.3
+    }
+  ]
+}

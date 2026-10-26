@@ -31,8 +31,6 @@ from modules.pipeline_strategies import (
     run_equity_pairs_strategy,
     run_international_strategy,
     run_bond_strategy,
-    run_spy_exits,
-    run_spy_strategy,
     resolve_cycle_deploy,
     summarize_entry_skip_reason,
 )
@@ -80,6 +78,25 @@ warnings.filterwarnings("ignore", message=r".*possibly delisted.*")
 pair_cooldown = {}
 
 logger = logging.getLogger(__name__)
+
+PAPER_RESEARCH_SCAN_BUDGET_SEC = 10 * 60
+
+
+def _paper_research_scan_allowed(deadline: float | None, sleeve: str) -> bool:
+    """Gate paper research scans so enough cycle time remains for exits and reporting."""
+    if deadline is None or time.monotonic() < deadline:
+        return True
+    logger.warning(
+        "Paper research scan budget spent; skipping %s for this cycle",
+        sleeve,
+    )
+    log_event(
+        "research_scan_skipped",
+        sleeve=sleeve,
+        reason="paper_research_budget_spent",
+    )
+    print(f"--- Paper scan budget spent: skipping {sleeve} this cycle ---")
+    return False
 
 
 def _warn_nonfatal(context: str, exc: BaseException) -> None:
@@ -162,6 +179,8 @@ def _game_plan_signals(regime: str) -> dict:
 
 def _maybe_rebalance_startup(executor, data, regime, vol, market_open, yield_gated=False):
     global _startup_rebalanced
+    if config.h1d_exclusive_blocks_other_entries():
+        return
     if _startup_rebalanced or not config.REBALANCE_ON_STARTUP:
         return
     if (
@@ -295,42 +314,55 @@ def _equity_log(symbol, side, regime, pair_key, _z, notional=""):
     trade_journal.log_signal(symbol, side, regime, pair_key, 0.0, _last_equity, notional)
 
 
-def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
-    if side == "buy":
-        logging.getLogger(__name__).info("SPY SLEEVE buy", extra={"symbol": symbol, "notional": notional, "ma_window": config.effective_spy_ma_window(), "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
-    else:
-        logging.getLogger(__name__).info("SPY SLEEVE sell", extra={"symbol": symbol, "notional": notional, "ma_window": config.effective_spy_ma_window(), "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
-    log_trade(symbol, side, regime)
-    trade_journal.log_signal(
-        symbol, side, regime, pair_key, momentum, _last_equity, notional
-    )
-
-
 _last_equity = 0.0
 
 
-def _record_cycle_error(error: str) -> None:
+def _record_cycle_error(error: str) -> str:
     """Persist last cycle failure on heartbeat for dashboard/status (non-trading metadata)."""
     from modules.safe_io import read_json_file, write_json_atomic
 
+    try:
+        from modules import error_watcher
+
+        klass = error_watcher.classify_error_class(error)
+    except Exception:
+        klass = "other"
+
     path = config.ensure_heartbeat_path_writable()
     payload = read_json_file(path) or {}
+    payload["timestamp"] = datetime.datetime.now().isoformat()
     payload["last_cycle_error"] = str(error)[:500]
     payload["last_cycle_error_at"] = datetime.datetime.now().isoformat()
+    payload["last_cycle_error_class"] = klass
     write_json_atomic(path, payload)
     try:
         from modules import error_watcher
 
-        error_watcher.log_action("cycle_error", error=str(error)[:500])
-        # Promote to error queue without fabricating a traceback.
-        error_watcher.log_failed_order(
-            symbol="CYCLE",
-            side="n/a",
-            reason="cycle_error",
-            error=str(error)[:1000],
+        error_watcher.log_action(
+            "cycle_error", error=str(error)[:500], error_class=klass
         )
+        # Cycle-level Alpaca 5xx/DNS is not a failed order — never fabricate
+        # symbol=CYCLE / side=n/a (that produced "[LIVE] Order failed: n/a CYCLE").
+        if klass == "transient_network":
+            error_watcher.log_transient_network(str(error)[:1000], context="cycle")
+        elif klass == "transient_api":
+            error_watcher.log_transient_api(str(error)[:1000], context="cycle")
+        else:
+            error_watcher.log_cycle_fault(str(error)[:1000], error_class=klass)
     except Exception:
         pass
+    return klass
+
+
+def _strip_spy_sleeve(payload: dict | None) -> dict | None:
+    """Drop the removed SPY sleeve from anything written to heartbeats or logs."""
+    if not isinstance(payload, dict):
+        return payload
+    out = {k: v for k, v in payload.items() if k not in ("spy", "spy_value", "spy_cap")}
+    pnl = out.get("sleeve_pnl")
+    if isinstance(pnl, dict) and "spy" in pnl:
+        out["sleeve_pnl"] = {k: v for k, v in pnl.items() if k != "spy"}
+    return out
 
 
 def _write_heartbeat(
@@ -339,7 +371,6 @@ def _write_heartbeat(
     cash,
     crypto_trades,
     equity_trades,
-    spy_trades,
     halted,
     market_open,
     sleeves=None,
@@ -375,8 +406,7 @@ def _write_heartbeat(
         "cash_pct": round(float(cash) / float(equity), 6) if equity and equity > 0 else 0.0,
         "crypto_trades_last_cycle": crypto_trades,
         "equity_trades_last_cycle": equity_trades,
-        "spy_trades_last_cycle": spy_trades,
-        "sleeve_caps": sleeve_caps
+        "sleeve_caps": _strip_spy_sleeve(sleeve_caps)
         or {
             "vti_core": config.effective_vti_core_pct(
                 equity,
@@ -386,7 +416,6 @@ def _write_heartbeat(
                 data=heartbeat_data,
                 insider_state=insider_state,
             ),
-            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
             "metal": config.METAL_SLEEVE_CAP_PCT if config.metal_sleeve_enabled() else 0.0,
@@ -448,7 +477,7 @@ def _write_heartbeat(
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
-        payload["sleeve_exposure"] = sleeves
+        payload["sleeve_exposure"] = _strip_spy_sleeve(sleeves)
     if wisdom:
         payload["wisdom"] = {
             "mode": wisdom.get("wisdom_mode"),
@@ -483,7 +512,7 @@ def _write_heartbeat(
     if macro_event:
         payload["macro_event"] = macro_event
     if sleeve_pnl:
-        payload["sleeve_pnl"] = sleeve_pnl
+        payload["sleeve_pnl"] = _strip_spy_sleeve(sleeve_pnl)
     if vti_core and vti_core.get("enabled"):
         payload["vti_core"] = {
             "target_pct": vti_core.get("target_pct"),
@@ -522,7 +551,12 @@ def _write_heartbeat(
 def main():
     global _last_equity, _last_cycle_schedule, _main_cycle_count
     _main_cycle_count += 1
-    now_ts = datetime.datetime.now()
+    paper_research_deadline = (
+        time.monotonic() + PAPER_RESEARCH_SCAN_BUDGET_SEC
+        if config.PAPER_TRADING
+        else None
+    )
+    now_ts = datetime.datetime.now(datetime.timezone.utc).astimezone()
     executor = _make_executor()
     schedule = equity_scan_state(executor.client, now_ts)
     _last_cycle_schedule = schedule
@@ -533,6 +567,8 @@ def main():
     equity_scans = schedule.get("equity_scans", market_open)
     executor.equity_session_open = market_open
     executor.refresh_cache()
+    executor.h1d_exclusive = bool(config.h1d_exclusive_blocks_other_entries())
+    h1d_pause = bool(executor.h1d_exclusive)
 
     try:
         from modules import error_watcher
@@ -542,7 +578,13 @@ def main():
         pass
 
     try:
-        guard_summary = executor.enforce_portfolio_guards(dry_run=bool(executor.dry_run))
+        # Live: first cycles after a mid-session start used to nibble
+        # concentration_guard_trim (XOM ~$1) before regime pause applied.
+        skip_conc = (not config.PAPER_TRADING) and _main_cycle_count <= 2
+        guard_summary = executor.enforce_portfolio_guards(
+            dry_run=bool(executor.dry_run),
+            skip_concentration=skip_conc,
+        )
         if _main_cycle_count <= 2 or guard_summary.get("concentration_trims") or any(
             a.get("status") in ("dry_run", "closed", "submitted")
             for a in (guard_summary.get("dust_actions") or [])
@@ -672,7 +714,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Alert error", exc)
         _write_heartbeat(
-            "HALTED", equity, cash, 0, 0, 0, True, market_open, None, scan_schedule=schedule
+            "HALTED", equity, cash, 0, 0, True, market_open, None, scan_schedule=schedule
         )
         return
 
@@ -1283,7 +1325,9 @@ def main():
                     print(f"--- Kraken SPCX buy skipped/failed: {kraken_buy['error']} ---")
 
     vti_result = None
-    if config.REBALANCE_ENABLED and market_open:
+    if h1d_pause:
+        print("--- h1d exclusive: other entry sleeves paused ---")
+    if config.REBALANCE_ENABLED and market_open and not h1d_pause:
         global _strategic_rebalancer
         from modules.operating_layer import run_operating_cycle_live
         from modules.rebalancer import StrategicRebalancer
@@ -1315,7 +1359,9 @@ def main():
                     f"--- Operating Layer: wisdom {wisdom_rec.get('action')} "
                     f"conv {wisdom_rec.get('conviction', 0):.2f} (no rebalance trigger) ---"
                 )
-    elif config.vti_core_enabled() and market_open:
+    elif market_open and not h1d_pause:
+        # Always run while open so VTI_CORE_ENABLED=false still unwinds leftover
+        # VTI (Paper Aggressive must not keep a stranded core).
         vti_result = rebalance_vti_core(
             executor,
             market_open=market_open,
@@ -1325,7 +1371,7 @@ def main():
         )
         if config.paper_aggressive_context() and vti_result.get("enabled"):
             print(
-                f"--- Dynamic VTI: {vti_result.get('target_pct', 0):.0%} target "
+                f"--- VTI core: {vti_result.get('target_pct', 0):.0%} target "
                 f"(vol={vol_label}/{vol_score:.4f}, stress={macro_stress_flag}) ---"
             )
         if vti_result.get("action"):
@@ -1340,9 +1386,20 @@ def main():
                 f"--- VTI core: {vti_result.get('current_value', 0):,.2f} / "
                 f"{vti_result.get('target_value', 0):,.2f} ---"
             )
+        elif vti_result.get("reason") == "core off; unwind leftover VTI":
+            print(
+                f"--- VTI core OFF: unwind leftover "
+                f"${vti_result.get('notional', 0):,.2f} "
+                f"({'ok' if vti_result.get('ok') else 'pending'}) ---"
+            )
 
     options_result = None
-    if config.effective_options_sleeve_enabled() and market_open:
+    if (
+        config.effective_options_sleeve_enabled()
+        and market_open
+        and not h1d_pause
+        and _paper_research_scan_allowed(paper_research_deadline, "options")
+    ):
         from modules.options_sleeve import current_vix_level, run_options_sleeve_cycle
 
         options_result = run_options_sleeve_cycle(
@@ -1352,7 +1409,7 @@ def main():
             market_open=market_open,
         )
 
-    if config.effective_wheel_sleeve_enabled() and market_open:
+    if config.effective_wheel_sleeve_enabled() and market_open and not h1d_pause:
         try:
             from modules.options_sleeve import current_vix_level
             from modules.wheel_sleeve import run_wheel_sleeve_cycle
@@ -1366,7 +1423,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Wheel sleeve", exc)
 
-    if config.effective_politician_copy_enabled() and market_open and config.PAPER_TRADING:
+    if config.effective_politician_copy_enabled() and market_open and config.PAPER_TRADING and not h1d_pause:
         try:
             from modules.politician_copy_sleeve import run_politician_copy_cycle
 
@@ -1378,7 +1435,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Politician copy sleeve", exc)
 
-    if config.effective_vol_trading_enabled() and market_open:
+    if config.effective_vol_trading_enabled() and market_open and not h1d_pause:
         from modules.options_sleeve import current_vix_level
         from modules.volatility_sleeve import run_volatility_sleeve_cycle
 
@@ -1413,7 +1470,7 @@ def main():
         or config.felix_social_manual_override()
         or config.PAPER_SOCIAL_SLEEVE_ENABLED
     )
-    if social_dynamic_ctx:
+    if social_dynamic_ctx and not h1d_pause:
         from modules.social_sleeve import apply_dynamic_social_gate
 
         apply_dynamic_social_gate(
@@ -1421,7 +1478,7 @@ def main():
         )
     if (
         config.effective_social_sleeve_enabled() or social_dynamic_ctx
-    ) and market_open:
+    ) and market_open and not h1d_pause:
         from modules.social_sleeve import run_social_sleeve_cycle
 
         social_result = run_social_sleeve_cycle(wisdom, executor, market_open=market_open)
@@ -1446,7 +1503,12 @@ def main():
                 )
 
     orb_mom_result = None
-    if config.effective_orb_momentum_enabled() and market_open:
+    if (
+        config.effective_orb_momentum_enabled()
+        and market_open
+        and not h1d_pause
+        and _paper_research_scan_allowed(paper_research_deadline, "ORB")
+    ):
         try:
             from modules.orb_momentum_sleeve import run_orb_momentum_cycle
 
@@ -1482,7 +1544,12 @@ def main():
             _warn_nonfatal("ORB momentum sleeve", exc)
 
     sector_rot_result = None
-    if config.effective_sector_rotation_enabled() and market_open:
+    if (
+        config.effective_sector_rotation_enabled()
+        and market_open
+        and not h1d_pause
+        and _paper_research_scan_allowed(paper_research_deadline, "sector rotation")
+    ):
         try:
             from modules.sector_rotation import run_sector_rotation_cycle
 
@@ -1518,7 +1585,13 @@ def main():
             _warn_nonfatal("Sector rotation sleeve", exc)
 
     vol_bo_result = None
-    if config.effective_vol_breakout_enabled() and market_open and config.PAPER_TRADING:
+    if (
+        config.effective_vol_breakout_enabled()
+        and market_open
+        and not h1d_pause
+        and config.PAPER_TRADING
+        and _paper_research_scan_allowed(paper_research_deadline, "volume breakout")
+    ):
         try:
             from modules.vol_breakout_sleeve import run_vol_breakout_cycle
 
@@ -1557,7 +1630,7 @@ def main():
     if exits:
         print(f"--- Stop-loss exits: {exits} ---")
 
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone()
     resolve_cycle_deploy(
         data,
         executor,
@@ -1569,7 +1642,7 @@ def main():
         yield_gated=yield_gated,
         market_open=equity_scans,
     )
-    if config.effective_crypto_enabled():
+    if config.effective_crypto_enabled() and not h1d_pause:
         c = run_crypto_strategy(
             data,
             executor,
@@ -1583,24 +1656,19 @@ def main():
         )
     else:
         c = 0
-    s = 0
     nyse_trades = 0
     gp_result = {"enabled": False, "signals": gp_signals, "actions": []}
 
     market_open = is_equity_market_open(executor.client)
     executor.equity_session_open = market_open
-    if equity_scans:
-        s += run_spy_exits(data, executor, regime, log_fn=_spy_log)
-        s += run_spy_strategy(
-            data,
-            executor,
-            regime,
-            now,
-            pair_cooldown,
-            log_fn=_spy_log,
-            portfolio_manager=portfolio_manager,
-            yield_gated=yield_gated,
-        )
+    if config.effective_h1d_trend_mix_enabled():
+        try:
+            from modules.h1d_trend_mix import run_h1d_trend_mix_cycle
+
+            run_h1d_trend_mix_cycle(executor, market_open=bool(market_open))
+        except Exception as exc:
+            _warn_nonfatal("h1d_trend_mix", exc)
+    if equity_scans and not h1d_pause and _paper_research_scan_allowed(paper_research_deadline, "NYSE"):
         if config.effective_equity_pairs_enabled():
             nyse_trades = run_equity_pairs_strategy(
                 data,
@@ -1715,12 +1783,14 @@ def main():
                         notional=notional,
                         notes=phase,
                     )
+    elif equity_scans and h1d_pause:
+        pass
     elif schedule.get("equity_prep"):
         print(
             f"--- Open prep: refreshing regime; SPY/NYSE scans start "
             f"{config.EQUITY_SCAN_AFTER_OPEN_MIN}m after the bell ---"
         )
-        if config.game_plan_active():
+        if config.game_plan_active() and not h1d_pause:
             gp_result = run_game_plan_cycle(
                 executor,
                 regime,
@@ -1728,18 +1798,20 @@ def main():
                 signals=gp_signals,
             )
     else:
-        if config.effective_crypto_enabled():
+        if h1d_pause:
+            print("--- Overnight: equity scans off (h1d exclusive) ---")
+        elif config.effective_crypto_enabled():
             print("--- Overnight: crypto only (SPY/NYSE scans off) ---")
         else:
             print("--- Overnight: equity scans off (crypto sleeve disabled) ---")
-        if config.game_plan_active():
+        if config.game_plan_active() and not h1d_pause:
             gp_result = run_game_plan_cycle(
                 executor,
                 regime,
                 market_open=False,
                 signals=gp_signals,
             )
-    print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
+    print(f"--- Crypto: {c} | NYSE: {nyse_trades} ---")
 
     kraken_autopilot_result = None
     if config.KRAKEN_AUTOPILOT_ENABLED:
@@ -1794,7 +1866,7 @@ def main():
             f" | Metal ${round(sleeves['metal_value'], 2)}/"
             f"${round(sleeves['metal_cap'], 2)}"
         )
-    total_entries = int(c) + int(s) + int(nyse_trades)
+    total_entries = int(c) + int(nyse_trades)
     if total_entries > 0:
         entry_skip_reason = "traded"
     else:
@@ -1818,13 +1890,12 @@ def main():
     entry_skip_daily = record_cycle(entry_skip_reason)
     maybe_emit_daily_summary()
     print(
-        f"=== CYCLE STATUS: spy={s} nyse={nyse_trades} crypto={c} | "
+        f"=== CYCLE STATUS: nyse={nyse_trades} crypto={c} | "
         f"gates={entry_skip_reason} | today skipped={entry_skip_daily.get('skipped_cycles', 0)} "
         f"({entry_skip_daily.get('top_skip', '-')}) ==="
     )
     print(
-        f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
-        f"Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
+        f"--- Exposure: Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
         f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)}{metal_line} ---"
     )
     gp_notes = ""
@@ -1852,7 +1923,7 @@ def main():
         c,
         nyse_trades,
         notes=(
-            f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
+            f"crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
             f"nyse_cap={config.effective_nyse_sleeve_cap_pct():.2%}; "
             f"entry_gates={entry_skip_reason}; {gp_notes}"
         ),
@@ -1940,7 +2011,6 @@ def main():
         cash,
         c,
         nyse_trades,
-        s,
         False,
         market_open,
         sleeves,
@@ -1979,7 +2049,7 @@ def main():
         equity=equity,
         cash=cash,
         crypto_trades=c,
-        spy_trades=s,
+        spy_trades=0,
         nyse_trades=nyse_trades,
         spacex_ipo=spacex_snapshot,
         crypto_gate=crypto_gate,
@@ -2081,6 +2151,34 @@ def _print_account_startup_summary(equity: float, cash: float | None = None) -> 
         print(f"--- {config.format_live_conservative_banner()} ---")
 
 
+def _start_paper_heartbeat_pulse(interval_sec: float = 60.0) -> None:
+    """Paper only. Keep the heartbeat file fresh while a cycle is still working.
+
+    The morning health task treats an 8-minute-old file as a dead bot. The
+    cycle watchdog still kills a stall at its own timeout. Live is unchanged.
+    """
+    if not config.PAPER_TRADING:
+        return
+    import threading
+
+    from modules.heartbeat_watchdog import touch_engine_heartbeat
+
+    try:
+        touch_engine_heartbeat()
+    except Exception:
+        logger.debug("initial heartbeat pulse failed", exc_info=True)
+
+    def _loop() -> None:
+        while True:
+            time.sleep(interval_sec)
+            try:
+                touch_engine_heartbeat()
+            except Exception:
+                logger.debug("heartbeat pulse failed", exc_info=True)
+
+    threading.Thread(target=_loop, name="heartbeat-pulse", daemon=True).start()
+
+
 def _print_startup_banner(startup_equity: float | None = None):
     mode = "PAPER" if config.PAPER_TRADING else "LIVE"
     endpoint = (
@@ -2131,6 +2229,12 @@ def _print_startup_banner(startup_equity: float | None = None):
         research_line = config.format_research_mode_banner()
         if research_line:
             print(f"--- {research_line} ---")
+        lab_line = config.format_paper_lab_banner()
+        if lab_line:
+            print(f"--- {lab_line} ---")
+        v2_line = config.format_paper_v2_calm_banner()
+        if v2_line:
+            print(f"--- {v2_line} ---")
         try:
             from modules.pipeline_strategies import load_pipeline_data
             from modules.market_context import current_regime_from_data
@@ -2361,6 +2465,15 @@ def _print_startup_banner(startup_equity: float | None = None):
             )
     print(f"--- Journal: {config.PAPER_JOURNAL_CSV} | Heartbeat: {config.HEARTBEAT_FILE} ---")
     print(f"--- {config.format_telegram_automation_banner()} ---")
+    try:
+        from modules.telegram_commands import ensure_telegram_command_poller
+
+        if ensure_telegram_command_poller():
+            print("--- Telegram phone commands: ON (open the bot chat, tap /status) ---")
+        elif config.get_telegram_config():
+            print("--- Telegram phone commands: off (TELEGRAM_COMMANDS_* in .env) ---")
+    except Exception as exc:
+        print(f"[WARN] Telegram phone commands: {exc}")
     if alerts.alerts_configured():
         print(f"--- Alerts: on - {config.telegram_alert_policy_summary()} ---")
         if config.telegram_weekly_summary_enabled():
@@ -2472,6 +2585,7 @@ if __name__ == "__main__":
     if config.effective_real_time_websocket_enabled():
         start_realtime_feed()
         time.sleep(1.5)
+    _start_paper_heartbeat_pulse()
     _print_startup_banner(startup_equity)
     if startup_equity is not None:
         _print_account_startup_summary(startup_equity, cash=startup_cash)
@@ -2512,6 +2626,7 @@ if __name__ == "__main__":
     while True:
         if watchdog is not None:
             watchdog.begin_cycle("main")
+        autofix_plan = None
         try:
             main()
         except AlpacaAuthError as e:
@@ -2525,12 +2640,18 @@ if __name__ == "__main__":
             sys.exit(1)
         except AlpacaCriticalError as e:
             log_event("alpaca_critical", error=str(e))
-            _record_cycle_error(str(e))
+            klass = _record_cycle_error(str(e))
             logger.warning(
                 "Alpaca API failure after retries (skipping cycle, bot continues): %s",
                 e,
             )
             trade_journal.log_event("error", notes=f"Alpaca API (transient): {e}")
+            try:
+                from modules.error_autofix import handle_cycle_error
+
+                autofix_plan = handle_cycle_error(str(e), error_class=klass)
+            except Exception:
+                autofix_plan = None
         except AlpacaValidationError as e:
             log_event("alpaca_validation", error=str(e))
             logger.info("Alpaca order validation skipped (cycle continues): %s", e)
@@ -2541,13 +2662,19 @@ if __name__ == "__main__":
             break
         except Exception as e:
             tb = traceback.format_exc()
-            _record_cycle_error(str(e))
+            klass = _record_cycle_error(str(e))
             log_event("cycle_error", error=str(e), exception_type=type(e).__name__)
             logger.exception("Cycle error: %s", e)
             notes = str(e)
             if tb.strip():
                 notes = f"{notes}\n{tb[-1500:]}"
             trade_journal.log_event("error", notes=notes)
+            try:
+                from modules.error_autofix import handle_cycle_error
+
+                autofix_plan = handle_cycle_error(str(e), error_class=klass)
+            except Exception:
+                autofix_plan = None
         finally:
             if watchdog is not None:
                 watchdog.end_cycle()
@@ -2555,4 +2682,7 @@ if __name__ == "__main__":
         if cli_args.cycles and cycle_count >= cli_args.cycles:
             logger.info("Completed %s cycle(s); exiting (--cycles)", cli_args.cycles)
             break
-        time.sleep(cycle_sleep_seconds(_last_cycle_schedule))
+        sleep_for = float(cycle_sleep_seconds(_last_cycle_schedule))
+        if autofix_plan is not None:
+            sleep_for = autofix_plan.loop_sleep_sec(sleep_for)
+        time.sleep(sleep_for)

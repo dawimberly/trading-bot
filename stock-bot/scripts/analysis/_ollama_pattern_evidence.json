@@ -1,0 +1,101 @@
+{
+  "daily_ret_by_weekday": {
+    "Wed": {
+      "n": 1,
+      "mean_bp": -139.2,
+      "sum_pct": -1.39
+    },
+    "Thu": {
+      "n": 3,
+      "mean_bp": -58.6,
+      "sum_pct": -1.76
+    },
+    "Fri": {
+      "n": 2,
+      "mean_bp": 14.9,
+      "sum_pct": 0.3
+    },
+    "Sat": {
+      "n": 1,
+      "mean_bp": 3.9,
+      "sum_pct": 0.04
+    },
+    "Sun": {
+      "n": 1,
+      "mean_bp": 0.0,
+      "sum_pct": 0.0
+    },
+    "Mon": {
+      "n": 1,
+      "mean_bp": -30.8,
+      "sum_pct": -0.31
+    }
+  },
+  "daily_equity": {
+    "2026-06-16": 98923.9,
+    "2026-06-17": 97547.04,
+    "2026-06-18": 98120.43,
+    "2026-06-19": 98234.84,
+    "2026-06-20": 98273.54,
+    "2026-06-21": 98273.54,
+    "2026-07-09": 98350.73,
+    "2026-07-10": 98528.65,
+    "2026-07-13": 98225.44,
+    "2026-07-23": 95843.92
+  },
+  "journal_events": {
+    "cycle": 507,
+    "error": 286,
+    "startup": 24,
+    "exit_error": 1
+  },
+  "top_exit_reason": {},
+  "top_sleeve": {},
+  "top_symbol": {
+    "GLD": 1
+  },
+  "strategy_30d": [
+    {
+      "name": null,
+      "ret": 2003368.0,
+      "sharpe": 12.85,
+      "wr": 83.4,
+      "n": 4893
+    },
+    {
+      "name": null,
+      "ret": 0.0,
+      "sharpe": 0.0,
+      "wr": 0.0,
+      "n": 54
+    },
+    {
+      "name": null,
+      "ret": -40958.0,
+      "sharpe": -2.58,
+      "wr": 21.0,
+      "n": 1188
+    },
+    {
+      "name": null,
+      "ret": -58854.0,
+      "sharpe": -52.59,
+      "wr": 1.5,
+      "n": 67
+    }
+  ],
+  "mc_attr_keys": [
+    "saved_at",
+    "source_mc",
+    "limitation",
+    "mc_runs",
+    "seed",
+    "days",
+    "thinking",
+    "profile",
+    "worst_runs",
+    "high_vti_at_trough_count",
+    "summary_narrative",
+    "runs"
+  ]
+}

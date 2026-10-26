@@ -1,0 +1,9 @@
+RUNNING
+worker_PID=14864
+launcher_PID=55524
+wrapper_PID=46856
+watcher_PID=56328
+out=c:\Users\Owner\PythonTrading\stock-bot\backtest_v154_thorough_1000.txt
+started=2026-07-18T00:13:32
+approx_bars=54 / 800
+eta_remain_min=177

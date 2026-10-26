@@ -1,0 +1,106 @@
+{
+  "saturday": "2026-09-05",
+  "hygiene": {
+    "generated_at": "2026-09-05 14:15 UTC",
+    "equity": 100421.52,
+    "regime": "RHYME_C: Steady_Bullish_Growth",
+    "heartbeat_age_min": 0.08878615,
+    "notes": [
+      "Freeze-safe: recommendations are CONFIRM/DENY/HOLD for humans only.",
+      "No auto .env / strategy / live changes."
+    ],
+    "findings": [
+      {
+        "id": "journal_parse_error",
+        "severity": "cleanup",
+        "title": "Journal had bad CSV lines (skipped)",
+        "detail": "Used on_bad_lines=skip for paper_chase_journal.csv",
+        "default_action": "HOLD",
+        "evidence": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\paper_chase_journal.csv"
+      },
+      {
+        "id": "spy_fills_ok",
+        "severity": "info",
+        "title": "No SPY sleeve fills in window",
+        "detail": "Consistent with SPY-off freeze lock.",
+        "default_action": "HOLD",
+        "evidence": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\paper_chase_journal.csv"
+      },
+      {
+        "id": "daily_errors_present",
+        "severity": "cleanup",
+        "title": "Today's error log has 1 error(s)",
+        "detail": "Review obvious repeats; do not retune strategy from errors alone.",
+        "default_action": "HOLD",
+        "evidence": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\logs\\daily_errors_2026-09-05.md"
+      },
+      {
+        "id": "attribution_stale",
+        "severity": "cleanup",
+        "title": "Sleeve attribution stale (401h)",
+        "detail": "Run: python scripts/analysis/forward_sleeve_attribution.py",
+        "default_action": "CONFIRM",
+        "evidence": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\scripts\\analysis\\forward_sleeve_attr_last.md"
+      }
+    ]
+  },
+  "week_files": [
+    {
+      "date": "2026-08-30",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\freeze_daily_2026-08-30.md",
+      "bytes": 2085
+    },
+    {
+      "date": "2026-08-31",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\freeze_daily_2026-08-31.md",
+      "bytes": 2087
+    },
+    {
+      "date": "2026-09-01",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\freeze_daily_2026-09-01.md",
+      "bytes": 1717
+    },
+    {
+      "date": "2026-09-02",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\freeze_daily_2026-09-02.md",
+      "bytes": 1717
+    },
+    {
+      "date": "2026-09-03",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\freeze_daily_2026-09-03.md",
+      "bytes": 1717
+    },
+    {
+      "date": "2026-09-04",
+      "path": "C:\\Users\\Owner\\PythonTrading\\stock-bot\\data\\freeze_daily_2026-09-04.md",
+      "bytes": 1718
+    }
+  ],
+  "standing": [
+    {
+      "id": "keep_freeze",
+      "title": "Keep forward-paper freeze (no new features)",
+      "default": "CONFIRM",
+      "detail": "Continue measure-only until freeze end date."
+    },
+    {
+      "id": "keep_spy_off",
+      "title": "Keep paper SPY satellite OFF",
+      "default": "CONFIRM",
+      "detail": "365d STRICT confirmed; live SPY unchanged."
+    },
+    {
+      "id": "no_live_change",
+      "title": "No live Profile A changes",
+      "default": "CONFIRM",
+      "detail": "Live SPY-off rejected on 365d live-shaped A/B."
+    },
+    {
+      "id": "no_new_sleeve",
+      "title": "Deny any new sleeve / Iran / headline module",
+      "default": "DENY",
+      "detail": "Geopolitics stays research sidecar only."
+    }
+  ],
+  "test": false
+}

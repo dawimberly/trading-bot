@@ -1,0 +1,76 @@
+Pre-Market Report — 2026-08-19 00:05:28 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 33704). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3738.081378s
+Equity: $96,593.69
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Risk-on regime (A)
+  • ATR sizing active (SPY probe)
+  • Strong insider cluster
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+
+=== Regime & Bubble ===
+Regime: RHYME_A: Euphoric_Volatility
+Bubble Risk: 32/100
+
+=== Insider Signals (top 3) ===
+• META | cluster_buy | s100 $21.8M — Cluster buy: 11 insiders purchased Meta Platforms, Inc.
+• LITE | executive_sell | s94 $5.0M — CEO sale - Lumentum Holdings Inc. ($5.0M)
+• LITE | executive_sell | s93 $31.6M — executive sale - Lumentum Holdings Inc. ($31.6M)
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 28 returned
+
+Top signals (up to 5)
+  META   cluster_buy      score=100  Cluster buy: 11 insiders purchased Meta Platforms, Inc. ($21
+  LITE   executive_sell   score= 94  CEO sale - Lumentum Holdings Inc. ($5.0M)
+  LITE   executive_sell   score= 93  executive sale - Lumentum Holdings Inc. ($31.6M)
+  LITE   executive_sell   score= 93  executive sale - Lumentum Holdings Inc. ($37.5M)
+  LITE   executive_sell   score= 93  CFO sale - Lumentum Holdings Inc. ($30.6M)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � tier-1 signals: META T1; cluster buys: RSVR (3 insiders); exec sells -> short wa
+
+Applied boosts
+  momentum  META: +0.300
+  momentum  RSVR: +0.180
+  stat_arb  META: x1.220
+  stat_arb  RSVR: x1.150
+  short     LITE: base=0.420 role=cfo
+  short     TNK: base=0.420 role=executive
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 32.2
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 29 | Boost: 1 clusters, 5 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.

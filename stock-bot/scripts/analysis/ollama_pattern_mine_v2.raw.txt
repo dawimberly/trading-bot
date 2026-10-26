@@ -1,0 +1,55 @@
+{
+  "patterns": [
+    {
+      "id": "P1",
+      "title": "Dynamic Hold Time Adjustment",
+      "mechanism": "Adjust the hold time based on market volatility and momentum signals.",
+      "why_missed": "A human operator might overlook the need for dynamic adjustments in holding periods, assuming a fixed strategy works best.",
+      "fits_facts": "A/B/C/D",
+      "strict_ab_test": "CLI/config A: Fixed 90-day hold time vs CLI/config B: Dynamic hold time based on volatility and momentum signals.",
+      "kill_criterion": "If the dynamic hold time adjustment does not improve returns or Sharpe ratio after 3 months, discard it.",
+      "priority": "high"
+    },
+    {
+      "id": "P2",
+      "title": "Adaptive Turnover Strategy",
+      "mechanism": "Implement a turnover strategy that adjusts based on the performance of individual stocks within the portfolio.",
+      "why_missed": "A human operator might not consider that some stocks perform better with higher or lower turnover rates.",
+      "fits_facts": "B/C/D",
+      "strict_ab_test": "CLI/config A: Fixed 10% annual turnover vs CLI/config B: Adaptive turnover based on stock performance.",
+      "kill_criterion": "If adaptive turnover does not improve returns or reduce drawdown after 6 months, discard it.",
+      "priority": "high"
+    },
+    {
+      "id": "P3",
+      "title": "Sector Rotation Based on Correlation Guard",
+      "mechanism": "Introduce a sector rotation mechanism that switches sectors based on the correlation guard's signals.",
+      "why_missed": "A human operator might not realize that rotating sectors can help mitigate risks and enhance returns.",
+      "fits_facts": "B/C/D/E",
+      "strict_ab_test": "CLI/config A: No sector rotation vs CLI/config B: Sector rotation based on correlation guard signals.",
+      "kill_criterion": "If sector rotation does not improve returns or reduce drawdown after 6 months, discard it.",
+      "priority": "high"
+    },
+    {
+      "id": "P4",
+      "title": "Enhanced Yield Gate with Volatility Sensitivity",
+      "mechanism": "Modify the yield gate to be more sensitive to market volatility, adjusting entry thresholds dynamically.",
+      "why_missed": "A human operator might not consider that volatility sensitivity in yield gates can improve risk management and returns.",
+      "fits_facts": "C/D/E",
+      "strict_ab_test": "CLI/config A: Fixed yield gate threshold vs CLI/config B: Volatility-sensitive yield gate.",
+      "kill_criterion": "If the enhanced yield gate does not improve Sharpe ratio or reduce drawdown after 3 months, discard it.",
+      "priority": "high"
+    },
+    {
+      "id": "P5",
+      "title": "Optimized Rebalance Cadence with Path Dependence Consideration",
+      "mechanism": "Adjust the rebalance cadence based on path dependence analysis to better manage drawdowns and maximize returns.",
+      "why_missed": "A human operator might not recognize that optimizing rebalance timing can significantly impact strategy performance, especially in volatile markets.",
+      "fits_facts": "D/E",
+      "strict_ab_test": "CLI/config A: Fixed monthly rebalancing vs CLI/config B: Optimized rebalance cadence based on path dependence analysis.",
+      "kill_criterion": "If the optimized rebalance cadence does not improve drawdown management or returns after 6 months, discard it.",
+      "priority": "high"
+    }
+  ],
+  "best_next": "P1 - Dynamic Hold Time Adjustment"
+}

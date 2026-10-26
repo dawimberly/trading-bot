@@ -1,0 +1,10 @@
+{
+  "utc": "2026-08-19 20:21:27 UTC",
+  "epoch": 1787170887.6263862,
+  "pid": 6920,
+  "final": false,
+  "phase": 4,
+  "phase_name": "Monte Carlo 200",
+  "log": "phase4_mc_200_365.log",
+  "child_pid": 20808
+}

@@ -1,0 +1,79 @@
+Pre-Market Report — 2026-07-25 00:04:02 ET
+User: dawimberly | Book: alpaca_paper | RR v1.5.4
+
+=== Startup ===
+paper bot started via run_paper_bot.py (PID 26760). First heartbeat may take up to 60s. | Stopped 4 orphan bot process(es).
+Heartbeat age: 3694.07649s
+Equity: $95,476.49
+
+=== Bot Health ===
+Score: 100/100 (Excellent) — Green
+  • Stable regime (C/D)
+  • ATR sizing active (SPY probe)
+  • Thinking engine ON (LLM)
+  • Strong insider clusters (2)
+  • All-time Sharpe negative (-0.87)
+  • Tail-risk guards clear
+  • Clean financial headline pool
+  • Quiet tape — scanner idle expected
+  • 3 strategies weak (<50)
+
+=== Regime & Bubble ===
+Regime: RHYME_D: Range_Bound_Neutral
+Bubble Risk: 33/100
+
+=== Insider Signals (top 3) ===
+• MPAA | executive_sell | s89 $405K — CEO sale - MOTORCAR PARTS OF AMERICA INC ($405K)
+• COHR | executive_sell | s83 $307K — CFO sale - COHERENT CORP. ($307K)
+• OMER | cluster_buy | s81 — Cluster buy: 3 insiders purchased OMEROS CORP
+
+=== Short Activity ===
+Protective Shorts: ON (8%-18% gross, RHYME_E<=12% RHYME_B<=18%, partial@1:1, trail 50%/35%) | RHYME_E bear-streak+depth | Sector shorts <=8%/name | 0 open · 0 fire(s) this week
+
+=== Insider Verification ===
+Exit code: 0
+=== Insider Integration Verification ===
+
+Monitor
+  [OK] Insider monitor enabled (paper/research)
+  [OK] Signals (min_score=60) � 28 returned
+
+Top signals (up to 5)
+  MPAA   executive_sell   score= 89  CEO sale - MOTORCAR PARTS OF AMERICA INC ($405K)
+  COHR   executive_sell   score= 83  CFO sale - COHERENT CORP. ($307K)
+  OMER   cluster_buy      score= 81  Cluster buy: 3 insiders purchased OMEROS CORP
+  BMNR   cluster_buy      score= 81  Cluster buy: 3 insiders purchased BITMINE IMMERSION TECHNOLO
+  MPAA   executive_sell   score= 78  executive sale - MOTORCAR PARTS OF AMERICA INC ($42K)
+
+Boosts
+  [OK] Insider signal boost enabled
+  [OK] apply_insider_signals_to_strategies() � cluster buys: OMER (3 insiders), BMNR (3 insiders); exec sells -> short watch: M
+
+Applied boosts
+  momentum  OMER: +0.180
+  momentum  BMNR: +0.180
+  stat_arb  OMER: x1.150
+  stat_arb  BMNR: x1.150
+  short     MPAA: base=0.420 role=executive
+  short     COHR: base=0.420 role=cfo
+
+Risk guard
+  [OK] Risk guard enabled
+  bubble_score_100: 32.9
+  guard: no activations this cycle (normal if bubble <= 85)
+  [OK] Risk guard fires on bubble>85 � bullish boosts suppressed (bubble 90>80); stat arb insider mult damped 80%
+  [OK] Live boosts suppressed under bubble=90
+
+Dashboard panel
+  [OK] Insider section widget
+  [OK] Insider DataTable
+  [OK] Refresh snapshot hook
+  [OK] UI fill handler
+  [OK] 45s auto-refresh
+
+Banner: >>> Insider Monitor: ON | Clusters: 2 | Quality signals: 28 | Boost: 2 clusters, 4 shorts
+
+=== Summary ===
+All checks passed
+
+Ready for market open.
