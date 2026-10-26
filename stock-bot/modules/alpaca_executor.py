@@ -988,8 +988,10 @@ class AlpacaExecutor:
         if order is None:
             return None
         status_text = str(getattr(order, "status", "") or "").lower()
-        if status_text in {"skipped", "error", "dry_run", "closed"} and not getattr(
-            order, "filled_qty", None
+        if (
+            status_text in {"skipped", "error", "dry_run", "closed"}
+            and not getattr(order, "filled_qty", None)
+            and not self._broker_order_id(order)
         ):
             return None
 
