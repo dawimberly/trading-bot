@@ -58,12 +58,15 @@ def test_titlebar_x_always_shuts_down_not_tray():
     assert "_start_tray" not in body
 
 
-def test_restart_all_three_button_is_wired():
+def test_update_all_three_button_is_wired():
     src = _src()
-    assert 'text="Restart All 3"' in src
+    assert 'text="Update All 3 books"' in src
+    assert 'text="Restart All 3"' not in src
     assert "def _restart_all_bots_async(" in src
-    assert "restart_all_bots(" in src
-    assert 'status="Restarting all 3 books…"' in src
+    assert "hard_update_all_bots(" in src
+    assert "CTkScrollableFrame(" in src
+    assert "def _fit_page_scroll(" in src
+    assert 'status="Hard-updating all 3 books…"' in src
     assert "Restart paper + live" not in src
 
 

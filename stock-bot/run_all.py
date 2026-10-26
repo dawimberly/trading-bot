@@ -31,8 +31,6 @@ from modules.pipeline_strategies import (
     run_equity_pairs_strategy,
     run_international_strategy,
     run_bond_strategy,
-    run_spy_exits,
-    run_spy_strategy,
     resolve_cycle_deploy,
     summarize_entry_skip_reason,
 )
@@ -80,6 +78,25 @@ warnings.filterwarnings("ignore", message=r".*possibly delisted.*")
 pair_cooldown = {}
 
 logger = logging.getLogger(__name__)
+
+PAPER_RESEARCH_SCAN_BUDGET_SEC = 10 * 60
+
+
+def _paper_research_scan_allowed(deadline: float | None, sleeve: str) -> bool:
+    """Gate paper research scans so enough cycle time remains for exits and reporting."""
+    if deadline is None or time.monotonic() < deadline:
+        return True
+    logger.warning(
+        "Paper research scan budget spent; skipping %s for this cycle",
+        sleeve,
+    )
+    log_event(
+        "research_scan_skipped",
+        sleeve=sleeve,
+        reason="paper_research_budget_spent",
+    )
+    print(f"--- Paper scan budget spent: skipping {sleeve} this cycle ---")
+    return False
 
 
 def _warn_nonfatal(context: str, exc: BaseException) -> None:
@@ -295,17 +312,6 @@ def _equity_log(symbol, side, regime, pair_key, _z, notional=""):
     trade_journal.log_signal(symbol, side, regime, pair_key, 0.0, _last_equity, notional)
 
 
-def _spy_log(symbol, side, regime, pair_key, momentum, notional=""):
-    if side == "buy":
-        logging.getLogger(__name__).info("SPY SLEEVE buy", extra={"symbol": symbol, "notional": notional, "ma_window": config.effective_spy_ma_window(), "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
-    else:
-        logging.getLogger(__name__).info("SPY SLEEVE sell", extra={"symbol": symbol, "notional": notional, "ma_window": config.effective_spy_ma_window(), "cap": config.SPY_SLEEVE_CAP_PCT, "regime": regime})
-    log_trade(symbol, side, regime)
-    trade_journal.log_signal(
-        symbol, side, regime, pair_key, momentum, _last_equity, notional
-    )
-
-
 _last_equity = 0.0
 
 
@@ -346,13 +352,23 @@ def _record_cycle_error(error: str) -> str:
     return klass
 
 
+def _strip_spy_sleeve(payload: dict | None) -> dict | None:
+    """Drop the removed SPY sleeve from anything written to heartbeats or logs."""
+    if not isinstance(payload, dict):
+        return payload
+    out = {k: v for k, v in payload.items() if k not in ("spy", "spy_value", "spy_cap")}
+    pnl = out.get("sleeve_pnl")
+    if isinstance(pnl, dict) and "spy" in pnl:
+        out["sleeve_pnl"] = {k: v for k, v in pnl.items() if k != "spy"}
+    return out
+
+
 def _write_heartbeat(
     regime,
     equity,
     cash,
     crypto_trades,
     equity_trades,
-    spy_trades,
     halted,
     market_open,
     sleeves=None,
@@ -388,8 +404,7 @@ def _write_heartbeat(
         "cash_pct": round(float(cash) / float(equity), 6) if equity and equity > 0 else 0.0,
         "crypto_trades_last_cycle": crypto_trades,
         "equity_trades_last_cycle": equity_trades,
-        "spy_trades_last_cycle": spy_trades,
-        "sleeve_caps": sleeve_caps
+        "sleeve_caps": _strip_spy_sleeve(sleeve_caps)
         or {
             "vti_core": config.effective_vti_core_pct(
                 equity,
@@ -399,7 +414,6 @@ def _write_heartbeat(
                 data=heartbeat_data,
                 insider_state=insider_state,
             ),
-            "spy": config.effective_sleeve_cap(config.SPY_SLEEVE_CAP_PCT, sleeve="spy"),
             "crypto": config.effective_sleeve_cap(config.CRYPTO_SLEEVE_CAP_PCT),
             "nyse": config.effective_sleeve_cap(config.NYSE_SLEEVE_CAP_PCT),
             "metal": config.METAL_SLEEVE_CAP_PCT if config.metal_sleeve_enabled() else 0.0,
@@ -461,7 +475,7 @@ def _write_heartbeat(
     if scan_schedule:
         payload["scan_schedule"] = scan_schedule
     if sleeves:
-        payload["sleeve_exposure"] = sleeves
+        payload["sleeve_exposure"] = _strip_spy_sleeve(sleeves)
     if wisdom:
         payload["wisdom"] = {
             "mode": wisdom.get("wisdom_mode"),
@@ -496,7 +510,7 @@ def _write_heartbeat(
     if macro_event:
         payload["macro_event"] = macro_event
     if sleeve_pnl:
-        payload["sleeve_pnl"] = sleeve_pnl
+        payload["sleeve_pnl"] = _strip_spy_sleeve(sleeve_pnl)
     if vti_core and vti_core.get("enabled"):
         payload["vti_core"] = {
             "target_pct": vti_core.get("target_pct"),
@@ -535,6 +549,11 @@ def _write_heartbeat(
 def main():
     global _last_equity, _last_cycle_schedule, _main_cycle_count
     _main_cycle_count += 1
+    paper_research_deadline = (
+        time.monotonic() + PAPER_RESEARCH_SCAN_BUDGET_SEC
+        if config.PAPER_TRADING
+        else None
+    )
     now_ts = datetime.datetime.now(datetime.timezone.utc).astimezone()
     executor = _make_executor()
     schedule = equity_scan_state(executor.client, now_ts)
@@ -691,7 +710,7 @@ def main():
         except Exception as exc:
             _warn_nonfatal("Alert error", exc)
         _write_heartbeat(
-            "HALTED", equity, cash, 0, 0, 0, True, market_open, None, scan_schedule=schedule
+            "HALTED", equity, cash, 0, 0, True, market_open, None, scan_schedule=schedule
         )
         return
 
@@ -1369,7 +1388,11 @@ def main():
             )
 
     options_result = None
-    if config.effective_options_sleeve_enabled() and market_open:
+    if (
+        config.effective_options_sleeve_enabled()
+        and market_open
+        and _paper_research_scan_allowed(paper_research_deadline, "options")
+    ):
         from modules.options_sleeve import current_vix_level, run_options_sleeve_cycle
 
         options_result = run_options_sleeve_cycle(
@@ -1473,7 +1496,11 @@ def main():
                 )
 
     orb_mom_result = None
-    if config.effective_orb_momentum_enabled() and market_open:
+    if (
+        config.effective_orb_momentum_enabled()
+        and market_open
+        and _paper_research_scan_allowed(paper_research_deadline, "ORB")
+    ):
         try:
             from modules.orb_momentum_sleeve import run_orb_momentum_cycle
 
@@ -1509,7 +1536,11 @@ def main():
             _warn_nonfatal("ORB momentum sleeve", exc)
 
     sector_rot_result = None
-    if config.effective_sector_rotation_enabled() and market_open:
+    if (
+        config.effective_sector_rotation_enabled()
+        and market_open
+        and _paper_research_scan_allowed(paper_research_deadline, "sector rotation")
+    ):
         try:
             from modules.sector_rotation import run_sector_rotation_cycle
 
@@ -1545,7 +1576,12 @@ def main():
             _warn_nonfatal("Sector rotation sleeve", exc)
 
     vol_bo_result = None
-    if config.effective_vol_breakout_enabled() and market_open and config.PAPER_TRADING:
+    if (
+        config.effective_vol_breakout_enabled()
+        and market_open
+        and config.PAPER_TRADING
+        and _paper_research_scan_allowed(paper_research_deadline, "volume breakout")
+    ):
         try:
             from modules.vol_breakout_sleeve import run_vol_breakout_cycle
 
@@ -1610,24 +1646,12 @@ def main():
         )
     else:
         c = 0
-    s = 0
     nyse_trades = 0
     gp_result = {"enabled": False, "signals": gp_signals, "actions": []}
 
     market_open = is_equity_market_open(executor.client)
     executor.equity_session_open = market_open
-    if equity_scans:
-        s += run_spy_exits(data, executor, regime, log_fn=_spy_log)
-        s += run_spy_strategy(
-            data,
-            executor,
-            regime,
-            now,
-            pair_cooldown,
-            log_fn=_spy_log,
-            portfolio_manager=portfolio_manager,
-            yield_gated=yield_gated,
-        )
+    if equity_scans and _paper_research_scan_allowed(paper_research_deadline, "NYSE"):
         if config.effective_equity_pairs_enabled():
             nyse_trades = run_equity_pairs_strategy(
                 data,
@@ -1766,7 +1790,7 @@ def main():
                 market_open=False,
                 signals=gp_signals,
             )
-    print(f"--- Crypto: {c} | SPY: {s} | NYSE: {nyse_trades} ---")
+    print(f"--- Crypto: {c} | NYSE: {nyse_trades} ---")
 
     kraken_autopilot_result = None
     if config.KRAKEN_AUTOPILOT_ENABLED:
@@ -1821,7 +1845,7 @@ def main():
             f" | Metal ${round(sleeves['metal_value'], 2)}/"
             f"${round(sleeves['metal_cap'], 2)}"
         )
-    total_entries = int(c) + int(s) + int(nyse_trades)
+    total_entries = int(c) + int(nyse_trades)
     if total_entries > 0:
         entry_skip_reason = "traded"
     else:
@@ -1845,13 +1869,12 @@ def main():
     entry_skip_daily = record_cycle(entry_skip_reason)
     maybe_emit_daily_summary()
     print(
-        f"=== CYCLE STATUS: spy={s} nyse={nyse_trades} crypto={c} | "
+        f"=== CYCLE STATUS: nyse={nyse_trades} crypto={c} | "
         f"gates={entry_skip_reason} | today skipped={entry_skip_daily.get('skipped_cycles', 0)} "
         f"({entry_skip_daily.get('top_skip', '-')}) ==="
     )
     print(
-        f"--- Exposure: SPY ${round(sleeves['spy_value'], 2)}/${round(sleeves['spy_cap'], 2)} | "
-        f"Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
+        f"--- Exposure: Crypto ${round(sleeves['crypto_value'], 2)}/${round(sleeves['crypto_cap'], 2)} | "
         f"NYSE ${round(sleeves['nyse_value'], 2)}/${round(sleeves['nyse_cap'], 2)}{metal_line} ---"
     )
     gp_notes = ""
@@ -1879,7 +1902,7 @@ def main():
         c,
         nyse_trades,
         notes=(
-            f"spy={s} crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
+            f"crypto_cap={config.CRYPTO_SLEEVE_CAP_PCT:.2%} "
             f"nyse_cap={config.effective_nyse_sleeve_cap_pct():.2%}; "
             f"entry_gates={entry_skip_reason}; {gp_notes}"
         ),
@@ -1967,7 +1990,6 @@ def main():
         cash,
         c,
         nyse_trades,
-        s,
         False,
         market_open,
         sleeves,
@@ -2006,7 +2028,7 @@ def main():
         equity=equity,
         cash=cash,
         crypto_trades=c,
-        spy_trades=s,
+        spy_trades=0,
         nyse_trades=nyse_trades,
         spacex_ipo=spacex_snapshot,
         crypto_gate=crypto_gate,
@@ -2106,6 +2128,34 @@ def _print_account_startup_summary(equity: float, cash: float | None = None) -> 
     elif config.live_conservative_lock_active():
         print(f"--- {config.format_live_conservative_headline()} ---")
         print(f"--- {config.format_live_conservative_banner()} ---")
+
+
+def _start_paper_heartbeat_pulse(interval_sec: float = 60.0) -> None:
+    """Paper only. Keep the heartbeat file fresh while a cycle is still working.
+
+    The morning health task treats an 8-minute-old file as a dead bot. The
+    cycle watchdog still kills a stall at its own timeout. Live is unchanged.
+    """
+    if not config.PAPER_TRADING:
+        return
+    import threading
+
+    from modules.heartbeat_watchdog import touch_engine_heartbeat
+
+    try:
+        touch_engine_heartbeat()
+    except Exception:
+        logger.debug("initial heartbeat pulse failed", exc_info=True)
+
+    def _loop() -> None:
+        while True:
+            time.sleep(interval_sec)
+            try:
+                touch_engine_heartbeat()
+            except Exception:
+                logger.debug("heartbeat pulse failed", exc_info=True)
+
+    threading.Thread(target=_loop, name="heartbeat-pulse", daemon=True).start()
 
 
 def _print_startup_banner(startup_equity: float | None = None):
@@ -2514,6 +2564,7 @@ if __name__ == "__main__":
     if config.effective_real_time_websocket_enabled():
         start_realtime_feed()
         time.sleep(1.5)
+    _start_paper_heartbeat_pulse()
     _print_startup_banner(startup_equity)
     if startup_equity is not None:
         _print_account_startup_summary(startup_equity, cash=startup_cash)

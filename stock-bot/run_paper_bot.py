@@ -107,6 +107,25 @@ def _autorestart_enabled(env: dict[str, str]) -> bool:
     return _truthy(raw)
 
 
+def engine_exit_action(
+    rc: int | None,
+    *,
+    autorestart: bool,
+    quick_failures: int,
+) -> str:
+    """Supervisor decision after the paper engine process exits.
+
+    ``stop`` ends the supervisor. ``restart`` spawns the engine again.
+    Exit 0 is a clean shutdown. Exit 1 stops after three quick failures
+    already counted in ``quick_failures``. A watchdog stall (exit 42) restarts.
+    """
+    if rc == 0 or not autorestart:
+        return "stop"
+    if rc == 1 and quick_failures >= 3:
+        return "stop"
+    return "restart"
+
+
 def _spawn_run_all(python: str, env: dict[str, str], flags: int) -> subprocess.Popen:
     return subprocess.Popen(
         [python, str(RUN_ALL)],
@@ -221,11 +240,17 @@ def main() -> None:
     print("=" * width)
     print(config.format_paper_live_profile_line())
     print("=" * width)
-    for line in config.format_realistic_research_startup_lines():
-        try:
-            print(line)
-        except UnicodeEncodeError:
-            print(line.encode("ascii", "replace").decode("ascii"))
+    # Do not Yahoo-scan from the supervisor. That scan was blocking spawn,
+    # and the engine repeats a bounded scan after it is actually running.
+    os.environ["BOT_HEALTH_SKIP_LIVE_SCAN"] = "1"
+    try:
+        for line in config.format_realistic_research_startup_lines():
+            try:
+                print(line)
+            except UnicodeEncodeError:
+                print(line.encode("ascii", "replace").decode("ascii"))
+    finally:
+        os.environ.pop("BOT_HEALTH_SKIP_LIVE_SCAN", None)
     try:
         from modules.deployment_monitor import excess_cash_warning
 
@@ -297,8 +322,22 @@ def main() -> None:
         while True:
             rc = proc.poll()
             if rc is not None:
-                # Engine exited. Clean (0) or auth/fatal (1) => stop supervisor.
-                if not autorestart or rc in (0, 1):
+                # Clean shutdown only. Exit 1 is a startup/auth crash — retry
+                # a few times so Update All 3 does not leave the book dead.
+                action = engine_exit_action(
+                    rc, autorestart=autorestart, quick_failures=restart_count
+                )
+                if action == "stop":
+                    if rc == 1 and restart_count >= 3:
+                        print(
+                            "--- Paper engine failed 3 times (exit 1); supervisor stopping ---",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"--- Paper engine exited ({rc}); supervisor stopping ---",
+                            flush=True,
+                        )
                     sys.exit(rc if rc is not None else 0)
                 # Back off harder if the engine keeps dying quickly (crash loop).
                 now = time.monotonic()

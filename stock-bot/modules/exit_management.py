@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 _DAILY_CLOSE_MATRIX = None
 _DAILY_CLOSE_MATRIX_MONO = 0.0
 _DAILY_CLOSE_TTL_SEC = 900.0
+_DAILY_ATR_EVIDENCE = {}
 
 
 def reset_daily_atr_cache() -> None:
@@ -336,7 +337,18 @@ def _daily_bar_atr(symbol: str) -> float | None:
         ):
             _DAILY_CLOSE_MATRIX = load_close_matrix(interval="1d")
             _DAILY_CLOSE_MATRIX_MONO = now
-        return calculate_atr(_DAILY_CLOSE_MATRIX, symbol)
+        value = calculate_atr(_DAILY_CLOSE_MATRIX, symbol)
+        try:
+            series = _DAILY_CLOSE_MATRIX[symbol].dropna()
+            _DAILY_ATR_EVIDENCE[symbol] = {
+                "source": "daily_close_matrix", "atr": value,
+                "last_bar": str(series.index[-1]) if len(series) else None,
+                "close_tail": [float(v) for v in series.tail(15)],
+                "cache_age_seconds": now - _DAILY_CLOSE_MATRIX_MONO,
+            }
+        except Exception:
+            _DAILY_ATR_EVIDENCE[symbol] = {"source": "daily_close_matrix", "atr": value}
+        return value
     except Exception:
         return None
 
@@ -376,4 +388,9 @@ def resolve_symbol_atr_and_conviction(
         conviction = 0.5
     if atr is None or atr <= 0:
         atr = _entry_fallback_atr(executor, symbol)
+        _DAILY_ATR_EVIDENCE[symbol] = {"source": "entry_fallback", "atr": atr}
+    try:
+        executor._last_atr_evidence = dict(_DAILY_ATR_EVIDENCE.get(symbol) or {})
+    except Exception:
+        pass
     return float(atr), float(conviction)

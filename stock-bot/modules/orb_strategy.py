@@ -47,9 +47,9 @@ def _fetch_intraday_bars(symbol: str) -> pd.DataFrame | None:
         bars = cached.get("_bars")
         return bars if isinstance(bars, pd.DataFrame) else None
     try:
-        import yfinance as yf
+        from modules.volume_analysis import yahoo_history
 
-        hist = yf.Ticker(sym).history(period="1d", interval="5m", auto_adjust=False)
+        hist = yahoo_history(sym, period="1d", interval="5m", auto_adjust=False)
         if hist is None or hist.empty:
             _cache_put(cache_key, {"_bars": None})
             return None
@@ -144,6 +144,7 @@ def get_orb_signals(
     volume_filter: bool = True,
     *,
     limit: int = 20,
+    deadline_sec: float | None = None,
 ) -> list[dict[str, Any]]:
     """Return ORB breakout signals from the momentum universe (list, may be empty)."""
     if not config.effective_orb_enabled():
@@ -151,11 +152,21 @@ def get_orb_signals(
 
     minutes = max(5, int(minutes or getattr(config, "ORB_BREAKOUT_MINUTES", 30)))
     limit = max(1, int(limit))
-    from modules.volume_analysis import calculate_rvol
+    from modules.volume_analysis import (
+        RVOL_SCAN_BUDGET_SEC,
+        _deadline_at,
+        _deadline_reached,
+        calculate_rvol,
+    )
 
+    if deadline_sec is None:
+        deadline_sec = RVOL_SCAN_BUDGET_SEC
+    deadline = _deadline_at(deadline_sec)
     upside: list[dict[str, Any]] = []
     downside: list[dict[str, Any]] = []
     for sym in nyse_scan_universe(data, limit_scan=_SCAN_UNIVERSE_CAP):
+        if _deadline_reached(deadline):
+            break
         or_info = calculate_opening_range(data, sym, minutes=minutes)
         if not or_info:
             continue
@@ -285,7 +296,9 @@ def format_telegram_weekly_orb_block(data=None) -> str:
     return "\n".join(lines)
 
 
-def combined_scanner_dashboard_rows(data=None, *, limit: int = 10) -> list[dict[str, str]]:
+def combined_scanner_dashboard_rows(
+    data=None, *, limit: int = 10, deadline_sec: float | None = None
+) -> list[dict[str, str]]:
     """RVOL leaders plus ORB upside breakouts for dashboard."""
     if data is None:
         from modules.pipeline_strategies import load_pipeline_data
@@ -301,6 +314,7 @@ def combined_scanner_dashboard_rows(data=None, *, limit: int = 10) -> list[dict[
         minutes=int(config.ORB_BREAKOUT_MINUTES),
         volume_filter=True,
         limit=limit,
+        deadline_sec=deadline_sec,
     )
     for item in orb:
         if item.get("type") != "up_breakout":
@@ -319,7 +333,12 @@ def combined_scanner_dashboard_rows(data=None, *, limit: int = 10) -> list[dict[
             }
         )
 
-    for item in get_high_rvol_stocks(data, min_rvol=config.RVOL_MIN_THRESHOLD, limit=limit):
+    for item in get_high_rvol_stocks(
+        data,
+        min_rvol=config.RVOL_MIN_THRESHOLD,
+        limit=limit,
+        deadline_sec=deadline_sec,
+    ):
         sym = str(item["symbol"])
         if sym in seen:
             continue

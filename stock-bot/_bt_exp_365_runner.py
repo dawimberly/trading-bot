@@ -1026,6 +1026,12 @@ def _small_account_start_equity() -> float:
     return float(config.SMALL_ACCOUNT_BACKTEST_EQUITY)
 
 
+def _append_runner_holdout_mark(portfolio, prices, bar_index: int, marks: list, bars: list) -> None:
+    """One end-of-bar equity mark for chronological holdout scoring."""
+    marks.append(float(portfolio.equity(prices)))
+    bars.append(int(bar_index))
+
+
 def run_backtest(
     data,
     *,
@@ -1266,6 +1272,9 @@ def run_backtest(
         halt_min_bars=config.HALT_MIN_BARS,
     )
     equity_curve = []
+    equity_bar_index: list[int] = []
+    holdout_equity: list[float] = []
+    holdout_bar_index: list[int] = []
     regime_counts = {}
     regime_series: list[str] = []
     regime_filter_skips = 0
@@ -1412,7 +1421,9 @@ def run_backtest(
         eq = portfolio.equity(prices)
         if small_account:
             config.configure_account_profile(eq)
+        # Pre-trade mark. Chronological holdout scores this curve as recorded.
         equity_curve.append(eq)
+        equity_bar_index.append(i)
 
         from modules.market_context import set_regime_bar_index
 
@@ -1499,6 +1510,7 @@ def run_backtest(
                     f"!!! RISK HALT at {data.index[i].date()} "
                     f"(equity ${round(eq, 2)}, DD {risk_manager.current_drawdown(eq):.1%}) !!!"
                 )
+            _append_runner_holdout_mark(portfolio, prices, i, holdout_equity, holdout_bar_index)
             continue
         if verbose and prev_halted and not risk_manager.halted:
             print(
@@ -1508,6 +1520,7 @@ def run_backtest(
 
         if regime_filter and not regime_matches(regime_label, regime_filter):
             regime_filter_skips += 1
+            _append_runner_holdout_mark(portfolio, prices, i, holdout_equity, holdout_bar_index)
             continue
 
         yield_gated = False
@@ -2105,6 +2118,7 @@ def run_backtest(
                 spy_fill["hours_to_90pct"] = round(
                     spy_fill["cycles_to_90pct"] * (COOLDOWN_SECONDS / 3600), 1
                 )
+        _append_runner_holdout_mark(portfolio, prices, i, holdout_equity, holdout_bar_index)
 
     bench = _benchmark_return(data, warmup)
     perf = compute_performance_metrics(
@@ -2142,11 +2156,14 @@ def run_backtest(
         "sharpe": sharpe,
         "sortino": sortino,
         "calmar": calmar,
+        "return_over_max_dd": perf.get("return_over_max_dd", 0.0),
         "max_drawdown_pct": max_dd,
         "win_rate_pct": win_rate_pct,
         "rolling_sharpe_mean": rolling_sharpe_mean,
         "profit_factor": profit_factor,
         "avg_trade_return_pct": perf.get("avg_trade_return_pct", 0.0),
+        "avg_trade_return_basis": perf.get("avg_trade_return_basis", "return_per_order"),
+        "return_per_order_pct": perf.get("return_per_order_pct", 0.0),
         "rolling_sharpe_series": perf.get("rolling_sharpe_series"),
         "drawdown_series": perf.get("drawdown_series"),
         "benchmark_return_pct": perf.get("benchmark_return_pct"),
@@ -2192,6 +2209,10 @@ def run_backtest(
         "cap_scale": cap_scale,
         "equity_index": [data.index[i].isoformat() for i in range(warmup, len(data))],
         "equity_values": [round(v, 2) for v in equity_curve],
+        "equity_bar_index": list(equity_bar_index),
+        "holdout_equity_values": [round(v, 2) for v in holdout_equity],
+        "holdout_equity_bar_index": list(holdout_bar_index),
+        "initial_capital": float(portfolio.initial_capital),
         "pairs_traded": pairs_traded,
         "pair_pnl_correlation": pair_pnl_corr,
     }
@@ -6145,7 +6166,8 @@ def run_performance_test(
         print(f"VTI Buy & Hold:   {round(bench, 2)}%")
     print(f"Sharpe Ratio:     {round(sharpe, 2)}")
     print(f"Sortino Ratio:    {round(result.get('sortino', 0), 2)}")
-    print(f"Calmar Ratio:     {round(result.get('calmar', 0), 2)}")
+    print(f"Calmar Ratio:     {round(result.get('return_over_max_dd', 0), 2)}")
+    print(f"Calmar (CAGR):    {round(result.get('calmar', 0), 2)}")
     print(f"Win rate (daily): {round(result.get('win_rate_pct', 0), 1)}%")
     print(f"Max Drawdown:     {round(max_dd, 2)}%")
     print(f"SPY signals:      {total_spy}")
@@ -6195,7 +6217,7 @@ def run_performance_test(
         skips = result.get("regime_filter_skips", 0)
         print(f"Regime filter skips: {skips} bars (no new trading)")
     print(f"Profit factor:    {round(result.get('profit_factor', 0), 2)}")
-    print(f"Avg trade return: {round(result.get('avg_trade_return_pct', 0), 3)}%")
+    print(f"Return per order: {round(result.get('return_per_order_pct', result.get('avg_trade_return_pct', 0)), 3)}%")
     if result.get("attribution"):
         from modules.backtest_attribution import print_attribution_report
 
@@ -6252,6 +6274,9 @@ def run_performance_test(
             "win_rate_pct": result.get("win_rate_pct"),
             "profit_factor": result.get("profit_factor"),
             "avg_trade_return_pct": result.get("avg_trade_return_pct"),
+            "return_per_order_pct": result.get("return_per_order_pct"),
+            "avg_trade_return_basis": result.get("avg_trade_return_basis"),
+            "return_over_max_dd": result.get("return_over_max_dd"),
             "total_orders": total_orders,
         }
         path = export_results_csv([row], RUN_OPTIONS.export_csv)

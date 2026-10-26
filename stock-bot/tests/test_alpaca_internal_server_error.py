@@ -66,6 +66,41 @@ def test_not_fractionable_is_skippable():
     assert is_skippable_order_error(exc) is True
 
 
+def test_not_fractionable_403_does_not_exit_as_auth(monkeypatch):
+    """A whole-share reject is HTTP 403. It must not be treated as a bad API key."""
+    from alpaca.common.exceptions import APIError
+    from modules.alpaca_client import (
+        AlpacaAuthError,
+        AlpacaValidationError,
+        is_auth_alpaca_error,
+    )
+
+    monkeypatch.setattr("modules.alpaca_client.RETRY_BASE_DELAY_SEC", 0.0)
+
+    class _Response:
+        status_code = 403
+
+    class _HttpError:
+        response = _Response()
+
+    exc = APIError(
+        '{"code":40310000,"message":"asset \\"PS\\" is not fractionable"}',
+        http_error=_HttpError(),
+    )
+    assert is_auth_alpaca_error(exc) is False
+
+    def boom():
+        raise exc
+
+    try:
+        call_with_retry(boom, op_name="submit_order")
+        raise AssertionError("expected AlpacaValidationError")
+    except AlpacaAuthError:
+        raise AssertionError("not-fractionable 403 must not exit the bot")
+    except AlpacaValidationError as err:
+        assert "not fractionable" in str(err).lower()
+
+
 def test_call_with_retry_retries_json_500(monkeypatch):
     monkeypatch.setattr("modules.alpaca_client.RETRY_BASE_DELAY_SEC", 0.0)
     from alpaca.common.exceptions import APIError

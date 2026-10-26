@@ -2,11 +2,17 @@
 
 **Personal systematic fund** on Alpaca. **What actually runs** is the portal overlay in `modules/portal_bot.py`, not the old Profile A / v1.5.4 VTI locks further down this file.
 
+### Phase 4 Medium paper trial (2026-10-11)
+
+Phase 4 remains a Medium paper trial on `cursor/phase4-integration`. October 12 order, fill, and realized-P&L reconciliation is **NOT YET TESTED**. Realized dollars belong on fill rows; confirmed close markers carry no duplicate dollars. Estimated remaining quantity cannot confirm a completed exit. Offline research does not validate broker execution or paper accounting.
+
+Research runs must use historical snapshots, keep outputs outside active books, and use only information available before the simulated execution. Record data coverage, universe selection, costs, and execution limitations with each result. Promotion requires review of actual paper orders and fills; this branch is not approval to merge or deploy to live.
+
 | Book | ID | Employed (2026-10-10) |
 |------|-----|------------------------|
 | **Live** | `alpaca_live` | ~$300 · **VTI core OFF** · NYSE-only (~95% cap) · 1% / $10 small-account caps · crypto **off** |
 | **Medium SoT** | `alpaca_paper_v2` | ~$102k · **15** names · 30d · **2× ATR** · VTI **0** · scanners off · A2B1 **off** |
-| **Lab 8** (aggressive) | `alpaca_paper` | **8** names · 30d · lab trail · VTI **0** · scanners on · **A2B1 still on** (isolated-walk FAIL 2026-10-10; named kill only) |
+| **Lab 8** (aggressive) | `alpaca_paper` | **8** names · 30d · lab trail · VTI **0** · scanners on · **A2B1 on** (isolated-walk CANDIDATE 2026-10-10; Medium/live stay off) |
 
 **Stat arb** is in the function name `run_nyse_momentum_and_stat_arb` but **does not trade** on these books: `effective_stat_arb_enabled()` requires crypto ON, Lab `stat_arb` cap is **0%**, and journals have **0** pair fills. Paper P&L is NYSE momentum.
 
@@ -136,23 +142,24 @@ Quit **PythonTradingMonitor.exe** before rebuilding (unlocks `dist\PythonTrading
 |-------|-------------------|------------------------------|----------------------|
 | **VTI core** | **Off** | **Off** | **Off** |
 | **Names / exits** | Small NYSE book | **15** / 30d / **2× ATR** | **8** / 30d / lab trail |
-| **A2B1** (≥8% next open, skip Mon) | Off | Off | **On** (walk FAIL; leftover flag) |
+| **A2B1** (≥8% next open, skip Mon) | Off | Off | **On** (walk CANDIDATE; already on Lab) |
 | **Stat arb pairs** | Off | Off | Cap **0%** (crypto-gated; **0** fills) |
 | **Crypto** | Off | Off | Off |
 | **Scanners** | Off | Off | On (FULL, not PIT) |
 
 ### Research SoT (isolated NYSE MA70 walk)
 
-Do not quote today's screener on history. The honest book is **S&P 500 membership by date**, 10 bps round trip, sleeve 0.95, drawdown marked to market.
+Do not quote today's screener on history. The honest book is **S&P 500 membership by date**, Mon–Fri session bars, interior ffill, 10 bps RT, sleeve 0.95, marked-to-market DD. Coverage of index members is **97.4% / 95.4%** after prefetching missing S&P names (Yahoo-dead M&A tickers remain). Windows are two **disjoint** 365-session walks, not a full-DB that contains the recent year.
 
-| | 365d book / DD / Sharpe | Full DB book / DD / Sharpe |
-|--|-------------------------|----------------------------|
-| **pick_15 (keep)** | **+95.5% / 13.8 / 1.91** | **+134% / 19.6 / 1.06** |
-| current screener (look-ahead) | +246% / 13.8 / 2.72 | +298% / 30.6 / 1.28 |
+| | 365d_recent (2025-04-11→2026-10-09) | 365d_prior (2023-10-02→2025-04-10) |
+|--|-------------------------------------|-------------------------------------|
+| **pick_15 (keep)** | **+100.2% / 18.7 / 1.66** | **+6.2% / 22.8 / 0.27** |
+| A2B1 (CANDIDATE) | +108.1% / 16.0 / 1.90 | +6.7% / 19.0 / 0.29 |
+| current screener (look-ahead) | +266% / 14.4 / 2.51 | −14.2% / 31.0 / −0.47 |
 
 Scripts: `scripts/analysis/pit_universe_rerun.py`, `vol_momentum_ab.py`, `a2b1_pit_ab.py`. Ledger: `best_strategies/findings.md` (as of 2026-10-10). Protocol: `best_strategies/PROTOCOL.md`.
 
-**Killed on this book (both windows):** risk-adjusted rank, 12% vol target, A2B1 skip-Monday fade, Friday flatten, take_1R, pick_8 vs pick_15 (DD), Lab 8 vs pick_15 (DD). Lab 8 stays the aggressive *executor* from the STRICT name-count table, not because 8 wins the isolated walk.
+**Killed on this book (fail the recent year or both windows):** risk-adjusted rank, 12% vol target, Friday flatten, take_1R, pick_8 vs pick_15 (DD), Lab 8 vs pick_15 (recent return). **A2B1 clears both windows** — already on Lab; Medium/live stay off. Lab 8 stays the aggressive *executor* from the non-PIT STRICT name-count table, not because 8 wins the isolated walk.
 
 ### Profile A — documented live lock (`run_all.py`)
 
@@ -1731,7 +1738,7 @@ python scripts/analysis/weekly_review.py --test
 python scripts/analysis/weekly_review.py --skip-backtest   # smoke only
 ```
 
-Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`. Closed-trade dollars come from `trade_closed` (`realized_pnl`); a paired percent-only `exit` note is dropped so the same close is not counted twice. Unpaired old `exit` rows still count as win/loss direction only. The Saturday pack also appends a Lab 8 A2B1 / fat-loser tally (`data/lab_a2b1_week_latest.md`; standalone: `python scripts/analysis/lab_a2b1_week.py`). Advisory only — does not write `.env`.
+Outputs: `data/weekly_review_YYYY-MM-DD.md`, `data/weekly_review_latest.md`. New realized-dollar accounting uses sell `fill` rows. The same fill is counted once when it shares an execution id. The same order id with the same quantity and price, and no execution id, is reported as uncertain and both records stay in the unattributed list. A historical `trade_closed` marker is left out of the confident total only when it matches one identified fill with the same dollars. Unpaired old `exit` rows still count as win/loss direction only. The Saturday pack also appends a Lab 8 A2B1 / fat-loser tally (`data/lab_a2b1_week_latest.md`; standalone: `python scripts/analysis/lab_a2b1_week.py`). Advisory only — does not write `.env`.
 
 The NYSE hour table is **sale hour**: the exit timestamp converted from the machine clock to ET. It does not use blank `entry_hour`, and it is not an entry-quality score. `python scripts/analysis/eval_open_stop_gap.py` classifies those ATR exits as an overnight gap-through versus a session fade. The 2026-09-26 week was 8 fades and 1 open print (TGT). That script does not write `.env`.
 

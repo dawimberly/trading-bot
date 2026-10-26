@@ -86,10 +86,35 @@ def _execute_backtest_core_rebalance(portfolio, prices, core_pct: float) -> bool
     min_n = config.effective_min_notional(eq)
     if abs(delta) < min_n:
         return False
-    if delta > 0:
-        portfolio.trade(core_sym, "buy", price, tx_cost=0.0, notional=delta)
-    else:
-        portfolio.trade(core_sym, "sell", price, tx_cost=0.0, notional=-delta)
+    side = "buy" if delta > 0 else "sell"
+    notional = delta if delta > 0 else -delta
+    if _queue_delayed_core_rebalance(portfolio, core_sym, side, notional):
+        return False
+    portfolio.trade(core_sym, side, price, tx_cost=0.0, notional=notional)
+    return True
+
+
+def _queue_delayed_core_rebalance(portfolio, symbol: str, side: str, notional: float) -> bool:
+    """Queue one core order for the next bar. Same-close callers keep trading now."""
+    from modules.backtester_core import RUN_OPTIONS
+
+    if getattr(RUN_OPTIONS, "fill_timing", "same_close") != "next_close":
+        return False
+    from backtester import _core_rebalance_pending, _queue_research_intent
+
+    if _core_rebalance_pending(portfolio, symbol):
+        return True
+    _queue_research_intent(
+        portfolio,
+        symbol=symbol,
+        side=side,
+        notional=notional,
+        tx_cost=0.0,
+        allow_naked_short=False,
+        reduce_only=side == "sell",
+        signal_bar=None,
+        source="core_rebalance",
+    )
     return True
 
 

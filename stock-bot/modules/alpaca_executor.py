@@ -64,6 +64,17 @@ def _lab_sold_today(symbol: str) -> bool:
     return config.normalize_symbol(symbol) in {config.normalize_symbol(s) for s in sold}
 
 
+def note_lab_sell(symbol: str, reason: str) -> None:
+    """Same-day rebuy stays for other Lab sells. This experiment does not use it."""
+    if not config.paper_lab_concentrated_enabled():
+        return
+    from modules.lab_forward_trail import records_same_day_rebuy
+
+    if not records_same_day_rebuy(reason):
+        return
+    _record_lab_sold_today(symbol)
+
+
 def _record_lab_sold_today(symbol: str) -> None:
     path = _lab_sold_today_path()
     today = _et_today()
@@ -231,6 +242,7 @@ class AlpacaExecutor:
         sleeve: str | None = None,
         notional=None,
         qty=None,
+        exit_meta: dict | None = None,
     ):
         if not self._validate_order_symbol(symbol):
             return None
@@ -281,6 +293,25 @@ class AlpacaExecutor:
             except Exception:
                 pass
 
+        # OBSERVATIONAL_PLAN_HOOK_BEGIN pre_submit
+        # Reporting only. Capture failure must not change or block the order.
+        _purchase_plan_token = None
+        try:
+            from modules.purchase_plans import before_submit as _plan_before_submit
+
+            _purchase_plan_token = _plan_before_submit(
+                self,
+                config,
+                symbol=symbol,
+                side=side,
+                reason=reason,
+                sleeve=sleeve,
+                order=order,
+            )
+        except Exception:
+            logger.warning("TRADE PLAN INCOMPLETE: pre-submit capture unavailable")
+        # OBSERVATIONAL_PLAN_HOOK_END pre_submit
+
         if getattr(self, "dry_run", False):
             logger.info(
                 "Dry-run preflight passed",
@@ -313,15 +344,25 @@ class AlpacaExecutor:
                 except Exception:
                     pass
                 raise
+        # OBSERVATIONAL_PLAN_HOOK_BEGIN order_link
+        # Link the returned order id. This is not a confirmed fill.
+        try:
+            from modules.purchase_plans import submitted as _plan_submitted
+
+            _plan_submitted(_purchase_plan_token, submitted)
+        except Exception:
+            logger.warning("TRADE PLAN INCOMPLETE: order link unavailable")
+        # OBSERVATIONAL_PLAN_HOOK_END order_link
         self._invalidate_cache()
-        if config.paper_lab_concentrated_enabled() and str(side).lower() == "sell":
-            _record_lab_sold_today(symbol)
+        if str(side).lower() == "sell":
+            note_lab_sell(symbol, reason)
         self._track_order(
             submitted,
             symbol=symbol,
             side=side,
             reason=reason,
             sleeve=sleeve,
+            exit_meta=exit_meta,
         )
         logger.info(
             "order submitted",
@@ -635,7 +676,12 @@ class AlpacaExecutor:
         if mult >= 0.999:
             return notional
         scaled = round(notional * mult, 2)
-        if scaled < self._min_notional():
+        min_n = self._min_notional()
+        if scaled < min_n:
+            # NYSE: keep a min ticket when the unscaled size was valid.
+            # Other sleeves stay blocked so a crushed multiplier cannot drip.
+            if str(sleeve_key or "").lower() == "nyse" and float(notional) >= min_n:
+                return round(min_n, 2)
             return None
         return scaled
 
@@ -677,6 +723,17 @@ class AlpacaExecutor:
         if self._positions is None:
             self.refresh_cache()
         return self._positions
+
+    @staticmethod
+    def _broker_order_id(order) -> str:
+        """Alpaca orders use ``id``. Dust closes use ``order_id``."""
+        if order is None:
+            return ""
+        oid = getattr(order, "id", None)
+        if oid:
+            return str(oid)
+        oid = getattr(order, "order_id", None)
+        return str(oid or "")
 
     @staticmethod
     def _order_filled_qty(order):
@@ -724,8 +781,9 @@ class AlpacaExecutor:
         side: str,
         reason: str = "",
         sleeve: str | None = None,
+        exit_meta: dict | None = None,
     ) -> None:
-        oid = str(getattr(order, "id", "") or "")
+        oid = self._broker_order_id(order)
         if not oid:
             return
         ctx = {
@@ -743,15 +801,29 @@ class AlpacaExecutor:
                     entry = 0.0
                 if entry > 0:
                     ctx["entry_price"] = entry
+                try:
+                    held = abs(float(getattr(pos, "qty", 0) or 0))
+                except (TypeError, ValueError):
+                    held = 0.0
+                if held > 0:
+                    ctx["position_qty_before"] = held
                 created = getattr(pos, "created_at", None) or getattr(pos, "createdAt", None)
                 if created is not None:
                     ctx["opened_at"] = created
+        if exit_meta:
+            atr = exit_meta.get("atr")
+            if atr not in (None, ""):
+                ctx["atr"] = atr
+                ctx["atr_asof"] = exit_meta.get("atr_asof") or "at_exit"
+            stop = exit_meta.get("stop_price")
+            if stop not in (None, ""):
+                ctx["stop_price"] = stop
         self._order_notify_ctx[oid] = ctx
 
     def _emit_fill_notification(self, order, details: dict) -> None:
         if not details or not details.get("filled"):
             return
-        oid = str(getattr(order, "id", "") or "")
+        oid = self._broker_order_id(order)
         if not oid or oid in self._notified_order_ids:
             return
 
@@ -787,6 +859,7 @@ class AlpacaExecutor:
             }
         )
         self._notified_order_ids.add(oid)
+        ctx["order_status"] = str(details.get("status") or "filled")
         self._journal_fill(
             symbol=symbol,
             side=side,
@@ -851,6 +924,20 @@ class AlpacaExecutor:
                 cash = round(float(getattr(self._account, "cash", 0) or 0), 2)
             except (TypeError, ValueError):
                 cash = ""
+            remaining = None
+            order_status = ""
+            if side_l.startswith("sell"):
+                order_status = str(ctx.get("order_status") or "")
+                before = ctx.get("position_qty_before")
+                if before is not None:
+                    try:
+                        remaining = float(before) - float(qty or 0)
+                    except (TypeError, ValueError):
+                        remaining = None
+            confirmed_qty = ctx.get("broker_qty_confirmed")
+            qty_source = "confirmed" if confirmed_qty is not None else (
+                "estimated" if remaining is not None else "unavailable"
+            )
             log_fill(
                 symbol,
                 "sell" if side_l.startswith("sell") else "buy",
@@ -868,6 +955,14 @@ class AlpacaExecutor:
                 is_partial="1" if partial else "0",
                 entry_price=entry if side_l.startswith("sell") else (price if price > 0 else ""),
                 hold_minutes=hold,
+                exit_price=price if price > 0 else "",
+                atr=ctx.get("atr") or "",
+                atr_asof=ctx.get("atr_asof") or "",
+                stop_price=ctx.get("stop_price") or "",
+                broker_qty_remaining=confirmed_qty,
+                broker_qty_source=qty_source if side_l.startswith("sell") else "",
+                estimated_qty_remaining=remaining,
+                order_status=order_status,
             )
         except Exception:
             logger.debug("journal fill skipped", exc_info=True)
@@ -920,7 +1015,9 @@ class AlpacaExecutor:
         if max_wait <= 0:
             return first
 
-        oid = order.id
+        oid = self._broker_order_id(order)
+        if not oid:
+            return first
         deadline = time.time() + max_wait
         latest = first
         while time.time() < deadline:
@@ -956,6 +1053,24 @@ class AlpacaExecutor:
         from modules.market_hours import is_equity_market_open
 
         return is_equity_market_open(self.client)
+
+    def open_orders_for_symbol(self, symbol) -> list[dict]:
+        """Open orders for one symbol. Raises if the broker list cannot be read."""
+        target = config.normalize_symbol(symbol)
+        request_params = GetOrdersRequest(status="open")
+        rows = []
+        for order in self._api("get_orders", self.client.get_orders, filter=request_params):
+            if config.normalize_symbol(order.symbol) != target:
+                continue
+            rows.append(
+                {
+                    "id": str(getattr(order, "id", "") or ""),
+                    "side": str(getattr(order, "side", "") or ""),
+                    "status": str(getattr(order, "status", "") or ""),
+                    "qty": str(getattr(order, "qty", "") or ""),
+                }
+            )
+        return rows
 
     def _cancel_open_orders_for(self, symbol):
         target = config.normalize_symbol(symbol)
@@ -1409,7 +1524,8 @@ class AlpacaExecutor:
         return None
 
     def execute_reduce_notional(
-        self, symbol, reduce_notional, *, reason="reduce", sleeve=None, skip_dust: bool = False
+        self, symbol, reduce_notional, *, reason="reduce", sleeve=None, skip_dust: bool = False,
+        exit_meta: dict | None = None,
     ):
         """Reduce long (sell) or short (buy cover) up to reduce_notional."""
         if not self._equity_trading_allowed(symbol):
@@ -1441,7 +1557,10 @@ class AlpacaExecutor:
             if sell_notional < min_n:
                 if config.paper_aggressive_context() and mv <= min_n * 3:
                     return self.execute_full_exit(
-                        symbol, reason=reason or "dust_exit", sleeve=sleeve
+                        symbol,
+                        reason=reason or "dust_exit",
+                        sleeve=sleeve,
+                        exit_meta=exit_meta,
                     )
                 return None
             sell_notional = self._skip_if_notional_invalid(
@@ -1492,6 +1611,7 @@ class AlpacaExecutor:
             reason=reason,
             sleeve=sleeve,
             qty=safe_qty,
+            exit_meta=exit_meta,
         )
         if submitted is None:
             return None
@@ -1501,7 +1621,10 @@ class AlpacaExecutor:
         )
         return submitted
 
-    def execute_full_exit(self, symbol, *, reason="exit", sleeve=None, skip_dust: bool = False):
+    def execute_full_exit(
+        self, symbol, *, reason="exit", sleeve=None, skip_dust: bool = False,
+        exit_meta: dict | None = None,
+    ):
         if not self._equity_trading_allowed(symbol):
             return None
         self._cancel_open_orders_for(symbol)
@@ -1542,6 +1665,7 @@ class AlpacaExecutor:
             reason=reason,
             sleeve=sleeve,
             qty=safe_qty,
+            exit_meta=exit_meta,
         )
         if submitted is None:
             return None
@@ -1645,6 +1769,18 @@ class AlpacaExecutor:
             return None
         formatted_symbol, tif, is_crypto_sym = self.get_order_params(symbol)
         side_lower = side.lower()
+        if side_lower == "buy" and config.paper_lab_concentrated_enabled():
+            from modules.lab_forward_trail import buy_block_reason
+
+            block = buy_block_reason(symbol)
+            if block:
+                logger.info(
+                    "execute_order blocked: %s",
+                    block,
+                    extra={"symbol": symbol},
+                )
+                log_event("lab_forward_buy_block", symbol=symbol, block=block)
+                return None
 
         if not reduce_only and side_lower == "sell":
             if self._find_position(symbol) is None:

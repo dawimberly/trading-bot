@@ -68,18 +68,18 @@ def test_spy_is_nyse_name_when_sleeve_retired(monkeypatch):
     assert _is_tactical_long("SPY") is True
 
 
-def test_spy_stays_own_sleeve_when_enabled(monkeypatch):
+def test_spy_sleeve_cannot_be_revived(monkeypatch):
     monkeypatch.setattr(config, "SPY_SLEEVE_CAP_PCT", 0.45)
     monkeypatch.setattr(config, "PAPER_SPY_MAX_EXPOSURE_PCT", 0.46)
     monkeypatch.setattr(config, "PAPER_TRADING", False)
     monkeypatch.setattr(config, "PAPER_AGGRESSIVE_ENABLED", False)
     monkeypatch.setattr(config, "_paper_aggressive_ctx", False)
-    assert config.spy_sleeve_enabled() is True
-    assert config._nyse_eligible_symbol("SPY") is False
-    assert _is_nyse_momentum_position("SPY") is False
+    assert config.spy_sleeve_enabled() is False
+    assert config._nyse_eligible_symbol("SPY") is True
+    assert _is_nyse_momentum_position("SPY") is True
     pos = SimpleNamespace(symbol="SPY")
-    assert AlpacaExecutor._is_spy_position(pos) is True
-    assert AlpacaExecutor._is_nyse_sleeve_position(pos) is False
+    assert AlpacaExecutor._is_spy_position(pos) is False
+    assert AlpacaExecutor._is_nyse_sleeve_position(pos) is True
 
 
 def test_rebalance_does_not_liquidate_leftover_spy(monkeypatch):

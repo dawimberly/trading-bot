@@ -347,6 +347,12 @@ def trim_long_sleeves_to_cash_target(
 
         proceeds = sell_val * (1 - tx_cost)
 
+        note_reduction = getattr(portfolio, "note_research_long_reduction", None)
+
+        if note_reduction is not None:
+
+            note_reduction(symbol, sell_qty, proceeds, qty)
+
         portfolio.cash += proceeds
 
         portfolio.positions[symbol] = qty - sell_qty

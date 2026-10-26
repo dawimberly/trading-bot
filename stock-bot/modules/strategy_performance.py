@@ -29,7 +29,6 @@ STRATEGY_IDS: tuple[str, ...] = (
     "stat_arb",
     "atr_sizing",
     "nyse_momentum_base",
-    "spy_trend",
 )
 
 STRATEGY_LABELS: dict[str, str] = {
@@ -42,7 +41,6 @@ STRATEGY_LABELS: dict[str, str] = {
     "stat_arb": "Stat Arb Pairs",
     "atr_sizing": "ATR-adjusted Sizing",
     "nyse_momentum_base": "Base NYSE Momentum",
-    "spy_trend": "SPY Trend",
 }
 
 _RATING_ORDER = ("Excellent", "Good", "Fair", "Weak", "No data")
@@ -132,14 +130,13 @@ def classify_strategy(
         tags.extend(t.strip().lower() for t in tag_blob.replace("+", ",").split(",") if t.strip())
 
     sleeve_u = str(sleeve or "").upper()
-    sym = config.normalize_symbol(symbol or "")
     backtest = str(strategy or "").lower()
 
     if atr_applied and "atr" not in tags:
         tags.append("atr")
 
-    if backtest == "spy" or sleeve_u == "SPY" or sym == config.SPY_BOT_SYMBOL:
-        return "spy_trend"
+    if sleeve_u == "SPY":
+        sleeve_u = "NYSE"
     if backtest == "stat_arb" or ("/" in reason_s and "MA" not in reason_s.upper().split("/")[-1]):
         if sleeve_u != "NYSE" and (backtest == "stat_arb" or "pair" in reason_s.lower()):
             return "stat_arb"
@@ -557,8 +554,6 @@ def format_strategy_health_banner() -> str | None:
                 short = "ATR"
             elif "NYSE" in row["label"]:
                 short = "NYSE"
-            elif "SPY" in row["label"]:
-                short = "SPY"
             parts.append(f"{short} {rating_short_label(row['rating'])}")
         return f">>> Strategy Health: {', '.join(parts)} <<<"
     except Exception as exc:

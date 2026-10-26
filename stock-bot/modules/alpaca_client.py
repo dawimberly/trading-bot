@@ -165,8 +165,23 @@ def alpaca_http_status(exc: BaseException) -> int | None:
     return None
 
 
+def is_ssl_verify_error(exc: BaseException) -> bool:
+    """True for TLS verify failures (AV MITM / bad SSL_CERT_FILE)."""
+    name = type(exc).__name__
+    if name in {"SSLError", "SSLCertVerificationError"}:
+        return True
+    text = str(exc).lower()
+    return (
+        "certificate_verify_failed" in text
+        or "self-signed certificate" in text
+        or "unable to get local issuer certificate" in text
+    )
+
+
 def is_transient_alpaca_error(exc: BaseException) -> bool:
     """True for retryable broker/network failures (5xx, 429, timeouts, DNS)."""
+    if is_ssl_verify_error(exc):
+        return True
     status = alpaca_http_status(exc)
     if status in TRANSIENT_HTTP_STATUS:
         return True
@@ -183,8 +198,10 @@ def is_auth_alpaca_error(exc: BaseException) -> bool:
         return False
     status = getattr(exc, "status_code", None)
     msg = str(exc).lower()
-    # Insufficient qty / missing asset are order/asset issues, not credential auth.
+    # Order rejects share HTTP 403 with a real credential failure.
     if status == 403 and "insufficient qty" in msg:
+        return False
+    if is_not_fractionable_error(exc):
         return False
     if is_unknown_asset_error(exc):
         return False
@@ -309,6 +326,24 @@ def call_with_retry(
                 time.sleep(delay)
                 continue
             logger.error("Alpaca %s network failure after retries: %s", op_name, exc)
+            raise AlpacaCriticalError(str(exc)) from exc
+        except Exception as exc:
+            if not is_ssl_verify_error(exc):
+                raise
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = RETRY_BASE_DELAY_SEC * (2 ** (attempt - 1))
+                logger.warning(
+                    "Alpaca %s TLS verify error — retry %s/%s in %.1fs: %s",
+                    op_name,
+                    attempt,
+                    max_attempts,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                continue
+            logger.error("Alpaca %s TLS failure after retries: %s", op_name, exc)
             raise AlpacaCriticalError(str(exc)) from exc
     if last_exc is not None:
         raise AlpacaCriticalError(str(last_exc)) from last_exc

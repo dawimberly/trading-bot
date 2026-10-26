@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import time
 from typing import Any
 
@@ -105,6 +106,11 @@ def _scanner_health_snapshot() -> dict[str, Any]:
     }
     if quiet or not snap["scanners_on"]:
         return snap
+    # The paper supervisor prints this banner before it spawns the engine.
+    # A live Yahoo scan there blocks startup and never reaches the watchdog.
+    skip = os.getenv("BOT_HEALTH_SKIP_LIVE_SCAN", "").strip().lower()
+    if skip in ("1", "true", "yes", "on"):
+        return snap
     try:
         from modules.pipeline_strategies import load_pipeline_data
 
@@ -119,26 +125,43 @@ def _scanner_health_snapshot() -> dict[str, Any]:
         ][:18]
         if cols:
             data = data[cols]
+        # One shared budget so the startup banner cannot outlast the watchdog.
+        budget_end = time.monotonic() + 12.0
+
+        def _left() -> float:
+            return max(0.0, budget_end - time.monotonic())
+
         if config.effective_rvol_scanner_enabled():
             from modules.volume_analysis import get_high_rvol_stocks
 
             snap["rvol_hits"] = len(
                 get_high_rvol_stocks(
-                    data, min_rvol=float(config.RVOL_MIN_THRESHOLD), limit=5
+                    data,
+                    min_rvol=float(config.RVOL_MIN_THRESHOLD),
+                    limit=5,
+                    deadline_sec=_left(),
                 )
             )
         if config.effective_orb_enabled():
             from modules.volume_analysis import get_orb_signals
 
             snap["orb_hits"] = len(
-                get_orb_signals(data, minutes=int(config.ORB_BREAKOUT_MINUTES), limit=5)
+                get_orb_signals(
+                    data,
+                    minutes=int(config.ORB_BREAKOUT_MINUTES),
+                    limit=5,
+                    deadline_sec=_left(),
+                )
             )
         if config.effective_catalyst_scoring_enabled():
             from modules.catalyst_scoring import get_top_catalyst_stocks
 
             snap["catalyst_hits"] = len(
                 get_top_catalyst_stocks(
-                    data, min_score=float(config.CATALYST_MIN_SCORE), limit=5
+                    data,
+                    min_score=float(config.CATALYST_MIN_SCORE),
+                    limit=5,
+                    deadline_sec=_left(),
                 )
             )
     except Exception as exc:

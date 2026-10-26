@@ -4,6 +4,7 @@ Run:
   python status.py
   python status.py --positions
   python status.py --positions --ticker AAPL
+  python status.py --risk-report
   python scripts/cleanup_stale_positions.py --help
 """
 from __future__ import annotations
@@ -135,7 +136,6 @@ def _active_sleeves(hb: dict | None) -> list[str]:
     active: list[str] = []
     for label, key in (
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("Crypto", "crypto_value"),
         ("NYSE", "nyse_value"),
         ("Metal", "metal_value"),
@@ -600,6 +600,66 @@ def _print_positions(*, paper: bool = True, ticker: str | None = None, compact: 
         _emit(line)
 
 
+def _print_risk_report() -> None:
+    """Read-only sleeve / name / fill snapshot. Does not gate orders."""
+    from modules.alpaca_client import get_trading_client
+    from modules.risk_audit import exposure_snapshot, load_last_fill_audit
+
+    _emit("=== Risk report (advisory — existing caps, no new guard) ===")
+    _emit("Not wired into the order path. Limits below are already in the executor.")
+    for paper, label in ((False, "live"), (True, "paper")):
+        try:
+            client = get_trading_client(paper=paper, allow_live=not paper)
+            snap = exposure_snapshot(client, label=label, paper=paper)
+        except Exception as exc:
+            _emit(f"{label}: unavailable ({str(exc)[:160]})")
+            continue
+        _emit(
+            f"{label}  equity {_fmt_equity(snap['equity'])}  cash "
+            f"{snap.get('cash_pct') or 0:.1%}  names {snap['n_positions']}"
+        )
+        caps = snap.get("caps") or {}
+        _emit(
+            f"      caps: per-name {caps.get('per_name', 0):.0%}  "
+            f"NYSE {caps.get('nyse_sleeve', 0):.0%}  "
+            f"daily-loss {caps.get('daily_loss', 0):.0%}  "
+            f"halt-DD {caps.get('halt_dd', 0):.0%}"
+        )
+        sleeves = snap.get("sleeve_pct") or {}
+        if sleeves:
+            bits = "  ".join(f"{k} {v:.1%}" for k, v in sleeves.items())
+            _emit(f"      sleeves: {bits}")
+        for row in snap.get("largest") or []:
+            _emit(
+                f"      {row['symbol']:<6} {row['sleeve']:<6} "
+                f"{row['pct']:.1%}  ${row['value']:,.0f}"
+            )
+        flags = snap.get("flags") or []
+        if label == "paper" and snap.get("n_positions") == 8:
+            _emit("      note: portal Lab overlay is 15%/name and NYSE 95%; flags above use process .env")
+        if flags:
+            for flag in flags:
+                _emit(f"      FLAG {flag}")
+        else:
+            _emit("      flags: none vs those caps")
+    audit = load_last_fill_audit()
+    _emit()
+    if not audit:
+        _emit("Fills: no audit yet. Run: python scripts/analysis/audit_fills.py --days 14")
+        return
+    _emit(f"Fills: {audit.get('generated')}  {audit.get('days')}d  sqlite prior close")
+    for key in ("live", "paper"):
+        book = (audit.get("books") or {}).get(key) or {}
+        if book.get("error"):
+            _emit(f"      {key}: {book['error']}")
+            continue
+        ov = (book.get("summary") or {}).get("overall") or {}
+        _emit(
+            f"      {key}: n={ov.get('n')} median={ov.get('median_bps')}bps "
+            f"mean={ov.get('mean_bps')}bps flag={ov.get('flag')}"
+        )
+
+
 def _live_positions_available() -> bool:
     """True when live Alpaca credentials can be queried."""
     if _is_live_book_active():
@@ -624,9 +684,17 @@ def main() -> None:
         help="Show open holdings (entry, unrealized P/L, days held) and exit",
     )
     parser.add_argument("--ticker", "-t", help="With --positions, filter to one ticker")
+    parser.add_argument(
+        "--risk-report",
+        action="store_true",
+        help="Advisory: sleeve pct, per-name vs existing caps, last fill audit. No orders.",
+    )
     args = parser.parse_args()
 
     setup_project_logging()
+    if args.risk_report:
+        _print_risk_report()
+        return
     if args.positions:
         _print_positions(paper=True, ticker=args.ticker, compact=False)
         if _is_live_book_active():

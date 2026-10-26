@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -127,7 +127,9 @@ def _lab_exit_harness(monkeypatch, *, weekday_dt, prior_ret, created_at):
 
 
 def test_a2b1_flattens_on_tuesday(monkeypatch):
-    created = datetime(2026, 9, 22, 15, 0, tzinfo=_ET)
+    # Age uses the wall clock, not the injected weekday. Keep the fill inside
+    # the 30-day hold so this test still isolates the A2B1 flatten.
+    created = datetime.now(_ET) - timedelta(days=6)
     n, orders = _lab_exit_harness(
         monkeypatch,
         weekday_dt=datetime(2026, 9, 29, 10, 0, tzinfo=_ET),
@@ -139,7 +141,7 @@ def test_a2b1_flattens_on_tuesday(monkeypatch):
 
 
 def test_a2b1_skips_monday(monkeypatch):
-    created = datetime(2026, 9, 22, 15, 0, tzinfo=_ET)
+    created = datetime.now(_ET) - timedelta(days=6)
     n, orders = _lab_exit_harness(
         monkeypatch,
         weekday_dt=datetime(2026, 9, 28, 10, 0, tzinfo=_ET),

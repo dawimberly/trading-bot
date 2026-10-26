@@ -1,0 +1,10 @@
+[server]
+address = "127.0.0.1"
+port = 8765
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "viewer"

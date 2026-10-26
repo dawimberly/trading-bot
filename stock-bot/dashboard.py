@@ -302,8 +302,6 @@ def _load_json(path: Path) -> dict | None:
 
 def _infer_sleeve(symbol: str) -> str:
     sym = config.normalize_symbol(symbol or "")
-    if sym == config.SPY_BOT_SYMBOL:
-        return "SPY"
     if config.is_crypto(sym):
         return "Crypto"
     if config.is_metal_symbol(sym):
@@ -318,7 +316,6 @@ def _active_sleeves(heartbeat: dict) -> list[str]:
     active: list[str] = []
     checks = [
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("Crypto", "crypto_value"),
         ("NYSE", "nyse_value"),
         ("Metal", "metal_value"),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import config
 
-SLEEVE_KEYS = ("spy", "crypto", "nyse", "metal")
+SLEEVE_KEYS = ("crypto", "nyse", "metal")
 
 
 def _empty_sleeve() -> dict:
@@ -22,8 +22,6 @@ def sleeve_for_symbol(symbol: str) -> str:
     sym = config.normalize_symbol(symbol)
     if config.is_crypto(sym):
         return "crypto"
-    if sym == config.SPY_BOT_SYMBOL:
-        return "spy"
     if config.is_metal_symbol(sym):
         return "metal"
     return "nyse"
@@ -116,7 +114,7 @@ def position_below_cost(executor, symbol: str) -> bool:
 
 def format_sleeve_pnl_line(sleeve_pnl: dict[str, dict]) -> str:
     parts = []
-    for key in ("spy", "crypto", "nyse"):
+    for key in ("crypto", "nyse"):
         row = sleeve_pnl.get(key) or {}
         if row.get("positions", 0) <= 0:
             continue

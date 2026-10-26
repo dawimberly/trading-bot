@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -15,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 _CACHE: dict[str, tuple[float, pd.Series]] = {}
 _CACHE_TTL_SEC = 3600
+# One Yahoo call must not sit on a dead socket. One RVOL pass (filter plus
+# re-rank) shares RVOL_SCAN_BUDGET_SEC. A timeout or a spent budget is
+# unknown RVOL: eligible to stay in the sleeve, not a confirmed pass, and
+# not inserted into the scored ranking.
+_YF_TIMEOUT_SEC = 8.0
+RVOL_SCAN_BUDGET_SEC = 45.0
 
 
 def _cache_get(symbol: str) -> pd.Series | None:
@@ -34,6 +41,54 @@ def _cache_put(symbol: str, series: pd.Series) -> None:
     _CACHE[sym] = (time.time(), series)
 
 
+def _deadline_at(seconds: float | None) -> float | None:
+    if seconds is None:
+        return None
+    return time.monotonic() + float(seconds)
+
+
+def _deadline_reached(deadline: float | None) -> bool:
+    return deadline is not None and time.monotonic() >= deadline
+
+
+def _call_with_timeout(fn, timeout: float):
+    """Run fn on a daemon thread. Raise TimeoutError if it does not finish."""
+    box: dict[str, Any] = {}
+
+    def _run() -> None:
+        try:
+            box["value"] = fn()
+        except Exception as exc:
+            box["error"] = exc
+
+    thread = threading.Thread(target=_run, name="yahoo-history", daemon=True)
+    thread.start()
+    thread.join(max(0.1, float(timeout)))
+    if thread.is_alive():
+        raise TimeoutError(f"Yahoo history exceeded {timeout:.0f}s")
+    if "error" in box:
+        raise box["error"]
+    return box.get("value")
+
+
+def yahoo_history(symbol: str, *, timeout: float | None = None, **kwargs):
+    """yfinance history() with a hard wall-clock cap. Raises on failure."""
+    import yfinance as yf
+
+    if timeout is None:
+        timeout = _YF_TIMEOUT_SEC
+    kwargs.setdefault("timeout", timeout)
+
+    def _call():
+        try:
+            return yf.Ticker(symbol).history(**kwargs)
+        except TypeError:
+            kwargs.pop("timeout", None)
+            return yf.Ticker(symbol).history(**kwargs)
+
+    return _call_with_timeout(_call, float(timeout) + 1.0)
+
+
 def _fetch_volume_series(symbol: str, *, lookback_days: int) -> pd.Series | None:
     sym = config.normalize_symbol(symbol)
     if not sym:
@@ -42,10 +97,8 @@ def _fetch_volume_series(symbol: str, *, lookback_days: int) -> pd.Series | None
     if cached is not None:
         return cached
     try:
-        import yfinance as yf
-
         period_days = max(lookback_days + 15, 30)
-        hist = yf.Ticker(sym).history(period=f"{period_days}d", auto_adjust=False)
+        hist = yahoo_history(sym, period=f"{period_days}d", auto_adjust=False)
         if hist is None or hist.empty or "Volume" not in hist.columns:
             return None
         vols = hist["Volume"].dropna()
@@ -83,14 +136,21 @@ def get_high_rvol_stocks(
     data,
     min_rvol: float = 2.0,
     limit: int = 20,
+    *,
+    deadline_sec: float | None = RVOL_SCAN_BUDGET_SEC,
 ) -> list[dict[str, Any]]:
     """Rank symbols in *data* columns by RVOL (desc)."""
     min_rvol = float(min_rvol)
     limit = max(1, int(limit))
+    if deadline_sec is None:
+        deadline_sec = RVOL_SCAN_BUDGET_SEC
     # Prefer momentum universe (capped) — same source as ORB/catalyst scanners.
     symbols = nyse_scan_universe(data, limit_scan=max(80, limit * 4))
+    deadline = _deadline_at(deadline_sec)
     scored: list[tuple[float, str]] = []
     for sym in symbols:
+        if _deadline_reached(deadline):
+            break
         rvol = calculate_rvol(data, sym)
         if rvol is not None and rvol >= min_rvol:
             scored.append((rvol, sym))
@@ -103,26 +163,61 @@ def filter_symbols_by_rvol(
     data,
     *,
     min_rvol: float | None = None,
+    deadline_sec: float | None = RVOL_SCAN_BUDGET_SEC,
+    deadline: float | None = None,
 ) -> list[str]:
-    """Drop names below *min_rvol*; keep when RVOL unknown."""
+    """Drop names whose measured RVOL is below *min_rvol*.
+
+    Three outcomes stay distinct:
+    - measured RVOL at or above the threshold: kept
+    - measured RVOL below the threshold: dropped
+    - unknown RVOL (timeout, delisted, empty history, or budget spent
+      before this name): kept, in place
+
+    Keeping an unknown name does not record it as a confirmed pass. The
+    re-rank leaves those names unscored.
+    """
     if not config.effective_rvol_scanner_enabled():
         return list(symbols)
     threshold = float(min_rvol if min_rvol is not None else config.RVOL_MIN_THRESHOLD)
+    if deadline is None:
+        deadline = _deadline_at(deadline_sec)
     out: list[str] = []
-    for sym in symbols:
+    for i, sym in enumerate(symbols):
+        if _deadline_reached(deadline):
+            out.extend(symbols[i:])
+            break
         rvol = calculate_rvol(data, sym)
         if rvol is None or rvol >= threshold:
             out.append(sym)
     return out
 
 
-def prioritize_symbols_by_rvol(symbols: list[str], data) -> list[str]:
-    """High-RVOL names first; unknown RVOL kept at the end in original order."""
+def prioritize_symbols_by_rvol(
+    symbols: list[str],
+    data,
+    *,
+    deadline_sec: float | None = RVOL_SCAN_BUDGET_SEC,
+    deadline: float | None = None,
+) -> list[str]:
+    """Measured RVOL first, high to low. Unknown names stay at the end.
+
+    A timeout and a name not reached before *deadline* are unknown. They
+    keep their relative order and are not given a rank as if they had passed.
+    *deadline* is an absolute monotonic timestamp shared with the filter.
+    """
     if not symbols:
         return []
+    if deadline is None:
+        if deadline_sec is None:
+            deadline_sec = RVOL_SCAN_BUDGET_SEC
+        deadline = _deadline_at(deadline_sec)
     scored: list[tuple[float, str]] = []
     unknown: list[str] = []
-    for sym in symbols:
+    for i, sym in enumerate(symbols):
+        if _deadline_reached(deadline):
+            unknown.extend(symbols[i:])
+            break
         rvol = calculate_rvol(data, sym)
         if rvol is None:
             unknown.append(sym)
@@ -132,13 +227,28 @@ def prioritize_symbols_by_rvol(symbols: list[str], data) -> list[str]:
     return [s for _, s in scored] + unknown
 
 
-def apply_rvol_universe_boost(symbols: list[str], data) -> list[str]:
-    """Filter low-RVOL names, then prioritize high-RVOL for momentum sleeve."""
-    cols = filter_symbols_by_rvol(symbols, data)
-    # Never wipe the sleeve when every name fails the RVOL threshold.
+def apply_rvol_universe_boost(
+    symbols: list[str],
+    data,
+    *,
+    deadline_sec: float | None = RVOL_SCAN_BUDGET_SEC,
+) -> list[str]:
+    """Filter low-RVOL names, then re-rank, on one shared scan budget.
+
+    The re-rank does not start a second 45s clock. If the filter spends the
+    budget, prioritization does not call Yahoo again.
+
+    Existing empty-sleeve fallback: if every name that was actually measured
+    is below the threshold, the original list is restored. That avoids an
+    empty momentum sleeve. It does not mark those names as RVOL passes.
+    """
+    if deadline_sec is None:
+        deadline_sec = RVOL_SCAN_BUDGET_SEC
+    deadline = _deadline_at(deadline_sec)
+    cols = filter_symbols_by_rvol(symbols, data, deadline=deadline)
     if not cols and symbols:
         cols = list(symbols)
-    return prioritize_symbols_by_rvol(cols, data)
+    return prioritize_symbols_by_rvol(cols, data, deadline=deadline)
 
 
 def rvol_momentum_rank_boost(symbol: str, data=None) -> float:
@@ -240,7 +350,9 @@ def format_telegram_weekly_rvol_block(data=None) -> str:
     return block
 
 
-def rvol_dashboard_rows(data=None, *, limit: int = 10) -> list[dict[str, str]]:
+def rvol_dashboard_rows(
+    data=None, *, limit: int = 10, deadline_sec: float | None = None
+) -> list[dict[str, str]]:
     if data is None:
         from modules.pipeline_strategies import load_pipeline_data
 
@@ -248,10 +360,17 @@ def rvol_dashboard_rows(data=None, *, limit: int = 10) -> list[dict[str, str]]:
     try:
         from modules.orb_strategy import combined_scanner_dashboard_rows
 
-        return combined_scanner_dashboard_rows(data, limit=limit)
+        return combined_scanner_dashboard_rows(
+            data, limit=limit, deadline_sec=deadline_sec
+        )
     except Exception as exc:
         logger.debug("combined scanner dashboard rows unavailable, using RVOL fallback: %s", exc)
-    top = get_high_rvol_stocks(data, min_rvol=config.RVOL_MIN_THRESHOLD, limit=limit)
+    top = get_high_rvol_stocks(
+        data,
+        min_rvol=config.RVOL_MIN_THRESHOLD,
+        limit=limit,
+        deadline_sec=deadline_sec,
+    )
     rows: list[dict[str, str]] = []
     for row in top:
         rvol = float(row["rvol"])

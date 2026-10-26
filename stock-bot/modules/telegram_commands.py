@@ -361,7 +361,6 @@ def _sleeve_exposure_lines(hb: dict[str, Any] | None) -> list[str]:
     rows: list[str] = []
     mapping = (
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("Crypto", "crypto_value"),
         ("NYSE", "nyse_value"),
         ("Metal", "metal_value"),

@@ -147,6 +147,8 @@ def test_medium_user_bot_env_vti_core_off():
     assert lab.get("PAPER_LAB_ADD_POLICY") == "idle"
     assert lab.get("PAPER_LAB_ADD_MAX_MULT") == "2.0"
     assert lab.get("PAPER_MAX_POSITION_PCT") == "0.15"
+    assert lab.get("PAPER_LAB_HOLD_ONLY") == "true"
+    assert v2.get("STOP_LOSS_PCT") == "0.10"
     assert lab.get("PAPER_NYSE_A2B1_ENABLED") == "true"
     assert lab.get("PAPER_NYSE_GAIN_EXIT_PCT") == "8"
     assert lab.get("PAPER_NYSE_GAIN_EXIT_MODE") == "skip_monday"
@@ -172,6 +174,7 @@ def test_live_user_bot_env_vti_core_off():
     assert live.get("VTI_REBALANCE_CADENCE") == "drift"
     assert live.get("NYSE_SLEEVE_CAP_PCT") == "0.95"
     assert live.get("PAPER_NYSE_A2B1_ENABLED") == "false"
+    assert live.get("STOP_LOSS_PCT") == "0.10"
 
 
 def test_live_vti_off_effective_nyse_cap_not_frozen_10pct(monkeypatch):
@@ -374,6 +377,83 @@ def test_idle_cash_scale_in_adds_held_skips_knives_and_new_names(monkeypatch):
     assert n == 1
     assert buys == [("AAPL", "buy", "AAPL/IDLE_CASH")]
     assert all(sym != "NEW" for sym, *_ in buys)
+
+
+def test_idle_cash_scale_in_uses_fair_share_when_ticket_is_none(monkeypatch):
+    import pandas as pd
+    from modules.pipeline_strategies import run_idle_cash_scale_in
+
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setattr(config, "paper_idle_cash_scale_in_active", lambda **k: True)
+
+    idx = pd.RangeIndex(60)
+    data = pd.DataFrame({"AAPL": [100.0 + i * 0.05 for i in range(60)]}, index=idx)
+    buys = []
+
+    class Exec:
+        equity_session_open = True
+
+        def list_active_tickers(self):
+            return ["AAPL"]
+
+        def _find_position(self, symbol):
+            return SimpleNamespace(avg_entry_price=100.0, current_price=103.0)
+
+        def _get_account(self):
+            return SimpleNamespace(equity=100_000.0, cash=40_000.0)
+
+        def compute_nyse_notional(self):
+            return None
+
+        def execute_order(self, symbol, side, notional=None, reason=None, sleeve=None):
+            buys.append((symbol, side, reason, notional))
+            return {"id": "1"}
+
+    n = run_idle_cash_scale_in(data, Exec(), "RHYME_D: Range_Bound_Neutral", 100, {})
+    assert n == 1
+    assert buys[0][0] == "AAPL"
+    assert buys[0][2] == "AAPL/IDLE_CASH"
+    assert buys[0][3] == 38000.0
+
+
+def test_idle_cash_scale_in_still_adds_during_open_chop(monkeypatch):
+    import pandas as pd
+    from datetime import datetime
+    from modules.pipeline_strategies import run_idle_cash_scale_in
+
+    monkeypatch.setenv("TRADING_BOOK_ID", "alpaca_paper")
+    monkeypatch.setenv("PAPER_LAB_CONCENTRATED", "true")
+    monkeypatch.setattr(config, "paper_idle_cash_scale_in_active", lambda **k: True)
+    monkeypatch.setattr(
+        "modules.pipeline_strategies._nyse_open_cooldown_active", lambda now=None: True
+    )
+
+    idx = pd.RangeIndex(60)
+    data = pd.DataFrame({"AAPL": [100.0 + i * 0.05 for i in range(60)]}, index=idx)
+    buys = []
+
+    class Exec:
+        equity_session_open = True
+
+        def list_active_tickers(self):
+            return ["AAPL"]
+
+        def _find_position(self, symbol):
+            return SimpleNamespace(avg_entry_price=100.0, current_price=103.0)
+
+        def _get_account(self):
+            return SimpleNamespace(equity=100_000.0, cash=40_000.0)
+
+        def execute_order(self, symbol, side, notional=None, reason=None, sleeve=None):
+            buys.append(symbol)
+            return {"id": "1"}
+
+    n = run_idle_cash_scale_in(
+        data, Exec(), "RHYME_D: Range_Bound_Neutral", datetime(2026, 9, 21, 9, 45), {}
+    )
+    assert n == 1
+    assert buys == ["AAPL"]
 
 
 def test_idle_cash_scale_in_skips_when_session_closed(monkeypatch):

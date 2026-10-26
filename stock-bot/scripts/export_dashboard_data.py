@@ -33,7 +33,6 @@ STALE_MINUTES = 90.0
 
 _SLEEVE_DISPLAY = {
     "core": "VTI core",
-    "spy": "SPY",
     "nyse": "NYSE momentum",
     "crypto": "crypto",
     "metal": "metal",

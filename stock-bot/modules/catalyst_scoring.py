@@ -308,6 +308,7 @@ def get_top_catalyst_stocks(
     min_score: float | None = None,
     *,
     limit: int = 15,
+    deadline_sec: float | None = None,
 ) -> list[dict[str, Any]]:
     """Rank universe by catalyst score (desc)."""
     if not config.effective_catalyst_scoring_enabled():
@@ -317,8 +318,15 @@ def get_top_catalyst_stocks(
     )
     limit = max(1, int(limit))
     corpus = _load_headline_corpus()
+    from modules.volume_analysis import RVOL_SCAN_BUDGET_SEC, _deadline_at, _deadline_reached
+
+    if deadline_sec is None:
+        deadline_sec = RVOL_SCAN_BUDGET_SEC
+    deadline = _deadline_at(deadline_sec)
     scored: list[tuple[int, dict[str, Any]]] = []
     for sym in nyse_scan_universe(data, limit_scan=_SCAN_UNIVERSE_CAP):
+        if _deadline_reached(deadline):
+            break
         row = score_catalysts(data, sym, corpus=corpus)
         if int(row.get("score") or 0) >= threshold:
             scored.append((int(row["score"]), row))

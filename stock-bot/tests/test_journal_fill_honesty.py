@@ -52,7 +52,7 @@ def test_log_fill_writes_qty_price_sleeve(tmp_path, monkeypatch):
     fills = [r for r in rows if r["event"] == "fill"]
     closed = [r for r in rows if r["event"] == "trade_closed"]
     assert len(fills) == 1
-    assert len(closed) == 1
+    assert closed == []
     row = fills[0]
     assert row["event"] == "fill"
     assert row["symbol"] == "TXG"
@@ -63,10 +63,9 @@ def test_log_fill_writes_qty_price_sleeve(tmp_path, monkeypatch):
     assert row["order_id"] == "abc-123"
     assert row["book"] == "paper"
     assert row["realized_pnl"] == "-1.25"
+    assert row["is_partial"] == "unknown"
     assert row["exit_reason"] == "smart_atr_stop"
     assert "\n" not in row["notes"]
-    assert closed[0]["realized_pnl"] == "-1.25"
-    assert closed[0]["exit_reason"] == "smart_atr_stop"
 
 
 def test_log_fill_records_entry_hold_and_trade_id(tmp_path, monkeypatch):

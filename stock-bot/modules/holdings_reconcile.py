@@ -41,7 +41,6 @@ def holdings_audit(executor: AlpacaExecutor) -> dict:
         ],
         "sleeves": sleeves,
         "over_cap": {
-            "spy": max(0.0, sleeves["spy_value"] - sleeves["spy_cap"]),
             "crypto": max(0.0, sleeves["crypto_value"] - sleeves["crypto_cap"]),
             "nyse": max(0.0, sleeves["nyse_value"] - sleeves["nyse_cap"]),
             **(

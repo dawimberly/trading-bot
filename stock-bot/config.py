@@ -51,6 +51,7 @@ def _load_project_dotenv() -> None:
         "PAPER_LAB_TRAIL_ARM_PCT",
         "PAPER_LAB_TRAIL_PCT",
         "PAPER_LAB_DISASTER_PCT",
+        "PAPER_LAB_HOLD_ONLY",
         "PAPER_LAB_ADD_POLICY",
         "PAPER_LAB_ADD_MAX_MULT",
         "MAX_ACTIVE_TICKERS",
@@ -2330,6 +2331,9 @@ _backtest_live_conservative_ctx = False
 _backtest_paper_sleeves_ctx = False
 _backtest_vti_ceiling: float | None = None
 _backtest_strict_pit_ctx = False
+_strict_pit_allow: set[str] = set()
+_strict_pit_saved_flags: dict[str, bool] | None = None
+_strict_pit_disabled_groups: tuple[str, ...] = ()
 _live_thinking_sim_ctx = False
 _dynamic_risk_ctx: dict = {
     "vol_score": 0.02,
@@ -2833,13 +2837,132 @@ def backtest_vti_ceiling() -> float | None:
     return _backtest_vti_ceiling
 
 
+_STRICT_PIT_KILL_SWITCHES: dict[str, tuple[str, ...]] = {
+    # These sources are not reliably replayed from timestamped historical data.
+    "insider": (
+        "INSIDER_MONITOR_ENABLED",
+        "INSIDER_SIGNAL_BOOST_ENABLED",
+        "INSIDER_BOOST_ENABLED",
+        "INSIDER_RISK_GUARD_ENABLED",
+    ),
+    "rvol": ("RVOL_SCANNER_ENABLED",),
+    "catalyst": (
+        "CATALYST_SCORING_ENABLED",
+        "ORB_ENABLED",
+        "ORB_MOMENTUM_ENABLED",
+        "VOL_BREAKOUT_ENABLED",
+    ),
+    "historical_news": ("HISTORICAL_NEWS_ENABLED",),
+    "thinking": (
+        "THINKING_ENGINE_ENABLED",
+        "PAPER_THINKING_ENGINE_ENABLED",
+        "LIVE_THINKING_ENGINE_ENABLED",
+    ),
+    "dynamic_universe": (
+        "USE_DYNAMIC_UNIVERSE",
+        "PAPER_DYNAMIC_UNIVERSE_ENABLED",
+        "DYNAMIC_SECTOR_SCREENER_ENABLED",
+    ),
+    "buffett": ("BUFFETT_INDICATOR_ENABLED",),
+    "social": (
+        "SOCIAL_SLEEVE_ENABLED",
+        "PAPER_SOCIAL_SLEEVE_ENABLED",
+        "SOCIAL_MACRO_OVERRIDES_ENABLED",
+        "PAPER_SOCIAL_MACRO_BOOST_ENABLED",
+        "FELIX_SOCIAL_DYNAMIC_ENABLED",
+        "FELIX_SENTIMENT_ENABLED",
+    ),
+}
+
+
+def strict_pit_allow() -> set[str]:
+    """Return strict-PIT exceptions by switch group or exact config flag name."""
+    return set(_strict_pit_allow)
+
+
+def set_strict_pit_allow(allow) -> None:
+    """Set groups/flags explicitly allowed during strict-PIT research."""
+    global _strict_pit_allow
+    _strict_pit_allow = {str(item).strip().lower() for item in (allow or ())}
+    if _strict_pit_saved_flags is not None:
+        apply_strict_pit_kill_switches()
+
+
+def apply_strict_pit_kill_switches(allow=None) -> tuple[str, ...]:
+    """Disable overlays without dependable as-of historical replay data.
+
+    `allow` accepts a switch group such as ``insider`` or an exact config flag
+    name. Original values are restored when the strict-PIT context is disabled.
+    This does not validate historical index/universe membership; the caller must
+    use a point-in-time universe harness for that.
+    """
+    global STRICT_PIT_BACKTEST, _strict_pit_saved_flags, _strict_pit_disabled_groups
+    allowed = (
+        _strict_pit_allow
+        if allow is None
+        else {str(item).strip().lower() for item in allow}
+    )
+    all_names = {
+        name for names in _STRICT_PIT_KILL_SWITCHES.values() for name in names
+    }
+    valid = set(_STRICT_PIT_KILL_SWITCHES) | {name.lower() for name in all_names}
+    unknown = allowed - valid
+    if unknown:
+        raise ValueError(f"Unknown strict-PIT allow entries: {sorted(unknown)}")
+
+    if _strict_pit_saved_flags is None:
+        _strict_pit_saved_flags = {
+            name: bool(globals()[name])
+            for name in all_names
+            if name in globals()
+        }
+    else:
+        # Repeated calls with a different allow-list start from the same baseline.
+        for name, value in _strict_pit_saved_flags.items():
+            globals()[name] = value
+
+    disabled: list[str] = []
+    for group, names in _STRICT_PIT_KILL_SWITCHES.items():
+        group_allowed = group in allowed or any(name.lower() in allowed for name in names)
+        if group_allowed:
+            continue
+        for name in names:
+            if name in globals():
+                globals()[name] = False
+        disabled.append(group)
+    STRICT_PIT_BACKTEST = True
+    _strict_pit_disabled_groups = tuple(disabled)
+    set_backtest_strict_pit_context(True)
+    return _strict_pit_disabled_groups
+
+
 def set_backtest_strict_pit_context(active: bool) -> None:
-    global _backtest_strict_pit_ctx
+    global _backtest_strict_pit_ctx, _strict_pit_saved_flags, _strict_pit_disabled_groups
     _backtest_strict_pit_ctx = bool(active)
+    if active or _strict_pit_saved_flags is None:
+        return
+    for name, value in _strict_pit_saved_flags.items():
+        globals()[name] = value
+    _strict_pit_saved_flags = None
+    _strict_pit_disabled_groups = ()
 
 
 def backtest_strict_pit_context() -> bool:
     return _backtest_strict_pit_ctx
+
+
+def strict_pit_disabled_groups() -> tuple[str, ...]:
+    return _strict_pit_disabled_groups
+
+
+def format_strict_pit_banner() -> str:
+    if not (STRICT_PIT_BACKTEST or backtest_strict_pit_context()):
+        return "STRICT PIT: off"
+    groups = ", ".join(_strict_pit_disabled_groups) or "no overlay groups disabled"
+    return (
+        f"STRICT PIT overlay filters: ON ({groups}); "
+        "historical universe membership is not validated by this switch"
+    )
 
 
 def set_live_thinking_sim_context(active: bool) -> None:
@@ -2936,13 +3059,8 @@ def paper_sleeve_hard_cap_pct(sleeve_key: str) -> float | None:
 
 
 def spy_sleeve_enabled() -> bool:
-    """Dedicated SPY sleeve (cap + MA trend fill). Off does not ban SPY as a NYSE name."""
-    if float(SPY_SLEEVE_CAP_PCT) <= 0:
-        return False
-    hard = paper_sleeve_hard_cap_pct("spy")
-    if hard is not None and float(hard) <= 0:
-        return False
-    return True
+    """SPY trend sleeve is removed. SPY stays a normal NYSE name and the market benchmark."""
+    return False
 
 
 def set_backtest_live_conservative_context(enabled: bool) -> None:
@@ -3968,7 +4086,7 @@ def print_live_stack_flags() -> None:
         else ""
     )
     print(
-        f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
+        f"  sleeves: crypto {alloc['crypto']:.0%} | "
         f"NYSE {alloc['nyse']:.0%}{stat_part} | metal {alloc['metal']:.0%} | "
         f"cash {alloc['cash_buffer']:.0%}"
     )
@@ -4270,7 +4388,7 @@ def print_paper_research_stack_flags() -> None:
             else ""
         )
         print(
-            f"  sleeves: SPY {alloc['spy']:.0%} | crypto {alloc['crypto']:.0%} | "
+            f"  sleeves: crypto {alloc['crypto']:.0%} | "
             f"NYSE {alloc['nyse']:.0%}{stat_part} | metal {alloc['metal']:.0%} | "
             f"cash {alloc['cash_buffer']:.0%}"
         )
@@ -5938,6 +6056,63 @@ def paper_lab_disaster_pct() -> float:
     return float(os.getenv("PAPER_LAB_DISASTER_PCT", "0.10"))
 
 
+def paper_lab_hold_only_enabled() -> bool:
+    """Lab experiment: no loss stop, no trail, no half, no A2B1.
+
+    The only exit is ``paper_lab_max_hold_days`` (30). Portal sets
+    ``PAPER_LAB_HOLD_ONLY=true``. Unset keeps the prior disaster/trail exits
+    so older tests and a manual rollback stay on that path.
+    """
+    if trading_book_id() != "alpaca_paper":
+        return False
+    if not paper_lab_concentrated_enabled():
+        return False
+    return os.getenv("PAPER_LAB_HOLD_ONLY", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def book_hard_stop_pct(book_id: str | None = None) -> float | None:
+    """Long-equity loss stop for one book. None means that stop is off.
+
+    Approved 2026-10-25, one change per book:
+    alpaca_paper with hold-only has no loss stop.
+    alpaca_paper_v2 and alpaca_live are 10%.
+    Any other book stays at 5% unless ``STOP_LOSS_PCT`` is set.
+    ``STOP_LOSS_PCT=off`` disables the percentage stop on a book that has one.
+    """
+    bid = (book_id if book_id is not None else trading_book_id()).strip()
+    if bid == "alpaca_paper" and paper_lab_hold_only_enabled():
+        return None
+    raw = os.getenv("STOP_LOSS_PCT")
+    if raw is not None:
+        text = raw.strip().lower()
+        if text in {"", "off", "none", "disabled", "false"}:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            pass
+    if bid in {"alpaca_paper_v2", "alpaca_live"}:
+        return 0.10
+    return float(STOP_LOSS_PCT)
+
+
+def equity_loss_stop_hit(pnl_pct: float) -> bool:
+    """True when unrealized pnl has reached this book's loss stop.
+
+    A tighter ATR or smart-stop signal inside that band does not count.
+    A loss past the band counts even when that tighter signal is quiet.
+    """
+    pct = book_hard_stop_pct()
+    if pct is None:
+        return False
+    return float(pnl_pct) <= -float(pct)
+
+
 def paper_lab_max_hold_days() -> int:
     return max(1, int(os.getenv("PAPER_LAB_MAX_HOLD_DAYS", "30")))
 
@@ -6032,6 +6207,13 @@ def research_mode_ready() -> bool:
 def format_paper_lab_banner() -> str | None:
     if not paper_lab_concentrated_enabled():
         return None
+    if paper_lab_hold_only_enabled():
+        return (
+            "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
+            "STOP EXPERIMENT 2026-10-25: no loss stop | "
+            f"exit only at {paper_lab_max_hold_days()}d hold | "
+            "trail, half, and A2B1 suspended"
+        )
     add = paper_lab_add_policy()
     if add == "idle":
         add_bit = "idle-cash add (2× only if book full)"
@@ -6045,8 +6227,10 @@ def format_paper_lab_banner() -> str | None:
         a2b1 = f" | A2B1 ≥{pct:.0f}% next-open skip Mon"
     return (
         "PAPER LAB ON (alpaca_paper only): 8 names ≤15% | "
-        "disaster -10% | 30d time | trail 8% off high after +10% | "
-        f"half @ +20% | {add_bit} | no same-day rebuy{a2b1}"
+        "disaster -10% | 30d time | forward experiment arm +5% then full exit "
+        "at -2% from observed peak | 30m rebuy after broker flat | "
+        f"half and 8% trail replaced | {add_bit} | "
+        f"same-day rebuy remains for other Lab sells{a2b1}"
     )
 
 
@@ -6055,7 +6239,7 @@ def format_paper_v2_calm_banner() -> str | None:
         return None
     return (
         "PAPER MEDIUM (alpaca_paper_v2): 15 names | 30d hold | 2x ATR | "
-        "no 1R | no micro-trims | 33/67 VTI"
+        "hard stop 10% | no 1R | no micro-trims | 33/67 VTI"
     )
 
 

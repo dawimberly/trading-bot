@@ -552,10 +552,9 @@ def gather_periodic_summary(
     active_exposure = None
     if sleeves:
         try:
-            spy = float(sleeves.get("spy_value") or 0)
             nyse = float(sleeves.get("nyse_value") or 0)
             crypto = float(sleeves.get("crypto_value") or 0)
-            active_exposure = spy + nyse + crypto
+            active_exposure = nyse + crypto
         except (TypeError, ValueError):
             active_exposure = None
 
@@ -792,7 +791,6 @@ def _format_sleeve_lines(sleeves: dict | None) -> list[str]:
     parts: list[tuple[str, float]] = []
     mapping = (
         ("VTI", "vti_core_value"),
-        ("SPY", "spy_value"),
         ("NYSE", "nyse_value"),
         ("Crypto", "crypto_value"),
         ("Metal", "metal_value"),

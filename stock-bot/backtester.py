@@ -23,6 +23,8 @@ Core engine: modules/backtester_core.py (data cache, metrics, slippage, walk-for
 """
 
 import argparse
+import copy
+from functools import wraps
 import json
 import os
 import sys
@@ -82,6 +84,7 @@ from modules.backtester_core import (
     regime_matches,
     resolve_regime_name,
     ensure_daily_data_cached,
+    min_rows_for_backtest,
     export_results_csv,
     export_results_json,
     format_enhanced_final_table,
@@ -167,6 +170,15 @@ def _tx_cost_for_symbol(symbol: str) -> float:
 DAILY_COOLDOWN_BARS = 1
 
 
+def _shared_research_state(portfolio, name: str, factory):
+    """Portfolio-owned research state. The next executor sees the same object."""
+    current = getattr(portfolio, name, None)
+    if current is None:
+        current = factory() if callable(factory) else factory
+        setattr(portfolio, name, current)
+    return current
+
+
 class BacktestExecutor:
     """Mirrors AlpacaExecutor: equity-based sizing with per-sleeve caps."""
 
@@ -196,6 +208,23 @@ class BacktestExecutor:
             book = {}
             portfolio._stat_arb_open = book
         self._stat_arb_open = book
+        self._pair_symbols = _shared_research_state(portfolio, "_pair_symbols", set)
+        self._profit_exit_cooldown = _shared_research_state(
+            portfolio, "_profit_exit_cooldown", dict
+        )
+        self._profit_target_state = _shared_research_state(
+            portfolio, "_profit_target_state", dict
+        )
+        self.profit_target_stats = _shared_research_state(
+            portfolio,
+            "profit_target_stats",
+            lambda: {"exits": 0, "armed": 0, "rebuy_blocks": 0},
+        )
+        self.ipo_stats = _shared_research_state(
+            portfolio,
+            "ipo_stats",
+            lambda: {"buys": 0, "trims": 0, "trim_notional": 0.0},
+        )
 
     def set_regime_sleeve_scales(self, *, spy_scale: float = 1.0, nyse_scale: float = 1.0) -> None:
         self._regime_spy_scale = float(spy_scale)
@@ -258,12 +287,10 @@ class BacktestExecutor:
         self._wisdom_sizing_multiplier = float(multiplier)
 
     def register_pair_symbols(self, long_sym: str, short_sym: str) -> None:
-        symbols = getattr(self, "_pair_symbols", None)
-        if symbols is None:
-            symbols = set()
-            self._pair_symbols = symbols
+        symbols = _shared_research_state(self.portfolio, "_pair_symbols", set)
         symbols.add(long_sym)
         symbols.add(short_sym)
+        self._pair_symbols = symbols
 
     def pair_sleeve_value(self) -> float:
         total = 0.0
@@ -563,6 +590,10 @@ class BacktestExecutor:
         if price is None or not np.isfinite(price) or price <= 0:
             return None
         qty = float(pos.qty)
+        if getattr(RUN_OPTIONS, "fill_timing", "same_close") == "next_close":
+            kwargs = dict(kwargs)
+            kwargs["close_qty"] = abs(qty)
+            kwargs["reduce_only"] = True
         if qty > 0:
             return self.execute_order(
                 pos.symbol, "sell", notional=round(qty * price, 2), **kwargs
@@ -627,7 +658,11 @@ class BacktestExecutor:
             )
             if notional is None:
                 return None
-        if side.lower() == "buy" and notional is not None:
+        delayed_pair = (
+            getattr(RUN_OPTIONS, "fill_timing", "same_close") == "next_close"
+            and kwargs.get("atomic_pair_id")
+        )
+        if side.lower() == "buy" and notional is not None and not delayed_pair:
             from modules.paper_risk_controls import cap_per_name_buy_notional
 
             equity = self.portfolio.equity(self.prices)
@@ -641,16 +676,35 @@ class BacktestExecutor:
             )
             if notional is None:
                 return None
+        allow_naked_short = bool(
+            kwargs.get("naked_short") or kwargs.get("strategy") == "opportunistic_short"
+        )
+        if getattr(RUN_OPTIONS, "fill_timing", "same_close") == "next_close":
+            att = getattr(self, "_attribution", None)
+            if att is not None:
+                self.portfolio._research_attribution = att
+            return _queue_research_intent(
+                self.portfolio,
+                symbol=symbol,
+                side=side.lower(),
+                notional=notional,
+                tx_cost=_tx_cost_for_symbol(symbol),
+                allow_naked_short=allow_naked_short,
+                reduce_only=bool(reduce_only),
+                signal_bar=getattr(self, "_bar_index", None),
+                source="strategy",
+                meta=_research_fill_meta(kwargs),
+                atomic_pair_id=kwargs.get("atomic_pair_id"),
+                atomic_pair_leg=kwargs.get("atomic_pair_leg"),
+                close_qty=kwargs.get("close_qty"),
+            )
         order = self.portfolio.trade(
             symbol,
             side.lower(),
             price,
             tx_cost=_tx_cost_for_symbol(symbol),
             notional=notional,
-            allow_naked_short=bool(
-                kwargs.get("naked_short")
-                or kwargs.get("strategy") == "opportunistic_short"
-            ),
+            allow_naked_short=allow_naked_short,
         )
         if order:
             for k in (
@@ -681,6 +735,653 @@ class BacktestExecutor:
                 att.on_fill(order, self.prices, self.portfolio, **kwargs)
         return order
 
+    def order_filled(self, order, max_wait=0) -> bool:
+        """True only after a research fill. A queued intent is not a fill."""
+        del max_wait
+        if not isinstance(order, dict) or order.get("queued"):
+            return False
+        try:
+            qty = float(order.get("qty") or 0.0)
+            notional = float(order.get("notional") or 0.0)
+        except (TypeError, ValueError):
+            return False
+        return qty > 0 or notional > 0
+
+    def begin_atomic_pair(self, long_sym, short_sym, leg_n, pair_key: str = "") -> str:
+        """Link the next two research orders. Live executors do not use this."""
+        del leg_n
+        seq = int(getattr(self.portfolio, "_atomic_pair_seq", 0)) + 1
+        self.portfolio._atomic_pair_seq = seq
+        label = pair_key or f"{long_sym}/{short_sym}"
+        return f"{label}#{seq}"
+
+    def defer_until_fill(self, order, callback) -> None:
+        """Run callback once, after this queued research order fills."""
+        if not isinstance(order, dict) or not order.get("queued"):
+            return
+        seq = order.get("seq")
+        for intent in getattr(self.portfolio, "_pending_intents", []) or []:
+            if intent.get("seq") == seq:
+                intent.setdefault("on_fill", []).append(callback)
+                return
+
+    def defer_until_pair_fill(self, pair_id: str, callback) -> None:
+        """Run callback once, after every leg of this research pair fills."""
+        if not pair_id:
+            return
+        bucket = getattr(self.portfolio, "_pair_fill_callbacks", None)
+        if bucket is None:
+            bucket = {}
+            self.portfolio._pair_fill_callbacks = bucket
+        bucket.setdefault(str(pair_id), []).append(callback)
+
+
+_RESEARCH_FILL_META_KEYS = (
+    "reason",
+    "sleeve",
+    "strategy",
+    "pair_key",
+    "naked_short",
+    "naked_cover",
+    "pair_cover",
+    "exit_reason",
+    "entry_bar",
+    "exit_bar",
+    "trigger_reason",
+    "entry_z",
+    "bubble_score",
+    "partial_exit",
+)
+
+
+def _research_fill_meta(kwargs: dict) -> dict:
+    return {key: kwargs[key] for key in _RESEARCH_FILL_META_KEYS if key in kwargs}
+
+
+def _core_rebalance_pending(portfolio, symbol: str) -> bool:
+    for item in getattr(portfolio, "_pending_intents", []) or []:
+        if item.get("symbol") == symbol and item.get("source") in (
+            "core_rebalance",
+            "vti_rebalance",
+        ):
+            return True
+    return False
+
+
+def record_end_of_bar_equity(
+    portfolio,
+    prices,
+    marks: list,
+    bar_index: int | None = None,
+    bar_indices: list | None = None,
+) -> float:
+    """Append equity after this bar's executions, marked at this bar's close.
+
+    Decision-time equity (the pre-trade list used for sizing) is separate.
+    """
+    mark = float(portfolio.equity(prices))
+    marks.append(mark)
+    if bar_indices is not None and bar_index is not None:
+        bar_indices.append(int(bar_index))
+    return mark
+
+
+def _queue_research_intent(
+    portfolio,
+    *,
+    symbol: str,
+    side: str,
+    notional: float | None,
+    tx_cost: float,
+    allow_naked_short: bool,
+    reduce_only: bool,
+    signal_bar: int | None,
+    source: str,
+    meta: dict | None = None,
+    atomic_pair_id: str | None = None,
+    atomic_pair_leg: str | None = None,
+    close_qty: float | None = None,
+) -> dict:
+    """Store a research order for the next bar. Cash and positions stay unchanged."""
+    if not hasattr(portfolio, "_pending_intents"):
+        portfolio._pending_intents = []
+    seq = int(getattr(portfolio, "_intent_seq", 0)) + 1
+    portfolio._intent_seq = seq
+    intent = {
+        "seq": seq,
+        "symbol": symbol,
+        "side": side.lower(),
+        "notional": None if notional is None else float(notional),
+        "tx_cost": float(tx_cost),
+        "allow_naked_short": bool(allow_naked_short),
+        "reduce_only": bool(reduce_only),
+        "signal_bar": signal_bar,
+        "source": source,
+        "meta": dict(meta or {}),
+        "atomic_pair_id": atomic_pair_id,
+        "atomic_pair_leg": atomic_pair_leg,
+        "close_qty": None if close_qty is None else float(close_qty),
+        "on_fill": [],
+    }
+    portfolio._pending_intents.append(intent)
+    return {
+        "queued": True,
+        "symbol": symbol,
+        "side": side.lower(),
+        "notional": intent["notional"],
+        "seq": seq,
+        "signal_bar": signal_bar,
+    }
+
+
+def _apply_delayed_fill_bookkeeping(portfolio, order, prices, intent, bar_index) -> None:
+    """Same research bookkeeping an immediate fill performs, at the fill bar."""
+    meta = dict(intent.get("meta") or {})
+    for key, value in meta.items():
+        order.setdefault(key, value)
+    if config.paper_aggressive_context():
+        from modules.paper_risk_controls import update_position_meta_on_fill
+
+        raw = prices.get(order.get("symbol")) if hasattr(prices, "get") else None
+        update_position_meta_on_fill(
+            portfolio,
+            order.get("symbol"),
+            str(order.get("side") or ""),
+            float(raw if raw is not None else 0.0),
+            bar_index=bar_index,
+            order=order,
+        )
+    att = getattr(portfolio, "_research_attribution", None)
+    if att is not None:
+        att.on_fill(order, prices, portfolio, **meta)
+
+
+def _record_pair_rejection(portfolio, pair_id, reason: str, symbols) -> None:
+    rows = getattr(portfolio, "pair_rejections", None)
+    if rows is None:
+        rows = []
+        portfolio.pair_rejections = rows
+    rows.append(
+        {
+            "pair_id": pair_id,
+            "reason": reason,
+            "symbols": [str(symbol) for symbol in symbols],
+        }
+    )
+
+
+def _research_short_open_allowed(intent, symbol: str) -> bool:
+    """Same short-open permission portfolio.trade uses for an immediate fill."""
+    if intent.get("allow_naked_short"):
+        return True
+    if config.is_crypto(symbol):
+        return bool(config.effective_stat_arb_enabled())
+    return bool(
+        config.effective_equity_pairs_enabled() or config.effective_stat_arb_enabled()
+    )
+
+
+def _pair_leg_cash_delta(intent, price: float) -> tuple[float, str | None]:
+    """Signed cash change if this leg fills in full. A reason means it cannot."""
+    side = str(intent.get("side") or "").lower()
+    symbol = intent["symbol"]
+    notional = intent.get("notional")
+    if notional is None or float(notional) <= 0:
+        return 0.0, "missing_notional"
+    notional = float(notional)
+    _adj, tx_cost, _slip = effective_execution(
+        price, side, symbol, float(intent.get("tx_cost") or 0.0)
+    )
+    if side == "buy":
+        return -notional * (1.0 + tx_cost), None
+    if side == "sell":
+        return notional * (1.0 - tx_cost), None
+    return 0.0, "unsupported_side"
+
+
+def _atomic_pair_block_reason(portfolio, legs, prices) -> str | None:
+    """Reject the whole pair instead of resizing either leg."""
+    if any(bool(leg.get("reduce_only")) for leg in legs):
+        return _atomic_exit_block_reason(portfolio, legs, prices)
+    from modules.paper_risk_controls import cap_per_name_buy_notional
+
+    cash = float(portfolio.cash)
+    for intent in legs:
+        symbol = intent["symbol"]
+        price = prices.get(symbol) if hasattr(prices, "get") else None
+        if price is None or not np.isfinite(price) or float(price) <= 0:
+            return "missing_price"
+        price = float(price)
+        side = str(intent.get("side") or "").lower()
+        held = float(portfolio.positions.get(symbol, 0.0) or 0.0)
+        notional = intent.get("notional")
+        if side == "buy" and held < 0:
+            return "long_leg_blocked"
+        if side == "sell" and held > 0:
+            return "short_leg_blocked"
+        if side == "sell" and held <= 0 and not _research_short_open_allowed(intent, symbol):
+            return "short_permission_denied"
+        if side == "buy" and notional is not None and held >= 0:
+            capped = cap_per_name_buy_notional(
+                symbol=symbol,
+                side=side,
+                notional=float(notional),
+                equity=portfolio.equity(prices),
+                prices=prices,
+                positions=portfolio.positions,
+            )
+            if capped is None or float(capped) + 0.01 < float(notional):
+                return "position_cap"
+        delta, reason = _pair_leg_cash_delta(intent, price)
+        if reason:
+            return reason
+        cash += delta
+        if cash < -1e-6:
+            return "insufficient_cash"
+    sleeve = _stat_arb_sleeve_gross_block(portfolio, legs, prices)
+    if sleeve:
+        return sleeve
+    return None
+
+
+def _exact_close_cash_delta(intent, price: float, held: float) -> tuple[float, str | None]:
+    """Cash change for a full close of ``close_qty`` shares at the slipped fill.
+
+    The quantity is capped to the shares still held. Slippage and fees are the
+    same ``effective_execution`` values ``trade`` applies, counted once.
+    """
+    side = str(intent.get("side") or "").lower()
+    symbol = intent["symbol"]
+    qty = float(intent.get("close_qty") or 0.0)
+    if qty <= 0:
+        return 0.0, "missing_notional"
+    tx_cost = float(intent.get("tx_cost") or 0.0)
+    if side == "sell":
+        if held <= 1e-12:
+            intent["_skip_flat"] = True
+            return 0.0, None
+        qty = min(held, qty)
+        adj, fee, _slip = effective_execution(price, "sell", symbol, tx_cost)
+        return qty * adj * (1.0 - fee), None
+    if side == "buy":
+        if held >= -1e-12:
+            intent["_skip_flat"] = True
+            return 0.0, None
+        qty = min(abs(held), qty)
+        adj, fee, _slip = effective_execution(price, "buy", symbol, tx_cost)
+        return -(qty * adj * (1.0 + fee)), None
+    return 0.0, "unsupported_side"
+
+
+def _atomic_exit_block_reason(portfolio, legs, prices) -> str | None:
+    """Reduce-only exit legs may shrink to the shares still held. They cannot flip."""
+    cash = float(portfolio.cash)
+    for intent in legs:
+        symbol = intent["symbol"]
+        price = prices.get(symbol) if hasattr(prices, "get") else None
+        if price is None or not np.isfinite(price) or float(price) <= 0:
+            return "missing_price"
+        price = float(price)
+        side = str(intent.get("side") or "").lower()
+        held = float(portfolio.positions.get(symbol, 0.0) or 0.0)
+        if intent.get("close_qty") is not None:
+            delta, reason = _exact_close_cash_delta(intent, price, held)
+            if reason:
+                return reason
+            if intent.get("_skip_flat"):
+                continue
+            cash += delta
+            if cash < -1e-6:
+                return "insufficient_cash"
+            continue
+        notional = intent.get("notional")
+        if notional is None or float(notional) <= 0:
+            return "missing_notional"
+        if side == "sell":
+            if held <= 0:
+                intent["_skip_flat"] = True
+                continue
+            cap = held * price
+            if float(notional) > cap:
+                intent["notional"] = cap
+        elif side == "buy":
+            if held >= 0:
+                intent["_skip_flat"] = True
+                continue
+            cap = abs(held) * price
+            if float(notional) > cap:
+                intent["notional"] = cap
+        else:
+            return "unsupported_side"
+        delta, reason = _pair_leg_cash_delta(intent, price)
+        if reason:
+            return reason
+        cash += delta
+        if cash < -1e-6:
+            return "insufficient_cash"
+    return None
+
+
+def _stat_arb_sleeve_gross_block(portfolio, legs, prices) -> str | None:
+    """Reject a new stat-arb pair whose gross would exceed the existing sleeve cap."""
+    if any(bool(leg.get("reduce_only")) for leg in legs):
+        return None
+    strategies = {
+        str((leg.get("meta") or {}).get("strategy") or "") for leg in legs
+    }
+    if "stat_arb" not in strategies:
+        return None
+    if not config.effective_stat_arb_sleeve_cap_enabled():
+        return None
+    cap_pct = float(config.effective_stat_arb_cap() or 0.0)
+    if cap_pct <= 0:
+        return None
+    equity = float(portfolio.equity(prices))
+    if equity <= 0:
+        return "sleeve_gross"
+    cap_usd = equity * cap_pct
+    owned = {
+        config.normalize_symbol(sym)
+        for sym in (getattr(portfolio, "_pair_symbols", ()) or ())
+    }
+    existing = 0.0
+    for symbol, qty in portfolio.positions.items():
+        if config.normalize_symbol(symbol) not in owned:
+            continue
+        price = prices.get(symbol) if hasattr(prices, "get") else None
+        if price is None or not np.isfinite(price) or float(price) <= 0:
+            continue
+        existing += abs(float(qty) * float(price))
+    added = sum(abs(float(leg.get("notional") or 0.0)) for leg in legs)
+    if existing + added > cap_usd + 0.05:
+        return "sleeve_gross"
+    return None
+
+
+def _snapshot_research_portfolio(portfolio) -> dict:
+    """Copy the fields a research trade can change. No broker state is included."""
+    return {
+        "cash": float(portfolio.cash),
+        "execution_cost_usd": float(getattr(portfolio, "execution_cost_usd", 0.0) or 0.0),
+        "positions": dict(portfolio.positions),
+        "entry_cost": dict(getattr(portfolio, "entry_cost", {}) or {}),
+        "closed_trades": list(getattr(portfolio, "closed_trades", []) or []),
+        "position_meta": copy.deepcopy(getattr(portfolio, "position_meta", {}) or {}),
+        "short_position_meta": copy.deepcopy(
+            getattr(portfolio, "short_position_meta", {}) or {}
+        ),
+        "_short_open_qty": dict(getattr(portfolio, "_short_open_qty", {}) or {}),
+        "_short_open_proceeds": dict(getattr(portfolio, "_short_open_proceeds", {}) or {}),
+    }
+
+
+def _restore_research_portfolio(portfolio, snap: dict) -> None:
+    portfolio.cash = snap["cash"]
+    portfolio.execution_cost_usd = snap["execution_cost_usd"]
+    portfolio.positions = dict(snap["positions"])
+    portfolio.entry_cost = dict(snap["entry_cost"])
+    portfolio.closed_trades = list(snap["closed_trades"])
+    portfolio.position_meta = copy.deepcopy(snap["position_meta"])
+    portfolio.short_position_meta = copy.deepcopy(snap["short_position_meta"])
+    portfolio._short_open_qty = dict(snap["_short_open_qty"])
+    portfolio._short_open_proceeds = dict(snap["_short_open_proceeds"])
+
+
+def _drop_unfilled_pair_callbacks(portfolio, pair_id, legs) -> None:
+    """A rejected pair must not stamp cooldowns or counters later."""
+    (getattr(portfolio, "_pair_fill_callbacks", None) or {}).pop(pair_id, None)
+    for intent in legs:
+        intent["on_fill"] = []
+
+
+def _run_fill_callbacks(intent) -> None:
+    callbacks = list(intent.get("on_fill") or [])
+    intent["on_fill"] = []
+    for callback in callbacks:
+        callback()
+
+
+def _flush_atomic_pair(portfolio, legs, prices, bar_index) -> list[dict]:
+    """Fill every leg or none. Requested notionals stay unchanged."""
+    legs = sorted(legs, key=lambda item: int(item["seq"]))
+    pair_id = legs[0].get("atomic_pair_id")
+    symbols = [leg["symbol"] for leg in legs]
+    reason = _atomic_pair_block_reason(portfolio, legs, prices)
+    if reason:
+        _record_pair_rejection(portfolio, pair_id, reason, symbols)
+        _drop_unfilled_pair_callbacks(portfolio, pair_id, legs)
+        return []
+    snapshot = _snapshot_research_portfolio(portfolio)
+    staged: list[tuple[dict, dict]] = []
+    try:
+        for intent in legs:
+            if intent.get("_skip_flat"):
+                continue
+            symbol = intent["symbol"]
+            price = float(prices.get(symbol))
+            side = str(intent["side"]).lower()
+            requested = float(intent.get("notional") or 0.0)
+            close_qty = intent.get("close_qty")
+            allow_short = (
+                side == "sell"
+                and bool(intent.get("allow_naked_short"))
+                and not bool(intent.get("reduce_only"))
+            )
+            if close_qty is not None:
+                order = portfolio.trade(
+                    symbol,
+                    side,
+                    price,
+                    tx_cost=float(intent.get("tx_cost") or 0.0),
+                    close_qty=float(close_qty),
+                )
+            else:
+                order = portfolio.trade(
+                    symbol,
+                    side,
+                    price,
+                    tx_cost=float(intent.get("tx_cost") or 0.0),
+                    notional=requested,
+                    allow_naked_short=allow_short,
+                )
+            filled_notional = float(order.get("notional") or 0.0) if order else 0.0
+            resized = abs(filled_notional - requested) > 0.05
+            if not order or (
+                close_qty is None and resized and not intent.get("reduce_only")
+            ):
+                _restore_research_portfolio(portfolio, snapshot)
+                _record_pair_rejection(portfolio, pair_id, "execution_failed", symbols)
+                _drop_unfilled_pair_callbacks(portfolio, pair_id, legs)
+                return []
+            staged.append((intent, order))
+    except Exception:
+        _restore_research_portfolio(portfolio, snapshot)
+        raise
+    executed: list[dict] = []
+    portfolio._research_fill_bar = bar_index
+    pair_fills = getattr(portfolio, "_research_pair_fills", None)
+    if pair_fills is None:
+        pair_fills = {}
+        portfolio._research_pair_fills = pair_fills
+    for intent, order in staged:
+        order["delayed_fill"] = True
+        order["signal_bar"] = intent.get("signal_bar")
+        order["seq"] = intent["seq"]
+        order["atomic_pair_id"] = pair_id
+        _apply_delayed_fill_bookkeeping(portfolio, order, prices, intent, bar_index)
+        _run_fill_callbacks(intent)
+        executed.append(order)
+    pair_fills[pair_id] = list(executed)
+    callbacks = (getattr(portfolio, "_pair_fill_callbacks", None) or {}).pop(pair_id, [])
+    for callback in callbacks:
+        callback()
+    return executed
+
+
+def reject_terminal_delayed_intents(portfolio) -> int:
+    """Drop intents left after the last bar. Paired legs are rejected together."""
+    pending = list(getattr(portfolio, "_pending_intents", []) or [])
+    seen = set()
+    for intent in pending:
+        pair_id = intent.get("atomic_pair_id")
+        if not pair_id or pair_id in seen:
+            continue
+        seen.add(pair_id)
+        symbols = [
+            row["symbol"] for row in pending if row.get("atomic_pair_id") == pair_id
+        ]
+        _record_pair_rejection(portfolio, pair_id, "terminal_bar", symbols)
+        symbols_intents = [
+            row for row in pending if row.get("atomic_pair_id") == pair_id
+        ]
+        _drop_unfilled_pair_callbacks(portfolio, pair_id, symbols_intents)
+    portfolio._pending_intents = []
+    return len(pending)
+
+
+def flush_delayed_intents(portfolio, prices, *, bar_index: int | None = None) -> list[dict]:
+    """Fill queued research intents at this bar's close, in original sequence.
+
+    A reduce-only sell only reduces a long. A reduce-only buy only covers a
+    short. Neither may cross zero. A sell of a long is capped at the shares
+    still held. A short is opened only when the original intent set
+    ``allow_naked_short`` and ``reduce_only`` is false. An intent with
+    ``close_qty`` closes that many shares, capped to the position still open,
+    and pays the slippage-adjusted fill once. Ordinary notional orders do not
+    set ``close_qty``. Slippage and fees are applied once, inside
+    ``portfolio.trade``. Position metadata and attribution run after the fill,
+    on this bar.
+
+    If an atomic pair raises, ``_flush_atomic_pair`` restores that pair and the
+    exception propagates. Intents after that pair are put back on
+    ``_pending_intents`` before the raise. The failed pair is not re-queued.
+    This flush does not fill anything after the exception.
+
+    Immediate exceptions (these do not enter this queue):
+    drawdown-halt trims via ``trim_long_sleeves_to_cash_target``; wheel,
+    politician-copy, options, and volatility sleeve cash or position writes;
+    the separate ``backtester_macro_hedge.py`` script; and
+    ``_bt_exp_365_runner.py``, which does not use this queue.
+    """
+    pending = list(getattr(portfolio, "_pending_intents", []) or [])
+    portfolio._pending_intents = []
+    portfolio._research_fill_bar = bar_index
+    pending.sort(key=lambda item: int(item["seq"]))
+    fills: list[dict] = []
+    done_pairs: set[str] = set()
+    for index, intent in enumerate(pending):
+        pair_id = intent.get("atomic_pair_id")
+        if pair_id:
+            if pair_id in done_pairs:
+                continue
+            done_pairs.add(pair_id)
+            legs = [row for row in pending if row.get("atomic_pair_id") == pair_id]
+            try:
+                fills.extend(_flush_atomic_pair(portfolio, legs, prices, bar_index))
+            except Exception:
+                restored = [
+                    row
+                    for row in pending[index + 1 :]
+                    if row.get("atomic_pair_id") != pair_id
+                ]
+                portfolio._pending_intents = restored
+                raise
+            continue
+        symbol = intent["symbol"]
+        close_qty = intent.get("close_qty")
+        if close_qty is not None:
+            price = prices.get(symbol) if hasattr(prices, "get") else None
+            if price is None or not np.isfinite(price) or float(price) <= 0:
+                continue
+            side = str(intent["side"]).lower()
+            held = float(portfolio.positions.get(symbol, 0.0) or 0.0)
+            qty = None
+            if side == "sell" and held > 0:
+                qty = min(float(close_qty), held)
+            elif side == "buy" and held < 0:
+                qty = min(float(close_qty), abs(held))
+            order = None
+            if qty is not None and qty > 0:
+                order = portfolio.trade(
+                    symbol,
+                    side,
+                    float(price),
+                    tx_cost=float(intent.get("tx_cost") or 0.0),
+                    close_qty=qty,
+                )
+            if order:
+                order["delayed_fill"] = True
+                order["signal_bar"] = intent.get("signal_bar")
+                order["seq"] = intent["seq"]
+                _apply_delayed_fill_bookkeeping(
+                    portfolio, order, prices, intent, bar_index
+                )
+                _run_fill_callbacks(intent)
+                fills.append(order)
+            continue
+        price = prices.get(symbol) if hasattr(prices, "get") else None
+        if price is None or not np.isfinite(price) or float(price) <= 0:
+            continue
+        price = float(price)
+        side = str(intent["side"]).lower()
+        notional = intent.get("notional")
+        held = float(portfolio.positions.get(symbol, 0.0) or 0.0)
+        reduce_only = bool(intent.get("reduce_only"))
+        allow_short = bool(intent.get("allow_naked_short")) and not reduce_only
+        if reduce_only and side == "sell":
+            if held <= 0:
+                continue
+            cap = held * price
+            if notional is None or float(notional) > cap:
+                notional = cap
+            allow_short = False
+        elif reduce_only and side == "buy":
+            if held >= 0:
+                continue
+            cap = abs(held) * price
+            if notional is None or float(notional) > cap:
+                notional = cap
+        elif reduce_only:
+            continue
+        elif side == "sell" and held > 0:
+            cap = held * price
+            if notional is None or float(notional) > cap:
+                notional = cap
+            allow_short = False
+        elif side == "sell" and held <= 0 and not allow_short:
+            continue
+        if side == "buy" and held >= 0 and notional is not None and not reduce_only:
+            from modules.paper_risk_controls import cap_per_name_buy_notional
+
+            notional = cap_per_name_buy_notional(
+                symbol=symbol,
+                side=side,
+                notional=notional,
+                equity=portfolio.equity(prices),
+                prices=prices,
+                positions=portfolio.positions,
+            )
+            if notional is None:
+                continue
+        order = portfolio.trade(
+            symbol,
+            side,
+            price,
+            tx_cost=float(intent.get("tx_cost") or 0.0),
+            notional=notional,
+            allow_naked_short=allow_short,
+        )
+        if order:
+            order["delayed_fill"] = True
+            order["signal_bar"] = intent.get("signal_bar")
+            order["seq"] = intent["seq"]
+            _apply_delayed_fill_bookkeeping(
+                portfolio, order, prices, intent, bar_index
+            )
+            _run_fill_callbacks(intent)
+            fills.append(order)
+    return fills
+
 
 class BacktestPortfolio:
     def __init__(self, initial_capital=10000.0):
@@ -691,6 +1392,9 @@ class BacktestPortfolio:
         self.short_position_meta = {}
         self.entry_cost = {}
         self.execution_cost_usd = 0.0
+        self.closed_trades: list[dict] = []
+        self._short_open_qty: dict[str, float] = {}
+        self._short_open_proceeds: dict[str, float] = {}
 
     def equity(self, prices):
         total = self.cash
@@ -708,9 +1412,169 @@ class BacktestPortfolio:
         fee = notional * max(0.0, tx_cost)
         self.execution_cost_usd += slip + fee
 
-    def trade(self, symbol, side, price, tx_cost=TX_COST, notional=None, *, allow_naked_short=False):
+    def _record_closed_trade(
+        self,
+        symbol: str,
+        position_side: str,
+        qty: float,
+        entry_notional: float,
+        realized_pnl: float | None,
+        *,
+        basis_known: bool,
+    ) -> None:
+        entry = float(entry_notional)
+        if basis_known and entry > 1e-9 and realized_pnl is not None:
+            ret: float | None = float(realized_pnl) / entry * 100.0
+            pnl: float | None = round(float(realized_pnl), 6)
+            known = True
+        else:
+            ret = None
+            pnl = None
+            known = False
+        self.closed_trades.append(
+            {
+                "symbol": symbol,
+                "position_side": position_side,
+                "qty": round(float(qty), 8),
+                "entry_notional": None if not known else round(entry, 6),
+                "realized_pnl": pnl,
+                "return_pct": None if ret is None else round(ret, 6),
+                "basis_known": known,
+            }
+        )
+
+    def note_research_long_reduction(
+        self, symbol: str, sell_qty: float, proceeds: float, qty_before: float
+    ) -> None:
+        """Record a long reduction whose cash and quantity update stay with the caller."""
+        held = float(qty_before)
+        sold = float(sell_qty)
+        total_cost = float(self.entry_cost.get(symbol, 0.0) or 0.0)
+        if held > 0 and total_cost > 0:
+            frac = min(1.0, sold / held)
+            alloc = total_cost * frac
+            self._record_closed_trade(
+                symbol, "long", sold, alloc, float(proceeds) - alloc, basis_known=True
+            )
+            if held - sold < 1e-9:
+                self.entry_cost.pop(symbol, None)
+            else:
+                self.entry_cost[symbol] = total_cost * (1.0 - sold / held)
+        else:
+            self._record_closed_trade(
+                symbol, "long", sold, 0.0, None, basis_known=False
+            )
+
+    def _note_short_open(self, symbol: str, qty: float, proceeds: float) -> None:
+        self._short_open_qty[symbol] = self._short_open_qty.get(symbol, 0.0) + float(qty)
+        self._short_open_proceeds[symbol] = (
+            self._short_open_proceeds.get(symbol, 0.0) + float(proceeds)
+        )
+
+    def _clear_short_basis(self, symbol: str) -> None:
+        self._short_open_qty.pop(symbol, None)
+        self._short_open_proceeds.pop(symbol, None)
+
+    def _realize_short(self, symbol: str, cover_qty: float, cover_cost: float) -> None:
+        open_qty = self._short_open_qty.get(symbol, 0.0)
+        open_proceeds = self._short_open_proceeds.get(symbol, 0.0)
+        if open_qty > 1e-12:
+            frac = min(1.0, float(cover_qty) / open_qty)
+            alloc = open_proceeds * frac
+            remaining_qty = open_qty - float(cover_qty)
+            if remaining_qty < 1e-9:
+                self._clear_short_basis(symbol)
+            else:
+                self._short_open_qty[symbol] = remaining_qty
+                self._short_open_proceeds[symbol] = open_proceeds - alloc
+            self._record_closed_trade(
+                symbol, "short", cover_qty, alloc, alloc - cover_cost, basis_known=True
+            )
+        else:
+            self._record_closed_trade(
+                symbol, "short", cover_qty, 0.0, None, basis_known=False
+            )
+
+    def _trade_close_qty(self, symbol, side, raw_price, price, tx_cost, close_qty):
+        """Close up to ``close_qty`` shares. ``price`` is already slippage-adjusted.
+
+        Fees apply once on that fill. The close cannot cross zero. Cash that
+        cannot pay the full capped quantity returns None and changes nothing.
+        """
+        side = str(side).lower()
+        held = float(self.positions.get(symbol, 0.0) or 0.0)
+        qty = float(close_qty)
+        if qty <= 0:
+            return None
+        if side == "buy":
+            if held >= -1e-12:
+                return None
+            cover_qty = min(abs(held), qty)
+            cost = cover_qty * price * (1 + tx_cost)
+            if cost > self.cash:
+                return None
+            self._realize_short(symbol, cover_qty, cost)
+            self.cash -= cost
+            self.positions[symbol] = held + cover_qty
+            if abs(self.positions[symbol]) < 1e-9:
+                del self.positions[symbol]
+                self._clear_short_basis(symbol)
+            self._track_execution_cost(raw_price, price, cover_qty, tx_cost)
+            return {
+                "symbol": symbol,
+                "side": "buy",
+                "qty": cover_qty,
+                "notional": round(cover_qty * price, 2),
+                "pair_cover": True,
+            }
+        if side == "sell":
+            if held <= 1e-12:
+                return None
+            sell_qty = min(held, qty)
+            sell_notional = sell_qty * price
+            proceeds = sell_notional * (1 - tx_cost)
+            total_cost = self.entry_cost.get(symbol, 0.0)
+            if held > 0 and total_cost > 0:
+                alloc = total_cost * min(1.0, sell_qty / held)
+                self._record_closed_trade(
+                    symbol, "long", sell_qty, alloc, proceeds - alloc, basis_known=True
+                )
+                self.entry_cost[symbol] = total_cost * (1.0 - sell_qty / held)
+            else:
+                self._record_closed_trade(
+                    symbol, "long", sell_qty, 0.0, None, basis_known=False
+                )
+            self.cash += proceeds
+            self.positions[symbol] = held - sell_qty
+            if self.positions[symbol] < 1e-9:
+                del self.positions[symbol]
+                self.entry_cost.pop(symbol, None)
+            self._track_execution_cost(raw_price, price, sell_qty, tx_cost)
+            return {
+                "symbol": symbol,
+                "side": "sell",
+                "qty": sell_qty,
+                "notional": round(sell_notional, 2),
+            }
+        return None
+
+    def trade(
+        self,
+        symbol,
+        side,
+        price,
+        tx_cost=TX_COST,
+        notional=None,
+        *,
+        allow_naked_short=False,
+        close_qty=None,
+    ):
         raw_price = float(price)
         price, tx_cost, slip_pct = effective_execution(raw_price, side, symbol, tx_cost)
+        if close_qty is not None:
+            return self._trade_close_qty(
+                symbol, side, raw_price, price, tx_cost, float(close_qty)
+            )
         if notional is None:
             equity = self.equity({symbol: price})
             if config.backtest_small_account_context() or config.paper_aggressive_context():
@@ -744,10 +1608,12 @@ class BacktestPortfolio:
                 cost = cover_qty * price * (1 + tx_cost)
                 if cost > self.cash:
                     return None
+                self._realize_short(symbol, cover_qty, cost)
                 self.cash -= cost
                 self.positions[symbol] = existing + cover_qty
                 if abs(self.positions[symbol]) < 1e-9:
                     del self.positions[symbol]
+                    self._clear_short_basis(symbol)
                 self._track_execution_cost(raw_price, price, cover_qty, tx_cost)
                 return {
                     "symbol": symbol,
@@ -787,6 +1653,7 @@ class BacktestPortfolio:
                         return None
                     short_qty = notional / price
                     proceeds = notional * (1 - tx_cost)
+                    self._note_short_open(symbol, short_qty, proceeds)
                     self.cash += proceeds
                     self.positions[symbol] = self.positions.get(symbol, 0.0) - short_qty
                     self._track_execution_cost(raw_price, price, short_qty, tx_cost)
@@ -803,6 +1670,7 @@ class BacktestPortfolio:
                         return None
                     short_qty = notional / price
                     proceeds = notional * (1 - tx_cost)
+                    self._note_short_open(symbol, short_qty, proceeds)
                     self.cash += proceeds
                     self.positions[symbol] = self.positions.get(symbol, 0.0) - short_qty
                     self._track_execution_cost(raw_price, price, short_qty, tx_cost)
@@ -817,10 +1685,18 @@ class BacktestPortfolio:
             sell_notional = min(notional, qty * price) if notional else qty * price
             sell_qty = sell_notional / price
             proceeds = sell_notional * (1 - tx_cost)
-            self.cash += proceeds
             total_cost = self.entry_cost.get(symbol, 0.0)
             if qty > 0 and total_cost > 0:
+                alloc = total_cost * min(1.0, sell_qty / qty)
+                self._record_closed_trade(
+                    symbol, "long", sell_qty, alloc, proceeds - alloc, basis_known=True
+                )
                 self.entry_cost[symbol] = total_cost * (1.0 - sell_qty / qty)
+            else:
+                self._record_closed_trade(
+                    symbol, "long", sell_qty, 0.0, None, basis_known=False
+                )
+            self.cash += proceeds
             self.positions[symbol] = qty - sell_qty
             if self.positions[symbol] < 1e-9:
                 del self.positions[symbol]
@@ -846,14 +1722,24 @@ def _rebalance_vti_core(portfolio, prices, core_pct: float) -> None:
     min_n = config.effective_min_notional(eq)
     if abs(delta) < min_n:
         return
-    if delta > 0:
-        portfolio.trade(
-            VTI_CORE_SYMBOL, "buy", price, tx_cost=0.0, notional=delta
+    side = "buy" if delta > 0 else "sell"
+    notional = delta if delta > 0 else -delta
+    if getattr(RUN_OPTIONS, "fill_timing", "same_close") == "next_close":
+        if _core_rebalance_pending(portfolio, VTI_CORE_SYMBOL):
+            return
+        _queue_research_intent(
+            portfolio,
+            symbol=VTI_CORE_SYMBOL,
+            side=side,
+            notional=notional,
+            tx_cost=0.0,
+            allow_naked_short=False,
+            reduce_only=side == "sell",
+            signal_bar=None,
+            source="vti_rebalance",
         )
-    else:
-        portfolio.trade(
-            VTI_CORE_SYMBOL, "sell", price, tx_cost=0.0, notional=-delta
-        )
+        return
+    portfolio.trade(VTI_CORE_SYMBOL, side, price, tx_cost=0.0, notional=notional)
 
 
 def _parallel_backtest_worker(payload: tuple) -> dict:
@@ -912,12 +1798,13 @@ def _print_deep_history_mode_banner(
 
 
 def _calendar_days_to_fetch(sim_days: int) -> int:
-    """yfinance period is calendar days; reserve MA warmup + buffer for trading bars."""
-    return int(sim_days + MIN_HISTORY + WARMUP_CALENDAR_BUFFER)
+    """Fetch a calendar window large enough for warmup and requested market sessions."""
+    warmup_calendar_days = int(np.ceil(MIN_HISTORY * 365.25 / 252.0))
+    return int(sim_days + warmup_calendar_days + WARMUP_CALENDAR_BUFFER)
 
 
 def _min_rows_for_backtest(sim_days: int) -> int:
-    return MIN_HISTORY + max(10, int(sim_days * 0.85))
+    return min_rows_for_backtest(sim_days, min_history=MIN_HISTORY)
 
 
 def _ensure_daily_data(days, refresh=False, use_max=False):
@@ -930,6 +1817,7 @@ def _ensure_daily_data(days, refresh=False, use_max=False):
         load_close_matrix=load_close_matrix,
         fetch_daily_history=fetch_daily_history,
         fetch_daily_history_for_tickers=fetch_daily_history_for_tickers,
+        session_calendar_ticker=config.SPY_BOT_SYMBOL,
     )
 
 
@@ -1095,6 +1983,28 @@ def _small_account_start_equity() -> float:
     return float(config.SMALL_ACCOUNT_BACKTEST_EQUITY)
 
 
+def _restore_strict_pit_after_error(fn):
+    """Avoid leaving global feature switches disabled after a failed PIT run."""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        prior_flag = bool(config.STRICT_PIT_BACKTEST)
+        prior_context = config.backtest_strict_pit_context()
+        prior_allow = config.strict_pit_allow()
+        prior_run_option = bool(getattr(RUN_OPTIONS, "strict_pit", False))
+        try:
+            return fn(*args, **kwargs)
+        except Exception:
+            if not prior_flag and not prior_context:
+                config.STRICT_PIT_BACKTEST = False
+                config.set_backtest_strict_pit_context(False)
+                config.set_strict_pit_allow(prior_allow)
+                RUN_OPTIONS.strict_pit = prior_run_option
+            raise
+
+    return wrapped
+
+
+@_restore_strict_pit_after_error
 def run_backtest(
     data,
     *,
@@ -1103,6 +2013,7 @@ def run_backtest(
     wisdom_mode=None,
     monthly_web=None,
     track_metrics=False,
+    strict_pit: bool | None = None,
     vti_core_pct: float = 0.0,
     paper_aggressive: bool = False,
     small_account: bool = False,
@@ -1140,6 +2051,25 @@ def run_backtest(
     deep_history_indicators_only: bool = False,
 ):
     """Run fund pipeline on daily data; return performance + optional SPY fill metrics."""
+    saved_strict_flag = bool(config.STRICT_PIT_BACKTEST)
+    saved_strict_ctx = config.backtest_strict_pit_context()
+    saved_strict_allow = config.strict_pit_allow()
+    saved_run_strict = bool(getattr(RUN_OPTIONS, "strict_pit", False))
+    strict_pit_active = bool(
+        strict_pit
+        if strict_pit is not None
+        else (RUN_OPTIONS.strict_pit or config.STRICT_PIT_BACKTEST)
+    )
+    if strict_pit_active:
+        calendar_ticker = data.attrs.get("session_calendar_ticker")
+        if not calendar_ticker:
+            raise ValueError(
+                "Strict PIT replay requires daily data loaded on an observed "
+                "market-session calendar; use _ensure_daily_data()."
+            )
+        config.STRICT_PIT_BACKTEST = True
+        RUN_OPTIONS.strict_pit = True
+        config.apply_strict_pit_kill_switches()
     if stat_arb_report is None:
         stat_arb_report = bool(paper_aggressive)
     saved_deep_history = config.DEEP_HISTORY_ENABLED
@@ -1323,6 +2253,46 @@ def run_backtest(
         warmup = simulation_warmup_bars(n_bars)
     start_date = data.index[warmup]
     end_date = data.index[-1]
+    pit_universe_info = None
+    pit_membership_matrix = None
+    pit_ticker_to_column: dict[str, str] = {}
+    if strict_pit_active:
+        from modules import pit_universe as pit
+
+        membership_path = pit.SP500_MEMBERSHIP_PATH
+        if not membership_path.is_file():
+            raise RuntimeError(
+                "Strict PIT replay requires data/sp500_ticker_start_end.csv; "
+                "the historical membership file is missing."
+            )
+        membership = pit.load_sp500_membership(membership_path)
+        window_members = pit.sp500_tickers_in_window(
+            membership, pd.Timestamp(data.index[0]), pd.Timestamp(data.index[-1])
+        )
+        for ticker in window_members:
+            column = pit.resolve_column(ticker, data.columns)
+            if column is not None:
+                pit_ticker_to_column[ticker] = column
+        pit_membership_matrix = pit.membership_matrix(
+            pd.DatetimeIndex(data.index),
+            membership,
+            tickers=list(pit_ticker_to_column),
+        )
+        missing_members = [t for t in window_members if t not in pit_ticker_to_column]
+        pit_universe_info = {
+            "source": str(membership_path),
+            "mode": "S&P 500 membership by date, intersected with loaded price columns",
+            "members_in_window": len(window_members),
+            "members_with_price_data": len(pit_ticker_to_column),
+            "members_missing_price_data": len(missing_members),
+            "coverage_pct": round(
+                100.0 * len(pit_ticker_to_column) / len(window_members), 2
+            )
+            if window_members
+            else 0.0,
+            "missing_sample": missing_members[:25],
+            "complete": not missing_members,
+        }
     cooldown_bars = DAILY_COOLDOWN_BARS
     sharpe_scale = np.sqrt(252)
     sim_days = (end_date - start_date).days
@@ -1371,6 +2341,11 @@ def run_backtest(
         halt_min_bars=config.HALT_MIN_BARS,
     )
     equity_curve = []
+    # End-of-bar marks: cash and positions after that bar's fills, at that bar's close.
+    reported_equity: list[float] = []
+    reported_bar_index: list[int] = []
+    portfolio._pending_intents = []
+    portfolio._intent_seq = 0
     regime_counts = {}
     regime_series: list[str] = []
     regime_filter_skips = 0
@@ -1380,6 +2355,7 @@ def run_backtest(
     total_spy_entries = 0
     total_spy_exits = 0
     total_orders = 0
+    delayed_order_count = 0
     pause_days = 0
     halt_liquidations = 0
     exposure_samples = []
@@ -1565,10 +2541,42 @@ def run_backtest(
 
     for i in range(warmup, len(data)):
         window = _backtest_indicator_window(data, i, indicator_frame)
+        nyse_window = window
+        if pit_membership_matrix is not None:
+            active_tickers = set(
+                pit_membership_matrix.columns[
+                    pit_membership_matrix.iloc[i].to_numpy(dtype=bool)
+                ]
+            )
+            active_columns = {
+                pit_ticker_to_column[t]
+                for t in active_tickers
+                if t in pit_ticker_to_column
+            }
+            held_columns = {
+                str(symbol)
+                for symbol, qty in portfolio.positions.items()
+                if float(qty) > 0
+            }
+            keep_columns = [
+                column
+                for column in window.columns
+                if not config._nyse_eligible_symbol(column)
+                or config.normalize_symbol(column)
+                == config.normalize_symbol(config.SPY_BOT_SYMBOL)
+                or column in active_columns
+                or column in held_columns
+            ]
+            nyse_window = window.loc[:, keep_columns]
         prices = data.iloc[i]
+        if getattr(RUN_OPTIONS, "fill_timing", "same_close") == "next_close":
+            delayed_order_count += len(
+                flush_delayed_intents(portfolio, prices, bar_index=i)
+            )
         eq = portfolio.equity(prices)
         if small_account:
             config.configure_account_profile(eq)
+        # Pre-trade mark. Sizing later in this bar reads equity_curve; do not append fills here.
         equity_curve.append(eq)
 
         from modules.market_context import set_regime_bar_index
@@ -1673,6 +2681,9 @@ def run_backtest(
                     f"!!! RISK HALT at {data.index[i].date()} "
                     f"(equity ${round(eq, 2)}, DD {risk_manager.current_drawdown(eq):.1%}) !!!"
                 )
+            record_end_of_bar_equity(
+                portfolio, prices, reported_equity, i, reported_bar_index
+            )
             continue
         if verbose and prev_halted and not risk_manager.halted:
             print(
@@ -1682,6 +2693,9 @@ def run_backtest(
 
         if regime_filter and not regime_matches(regime_label, regime_filter):
             regime_filter_skips += 1
+            record_end_of_bar_equity(
+                portfolio, prices, reported_equity, i, reported_bar_index
+            )
             continue
 
         yield_gated = False
@@ -2152,7 +3166,7 @@ def run_backtest(
         equity_n = 0
         if config.effective_equity_pairs_enabled():
             eq_pairs = run_equity_pairs_strategy(
-                window,
+                nyse_window,
                 executor,
                 regime,
                 i,
@@ -2174,7 +3188,7 @@ def run_backtest(
             except Exception:
                 pass
             equity_n = run_nyse_momentum_and_stat_arb(
-                window,
+                nyse_window,
                 executor,
                 regime,
                 i,
@@ -2395,7 +3409,9 @@ def run_backtest(
                 vol_state["premium_days"] = int(vol_state.get("premium_days", 0)) + 1
         total_orders += len(executor.orders)
         trade_days += 1
-        prev_bar_equity = float(portfolio.equity(prices))
+        prev_bar_equity = record_end_of_bar_equity(
+            portfolio, prices, reported_equity, i, reported_bar_index
+        )
         if attribution_tracker is not None:
             attribution_tracker.snapshot_mtm(executor, prices)
 
@@ -2437,13 +3453,17 @@ def run_backtest(
                     spy_fill["cycles_to_90pct"] * (COOLDOWN_SECONDS / 3600), 1
                 )
 
+    dropped_terminal_intents = reject_terminal_delayed_intents(portfolio)
+    total_orders += delayed_order_count
     bench = _benchmark_return(data, warmup)
+    equity_index = [data.index[i].isoformat() for i in range(warmup, len(data))]
     perf = compute_performance_metrics(
-        equity_curve,
+        reported_equity,
         initial_capital=portfolio.initial_capital,
         benchmark_return_pct=bench,
         total_orders=total_orders,
-        equity_index=[data.index[i].isoformat() for i in range(warmup, len(data))],
+        equity_index=equity_index,
+        closed_trades=list(portfolio.closed_trades),
     )
     total_ret = perf["total_return_pct"]
     sharpe = perf["sharpe"]
@@ -2455,7 +3475,7 @@ def run_backtest(
     profit_factor = perf["profit_factor"]
 
     pair_pnl_corr = None
-    curve = pd.Series(equity_curve)
+    curve = pd.Series(reported_equity)
     returns = curve.pct_change().dropna()
     corr_n = min(len(pair_daily_pnl), len(returns))
     if corr_n > 2:
@@ -2478,6 +3498,16 @@ def run_backtest(
         "rolling_sharpe_mean": rolling_sharpe_mean,
         "profit_factor": profit_factor,
         "avg_trade_return_pct": perf.get("avg_trade_return_pct", 0.0),
+        "avg_trade_return_basis": perf.get("avg_trade_return_basis"),
+        "return_per_order_pct": perf.get("return_per_order_pct", 0.0),
+        "return_over_max_dd": perf.get("return_over_max_dd", 0.0),
+        "cagr_pct": perf.get("cagr_pct", 0.0),
+        "closed_trade_count": perf.get("closed_trade_count", 0),
+        "closed_trade_unknown_count": perf.get("closed_trade_unknown_count", 0),
+        "closed_trade_win_rate_pct": perf.get("closed_trade_win_rate_pct", 0.0),
+        "trade_profit_factor": perf.get("trade_profit_factor"),
+        "sortino_negative_subset": perf.get("sortino_negative_subset", 0.0),
+        "equity_mark": "end_of_bar_close",
         "rolling_sharpe_series": perf.get("rolling_sharpe_series"),
         "drawdown_series": perf.get("drawdown_series"),
         "benchmark_return_pct": perf.get("benchmark_return_pct"),
@@ -2493,7 +3523,7 @@ def run_backtest(
         "regime_filter": regime_filter,
         "regime_filter_skips": regime_filter_skips,
         "regime_breakdown": compute_regime_breakdown(
-            equity_curve, regime_series, initial_capital=initial_capital
+            reported_equity, regime_series, initial_capital=initial_capital
         ),
         "spy_fill": spy_fill,
         "halt_events": risk_manager.halt_events,
@@ -2521,8 +3551,26 @@ def run_backtest(
         "nyse_conditional_on_spy": config.effective_nyse_conditional_on_spy(),
         "small_account": small_account,
         "cap_scale": cap_scale,
-        "equity_index": [data.index[i].isoformat() for i in range(warmup, len(data))],
-        "equity_values": [round(v, 2) for v in equity_curve],
+        "equity_index": equity_index,
+        "equity_values": [round(v, 2) for v in reported_equity],
+        "equity_bar_index": list(reported_bar_index),
+        "initial_capital": float(portfolio.initial_capital),
+        "fill_timing": getattr(RUN_OPTIONS, "fill_timing", "same_close"),
+        "strict_pit": strict_pit_active,
+        "strict_pit_disabled_groups": list(config.strict_pit_disabled_groups()),
+        "pit_universe_validated": bool(
+            pit_universe_info and pit_universe_info.get("complete")
+        ),
+        "pit_universe_coverage": pit_universe_info,
+        "pit_universe_note": (
+            "Historical S&P 500 membership is applied per bar to NYSE candidates; "
+            "coverage is complete only when every member in the window has loaded prices."
+            if pit_universe_info
+            else "Historical membership was not applied; runtime candidate universe is used."
+        ),
+        "market_session_calendar": data.attrs.get("session_calendar_ticker"),
+        "weekend_rows_in_input": int((pd.DatetimeIndex(data.index).dayofweek >= 5).sum()),
+        "dropped_terminal_intents": int(dropped_terminal_intents),
         "pairs_traded": pairs_traded,
         "pair_pnl_correlation": pair_pnl_corr,
         "daily_bank_days": int(daily_bank_days),
@@ -2664,7 +3712,7 @@ def run_backtest(
         }
     if track_metrics:
         init = portfolio.initial_capital
-        curve_s = pd.Series(equity_curve)
+        curve_s = pd.Series(reported_equity)
         ret_s = curve_s.pct_change().dropna()
         peak_s = curve_s.cummax()
         in_dd = curve_s.iloc[1:] < peak_s.iloc[1:]
@@ -2794,6 +3842,11 @@ def run_backtest(
     config.DEEP_HISTORY_INDICATORS_ONLY = saved_deep_indicators_only
     config.PAPER_IPO_SAFETY_ENABLED = saved_paper_ipo_safety
     config.PAPER_PROFIT_TARGET_ENABLED = saved_paper_profit_target
+    if strict_pit_active and not (saved_strict_flag or saved_strict_ctx):
+        config.STRICT_PIT_BACKTEST = saved_strict_flag
+        config.set_backtest_strict_pit_context(saved_strict_ctx)
+        config.set_strict_pit_allow(saved_strict_allow)
+        RUN_OPTIONS.strict_pit = saved_run_strict
     store_last_result(result)
     return result
 
@@ -5445,6 +6498,10 @@ def _result_row(label: str, result: dict, *, bench: float | None = None) -> dict
         "rolling_sharpe_mean": result.get("rolling_sharpe_mean"),
         "profit_factor": result.get("profit_factor"),
         "avg_trade_return_pct": result.get("avg_trade_return_pct"),
+        "return_per_order_pct": result.get("return_per_order_pct"),
+        "closed_trade_win_rate_pct": result.get("closed_trade_win_rate_pct"),
+        "trade_profit_factor": result.get("trade_profit_factor"),
+        "return_over_max_dd": result.get("return_over_max_dd"),
         "final_equity": result.get("final_equity"),
         "total_orders": result.get("total_orders"),
         "halt_events": halt_n,
@@ -8111,9 +9168,15 @@ def run_performance_test(
     print(f"Total Return:     {round(total_ret, 2)}%")
     if bench is not None:
         print(f"VTI Buy & Hold:   {round(bench, 2)}%")
+    fill_mode = str(result.get("fill_timing") or "same_close")
+    fill_label = "optimistic" if fill_mode == "same_close" else "delayed close"
+    print(f"Fill timing:      {fill_mode} ({fill_label})")
+    if result.get("dropped_terminal_intents"):
+        print(f"Dropped final-bar intents: {int(result.get('dropped_terminal_intents') or 0)}")
     print(f"Sharpe Ratio:     {round(sharpe, 2)}")
     print(f"Sortino Ratio:    {round(result.get('sortino', 0), 2)}")
-    print(f"Calmar Ratio:     {round(result.get('calmar', 0), 2)}")
+    print(f"Calmar Ratio:     {round(result.get('return_over_max_dd', 0), 2)}")
+    print(f"Calmar (CAGR):    {round(result.get('calmar', 0), 2)}")
     print(f"Win rate (daily): {round(result.get('win_rate_pct', 0), 1)}%")
     print(f"Max Drawdown:     {round(max_dd, 2)}%")
     print(f"SPY signals:      {total_spy}")
@@ -8189,8 +9252,18 @@ def run_performance_test(
     if result.get("regime_filter"):
         skips = result.get("regime_filter_skips", 0)
         print(f"Regime filter skips: {skips} bars (no new trading)")
-    print(f"Profit factor:    {round(result.get('profit_factor', 0), 2)}")
-    print(f"Avg trade return: {round(result.get('avg_trade_return_pct', 0), 3)}%")
+    print(f"Daily profit factor: {round(result.get('profit_factor', 0), 2)}")
+    trade_pf = result.get("trade_profit_factor")
+    trade_pf_s = "n/a" if trade_pf is None else f"{round(float(trade_pf), 2)}"
+    closed_n = int(result.get("closed_trade_count") or 0)
+    closed_wr = result.get("closed_trade_win_rate_pct")
+    closed_wr_s = f"{round(float(closed_wr), 1)}%" if closed_wr is not None else "n/a"
+    print(f"Closed-trade profit factor: {trade_pf_s}")
+    print(f"Closed-trade win rate: {closed_wr_s} (n={closed_n})")
+    avg_closed = result.get("avg_trade_return_pct")
+    avg_closed_s = "n/a" if avg_closed is None else f"{round(float(avg_closed), 3)}%"
+    print(f"Avg closed-trade return: {avg_closed_s}")
+    print(f"Return per order: {round(result.get('return_per_order_pct', 0), 3)}%")
     if result.get("attribution"):
         from modules.backtest_attribution import print_attribution_report
 
@@ -8247,6 +9320,10 @@ def run_performance_test(
             "win_rate_pct": result.get("win_rate_pct"),
             "profit_factor": result.get("profit_factor"),
             "avg_trade_return_pct": result.get("avg_trade_return_pct"),
+            "return_per_order_pct": result.get("return_per_order_pct"),
+            "closed_trade_win_rate_pct": result.get("closed_trade_win_rate_pct"),
+            "trade_profit_factor": result.get("trade_profit_factor"),
+            "return_over_max_dd": result.get("return_over_max_dd"),
             "total_orders": total_orders,
         }
         path = export_results_csv([row], RUN_OPTIONS.export_csv)
@@ -8726,7 +9803,13 @@ if __name__ == "__main__":
         type=int,
         default=0,
         metavar="FOLDS",
-        help="Purged N-fold walk-forward (with --compare-final or standalone run)",
+        help="Chronological holdout folds (test-window metrics; legacy full-prefix kept)",
+    )
+    parser.add_argument(
+        "--fill-timing",
+        choices=("same_close", "next_close"),
+        default="same_close",
+        help="Research fills. same_close is optimistic and the default. next_close fills a bar-i signal at bar i+1 close.",
     )
     parser.add_argument(
         "--report-html",
@@ -8784,6 +9867,7 @@ if __name__ == "__main__":
     RUN_OPTIONS.crypto_commission_bps = max(0.0, float(args.crypto_commission_bps))
     apply_default_execution_costs()
     RUN_OPTIONS.walk_forward_folds = max(0, int(args.walk_forward))
+    RUN_OPTIONS.fill_timing = str(getattr(args, "fill_timing", "same_close") or "same_close")
     RUN_OPTIONS.full_accuracy = not RUN_OPTIONS.fast_mode
     RUN_OPTIONS.parallel_arms = not args.no_parallel
     RUN_OPTIONS.slippage_sensitivity = bool(args.slippage_sensitivity)

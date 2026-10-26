@@ -37,7 +37,6 @@ load_dotenv(ROOT / ".env", override=False)
 
 import config  # noqa: E402
 from modules import pit_universe as pit  # noqa: E402
-from modules.data_loader import load_close_matrix  # noqa: E402
 from modules.trial_ledger import deflate_trial, load_trials, record_trial  # noqa: E402
 from one_r_hit_backtest import SKIP, _universe, run_backtest  # noqa: E402
 from paper_lab_concentrated_backtest import run_lab  # noqa: E402
@@ -162,21 +161,21 @@ def load_alpaca_open_gaps(symbols: list[str], index: pd.DatetimeIndex) -> pd.Dat
 
 
 def _symbols_for(mode: str, data: pd.DataFrame, runtime_cols: set[str], membership: pd.DataFrame):
-    """(symbols, eligible-or-None) for one universe mode."""
+    """(symbols, eligible-or-None, members-in-window-or-None) for one universe mode."""
     current = [c for c in _universe(data.columns) if c in runtime_cols]
     if mode == "current":
-        return current, None
+        return current, None, None
     if mode == "frozen":
-        return pit.frozen_universe(current), None
+        return pit.frozen_universe(current), None, None
     if mode == "sp500":
         in_window = pit.sp500_tickers_in_window(membership, data.index[0], data.index[-1])
-        syms = [
-            s
-            for s in in_window
-            if s in data.columns and s not in SKIP and not config.is_crypto(s)
-        ]
+        syms = []
+        for s in in_window:
+            col = pit.resolve_column(s, data.columns)
+            if col and col not in SKIP and not config.is_crypto(col):
+                syms.append(col)
         elig = pit.membership_matrix(data.index, membership, tickers=syms)
-        return syms, elig
+        return syms, elig, in_window
     raise ValueError(mode)
 
 
@@ -212,10 +211,12 @@ def run_window(
     common = dict(ma_win=ma_win, warmup=warmup, max_hold=30, take_1r=False, sleeve=SLEEVE, cost_rt_bps=COST_BPS)
     out: dict = {"label": label, "start": None, "end": None, "modes": {}}
     for mode in pit.MODES:
-        syms, elig = _symbols_for(mode, data, runtime_cols, membership)
+        syms, elig, in_window = _symbols_for(mode, data, runtime_cols, membership)
         block: dict = {"symbols": len(syms), "policies": {}}
         if elig is not None:
-            block["coverage"] = pit.coverage_report(elig, data.columns)
+            block["coverage"] = pit.coverage_report(
+                elig, data.columns, members_in_window=in_window
+            )
         kw = dict(universe=syms, eligible=elig)
         runs: dict[str, dict] = {}
         for n in (8, 15, 25):
@@ -262,13 +263,16 @@ def main() -> int:
     membership = pit.load_sp500_membership()
     runtime = list(config.backtest_fetch_tickers())
     runtime_cols = set(runtime)
-    wanted = sorted(set(runtime) | set(membership["ticker"].unique()))
-    print(f"Loading daily closes for up to {len(wanted)} names...")
-    data = load_close_matrix(interval="1d", tickers=wanted)
+    print("Loading research closes (prefetch missing S&P members)...")
+    data, pref = pit.load_research_closes(membership, extra_tickers=runtime)
+    print(
+        f"Prefetch: already {pref['already']}, fetched {pref['fetched']}, "
+        f"failed {len(pref['failed'])}"
+    )
     if data is None or data.empty or len(data) < ma_win + 60:
         print("Not enough daily history")
         return 1
-    print(f"Matrix {data.shape[0]} bars x {data.shape[1]} names, {data.index[0].date()} -> {data.index[-1].date()}")
+    print(f"Matrix {data.shape[0]} session bars x {data.shape[1]} names, {data.index[0].date()} -> {data.index[-1].date()}")
 
     gaps = None
     if not args.no_gaps:
@@ -277,7 +281,7 @@ def main() -> int:
         if gaps is not None:
             print(f"Open gaps: {gaps.shape[1]} names, {int(gaps.notna().any(axis=1).sum())} sessions")
 
-    windows = [(f"{args.days}d", data.tail(args.days + ma_win + 40)), (f"full_db_{len(data)}bars", data)]
+    windows = pit.disjoint_session_windows(data, days=args.days, ma_win=ma_win)
     results = []
     for label, frame in windows:
         print(f"\n== window {label}: {len(frame)} bars ==")
