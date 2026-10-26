@@ -82,7 +82,7 @@ A bootstrap confidence interval of the edge **includes zero**. Treat the sleeve 
 
 The exemption is the strategy's 200-day trend exit (SSO flips to BIL). It does not add a new stop price. ATR stops, the −5% smart reeval, trailing stops, and max-hold still apply to these ETFs. SPY and GLD are one Alpaca position, so an exemption covers that whole line.
 
-**Live $10 minimum.** `LIVE_MIN_NOTIONAL` defaults to $10 and does not shrink with equity. On about $300:
+**Live $10 minimum.** `LIVE_MIN_NOTIONAL` defaults to $10 and does not shrink with equity. On a small book:
 
 - Each diversified name is about 4.17% ($12.50) and SSO is 50% ($150), so the first alignment clears $10.
 - Later, same-side adjustments below $10 are merged into the largest of those small orders when the sum reaches $10. A batched sell is capped at that name's position value.
@@ -138,7 +138,11 @@ Before 16:00 ET on a weekday the signal drops today's bar, because that close is
 
 `python -m modules.h1d_trend_mix` with no book still prints a flat $300 illustration and does not read an account.
 
-## Rollout
+## Status (2026-10-25)
+
+Live and Medium were switched to this sleeve with exclusive mode on 2026-10-25 at the owner's explicit request, skipping the multi-week paper rollout below. The first cycle after the switch ran with `H1D_TREND_MIX_DRY_RUN=true` and printed the plan with no orders; dry-run was then turned off. Medium is enabled in `trading_books.py` on this branch. Lab is unchanged. Rollback steps are in the top-level `README.md`.
+
+## Original rollout plan
 
 1. Medium (`alpaca_paper_v2`) dry-run for several weeks. Confirm the signal, the open window, and the wind-down list.
 2. Medium with `H1D_TREND_MIX_DRY_RUN=false`, still several weeks.

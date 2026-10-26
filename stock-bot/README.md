@@ -2,6 +2,33 @@
 
 **Personal systematic fund** on Alpaca. **What actually runs** is the portal overlay in `modules/portal_bot.py`, not the old Profile A / v1.5.4 VTI locks further down this file.
 
+### Live strategy: H1D 50/50 trend mix (switched 2026-10-25)
+
+Since 2026-10-25, **Live (`alpaca_live`) and Medium (`alpaca_paper_v2`)** run the H1D trend mix in **exclusive mode**. Lab (`alpaca_paper`) is unchanged and still runs `lab_next`. Full spec, backtest and safety notes: [`best_strategies/H1D_TREND_MIX.md`](best_strategies/H1D_TREND_MIX.md).
+
+- **Sleeve A (50%):** SSO while SPY's prior close is above its 200-day average, otherwise BIL.
+- **Sleeve B (50%):** equal weight across XLB, XLE, XLF, XLI, XLK, XLP, XLU, XLV, XLY, SPY, TLT, GLD (about 4.17% each).
+- Rebalanced monthly and on trend flips, fractional shares, signal on the prior close, orders only in the **first 7 minutes after the open** (the entry freshness gate). A missed window waits for the next open.
+- **Exclusive mode:** other entry sleeves are paused, and holdings outside the mix are wound down at the first eligible open.
+- **Hard stops:** the fixed and smart hard stops are skipped for the H1D ETFs; the exit is the 200-day trend flip.
+- 1999-2026 backtest (pre-tax, realistic costs): CAGR 9.35% vs VTI 8.78%, max drawdown -38.6% vs -55.5%. The bootstrap interval on the edge includes zero, so it was chosen for smaller crashes, not a proven edge.
+
+**Exit-order fix (same release):** full and partial exits reconcile with the broker before resubmitting, so shares held by open orders or unsellable remainders no longer cause repeated `exit_error` retries. Dust closes that have a broker order id are still polled for fills.
+
+**Per-book env flags** (only in `data/portal/users/<user>/books/<book>/.env`, never in the shared `.env`):
+
+```
+H1D_TREND_MIX_ENABLED=true
+H1D_TREND_MIX_EXCLUSIVE=true
+H1D_TREND_MIX_DISABLE_HARD_STOPS=true
+H1D_TREND_MIX_BOOKS=alpaca_live,alpaca_paper_v2
+H1D_TREND_MIX_DRY_RUN=false   # true = print the plan, send nothing
+```
+
+Preview the next-open plan without sending anything: `python -m modules.h1d_trend_mix --dry-run --book alpaca_live --user <portal user>`.
+
+**Rollback:** stop the books, set `H1D_TREND_MIX_ENABLED=false` (or remove the lines) in the Live and Medium book `.env` files, and restart. To roll back the code too, check out branch `backup/live-wt-20261025` (the exact code that ran before the switch) and restart all three books.
+
 ### Phase 4 Medium paper trial (2026-10-11)
 
 Phase 4 remains a Medium paper trial on `cursor/phase4-integration`. October 12 order, fill, and realized-P&L reconciliation is **NOT YET TESTED**. Realized dollars belong on fill rows; confirmed close markers carry no duplicate dollars. Estimated remaining quantity cannot confirm a completed exit. Offline research does not validate broker execution or paper accounting.
