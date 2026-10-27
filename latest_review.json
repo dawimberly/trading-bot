@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_at": "2026-10-26T23:02:40.971774+00:00",
+  "generated_at": "2026-10-27T23:02:42.666444+00:00",
   "scope": "observational research evidence only; no deployment",
   "target_net_annual_return": 0.5,
   "annual_target_status": "unverified",
@@ -9,11 +9,11 @@
   "books": [
     {
       "book": "alpaca_live",
-      "source_as_of": "2026-10-26T23:00:00.862495+00:00",
+      "source_as_of": "2026-10-27T23:00:01.118735+00:00",
       "purchases": 438,
       "sales": 386,
       "plans_available": 24,
-      "post_sale_30_price_observations": 166,
+      "post_sale_30_price_observations": 167,
       "gaps": [
         "action_scoping_unverified",
         "unresolved_initial_inventory_or_corporate_actions",
@@ -25,7 +25,7 @@
     },
     {
       "book": "alpaca_paper_v2",
-      "source_as_of": "2026-10-26T23:00:00.862495+00:00",
+      "source_as_of": "2026-10-27T23:00:01.118735+00:00",
       "purchases": 504,
       "sales": 348,
       "plans_available": 57,
@@ -42,11 +42,11 @@
     },
     {
       "book": "alpaca_paper",
-      "source_as_of": "2026-10-26T23:00:00.862495+00:00",
+      "source_as_of": "2026-10-27T23:00:01.118735+00:00",
       "purchases": 4600,
       "sales": 3805,
       "plans_available": 6,
-      "post_sale_30_price_observations": 1365,
+      "post_sale_30_price_observations": 1386,
       "gaps": [
         "unresolved_initial_inventory_or_corporate_actions",
         "original_purchase_plans_missing",
